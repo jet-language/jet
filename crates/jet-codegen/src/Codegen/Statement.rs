@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use super::*;
 use crate::Syntax;
 use crate::AST::{AccessConvention, Pattern, Type, VariantPayload};
@@ -33,7 +34,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_hook_outcome = etype == Some("HookOutcome");
     let is_data_event = etype == Some("DataEvent");
     // D-CONC-FAIL1=A: task failures are published by the shared Prelude, not
-    // emitted as a user enum (`user_TaskFailure`).
+    // emitted as the Prelude task-failure enum.
     let is_task_failure = etype == Some(crate::Syntax::TYPE_TASK_FAILURE);
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
     let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
@@ -102,7 +103,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let vname = |v: &str| -> String {
         if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_task_failure || is_anon_union {
             if is_task_failure {
-                return v.strip_prefix("user_").unwrap_or(v).to_string();
+                return crate::Syntax::generated_suffix(v).to_string();
             }
             v.to_string()
         } else {
@@ -143,7 +144,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                     .map(|(i, s)| match s {
                         PatSlot::Bind { name, .. } => mangle(name),
                         PatSlot::Wildcard => "_".to_string(),
-                        PatSlot::Range { .. } => format!("__jet_range_{}", i),
+                        PatSlot::Range { .. } => jet_format!("{jet_prefix}range_{}", i),
                     })
                     .collect();
                 // Named-field struct variant (S30, incl. a single named field):
@@ -196,7 +197,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
         // D-PATR arm-head: range patterns go through mixed-switch; shouldn't appear here.
         Pattern::Range { lo, hi, .. } => {
-            format!("_ if __jet_subject >= {} && __jet_subject <= {}", lo, hi)
+            jet_format!("_ if {jet_prefix}subject >= {} && {jet_prefix}subject <= {}", lo, hi)
         }
         // D-PATO: or-pattern in exhaustive match → `A(x) | B(x)`.
         Pattern::Or(alts, _) => {
@@ -338,7 +339,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .map(|(i, s)| match s {
                         PatSlot::Bind { name, .. } => mangle(name),
                         PatSlot::Wildcard => "_".to_string(),
-                        PatSlot::Range { .. } => format!("__jet_range_{}", i),
+                        PatSlot::Range { .. } => jet_format!("{jet_prefix}range_{}", i),
                     })
                     .collect();
                 if let Some(names) = variant_field_names(cx, variant) {
@@ -439,8 +440,8 @@ fn emit_named_fn_value_with_storage(
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            format!(
-                "__jet_a{}: {}",
+            jet_format!(
+                "{jet_prefix}a{}: {}",
                 i,
                 if middleware {
                     cx.rust_type(p)
@@ -455,9 +456,9 @@ fn emit_named_fn_value_with_storage(
         .enumerate()
         .map(|(i, _)| {
             if middleware {
-                format!("&__jet_a{i}")
+                jet_format!("&{jet_prefix}a{i}")
             } else {
-                format!("__jet_a{i}")
+                jet_format!("{jet_prefix}a{i}")
             }
         })
         .collect();

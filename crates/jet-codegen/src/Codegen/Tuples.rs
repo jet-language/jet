@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use super::*;
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Stmt,
@@ -571,8 +572,8 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     let view_lifetime = fields
         .iter()
         .any(|(_, ty)| cx.type_contains_view(ty))
-        .then_some("<'__jet_view>")
-        .unwrap_or("");
+        .then(|| jet_format!("<'{jet_prefix}view>"))
+        .unwrap_or_default();
     if !derives.is_empty() {
         out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
     }

@@ -5467,9 +5467,10 @@ impl LowerCtx<'_, '_> {
                         let cur = self.b.use_var(root_var);
                         let jv = self.fresh_var(types::I64);
                         self.b.def_var(jv, cur);
-                        self.vars.insert("__jet_value".to_string(), jv);
+                        self.vars
+                            .insert(jet_foundation::Names::mangle_generated("value"), jv);
                         self.var_tys.insert(
-                            "__jet_value".to_string(),
+                            jet_foundation::Names::mangle_generated("value"),
                             self.var_tys.get(root).cloned().unwrap_or(Type::Int),
                         );
                         self.lower_gc_edit_body(stmt)?;
@@ -6098,7 +6099,7 @@ impl LowerCtx<'_, '_> {
     }
 
     /// Body of `TStmt::GcEdit` when the nested stmt is not a plain assign.
-    /// `__jet_value` is already seeded from the root; write-through deref
+    /// `__jet___value` is already seeded from the root; write-through deref
     /// assigns update that Variable (not `struct_assign`).
     fn lower_gc_edit_body(&mut self, stmt: &TStmt) -> Result<(), String> {
         match stmt {
@@ -7428,9 +7429,10 @@ impl LowerCtx<'_, '_> {
                 let cur = self.b.use_var(root_var);
                 let jv = self.fresh_var(types::I64);
                 self.b.def_var(jv, cur);
-                self.vars.insert("__jet_value".to_string(), jv);
+                self.vars
+                    .insert(jet_foundation::Names::mangle_generated("value"), jv);
                 self.var_tys.insert(
-                    "__jet_value".to_string(),
+                    jet_foundation::Names::mangle_generated("value"),
                     self.var_tys.get(root).cloned().unwrap_or(Type::Int),
                 );
                 let result = self.lower_expr(edit)?;
@@ -8196,7 +8198,7 @@ impl LowerCtx<'_, '_> {
             // direct print. Keep the enum table path for enum payloads; record
             // fields below are rendered recursively through this function.
             let buf = self.call_host(self.host.str_begin, &[]);
-            let local = TLocal::generated(format!("__jet_show_{}", self.next_var));
+            let local = TLocal::generated(format!("show_{}", self.next_var));
             let place = local.rust_name();
             let expr = TExpr {
                 ty: ty.clone(),
@@ -8454,7 +8456,9 @@ impl LowerCtx<'_, '_> {
                 place.clone()
             };
             // Prefer mangled place (`__jet_cap_…`) when present.
-            let bind_key = if self.vars.contains_key(place) || place.starts_with("__jet_cap_") {
+            let bind_key = if self.vars.contains_key(place)
+                || place.starts_with(&jet_foundation::Names::mangle_generated("cap_"))
+            {
                 place.clone()
             } else {
                 key

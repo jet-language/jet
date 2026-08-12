@@ -47,7 +47,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             match &b.pattern {
                 // c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
                 // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
-                // then binds each name from `(tmp).user_<canonical-field>.clone()` (pairing
+                // then binds each name from `(tmp).__jet_<canonical-field>.clone()` (pairing
                 // elems to the type's canonical fields BY POSITION). Covered when the init
                 // is in-subset (its lowered `.ty` is a `Type::Tuple` — sema guarantees a
                 // tuple pattern destructures a tuple value, so the canonical field names
@@ -76,7 +76,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 }
                 // c109: a STRUCT-destructuring binding `Type { x, y } :: <init>`
                 // (S74, `BindPattern::Struct`). The AST `emit_stmt` borrows the init
-                // into a temp, then binds each field via `(tmp).user_<field>.clone()`
+                // into a temp, then binds each field via `(tmp).__jet_<field>.clone()`
                 // (the pattern's field name is both the bound local and the read).
                 // Covered when the init is in-subset; the per-field type comes from
                 // `cx.struct_fields` at lowering (total — sema proved the pattern
@@ -522,7 +522,7 @@ pub(crate) fn if_cond_in_subset(
             // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). Covered when
             // the variant is a single-payload variant (one `Bind` slot) of a covered
             // user enum — the AST `emit_if` already emits the correct
-            // `if let user_E::user_V(user_b) = <subj>` head. The subject was checked
+            // `if let __jet_E::__jet_V(user_b) = <subj>` head. The subject was checked
             // above; require the owning enum to be covered so the prefix/payload are
             // total. Multi-bind / unit variants stay on the AST path (the single-bind
             // shape mirrors the JSON-variant if-let exactly).
@@ -549,7 +549,7 @@ pub(crate) fn if_cond_in_subset(
             // c109 (D-PATW): a USER-enum variant if-let with a WILDCARD payload slot
             // (`if w == Some(_)`). The `_` binds nothing, so the then-branch gains no
             // local; `emit_if_let_pattern` already renders the slot as `_`, producing
-            // `if let user_E::user_V(_) = <subj>` (byte-for-byte the AST `emit_if`). A
+            // `if let __jet_E::__jet_V(_) = <subj>` (byte-for-byte the AST `emit_if`). A
             // single-payload covered-enum variant whose one slot is a wildcard is in
             // subset, introducing NO binding (empty bindings vec). (The recently-covered
             // user-variant if-let bound a name; this binds `_`.)

@@ -449,7 +449,7 @@ fn make(n: String) => Person {
     #[test]
     fn covers_generic_struct_fn() {
         // c109 Phase 19: a GENERIC STRUCT free function — its `Type::Apply` (`Pair<T>`)
-        // param/return type and the turbofish construction (`user_Pair::<T> { … }`) are now
+        // param/return type and the turbofish construction (`__jet_Pair::<T> { … }`) are now
         // covered. The struct's type-var fields are admitted by `field_ty_covered`; the
         // turbofish head is resolved at lowering.
         let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) => Pair<T> {\n return Pair<T>.{first: a, second: b}\n}\n";
@@ -536,7 +536,11 @@ fn mk() {
     print(n.text)
 }
 ";
-        assert!(covers_with_foreign(src, "mk", &[("Note", "__jet_notes")]));
+        assert!(covers_with_foreign(
+            src,
+            "mk",
+            &[("Note", &mangle("notes"))]
+        ));
     }
 
     #[test]
@@ -654,7 +658,7 @@ fn mk() {
     #[test]
     fn covers_generic_struct_literal() {
         // c109 Phase 19: a generic struct literal (`Pair<Int> { … }`) carries non-empty
-        // `type_args` (the turbofish `user_Pair::<i64> { … }`) and its field types reference
+        // `type_args` (the turbofish `__jet_Pair::<i64> { … }`) and its field types reference
         // type vars — both now covered. The owning fn routes through the TIR.
         let src = "struct Pair<T> { first: T\n second: T }\nfn mk() => Pair<Int> {\n return Pair<Int>.{ first: 1, second: 2 }\n}\n";
         assert!(covers(src, "mk"));
@@ -869,7 +873,7 @@ fn mk() {
     #[test]
     fn covers_user_enum_variant_if_let_condition() {
         // c109 (B4): `if m == .Ping(n) { … } else { … }` over a covered user enum lowers
-        // to `if let user_Msg::user_Ping(user_n) = m`. Single-payload variant (one bind).
+        // to `if let __jet_Msg::__jet_Ping(user_n) = m`. Single-payload variant (one bind).
         let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) => Int {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
         assert!(covers(src, "f"));
     }
@@ -944,7 +948,7 @@ fn mk() {
     fn covers_user_method_shadowing_builtin_name() {
         // c109 (builtin-name collision): a user instance method whose name collides with a
         // builtin (`get`/`len`) now routes through the TIR when a real `method_sigs` entry
-        // exists. The AST `emit_method_call` dispatches such a call to `user_<method>` BEFORE
+        // exists. The AST `emit_method_call` dispatches such a call to `__jet_<method>` BEFORE
         // `emit_builtin_method` (the fix), so the gate admits it. `recv_type` is a sema fact
         // (`build_cx` alone leaves the call node's `recv_type` empty), so we drive
         // `method_call_in_subset` directly with a synthetic `Some("Bag")` receiver — exactly
@@ -1056,7 +1060,7 @@ fn mk() {
     #[test]
     fn covers_generic_method() {
         // Card #129: generic owner identity survives through the enclosing
-        // `impl<T> user_Box<T>`; the method body lowers through ordinary TIR.
+        // `impl<T> __jet_Box<T>`; the method body lowers through ordinary TIR.
         let src = "struct Box<T> {\n v: T\n fn get(self) => T {\n return self.v\n }\n}\n";
         assert!(covers_method(src, "Box", "get"));
     }
@@ -2007,7 +2011,7 @@ fn maybe_shape(s: Shape) => (Shape?) {
 
     #[test]
     fn covers_trait_object_param() {
-        // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn user_Shape>`). The
+        // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn __jet_Shape>`). The
         // param type is admitted (`is_covered_trait_object_ty`); a body with no method
         // call is structurally in-subset (the dynamic-dispatch shape needs sema's
         // `recv_type`, proven by the TIR feature integration targets + parity). An
@@ -2211,7 +2215,7 @@ fn run() {
     fn covers_wildcard_enum_payload_if_let() {
         // c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
         // slot (`if w == .Some(_)`). The `_` binds nothing; the if-let head renders
-        // `if let user_Wrapper::user_Some(_) = user_w` (byte-for-byte the AST). Covered
+        // `if let __jet_Wrapper::__jet_Some(_) = user_w` (byte-for-byte the AST). Covered
         // when the variant is a single-payload variant of a covered enum.
         let src = "\
 enum Wrapper {

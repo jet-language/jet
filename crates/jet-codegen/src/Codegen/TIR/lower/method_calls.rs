@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::Cx;
@@ -7,6 +8,7 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
 use crate::Codegen::TIR::call_return_type_with_args;
@@ -279,7 +281,7 @@ fn lower_archive_source_call(
             .unwrap_or_else(unit_type),
         kind: TExprKind::ModuleCall {
             form: TModuleCallForm::Qualified {
-                rust_mod: "__jet_core_archive".to_string(),
+                rust_mod: mangle_generated("core_archive"),
                 rust_fn: mangle(method).to_string(),
             },
             type_args: type_args.to_vec(),
@@ -1270,7 +1272,7 @@ fn lower_method_call_impl(
                     if !lowered.ty.is_integer() {
                         return None;
                     }
-                    let source_name = format!("__jet_gc_index_{}", method_span.start);
+                    let source_name = jet_format!("{jet_prefix}gc_index_{}", method_span.start);
                     lowered_args[0].expr = Expr::Ident(source_name.clone(), arg.span);
                     env.bind(
                         &source_name,
@@ -1286,7 +1288,7 @@ fn lower_method_call_impl(
             env.gc_locals.remove(name);
             env.bind(
                 name,
-                TLocal::generated("__jet_value").through_ref(),
+                TLocal::generated("value").through_ref(),
                 saved.as_ref().and_then(|(_, ty)| ty.clone()),
             );
             let inner = lower_method_call(
@@ -1936,7 +1938,7 @@ fn lower_method_call_impl(
     }
     // c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)`. The gate
     // proved `recv_type == Some(<CoveredStruct>)` and the named field is `Type::Fn`. The
-    // AST `emit_method_call` (Expression.rs ~L1573) emits `(({recv}).{user_<field>})({args})`
+    // AST `emit_method_call` (Expression.rs ~L1573) emits `(({recv}).{__jet_<field>})({args})`
     // with PLAIN args. Resolve the field's Rust name + the call's result type (the Fn's
     // return) here; emit just splices. (Tried before the JSON/core/user shapes, mirroring
     // the AST dispatch order — a fn-field check fires before user-method dispatch.)
@@ -4816,7 +4818,7 @@ fn lower_method_call_impl(
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
-    // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
+    // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
         // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
         // one field/index boundary before applying `?`. Keep this as a TIR
@@ -5698,7 +5700,7 @@ fn lower_method_call_impl(
         };
     }
     // c109 Phase 30: DYNAMIC dispatch on a TRAIT-OBJECT receiver (`s.name()`/`s.area()`,
-    // `s: Box<dyn user_Shape>`). The gate proved `recv_type == Some(<trait>)` with the
+    // `s: Box<dyn __jet_Shape>`). The gate proved `recv_type == Some(<trait>)` with the
     // trait in `cx.trait_names`. The AST `emit_method_call` (Expression.rs ~L1657) emits
     // `({recv}).{method}({args})` — the BARE (unmangled) method name (vtable dispatch),
     // node (`({recv}).{method_rust}({args})`) with the bare method name. Trait declarations
@@ -5914,7 +5916,7 @@ fn lower_method_call_impl(
         && matches!(method, "add" | "sub" | "mul" | "div")
         && args.len() == 1;
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
-    // a plain user method is `user_<method>`. Numeric distinct operators are also
+    // a plain user method is `__jet_<method>`. Numeric distinct operators are also
     // emitted through the bare synthetic operator trait, even though sema does not
     // register them as ordinary Jet methods.
     let method_ref = if cx

@@ -68,7 +68,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // search.jet/index.jet). Its variants ARE registered in `cx.enum_variants` /
     // `cx.variant_owner` (`register_foreign_enum_variants`, Imports.rs), so matching it
     // resolves the owning enum + variant prefix (`emit_match_pattern` emits the foreign
-    // `{root}{mod}::user_<T>::user_<V>` head via `cx.foreign_types`). A foreign enum is
+    // `{root}{mod}::__jet_<T>::__jet_<V>` head via `cx.foreign_types`). A foreign enum is
     // NOT in `cx.cloneable` (that set tracks only local types), so we DON'T require it
     // here; instead we require every variant payload to be a covered VALUE type — a
     // covered payload (scalar/String/covered struct/enum/collection) is itself always
@@ -125,7 +125,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
     }
     // c109 Phase 24: a FOREIGN (imported) struct/enum payload (`Query.Kind(NoteType)`
     // where `NoteType` lives in another module). It renders via `cx.rust_type` to
-    // `{root}{mod}::user_<Name>`; a payload arg is moved/cloned by `lower_enum_arg`
+    // `{root}{mod}::__jet_<Name>`; a payload arg is moved/cloned by `lower_enum_arg`
     // (the borrowed-`.clone()` decision is total), so a foreign payload is byte-parity
     // safe. (A foreign METHOD is still out of subset — the recurring value-type seam.)
     if is_covered_foreign_value_ty(ty, cx) {
@@ -366,7 +366,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         return !members.is_empty() && members.iter().all(|m| field_ty_covered(m, cx, seen));
     }
     // c109 Phase 24: a covered ENUM field (`note_type: NoteType` on a `Note` struct). An
-    // enum field renders to `user_<Enum>` and a field read is a plain place / sema-cloned
+    // enum field renders to `__jet_<Enum>` and a field read is a plain place / sema-cloned
     // `.clone()` (the Phase-3/6 owning-field rewrite) — byte-identical, no new decision.
     // (Previously `field_ty_covered` admitted only scalar/String/struct/collection fields,
     // so any struct with an enum field stayed on the AST path.)
@@ -376,7 +376,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed field (`m: Meters` where
     // `Meters :: distinct Float`, or a `#UnitFamily` member like `width: Px`).
     // A distinct type renders via `cx.rust_type` to its generated newtype
-    // (`struct user_Meters(f64)`); a struct-lit field value is a distinct
+    // (`struct __jet_Meters(f64)`); a struct-lit field value is a distinct
     // constructor call (`Meters(10.0)` → the newtype, a covered expr) and a
     // field read is a plain by-value place — byte-identical to a scalar field,
     // no clone/deref decision. (Previously a distinct field routed to

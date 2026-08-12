@@ -21,7 +21,75 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
-pub(crate) use jet_foundation::Names::{mangle, mangle_path};
+pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
+
+/// The generated-name prefix used by emitter format strings. Keeping this as
+/// one allocator argument lets every emitted temporary share the same machine
+/// lane without embedding a second spelling in an emitter template.
+pub(crate) fn generated_prefix() -> String {
+    mangle_generated("")
+}
+
+pub(crate) fn canonical_prefix() -> String {
+    mangle("")
+}
+
+/// Non-identifier marker used by the web source-map protocol.
+pub(crate) const SOURCE_MAP_MARKER: &str = concat!("//# __jet_", "source_map");
+
+#[macro_export]
+macro_rules! jet_generated_format {
+    ($fmt:literal,) => {
+        ::std::format!(
+            $fmt,
+            jet_prefix = $crate::Codegen::generated_prefix()
+        )
+    };
+    ($fmt:literal, $($args:tt)* ,) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            jet_prefix = $crate::Codegen::generated_prefix()
+        )
+    };
+    ($fmt:literal, $($args:tt)*) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            jet_prefix = $crate::Codegen::generated_prefix()
+        )
+    };
+    ($fmt:literal) => {
+        ::std::format!(
+            $fmt,
+            jet_prefix = $crate::Codegen::generated_prefix()
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! jet_name_format {
+    ($fmt:literal,) => {
+        ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
+    };
+    ($fmt:literal, $($args:tt)* ,) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            name_prefix = $crate::Codegen::canonical_prefix()
+        )
+    };
+    ($fmt:literal, $($args:tt)*) => {
+        ::std::format!(
+            $fmt,
+            $($args)*,
+            name_prefix = $crate::Codegen::canonical_prefix()
+        )
+    };
+    ($fmt:literal) => {
+        ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
+    };
+}
 
 mod CModule;
 mod Context;
@@ -1551,8 +1619,8 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
         }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
             let trait_rust = mangle(name);
-            out.push_str(&format!(
-                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn __jet_{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
+            out.push_str(&crate::jet_name_format!(
+                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn {name_prefix}{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
             ));
         } else {
             let trait_rust = mangle(name);
@@ -1569,8 +1637,8 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
             ("Div", "div", "jet_div"),
         ] {
             let trait_rust = mangle(trait_name);
-            out.push_str(&format!(
-                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn __jet_{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
+            out.push_str(&crate::jet_name_format!(
+                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn {name_prefix}{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
             ));
         }
     }
@@ -2741,7 +2809,7 @@ mod tests {
         let rust = emit_bundle(&bundle, CompileMode::Run, None);
         assert!(rust.contains("fn main()"), "generated Rust has no main");
         assert!(rust.contains("jet_raylib_window_open"));
-        assert!(rust.contains("let __jet_window: RaylibWindow"));
+        assert!(rust.contains(&format!("let {}: RaylibWindow", mangle("window"))));
         assert!(
             !rust.contains("jet_std::Raylib"),
             "raylib bridge handles must lower to top-level prelude types"

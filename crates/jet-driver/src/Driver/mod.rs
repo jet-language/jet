@@ -3979,7 +3979,7 @@ pub fn compile_bundle_path_with_entry(
 /// `funcs.get("run")`). D-JPK-TASKRUN1 also says a cross-task dependency is a
 /// plain call — so renaming `#Job fn greet` → `run` would break
 /// `seed()`'s `greet()` with E0102. Fix: park any existing `fn run` as
-/// `__jet_unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
+/// `__jet___unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
 /// that forwards params (and return) while leaving `entry_fn` callable.
 ///
 /// The wrapper is never `#Job` (avoids E0928 on reserved lifecycle name
@@ -4015,7 +4015,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
     for item in items.iter_mut() {
         if let Item::Func(f) = item {
             if f.name == "run" {
-                f.name = "__jet_unused_run".to_string();
+                f.name = jet_foundation::Names::mangle_generated("unused_run");
                 // The shared script seam gives the synthetic entry a fallible
                 // unit return so ordinary `jet run` can report a
                 // default error. When `jet dev` selects another function,

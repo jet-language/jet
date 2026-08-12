@@ -1,6 +1,8 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
@@ -164,7 +166,7 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
         Pattern::StrMatch { parts, .. } => parts.clone(),
         _ => Vec::new(),
     };
-    let tuple_local = "__jet_sm_tuple";
+    let tuple_local = mangle_generated("sm_tuple");
     let tuple_ty = Type::Tuple(
         holes
             .iter()
@@ -240,7 +242,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
         Pattern::BinMatch { parts, .. } => parts.clone(),
         _ => Vec::new(),
     };
-    let tuple_local = "__jet_bm_tuple";
+    let tuple_local = mangle_generated("bm_tuple");
     let tuple_ty = Type::Tuple(
         holes
             .iter()
@@ -560,8 +562,8 @@ pub(crate) fn tir_range_guard(pattern: &Pattern) -> Option<String> {
                 .enumerate()
                 .filter_map(|(i, s)| {
                     if let PatSlot::Range { lo, hi } = s {
-                        Some(format!(
-                            "__jet_range_{} >= {} && __jet_range_{} <= {}",
+                        Some(jet_format!(
+                            "{jet_prefix}range_{} >= {} && {jet_prefix}range_{} <= {}",
                             i, lo, i, hi
                         ))
                     } else {

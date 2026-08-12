@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use super::*;
 use crate::Diagnostics::Span;
 use crate::Generics;
@@ -1167,11 +1168,11 @@ impl Cx {
     ) -> String {
         fn add_reference_lifetime(rust: String) -> String {
             if let Some(rest) = rust.strip_prefix("&mut ") {
-                format!("&'__jet_view mut {rest}")
+                jet_format!("&'{jet_prefix}view mut {rest}")
             } else if let Some(rest) = rust.strip_prefix('&') {
-                format!("&'__jet_view {rest}")
+                jet_format!("&'{jet_prefix}view {rest}")
             } else if let Some(prefix) = rust.strip_suffix("JetComputeViewMut<'_>") {
-                format!("{prefix}JetComputeViewMut<'__jet_view>")
+                jet_format!("{prefix}JetComputeViewMut<'{jet_prefix}view>")
             } else {
                 rust
             }
@@ -1179,9 +1180,9 @@ impl Cx {
 
         fn add_type_lifetime(rust: String) -> String {
             if let Some(open) = rust.find('<') {
-                format!("{}<'__jet_view, {}", &rust[..open], &rust[open + 1..])
+                jet_format!("{}<'{jet_prefix}view, {}", &rust[..open], &rust[open + 1..])
             } else {
-                format!("{rust}<'__jet_view>")
+                jet_format!("{rust}<'{jet_prefix}view>")
             }
         }
 
@@ -1260,9 +1261,9 @@ impl Cx {
                         .collect::<Vec<_>>()
                         .join(", ");
                     let life = definition_contains_view(cx, name)
-                        .then_some("'__jet_view")
+                        .then(|| jet_format!("'{jet_prefix}view"))
                         .into_iter()
-                        .chain((!args.is_empty()).then_some(args.as_str()))
+                        .chain((!args.is_empty()).then(|| args.clone()))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{head}<{life}>")
@@ -2383,9 +2384,9 @@ impl Cx {
                     .unwrap_or_default()
             });
         let mut independent_lifetimes = Vec::new();
-        // HRTB binder must not reuse the enclosing function's `'__jet_view`
+        // HRTB binder must not reuse the enclosing function's `'__jet___view`
         // (E0496 shadow when a view-returning fn takes a view-returning callback).
-        const FN_VIEW: &str = "'__jet_fn_view";
+        let fn_view = jet_format!("'{jet_prefix}fn_view");
         let ps = params
             .iter()
             .enumerate()
@@ -2396,14 +2397,14 @@ impl Cx {
                     let rust = rust_param_type(self, AccessConvention::Read, p);
                     if owner_params.contains(&index) {
                         if let Some(rest) = rust.strip_prefix("&mut ") {
-                            format!("&{FN_VIEW} mut {rest}")
+                            format!("&{fn_view} mut {rest}")
                         } else if let Some(rest) = rust.strip_prefix('&') {
-                            format!("&{FN_VIEW} {rest}")
+                            format!("&{fn_view} {rest}")
                         } else {
                             rust
                         }
                     } else if has_view_return {
-                        let lifetime = format!("'__jet_arg{index}");
+                        let lifetime = jet_format!("'{jet_prefix}arg{index}");
                         if let Some(rest) = rust.strip_prefix("&mut ") {
                             independent_lifetimes.push(lifetime.clone());
                             format!("&{lifetime} mut {rest}")
@@ -2424,7 +2425,7 @@ impl Cx {
             .map(|t| {
                 if has_view_return {
                     self.rust_type_with_view_lifetime(t)
-                        .replace("'__jet_view", FN_VIEW)
+                        .replace(&jet_format!("'{jet_prefix}view"), &fn_view)
                 } else {
                     self.rust_type(t)
                 }
@@ -2437,7 +2438,7 @@ impl Cx {
             format!("std::sync::Arc<dyn {trait_name}({ps}) -> {r} + Send + Sync>")
         } else if mut_capture {
             if has_view_return {
-                let lifetimes = std::iter::once(FN_VIEW.to_string())
+                let lifetimes = std::iter::once(fn_view.clone())
                     .chain(independent_lifetimes)
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -2446,7 +2447,7 @@ impl Cx {
                 format!("Box<dyn {trait_name}({ps}) -> {r}>")
             }
         } else if has_view_return {
-            let lifetimes = std::iter::once(FN_VIEW.to_string())
+            let lifetimes = std::iter::once(fn_view.clone())
                 .chain(independent_lifetimes)
                 .collect::<Vec<_>>()
                 .join(", ");

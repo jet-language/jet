@@ -5,8 +5,41 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
 use jet::Interpreter::{dev_iteration, RunOutcome};
+
+#[test]
+fn generated_temporaries_do_not_collide_with_collection_locals() {
+    let src = r#"
+fn run() {
+    value :: 2
+    v :: 3
+    k :: "apple"
+    item :: 0
+    i :: 9
+    xs :: [value, v]
+    xs[1] = value
+    loop (list_index, list_item), xs {
+        print("{list_index}:{list_item}")
+    }
+    counts := [String: Int].{}
+    counts[k] = value
+    loop (map_key, map_value), counts {
+        print("{map_key}={map_value}")
+    }
+}
+"#;
+    let rust = compile("tir_generated_name_collections", src);
+    for stem in ["i", "item", "k", "v"] {
+        let user = jet::AST::mangle(stem);
+        let generated = jet::AST::mangle_generated(stem);
+        assert_ne!(user, generated, "allocator lanes must stay distinct for {stem}");
+        assert!(rust.contains(&generated), "generated binding {generated} missing");
+    }
+    assert!(rust.contains(&format!("let {}", jet::AST::mangle("v"))));
+    assert!(rust.contains(&format!("let {}", jet::AST::mangle_generated("v"))));
+    assert_tiers_agree("tir_generated_name_collections", src, "0:2\n1:2\napple=2\n");
+}
 
 // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
 // and `loop x, coll` / `loop (k, v), map` iteration. The `IndexKind` (List/Map)

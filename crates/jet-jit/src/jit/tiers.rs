@@ -185,7 +185,7 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
         }
     }
 
-    let entry_native = if program.entry == "__jet_cli_main" {
+    let entry_native = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         // Host trampoline; user `run` is the resident body.
         native.contains("run")
     } else {
@@ -206,7 +206,7 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
                 .iter()
                 .all(|lam| resident_safe_spawn_lambda(lam, &names))
     };
-    let entry_shape_ok = if program.entry == "__jet_cli_main" {
+    let entry_shape_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         program.funcs.iter().any(|f| {
             f.name == "run"
                 && f.params.len() == 1

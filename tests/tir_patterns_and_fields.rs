@@ -8,7 +8,103 @@ mod tir_support;
 use std::fs;
 use std::process::Command;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
+
+fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
+    for entry in fs::read_dir(path).expect("read Codegen source directory") {
+        let entry = entry.expect("read Codegen directory entry");
+        let path = entry.path();
+        if path.is_dir() {
+            assert_no_hard_coded_generated_literals(&path);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read Codegen source");
+        let bytes = source.as_bytes();
+        let mut at = 0;
+        while at < bytes.len() {
+            if bytes[at] != b'"' {
+                at += 1;
+                continue;
+            }
+            let start = at + 1;
+            at = start;
+            let mut escaped = false;
+            while at < bytes.len() {
+                let byte = bytes[at];
+                at += 1;
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    break;
+                }
+            }
+            let literal = &source[start..at.saturating_sub(1)];
+            if literal == "//# __jet_source_map" && path.ends_with("Codegen/mod.rs") {
+                continue;
+            }
+            for (offset, _) in literal.match_indices("__jet_") {
+                if literal
+                    .as_bytes()
+                    .get(offset + b"__jet_".len())
+                    .is_some_and(|byte| byte.is_ascii_lowercase())
+                {
+                    panic!(
+                        "hard-coded generated literal in {}: {literal:?}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generated_literals_use_the_canonical_allocator() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/jet-codegen/src/Codegen");
+    assert_no_hard_coded_generated_literals(&root);
+}
+
+#[test]
+fn generated_temporaries_do_not_collide_with_pattern_and_field_locals() {
+    let src = r#"
+struct Pair {
+    left: Int
+    right: Int
+}
+fn run() {
+    value :: 7
+    v :: 3
+    range :: 0
+    s :: "ok"
+    loop i, 1..<4 {
+        range = (range + i)
+    }
+    pair :: Pair.{ left: value, right: range }
+    xs :: [v, pair.right]
+    xs[0] = value
+    loop item, xs {
+        print(item)
+    }
+    print("{s}:{value}:{pair.left}:{range}")
+}
+"#;
+    let rust = compile("tir_generated_name_patterns", src);
+    for stem in ["v", "range", "item"] {
+        let user = jet::AST::mangle(stem);
+        let generated = jet::AST::mangle_generated(stem);
+        assert_ne!(user, generated, "allocator lanes must stay distinct for {stem}");
+        assert!(rust.contains(&generated), "generated binding {generated} missing");
+    }
+    assert!(rust.contains(&format!("let {}", jet::AST::mangle("value"))));
+    assert!(rust.contains(&format!("let {}", jet::AST::mangle_generated("v"))));
+    assert_tiers_agree("tir_generated_name_patterns", src, "7\n6\nok:7:7:6\n");
+}
 
 /// c109 (builtin-name collision): a user method whose name collides with a builtin
 /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
@@ -725,7 +821,7 @@ fn run() {
     let out = jet::compile(src).expect("should compile");
     assert!(
         out.rust.contains(
-            "{ let __jet_v = 11i64; (__jet_points)[0i64 as usize].__jet_x = __jet_v; }"
+            "{ let __jet___v = 11i64; (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
         ),
         "plain indexed field assignment did not mutate the list element:\n{}",
         out.rust
@@ -734,7 +830,7 @@ fn run() {
         out.rust.contains(").__jet_x).jet_add((1i64)")
             && out
                 .rust
-                .contains("(__jet_points)[0i64 as usize].__jet_x = __jet_v;"),
+                .contains("(__jet_points)[0i64 as usize].__jet_x = __jet___v;"),
         "compound indexed field assignment did not use the checked add spine:\n{}",
         out.rust
     );

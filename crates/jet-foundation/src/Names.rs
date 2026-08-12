@@ -433,6 +433,19 @@ pub fn mangle_path(path: &str) -> String {
     crate::Syntax::generated_path(path)
 }
 
+/// Mangle a compiler-generated stem into the machine-name lane.
+///
+/// Generated locals use a reserved dunder suffix after the single `__jet_`
+/// prefix. This keeps a generated local distinct from the canonical mangle of
+/// a source identifier with the same visible stem.
+pub fn mangle_generated(name: &str) -> String {
+    let name = name
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(name);
+    let name = name.strip_prefix("__").unwrap_or(name);
+    crate::Syntax::generated_name(&format!("__{name}"))
+}
+
 /// Rust identifier for an inline-module member identity.
 pub fn member_name(module: &str, name: &str) -> String {
     let module = module
@@ -567,6 +580,13 @@ mod tests {
             member_name(&member_name("outer", "inner"), "helper"),
             "__jet_outer__inner__helper"
         );
+    }
+
+    #[test]
+    fn generated_names_use_a_collision_safe_lane() {
+        assert_eq!(mangle_generated("value"), "__jet___value");
+        assert_eq!(mangle_generated("__jet_value"), "__jet___value");
+        assert_eq!(mangle_generated("__jet___value"), "__jet___value");
     }
 
     #[test]

@@ -188,9 +188,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.inline_import_names.contains(&c.name);
             // c109 Phase 23: a DISTINCT-type constructor `UserId(expr)` (D-DIST1) is a
             // bare `Expr::Call` whose name is a distinct type (not in `cx.sigs` — so the
-            // AST `emit_call` falls through to `user_<Name>(args)` with NO sig, plain args).
+            // AST `emit_call` falls through to `__jet_<Name>(args)` with NO sig, plain args).
             // The TIR's fallthrough `Call` form reproduces that exactly (sig lookup misses
-            // → `lower_one_call_arg` with `conv: None` → plain arg, then `user_<Name>(…)`).
+            // → `lower_one_call_arg` with `conv: None` → plain arg, then `__jet_<Name>(…)`).
             // Sema validated the single-arg base-typed shape (E2 distinct checks); we admit
             // it when the name is a known distinct type, not shadowed by a local.
             let is_distinct_ctor =
@@ -338,7 +338,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             });
             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
             // list). The AST wraps the rendered literal `Box::new(<lit>) as Box<dyn
-            // user_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
+            // __jet_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
             // is a known user trait and the base is a PLAIN covered user struct (no import_ns,
             // no type_args — a coerced foreign/generic literal is not a construct any covered
             // program produces, so stay conservative and require the plain form). The fields
@@ -356,7 +356,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 19: a FOREIGN (imported user) struct literal — a `import_ns`
-            // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
+            // namespace head (`{root}{mod}::{__jet_<Name>}[::<args>]`, mangled fields).
             // Covered when the named foreign type is a covered foreign struct and the
             // import alias resolves; the head is resolved at lowering (`lower_expr`).
             if import_ns.is_some()
@@ -384,7 +384,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`
-            // → the turbofish `user_Pair::<T> { … }`). The base must be a covered struct
+            // → the turbofish `__jet_Pair::<T> { … }`). The base must be a covered struct
             // and every type arg covered/type-var (`is_covered_generic_struct_ty`). The
             // turbofish head is resolved at lowering via `user_type_apply_rust`.
             if !type_args.is_empty() {
@@ -403,7 +403,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
             // field names, and an auto `params: BTreeMap::new()` for HTTPRequest).
             // Reproduced in `lower_expr`'s StructLit arm. Otherwise the named type must be a
-            // covered user struct (`user_<name>` head, mangled fields).
+            // covered user struct (`__jet_<name>` head, mangled fields).
             // c109: a recursive (boxed) struct is CONSTRUCTIBLE (the boxed field value is
             // wrapped `Box::new(…)`, a total fact at lowering) even though it is not a
             // covered VALUE type (a boxed field READ needs deref, kept on the AST path).
@@ -442,7 +442,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // c109 Phase 4: a *unit* enum literal reaches codegen as a `Field` whose
             // receiver is the enum-name ident (sema only re-types it; it does NOT
             // rewrite the node — only payload literals become `Expr::EnumLit`). The
-            // AST path emits `user_<Enum>::user_<variant>` for this case. Cover it
+            // AST path emits `__jet_<Enum>::__jet_<variant>` for this case. Cover it
             // when the enum is a covered scalar-payload enum and `member` is one of
             // its (unit) variants. A receiver that is a known local can't also be a
             // covered enum name, so the two branches never collide.
@@ -519,10 +519,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 // c109: a comptime-const receiver (`$pair_value :: Pair{…}`; then
                 // `pair_value.left`).
                 // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
-                // = `user_Pair { … }`) at the use site, and reading a field off it is a
+                // = `__jet_Pair { … }`) at the use site, and reading a field off it is a
                 // plain place read — the AST `emit_expr` Field arm routes the const-ident
                 // `inner` through `boxed_field_read`, which calls `emit_expr(Ident)` →
-                // `cx.consts[P]`, yielding `((user_Pair { … }).user_<field>)`. The TIR
+                // `cx.consts[P]`, yielding `((__jet_Pair { … }).__jet_<field>)`. The TIR
                 // reproduces this exactly (`lower_expr`'s Ident arm already inlines the
                 // const string; the Field arm wraps it). A comptime const can hold a
                 // struct or enum value; either way the field read is byte-identical.
@@ -830,7 +830,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
 
 /// c109 Phase 13: is `name` a bare top-level function used as a VALUE? It must be a
 /// non-local, non-const name in `cx.fn_types` whose type is a `Type::Fn`. Such a name
-/// emits `emit_named_fn_value`'s `Box::new(move |…| user_<name>(…)) as <fn-type>`
+/// emits `emit_named_fn_value`'s `Box::new(move |…| __jet_<name>(…)) as <fn-type>`
 /// (Source/Codegen/Statement.rs). A const (inlined value) or an unqualified module
 /// import is NOT a fn-value, so this stays narrow.
 pub(crate) fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<String>) -> bool {

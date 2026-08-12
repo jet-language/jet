@@ -1,6 +1,7 @@
 use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_lambda_block;
@@ -30,20 +31,20 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 fn lambda_jit_name(start: usize, end: usize) -> String {
-    mangle(&format!("lambda_{start}_{end}"))
+    mangle_generated(&format!("lambda_{start}_{end}"))
 }
 
 fn reactive_capture_name(name: &str) -> String {
-    format!(
-        "__jet_cap_{}",
+    mangle_generated(&format!(
+        "cap_{}",
         crate::Syntax::generated_suffix(&mangle(name))
-    )
+    ))
 }
 
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
 /// Every capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
 /// analysis here. The body is lowered on a CLONED env extended with: the cloned
-/// captures (rebound to `__jet_cap_<n>`, place = that name, type `None` — matching the
+/// captures (rebound to `__jet___cap_<n>`, place = that name, type `None` — matching the
 /// AST slot) and the params (place = mangled name, type from the annotation). The
 /// rendered closure body string is produced now so emit is a pure wrapper.
 pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
@@ -143,9 +144,9 @@ fn lower_lambda_expecting_with_host_borrow(
     // Computed before the clone-capture prelude so a moving escape can also clone
     // borrowed/Fn captures rustc would otherwise reject (E0521).
     let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
-    // The clone-capture prelude: `let __jet_cap_<n> = (<outer place>).clone();`. The
+    // The clone-capture prelude: `let __jet___cap_<n> = (<outer place>).clone();`. The
     // outer place comes from the *outer* env (the capture is an outer local). The cap
-    // rebinds the name with place `__jet_cap_<n>`, no deref, type `None` (matching the
+    // rebinds the name with place `__jet___cap_<n>`, no deref, type `None` (matching the
     // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
     let mut prep = String::new();
     let mut extra_cloned: Vec<String> = Vec::new();
@@ -185,10 +186,7 @@ fn lower_lambda_expecting_with_host_borrow(
         .iter()
         .chain(extra_cloned.iter())
     {
-        let cap = format!(
-            "__jet_cap_{}",
-            crate::Syntax::generated_suffix(&mangle(name))
-        );
+        let cap = reactive_capture_name(name);
         // Clone temps must be `mut` when the closure body assigns through them
         // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
         // captures — over-mutability is safe; missing mut is rustc E0594 (I2).
@@ -230,7 +228,7 @@ fn lower_lambda_expecting_with_host_borrow(
             let cap_ty = env
                 .ty_of(&name)
                 .unwrap_or_else(|| Type::Named("Unit".to_string()));
-            // Body still reads the outer place (no `__jet_cap_` rebind).
+            // Body still reads the outer place (no `__jet___cap_` rebind).
             captures.push((name.clone(), crate::Codegen::TIR::local_place(&name), cap_ty));
         }
     }
@@ -545,10 +543,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     }
     cloned_captures.sort();
     for name in &cloned_captures {
-        let cap = format!(
-            "__jet_cap_{}",
-            crate::Syntax::generated_suffix(&mangle(name))
-        );
+        let cap = reactive_capture_name(name);
         prep.push_str(&format!(
             "let {} = ({}).clone();\n    ",
             cap,
@@ -598,7 +593,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
 
 /// Render a `#Reactive { … }` block as a `move || { … }` closure for
 /// `jet_reactive_effect`. Outer locals read inside the block are cloned into
-/// `__jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
+/// `__jet___cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
 fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, LowerEnv) {
     let reads = crate::Sema::block_free_var_reads(stmts);
     let mut caps: Vec<String> = reads
@@ -783,6 +778,6 @@ pub(crate) fn render_router_handler(
 mod tests {
     #[test]
     fn lambda_native_names_use_reserved_prefix() {
-        assert_eq!(super::lambda_jit_name(12, 34), "__jet_lambda_12_34");
+        assert_eq!(super::lambda_jit_name(12, 34), "__jet___lambda_12_34");
     }
 }

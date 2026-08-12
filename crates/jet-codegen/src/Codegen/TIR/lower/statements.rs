@@ -1,5 +1,7 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, PlaceAccess, Stmt, Type, UnOp};
 use crate::Codegen::Cx;
+use crate::Codegen::mangle_generated;
 #[cfg(test)]
 use crate::Codegen::build_cx;
 #[cfg(test)]
@@ -1495,8 +1497,8 @@ fn split_view_plan(
             continue;
         }
         group.sort_by_key(|&index| candidates[index].stmt_index);
-        let root = format!("__jet_place_plan_{plan_index}_root");
-        let len = format!("__jet_place_plan_{plan_index}_len");
+        let root = jet_format!("{jet_prefix}place_plan_{plan_index}_root");
+        let len = jet_format!("{jet_prefix}place_plan_{plan_index}_len");
         let mut regions = vec![SplitRegion {
             name: root.clone(),
             start: 0,
@@ -1511,10 +1513,10 @@ fn split_view_plan(
                 continue;
             };
             let region = regions.remove(region_index);
-            let prefix = format!("__jet_place_plan_{plan_index}_{step}_before");
-            let split_tail = format!("__jet_place_plan_{plan_index}_{step}_tail");
-            let segment = format!("__jet_place_plan_{plan_index}_{step}_segment");
-            let suffix = format!("__jet_place_plan_{plan_index}_{step}_after");
+            let prefix = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_before");
+            let split_tail = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_tail");
+            let segment = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_segment");
+            let suffix = jet_format!("{jet_prefix}place_plan_{plan_index}_{step}_after");
             if candidate.start > region.start {
                 regions.push(SplitRegion {
                     name: prefix.clone(),
@@ -1670,7 +1672,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             ) = (target, &mut lowered_source)
             {
                 let lowered = lower_expr(index, cx, env);
-                let source_name = format!("__jet_gc_index_{}", span.start);
+                let source_name = jet_format!("{jet_prefix}gc_index_{}", span.start);
                 let rust_name = source_name.clone();
                 let LValue::Index {
                     index: lowered_index,
@@ -1693,7 +1695,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             env.gc_locals.remove(name);
             env.bind(
                 name,
-                TLocal::generated("__jet_value").through_ref(),
+                TLocal::generated("value").through_ref(),
                 saved.as_ref().and_then(|(_, ty)| ty.clone()),
             );
             let plan = lower_stmt_plan(&lowered_source, cx, env);
@@ -1742,7 +1744,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     .get(&field.name)
                     .is_some_and(|ty| cx.type_contains_shared_guard(ty))
             });
-            let tmp = format!("__jet_d{}", span.start);
+            let tmp = jet_format!("{jet_prefix}d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let mut binds = Vec::new();
             for f in fields {
@@ -1802,7 +1804,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
                     )
             });
-            let tmp = format!("__jet_d{}", span.start);
+            let tmp = jet_format!("{jet_prefix}d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let mut binds = Vec::new();
             for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
@@ -1835,7 +1837,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 Type::List(inner) => Some((**inner).clone()),
                 _ => None,
             };
-            let tmp = format!("__jet_d{}", span.start);
+            let tmp = jet_format!("{jet_prefix}d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             let mut elem_names = Vec::new();
@@ -2082,7 +2084,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
             // with an Int placeholder element type (no element to infer from), so it
             // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
-            // columnar empty constructor `user_<S>_columns::from_aos(vec![])` using
+            // columnar empty constructor `__jet_<S>_columns::from_aos(vec![])` using
             // the binding's declared type.
             if let Some(decl @ Type::List(inner)) = b.ty.as_ref().map(Type::without_user_tags) {
                 if let Some(columns_ty) = cx.columnar_list_type(inner) {
@@ -2241,7 +2243,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 )
             };
             let binding_name = if is_resource {
-                jet_foundation::Names::mangle(&format!("resource_{}_{}", b.name, b.name_span.start))
+                mangle_generated(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
                 b.name.clone()
             };
@@ -2724,7 +2726,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let (iter_source, method_kind) = lower_forin_collection(collection, cx, env);
                 // Infer the element type from the lowered collection so the loop
                 // variable binds with its concrete type. This lets `core_struct_field_rust_name`
-                // emit plain field names (not `user_<field>`) for core types like DirEntry.
+                // emit plain field names (not `__jet_<field>`) for core types like DirEntry.
                 let lowered_coll = lower_expr(collection, cx, env);
                 if matches!(&lowered_coll.ty, Type::Named(name) if name == Syntax::TYPE_RANGE) {
                     let step = step.as_ref().map(|s| lower_expr(s, cx, env));

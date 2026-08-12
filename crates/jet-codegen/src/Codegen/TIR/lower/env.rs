@@ -179,9 +179,9 @@ impl LowerEnv {
         self.borrowed_locals.contains(name)
             || matches!(self.locals.get(name), Some((slot, _)) if slot.deref)
     }
-    /// The bare Rust binding name (without the deref wrapper), e.g. `user_light`
+    /// The bare Rust binding name (without the deref wrapper), e.g. `__jet_light`
     /// for a by-reference slot. Used by the match-subject clone, which clones the
-    /// borrow itself (`(user_light).clone()`), not `(*user_light)`.
+    /// borrow itself (`(__jet_light).clone()`), not `(*__jet_light)`.
     pub(super) fn rust_name_of(&self, name: &str) -> String {
         self.local_of(name).rust_name()
     }

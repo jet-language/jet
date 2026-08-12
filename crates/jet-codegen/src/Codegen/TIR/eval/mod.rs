@@ -1,5 +1,6 @@
 //! Canonical TIR evaluator — reference semantics (D-ONECORE1=A / #777).
 
+use crate::Codegen::mangle_generated;
 mod builtins;
 mod browser;
 mod closure_ops;
@@ -2316,9 +2317,9 @@ impl<'a> EvalCtx<'a> {
         self.current_span = previous_span;
         let post_result = match (&result, &cleanup_result) {
             (Ok(value), Ok(())) if !func.post_contracts.is_empty() => {
-                scope.insert("__jet_result".to_string(), value.clone());
+                scope.insert(mangle_generated("result"), value.clone());
                 let checked = self.check_contracts(&func.post_contracts, "Post", scope);
-                scope.remove("__jet_result");
+                scope.remove(&mangle_generated("result"));
                 checked
             }
             _ => Ok(()),

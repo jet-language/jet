@@ -314,7 +314,7 @@ pub(crate) fn concurrency_elem_covered(ty: &Type, cx: &Cx) -> bool {
 /// (`struct_is_covered` — which admits type-var fields, Phase 19), and every type argument
 /// must itself be a covered value type OR a bare type variable. Imported struct shapes use
 /// their canonical qualified names in the same tables, so `owner::Stack<Int>` follows the
-/// identical TIR path. The Rust head is `user_<Name>::<args>` (the turbofish from
+/// identical TIR path. The Rust head is `__jet_<Name>::<args>` (the turbofish from
 /// `user_type_apply_rust`), resolved at lowering. `cx.rust_type` already renders
 /// `Type::Apply` to that head, so param/return/local typing is byte-identical to the AST
 /// path. (A non-generic `Type::Apply` would be malformed; sema only produces `Apply` for a
@@ -339,7 +339,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 23: a DISTINCT type (`UserId :: distinct Int`, D-DIST1) usable as a
 /// param/return/local *value* type. A distinct type renders via `cx.rust_type` to its
-/// newtype `user_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
+/// newtype `__jet_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
 /// `#[repr(transparent)]` newtype is `Copy` iff its base is (sema/codegen derive set) —
 /// but the param convention (`Read`→deref for a non-scalar Named) is decided exactly as
 /// for a struct, so passing/binding/returning one is byte-identical to the AST path with
@@ -354,9 +354,9 @@ pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
 /// c109 Phase 23: a named-tuple type `(x: Int, y: Int)` (S73/D-SG7, `Type::Tuple`)
 /// usable as a param/return/local value type. A tuple renders via `cx.rust_type` to a
 /// generated `#[derive(Debug, Clone, PartialEq[, …])]` struct `JetTup_<hash>` (with
-/// `user_<field>` fields) emitted by `Tuples.rs` for every tuple SHAPE the program uses
+/// `__jet_<field>` fields) emitted by `Tuples.rs` for every tuple SHAPE the program uses
 /// — so passing/binding/returning one is byte-identical to the AST path with no new
-/// emit. A tuple field read is the generic `Field` shape (`(t).user_<f>`); construction
+/// emit. A tuple field read is the generic `Field` shape (`(t).__jet_<f>`); construction
 /// is the `TupleLit` shape; destructuring is the `BindPattern::Tuple` `let` form;
 /// `==`/`!=` is native (the derived `PartialEq`). Every field type must itself be a
 /// covered value type (so a field read / destructure element emits in-subset).
@@ -536,7 +536,7 @@ pub(crate) fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 30: a TRAIT-OBJECT param/return/local type (`s: Shape` where `Shape` is a
 /// user trait → `Type::TraitObject("Shape")`, or a bare `Type::Named("Shape")` naming a
-/// trait). It renders via `cx.rust_type` to `Box<dyn user_Shape>` (Context.rs), and the
+/// trait). It renders via `cx.rust_type` to `Box<dyn __jet_Shape>` (Context.rs), and the
 /// param convention is decided by `rust_param_type`'s trait-object arm (`Read` → `&Box<dyn
 /// …>`, the slot deref'd to `(*user_s)` by `param_place` — a non-scalar `Read` param). A
 /// METHOD on it is the dedicated trait-object dispatch shape (`recv_type == Some(<trait>)`,
@@ -669,16 +669,16 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // c109 Phase 21: a `[Task<Unit>]` worker list (34_parallel_scan) — a concurrency
         // handle element renders via `cx.rust_type` (`Vec<Jet…<…>>`) like any value type.
         || is_covered_concurrency_ty(ty, cx)
-        // c109 Phase 30: a TRAIT-OBJECT element (`[Shape]` → `Vec<Box<dyn user_Shape>>`).
+        // c109 Phase 30: a TRAIT-OBJECT element (`[Shape]` → `Vec<Box<dyn __jet_Shape>>`).
         // Each element is a `Box::new(<lit>) as Box<dyn …>` (the trait-coerced literal),
         // and `.each` over such a list dispatches via `jet_list_each_ref` (the `EachRef`
         // closure op, already built — `list_carries_trait`). The element renders via
-        // `cx.rust_type` to `Box<dyn user_<Trait>>`, byte-identical to the AST path.
+        // `cx.rust_type` to `Box<dyn __jet_<Trait>>`, byte-identical to the AST path.
         || is_covered_trait_object_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
         // `[String: JSON]`) OR a cross-module imported user struct/enum (`[String: Note]`
         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
-        // own Rust head ({root}jet_std::JSON / {root}{mod}::user_<Name>), and a foreign
+        // own Rust head ({root}jet_std::JSON / {root}{mod}::__jet_<Name>), and a foreign
         // element is moved/cloned by its own sub-expression (a construction or a bound
         // value), so the owning collection's `.iter().cloned()` / per-key/value clone is
         // byte-identical. (A foreign METHOD is still out of subset, so a fn that calls one

@@ -1,9 +1,11 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_head_range;
@@ -553,7 +555,7 @@ fn lower_if_cond_atom(
                     .and_then(|ts| ts.into_iter().next());
                 let place = TLocal::user(name);
                 if variant == "Object" {
-                    let obj_tmp = format!("__jet_obj{}", pat_span.start);
+                    let obj_tmp = jet_format!("{jet_prefix}obj{}", pat_span.start);
                     let map_ty = ty.clone().unwrap_or(Type::Map {
                         key: Box::new(Type::String),
                         key_span: None,
@@ -594,7 +596,7 @@ fn lower_if_cond_atom(
             }
         }
         // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). The Rust if-let
-        // pattern is the same `emit_if_let_pattern` (`user_E::user_V(user_b)`), and the
+        // pattern is the same `emit_if_let_pattern` (`__jet_E::__jet_V(user_b)`), and the
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
         if !is_json_variant(variant) {
@@ -648,7 +650,7 @@ fn lower_if_cond_atom(
         // second comparison invalid).
         let subject_value = lower_if_expr(subject, cx, env, cached);
         let subject_ty = subject_value.ty.clone();
-        let temp = format!("__jet_if_range_{}", subject.span().start);
+        let temp = jet_format!("{jet_prefix}if_range_{}", subject.span().start);
         let local = TLocal::generated(&temp);
         let local_expr = || TExpr {
             ty: subject_ty.clone(),
@@ -1252,7 +1254,12 @@ pub(super) fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::StrMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    str_match_scan_closure_ex(parts, cx, "__jet_switch_subject.as_str()", true)
+    str_match_scan_closure_ex(
+        parts,
+        cx,
+        &jet_format!("{jet_prefix}switch_subject.as_str()"),
+        true,
+    )
 }
 
 /// D-PARSESTR1 (extended for D-SHIFT1's `Cursor.take_pattern` consume mode —
@@ -1275,9 +1282,11 @@ pub(crate) fn str_match_scan_closure_ex(
 ) -> (String, Vec<(String, Type)>) {
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
-    body.push_str(&format!("let mut __jet_sm: &str = {};\n", subject_src));
+    body.push_str(&jet_format!("let mut {jet_prefix}sm: &str = {};\n", subject_src));
     if !require_full_match {
-        body.push_str("let __jet_sm_orig_len: usize = __jet_sm.len();\n");
+        body.push_str(&jet_format!(
+            "let {jet_prefix}sm_orig_len: usize = {jet_prefix}sm.len();\n"
+        ));
     }
     let mut i = 0;
     while i < parts.len() {
@@ -1291,16 +1300,16 @@ pub(crate) fn str_match_scan_closure_ex(
                 let already_consumed_by_prior_hole =
                     i > 0 && matches!(parts[i - 1], crate::AST::StrMatchPart::Hole { .. });
                 if !already_consumed_by_prior_hole {
-                    body.push_str(&format!(
-                        "if !__jet_sm.starts_with({lit}) {{ return None; }} __jet_sm = &__jet_sm[{lit}.len()..];\n",
+                    body.push_str(&jet_format!(
+                        "if !{jet_prefix}sm.starts_with({lit}) {{ return None; }} {jet_prefix}sm = &{jet_prefix}sm[{lit}.len()..];\n",
                         lit = escape_rust_str(lit)
                     ));
                 }
                 i += 1;
             }
             crate::AST::StrMatchPart::Hole { name, ty, .. } => {
-                let var = format!(
-                    "__jet_sm_{}",
+                let var = jet_format!(
+                    "{jet_prefix}sm_{}",
                     crate::Syntax::generated_suffix(&mangle(name))
                 );
                 // Find the boundary: the next literal anchor's text (non-greedy —
@@ -1308,8 +1317,8 @@ pub(crate) fn str_match_scan_closure_ex(
                 // hole is the last part.
                 match parts.get(i + 1) {
                     Some(crate::AST::StrMatchPart::Lit(next_lit)) => {
-                        body.push_str(&format!(
-                            "let {var}: &str = match __jet_sm.find({next_lit}) {{ Some(__jet_i) => {{ let __jet_h = &__jet_sm[..__jet_i]; __jet_sm = &__jet_sm[__jet_i + {next_lit}.len()..]; __jet_h }}, None => return None }};\n",
+                        body.push_str(&jet_format!(
+                            "let {var}: &str = match {jet_prefix}sm.find({next_lit}) {{ Some({jet_prefix}i) => {{ let {jet_prefix}h = &{jet_prefix}sm[..{jet_prefix}i]; {jet_prefix}sm = &{jet_prefix}sm[{jet_prefix}i + {next_lit}.len()..]; {jet_prefix}h }}, None => return None }};\n",
                             var = var,
                             next_lit = escape_rust_str(next_lit)
                         ));
@@ -1317,8 +1326,8 @@ pub(crate) fn str_match_scan_closure_ex(
                     _ => {
                         // Last part, or a hole followed by another hole (rejected at
                         // parse time by E0147) — take the rest of the string.
-                        body.push_str(&format!(
-                            "let {var}: &str = __jet_sm; __jet_sm = \"\";\n",
+                        body.push_str(&jet_format!(
+                            "let {var}: &str = {jet_prefix}sm; {jet_prefix}sm = \"\";\n",
                             var = var
                         ));
                     }
@@ -1332,20 +1341,20 @@ pub(crate) fn str_match_scan_closure_ex(
                         ));
                     }
                     Type::Int => {
-                        body.push_str(&format!(
-                            "let {var}: i64 = match {var}.trim().parse::<i64>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                        body.push_str(&jet_format!(
+                            "let {var}: i64 = match {var}.trim().parse::<i64>() {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",
                             var = var
                         ));
                     }
                     Type::Float => {
-                        body.push_str(&format!(
-                            "let {var}: f64 = match {var}.trim().parse::<f64>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                        body.push_str(&jet_format!(
+                            "let {var}: f64 = match {var}.trim().parse::<f64>() {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",
                             var = var
                         ));
                     }
                     Type::Bool => {
-                        body.push_str(&format!(
-                            "let {var}: bool = match {var}.trim().parse::<bool>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                        body.push_str(&jet_format!(
+                            "let {var}: bool = match {var}.trim().parse::<bool>() {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",
                             var = var
                         ));
                     }
@@ -1365,12 +1374,14 @@ pub(crate) fn str_match_scan_closure_ex(
     // matched, and reads the leftover tail via the consumed-length count.
     let ends_in_lit = matches!(parts.last(), Some(crate::AST::StrMatchPart::Lit(_)));
     if require_full_match && ends_in_lit {
-        body.push_str("if !__jet_sm.is_empty() { return None; }\n");
+        body.push_str(&jet_format!(
+            "if !{jet_prefix}sm.is_empty() {{ return None; }}\n"
+        ));
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| {
-            jet_foundation::Names::mangle(&format!(
+            mangle_generated(&format!(
                 "sm_{}",
                 crate::Syntax::generated_suffix(&mangle(n))
             ))
@@ -1378,8 +1389,10 @@ pub(crate) fn str_match_scan_closure_ex(
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
-        body.push_str("let __jet_consumed: usize = __jet_sm_orig_len - __jet_sm.len();\n");
-        tuple_vars.push("__jet_consumed".to_string());
+        body.push_str(&jet_format!(
+            "let {jet_prefix}consumed: usize = {jet_prefix}sm_orig_len - {jet_prefix}sm.len();\n"
+        ));
+        tuple_vars.push(mangle_generated("consumed"));
         tuple_tys.push("usize".to_string());
     }
     body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
@@ -1403,7 +1416,12 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     let Pattern::BinMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
-    bin_match_scan_closure_ex(parts, cx, "(__jet_switch_subject).as_slice()", true)
+    bin_match_scan_closure_ex(
+        parts,
+        cx,
+        &jet_format!("({jet_prefix}switch_subject).as_slice()"),
+        true,
+    )
 }
 
 /// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
@@ -1427,9 +1445,11 @@ pub(crate) fn bin_match_scan_closure_ex(
     use crate::AST::{BinEndian, BinMatchPart, BinSpec};
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
-    body.push_str(&format!("let __jet_bm: &[u8] = {};\n", subject_src));
-    body.push_str("let __jet_total: usize = __jet_bm.len().saturating_mul(8);\n");
-    body.push_str("let mut __jet_pos: usize = 0;\n");
+    body.push_str(&jet_format!("let {jet_prefix}bm: &[u8] = {};\n", subject_src));
+    body.push_str(&jet_format!(
+        "let {jet_prefix}total: usize = {jet_prefix}bm.len().saturating_mul(8);\n"
+    ));
+    body.push_str(&jet_format!("let mut {jet_prefix}pos: usize = 0;\n"));
     let ends_in_rest = matches!(
         parts.last(),
         Some(BinMatchPart::Hole { spec: BinSpec::Rest, .. })
@@ -1442,20 +1462,24 @@ pub(crate) fn bin_match_scan_closure_ex(
                     .map(|b| format!("{}u8", b))
                     .collect::<Vec<_>>()
                     .join(", ");
-                body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
-                body.push_str(&format!(
-                    "{{ let __s = __jet_pos / 8; let __lit: &[u8] = &[{arr}]; if __s + __lit.len() > __jet_bm.len() || &__jet_bm[__s..__s + __lit.len()] != __lit {{ return None; }} __jet_pos += __lit.len() * 8; }}\n",
+                body.push_str(&jet_format!(
+                    "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+                ));
+                body.push_str(&jet_format!(
+                    "{{ let __s = {jet_prefix}pos / 8; let __lit: &[u8] = &[{arr}]; if __s + __lit.len() > {jet_prefix}bm.len() || &{jet_prefix}bm[__s..__s + __lit.len()] != __lit {{ return None; }} {jet_prefix}pos += __lit.len() * 8; }}\n",
                 ));
             }
             BinMatchPart::Hole { name, spec, .. } => match spec {
                 BinSpec::Rest => {
-                    let var = format!(
-                        "__jet_bm_{}",
+                    let var = jet_format!(
+                        "{jet_prefix}bm_{}",
                         crate::Syntax::generated_suffix(&mangle(name))
                     );
-                    body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
-                    body.push_str(&format!(
-                        "let {var}: Vec<u8> = __jet_bm[__jet_pos / 8..].to_vec(); __jet_pos = __jet_total;\n"
+                    body.push_str(&jet_format!(
+                        "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+                    ));
+                    body.push_str(&jet_format!(
+                        "let {var}: Vec<u8> = {jet_prefix}bm[{jet_prefix}pos / 8..].to_vec(); {jet_prefix}pos = {jet_prefix}total;\n"
                     ));
                     holes.push((
                         name.clone(),
@@ -1463,15 +1487,15 @@ pub(crate) fn bin_match_scan_closure_ex(
                     ));
                 }
                 BinSpec::Bits { width, endian } => {
-                    let var = format!(
-                        "__jet_bm_{}",
+                    let var = jet_format!(
+                        "{jet_prefix}bm_{}",
                         crate::Syntax::generated_suffix(&mangle(name))
                     );
                     let ty = cx.rust_type(&bin_bits_type(*width));
                     let w = *width as usize;
-                    body.push_str(&format!("if __jet_pos + {w} > __jet_total {{ return None; }}\n"));
-                    body.push_str(&format!(
-                        "let {var}: {ty} = {{ let mut __v: u64 = 0; let mut __k = 0usize; while __k < {w} {{ let __p = __jet_pos + __k; __v = (__v << 1) | ((__jet_bm[__p / 8] >> (7 - (__p % 8))) & 1) as u64; __k += 1; }} __jet_pos += {w}; "
+                    body.push_str(&jet_format!("if {jet_prefix}pos + {w} > {jet_prefix}total {{ return None; }}\n"));
+                    body.push_str(&jet_format!(
+                        "let {var}: {ty} = {{ let mut __v: u64 = 0; let mut __k = 0usize; while __k < {w} {{ let __p = {jet_prefix}pos + __k; __v = (__v << 1) | (({jet_prefix}bm[__p / 8] >> (7 - (__p % 8))) & 1) as u64; __k += 1; }} {jet_prefix}pos += {w}; "
                     ));
                     if matches!(endian, BinEndian::Little) {
                         let nb = w / 8;
@@ -1493,15 +1517,19 @@ pub(crate) fn bin_match_scan_closure_ex(
     // whole bytes, so the match point must still land on a byte boundary.
     if require_full_match {
         if !ends_in_rest {
-            body.push_str("if __jet_pos != __jet_total { return None; }\n");
+            body.push_str(&jet_format!(
+                "if {jet_prefix}pos != {jet_prefix}total {{ return None; }}\n"
+            ));
         }
     } else {
-        body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
+        body.push_str(&jet_format!(
+            "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+        ));
     }
     let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| {
-            jet_foundation::Names::mangle(&format!(
+            mangle_generated(&format!(
                 "bm_{}",
                 crate::Syntax::generated_suffix(&mangle(n))
             ))
@@ -1509,8 +1537,10 @@ pub(crate) fn bin_match_scan_closure_ex(
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
-        body.push_str("let __jet_consumed: usize = __jet_pos / 8;\n");
-        tuple_vars.push("__jet_consumed".to_string());
+        body.push_str(&jet_format!(
+            "let {jet_prefix}consumed: usize = {jet_prefix}pos / 8;\n"
+        ));
+        tuple_vars.push(mangle_generated("consumed"));
         tuple_tys.push("usize".to_string());
     }
     body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));

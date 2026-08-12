@@ -378,7 +378,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     let Type::Named(type_name) = recv_ty else {
         return None;
     };
-    // User structs named Point/Rect/Size/MigrationStatus keep `user_<field>`
+    // User structs named Point/Rect/Size/MigrationStatus keep `__jet_<field>`
     // lowering (c133 M1 precedent; D-MIGRATE3=A extends it to `MigrationStatus`).
     let ui_name_collision = matches!(
         type_name.as_str(),
@@ -408,7 +408,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         ),
         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` read the real
         // `ProcessChild` Rust struct field directly (a writer/reader handle),
-        // not a `user_<field>` name.
+        // not a `__jet_<field>` name.
         "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr" | "terminal"),
         "TerminalSize" => matches!(member, "cols" | "rows"),
         "TerminalPolicy" => matches!(member, "size" | "mode"),

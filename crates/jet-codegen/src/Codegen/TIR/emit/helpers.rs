@@ -1,3 +1,4 @@
+use crate::jet_generated_format as jet_format;
 use crate::AST::Type;
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
@@ -305,7 +306,7 @@ pub(super) fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: 
         } else {
             value.to_string()
         };
-        return format!("{{ let __jet_v = {val}; ({base}).0[{lane}] = __jet_v; }}");
+        return jet_format!("{{ let {jet_prefix}v = {val}; ({base}).0[{lane}] = {jet_prefix}v; }}");
     }
     let writes: Vec<String> = lanes
         .iter()
@@ -313,16 +314,16 @@ pub(super) fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: 
         .map(|(i, &l)| {
             let lane = l as usize;
             let comp = if type_name == "F32x4" {
-                format!("(__jet_v).0[{i}] as f32")
+                jet_format!("({jet_prefix}v).0[{i}] as f32")
             } else if type_name == "F64x2" && lanes.len() == 2 {
-                format!("(__jet_v).0[{i}]")
+                jet_format!("({jet_prefix}v).0[{i}]")
             } else {
-                format!("(__jet_v).0[{i}]")
+                jet_format!("({jet_prefix}v).0[{i}]")
             };
             format!("({base}).0[{lane}] = {comp}")
         })
         .collect();
-    format!("{{ let __jet_v = {value}; {}; }}", writes.join("; "))
+    jet_format!("{{ let {jet_prefix}v = {value}; {}; }}", writes.join("; "))
 }
 
 pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
@@ -456,8 +457,8 @@ pub(crate) fn emit_require_stop(
                     Some(m) => emit_panic_message_expr(m, cx),
                     None => "\"condition failed\".to_string()".to_string(),
                 };
-                return format!(
-                    "{{ if !({cond_s}) {{ let __jet_msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &__jet_msg)); }} }}",
+                return jet_format!(
+                    "{{ if !({cond_s}) {{ let {jet_prefix}msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -476,8 +477,8 @@ pub(crate) fn emit_require_stop(
             let left_s = emit_tir_expr(left, cx);
             let right_s = emit_tir_expr(right, cx);
             if cx.test_mode {
-                return format!(
-                    "{{ let __jet_left = ({left_s}); let __jet_right = ({right_s}); if !(__jet_left == __jet_right) {{ let __jet_msg = format!(\"expected {{}}, got {{}}\", __jet_right.jet_show(), __jet_left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &__jet_msg)); }} }}",
+                return jet_format!(
+                    "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ let {jet_prefix}msg = format!(\"expected {{}}, got {{}}\", {jet_prefix}right.jet_show(), {jet_prefix}left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -486,8 +487,8 @@ pub(crate) fn emit_require_stop(
                     caret = loc.caret,
                 );
             }
-            format!(
-                "{{ let __jet_left = ({left_s}); let __jet_right = ({right_s}); if !(__jet_left == __jet_right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", __jet_left.jet_show(), __jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+            jet_format!(
+                "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", {jet_prefix}left.jet_show(), {jet_prefix}right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,

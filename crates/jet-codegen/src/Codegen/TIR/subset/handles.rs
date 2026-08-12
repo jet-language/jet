@@ -160,7 +160,7 @@ pub(crate) fn http_client_static_op(
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
 /// the subset? Reproduces router-handler lowering: the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
-/// the `env.get(name).is_none()` branch → the `move |__req| user_<fn>(&__req)` wrapper)
+/// the `env.get(name).is_none()` branch → the `move |__req| __jet_<fn>(&__req)` wrapper)
 /// or an in-subset literal LAMBDA (the `Box::new(<lambda>)` branch). The path (arg 0) is
 /// any in-subset value. No labels.
 pub(crate) fn router_register_in_subset(

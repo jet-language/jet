@@ -363,7 +363,7 @@ pub(crate) fn method_call_in_subset(
     // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
     // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
     // FIRST — a `struct_fields` entry whose type is `Type::Fn` — and emits
-    // `(({recv}).{user_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
+    // `(({recv}).{__jet_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
     // We mirror that order: tried before the user-method/static shapes so a fn-field whose
     // name happens to match a method name resolves to the field, exactly as the AST path.
     if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) {
@@ -925,7 +925,7 @@ pub(crate) fn method_call_in_subset(
     // (a boxed `Fn(HTTPRequest)=>HTTPResponse` closure). We cover it when the receiver is
     // in-subset, the path arg is in-subset, and the handler arg is one `emit_router_handler`
     // reproduces byte-for-byte: a bare top-level-fn name (NOT a local → the `Box::new(move
-    // |__req| user_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE
+    // |__req| __jet_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE
     // the numeric/handle/builtin shapes so the HTTPRouter `get`/`post` is claimed here.
     if recv_type.as_deref() == Some("HTTPRouter")
         && matches!(method, "get" | "post" | "put" | "delete")
@@ -1095,7 +1095,7 @@ pub(crate) fn method_call_in_subset(
         }
     }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
-    // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
+    // this (its `recv_type` is `None`). The AST path emits `__jet_<T>::__jet_<method>(…)`
     // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
     // reproduce exactly that, and only that: the receiver is a bare type-name ident
     // (not a local), the type is a covered struct/enum, the method is a registered
@@ -1121,7 +1121,7 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals);
     }
     // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
-    // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn user_Shape>`). Sema sets
+    // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn __jet_Shape>`). Sema sets
     // `recv_type == Some(<trait>)` with the trait in `cx.trait_names`; the AST
     // `emit_method_call` (Expression.rs ~L1657) keys on `cx.trait_names.contains(rt)` and
     // emits `({recv}).{method}({args})` — the BARE method name (vtable dispatch), args
@@ -1146,7 +1146,7 @@ pub(crate) fn method_call_in_subset(
     };
     // The method must be a user-defined method on that type (in `method_sigs`). A real
     // `method_sigs` entry is the TOTAL "this is a user method on `ty`" signal: the AST
-    // `emit_method_call` now dispatches to the user method (`user_<method>`) BEFORE
+    // `emit_method_call` now dispatches to the user method (`__jet_<method>`) BEFORE
     // `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈ method_sigs`
     // (the builtin-name-collision fix), so a user method SHADOWING a builtin name
     // (`get`/`len`/…) routes here, not through the name-keyed builtin path.
@@ -1265,12 +1265,12 @@ pub(crate) fn fn_field_call_in_subset(
 }
 
 /// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
-/// AST path (Expression.rs ~L1644) emits `user_<Type>::user_<method>(args)` for a
+/// AST path (Expression.rs ~L1644) emits `__jet_<Type>::__jet_<method>(args)` for a
 /// `MethodCall` whose receiver is an ident in `cx.type_names`. We admit exactly that
 /// case, conservatively:
 ///   - `type_name` is NOT a local (a local shadowing a type would be a field/method
 ///     access, not a static call);
-///   - `type_name` is a covered struct or enum (so its `user_<T>` prefix is right);
+///   - `type_name` is a covered struct or enum (so its `__jet_<T>` prefix is right);
 ///   - `method` is NOT an enum *variant* of `type_name` — a `Enum.Variant(args)`
 ///     receiver+method emits an enum literal (a different lowering, Expression.rs
 ///     ~L1635), so exclude it (Phase 4 covers enum literals via `Expr::EnumLit`/
@@ -1430,7 +1430,7 @@ pub(crate) fn static_method_call_in_subset(
     // `new` arm, and the only `new` special-case (`MEM_ALLOC_NEW`, D-ALLOC1) fires ONLY
     // for a `Field(mem_alias, AllocType)` receiver, never an `Ident(Type)` receiver. So
     // the AST path falls through `emit_builtin_method` (returns None) to the type-name
-    // static dispatch (Expression.rs ~L1644) → `user_<Type>::user_new(args)` — exactly
+    // static dispatch (Expression.rs ~L1644) → `__jet_<Type>::__jet_new(args)` — exactly
     // what the StaticCall lowering reproduces. We therefore admit `new` HERE (the
     // static shape) while `is_intercepted_method_name` keeps the INSTANCE-method intercept
     // (shape b) whole: a user instance method named `new`/`get`/… stays on the AST path.
