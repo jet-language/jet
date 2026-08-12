@@ -3498,6 +3498,7 @@ fn compile_src_with_options_and_policy(
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
+    bundle.materialize_script_entries();
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
@@ -3825,6 +3826,7 @@ pub fn check_eval_with_effect_facts(
             )
         }
     };
+    bundle.materialize_script_entries();
     let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(
         &mut bundle,
         crate::Sema::CompileMode::Eval,
@@ -3922,10 +3924,9 @@ pub fn compile_bundle_path_with_entry(
     entry_fn: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    let mut diags = crate::Sema::prepare_script_entries(&mut bundle);
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
-    diags.extend(crate::Sema::check_bundle(&mut bundle, mode));
+    let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
     // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
@@ -3984,11 +3985,23 @@ pub fn compile_bundle_path_with_entry(
 /// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
 /// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
+    use crate::Diagnostics::Span;
+    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, Item, Stmt};
+
     if entry_fn == "run" {
         return;
     }
-    use crate::Diagnostics::Span;
-    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, Item, Stmt};
+    // Keep an invalid explicit-run script unchanged so sema can report the conflict and retain
+    // its whole-file auto-wrap edit. Valid scripts have already been materialized by the loader.
+    let entry_module = &bundle.modules[bundle.entry];
+    if !entry_module.script_body.is_empty()
+        && entry_module
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Func(func) if func.name == "run"))
+    {
+        return;
+    }
 
     let items = &mut bundle.modules[bundle.entry].items;
     let Some(target) = items.iter().find_map(|item| match item {
@@ -4002,8 +4015,8 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         if let Item::Func(f) = item {
             if f.name == "run" {
                 f.name = "__jet_unused_run".to_string();
-                // `prepare_script_entries` gives the synthetic script entry
-                // a fallible unit return so ordinary `jet run` can report a
+                // The shared script seam gives the synthetic entry a fallible
+                // unit return so ordinary `jet run` can report a
                 // default error. When `jet dev` selects another function,
                 // that parked function is not an entry and must not retain a
                 // fallthrough obligation (E0114).

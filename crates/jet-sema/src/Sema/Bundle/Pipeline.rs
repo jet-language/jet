@@ -52,7 +52,7 @@ fn check_bundle_opts_for_output_inner(
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
-    diags.extend(prepare_script_entries(bundle));
+    diags.extend(validate_script_entries(bundle));
     diags.extend(inject_units_prelude(bundle));
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
