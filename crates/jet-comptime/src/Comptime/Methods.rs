@@ -54,14 +54,18 @@ mod structure_tests {
                 "core_calls/regex",
                 include_str!("Methods/core_calls/regex.rs"),
             ),
+            ("core_calls/data", include_str!("Methods/core_calls/data.rs")),
+            (
+                "core_calls/impure",
+                include_str!("Methods/core_calls/impure.rs"),
+            ),
             ("pool", include_str!("Methods/pool.rs")),
         ] {
             let lines = source.lines().count();
             assert!(
-                lines < 3_300,
+                lines < 2_500,
                 "{name}.rs regrew to {lines} lines; split it along semantic ownership \
-                 (cap raised from 2_500 when dispatch absorbed empty-schema/REPL \
-                 binding-type plumbing for core.data; still under one module)"
+                 without changing the 2,500-line module cap"
             );
         }
     }

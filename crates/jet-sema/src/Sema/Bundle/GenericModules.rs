@@ -2419,7 +2419,7 @@ mod instance_collision_tests {
     fn generic_template_snapshot_never_filters_parser_admitted_items() {
         let source = r#"
 module everything<T> {
-    $answer :: 42
+    $answer :: 42;
     tag Marked { deny: [Net] }
     trait Show { fn show(self) => T }
     struct Boxed { value: T }
