@@ -4894,21 +4894,27 @@ impl<'a> Checker<'a> {
                 return None;
             };
             if module == "core.os" && name == "on_interrupt" {
+                // D-OSINTERRUPT1/I3: this is the one fixed callback crossing.
+                // Keep the callback expectation tied to the complete one-slot
+                // signature. Do not silently type-check only `params.first()`
+                // if the registry row ever drifts to another shape.
+                debug_assert_eq!(params.len(), 1);
                 if args.len() != params.len() {
                     self.diags
                         .push(wrong_core_arity(name, params.len(), args.len(), span));
                 }
-                if let (Some((conv, param_ty)), Some(arg)) =
-                    (params.first(), args.get_mut(0))
-                {
-                    debug_assert_eq!(*conv, AccessConvention::Read);
-                    let saved_lambda_escapes = self.lambda_escapes;
-                    let saved_callback_depth = self.interrupt_callback_depth;
-                    self.lambda_escapes = true;
-                    self.interrupt_callback_depth += 1;
-                    self.expect_core_arg(name, 0, param_ty, arg);
-                    self.interrupt_callback_depth = saved_callback_depth;
-                    self.lambda_escapes = saved_lambda_escapes;
+                if params.len() == 1 {
+                    let (conv, param_ty) = &params[0];
+                    if let Some(arg) = args.get_mut(0) {
+                        debug_assert_eq!(*conv, AccessConvention::Read);
+                        let saved_lambda_escapes = self.lambda_escapes;
+                        let saved_callback_depth = self.interrupt_callback_depth;
+                        self.lambda_escapes = true;
+                        self.interrupt_callback_depth += 1;
+                        self.expect_core_arg(name, 0, param_ty, arg);
+                        self.interrupt_callback_depth = saved_callback_depth;
+                        self.lambda_escapes = saved_lambda_escapes;
+                    }
                 }
                 for arg in args.iter_mut().skip(params.len()) {
                     self.infer(&mut arg.expr);

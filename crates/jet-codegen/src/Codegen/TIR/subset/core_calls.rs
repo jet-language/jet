@@ -375,6 +375,12 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
         }
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-OSINTERRUPT1: the callback itself is canonicalized by lowering;
+        // admit all in-subset callback shapes so inline, named, and indirect
+        // values use the same `CoreClosureCall` path in every tier.
+        ("core.os", "on_interrupt") => {
+            args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
+        }
         // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector
         // args must be literal lambdas so lowering can seed row param types.
         ("core.data", "filter" | "sort_by") => {

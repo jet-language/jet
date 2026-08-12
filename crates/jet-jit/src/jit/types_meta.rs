@@ -382,6 +382,16 @@ pub(crate) fn fn_value_signature(
     Ok(sig)
 }
 
+pub(crate) fn interrupt_callback_signature(
+    module: &JITModule,
+    ty: &Type,
+    meta: &JitMeta<'_>,
+) -> Result<Signature, String> {
+    let mut sig = fn_value_signature(module, ty, meta)?;
+    sig.params.insert(0, AbiParam::new(types::I64));
+    Ok(sig)
+}
+
 pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
     match &tir.kind {
         TFuncKind::Method { self_conv, .. } => self_conv.is_some(),

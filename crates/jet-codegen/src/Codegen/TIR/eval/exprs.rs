@@ -1120,6 +1120,7 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
             TFnValueKind::Call { callee, args } => std::iter::once(callee.as_ref())
                 .chain(eval_call_children(args))
                 .collect(),
+            TFnValueKind::Interrupt { value } => vec![value.as_ref()],
         },
         TExprKind::Lambda(_)
         | TExprKind::Todo { .. }
@@ -7136,6 +7137,7 @@ impl<'a> EvalCtx<'a> {
                     }
                     self.call_callable_in_scope(&callable, argv, scope)
                 }
+                TFnValueKind::Interrupt { value } => self.eval_expr(value, scope),
             },
             TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {

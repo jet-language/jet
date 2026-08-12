@@ -703,6 +703,9 @@ fn web_wasm_expr_supported(
                         web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
                     })
             }
+            TIR::TFnValueKind::Interrupt { value } => {
+                web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
+            }
         },
         TIR::TExprKind::Lambda(lam) => match &lam.executable {
             TIR::TLambdaBody::Expr(body) => {
@@ -1076,6 +1079,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 web_expr_supported(callee)
                     && args.iter().all(|arg| web_expr_supported(&arg.value))
             }
+            TIR::TFnValueKind::Interrupt { value } => web_expr_supported(value),
         },
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
@@ -3605,6 +3609,9 @@ fn wasm_emit_expr(
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ")
             ),
+            TIR::TFnValueKind::Interrupt { value } => {
+                wasm_emit_expr(value, funcs, file_prefix, reconstructions)?
+            }
         },
         TIR::TExprKind::Lambda(lam) => {
             wasm_tir_lambda(lam, funcs, file_prefix, reconstructions)?
@@ -5129,6 +5136,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ")
             ),
+            TIR::TFnValueKind::Interrupt { value } => tir_js_expr(value, funcs, file_prefix)?,
         },
         E::MapLit(entries) => {
             let abi_int_values = matches!(

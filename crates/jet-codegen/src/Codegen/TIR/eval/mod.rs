@@ -39,6 +39,11 @@ mod disjoint_semantics {
 }
 
 #[allow(dead_code)]
+mod interrupt_queue {
+    include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
+}
+
+#[allow(dead_code)]
 mod uninit_semantics {
     include!("../../../Prelude/Uninit.rs");
 }
@@ -51,7 +56,7 @@ mod shared_protocol {
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -81,11 +86,12 @@ pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
 }
 
-static INTERPRETER_INTERRUPT_PENDING: AtomicUsize = AtomicUsize::new(0);
+static INTERPRETER_INTERRUPT_QUEUE: interrupt_queue::JetInterruptQueue =
+    interrupt_queue::JetInterruptQueue::new();
 static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
 fn note_interpreter_interrupt() {
-    INTERPRETER_INTERRUPT_PENDING.fetch_add(1, Ordering::Relaxed);
+    INTERPRETER_INTERRUPT_QUEUE.note();
 }
 
 #[cfg(unix)]
@@ -96,16 +102,7 @@ extern "C" fn interpreter_unix_mark(_: i32) {
 fn install_interpreter_interrupt_handler() -> Result<(), String> {
     #[cfg(unix)]
     {
-        extern "C" {
-            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-        }
-        const SIGINT: i32 = 2;
-        let previous = unsafe { signal(SIGINT, interpreter_unix_mark) };
-        return if previous == usize::MAX {
-            Err("could not install the SIGINT handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_unix_handler(interpreter_unix_mark);
     }
     #[cfg(windows)]
     {
@@ -117,20 +114,11 @@ fn install_interpreter_interrupt_handler() -> Result<(), String> {
                 0
             }
         }
-        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
-        extern "system" {
-            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
-        }
-        unsafe { SetConsoleCtrlHandler(None, 0) };
-        return if unsafe { SetConsoleCtrlHandler(Some(mark), 1) } == 0 {
-            Err("could not install the Windows console Ctrl-C handler".to_string())
-        } else {
-            Ok(())
-        };
+        return interrupt_queue::jet_interrupt_install_windows_handler(Some(mark));
     }
     #[cfg(not(any(unix, windows)))]
     {
-        Err("interrupt handling is unavailable on this target".to_string())
+        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
     }
 }
 
@@ -1248,6 +1236,9 @@ struct EvalTaskConfig<'a> {
 
 impl EvalRuntime<'_> {
     fn new() -> Self {
+        // A fresh interpreter runtime is a teardown boundary. Do not deliver
+        // a SIGINT that was marked for a previous dev/restart instance.
+        INTERPRETER_INTERRUPT_QUEUE.clear();
         Self {
             callables: Vec::new(),
             interrupt_handlers: Vec::new(),
@@ -2329,11 +2320,16 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         ensure_interpreter_interrupt_handler().map_err(|message| {
-            unsupported(&format!("core.os.on_interrupt: {message}"), self.span())
+            unsupported(&interrupt_queue::jet_interrupt_core_error(&message), self.span())
         })?;
         let value = self.eval_expr(callback, scope)?;
         let index = Self::callable_index(&value)
-            .ok_or_else(|| unsupported("core.os.on_interrupt callback", self.span()))?;
+            .ok_or_else(|| {
+                unsupported(
+                    interrupt_queue::jet_interrupt_invalid_callback_value_error(),
+                    self.span(),
+                )
+            })?;
         self.runtime
             .lock()
             .expect("evaluator runtime poisoned")
@@ -2346,10 +2342,6 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
-        let count = INTERPRETER_INTERRUPT_PENDING.swap(0, Ordering::Acquire);
-        if count == 0 {
-            return Ok(());
-        }
         let handlers = self
             .runtime
             .lock()
@@ -2357,27 +2349,32 @@ impl<'a> EvalCtx<'a> {
             .interrupt_handlers
             .clone();
         let mut deferred_panic = None;
-        for _ in 0..count {
-            for index in &handlers {
-                let value = Self::callable_value(*index);
-                match self.call_callable(&value, Vec::new()) {
-                    Ok(_) => {}
-                    Err(error) if error.code == "SOFT_EXIT" => {
-                        let panic_stop = self.sink.as_ref().is_some_and(|sink| {
-                            sink.lock()
-                                .expect("evaluator sink poisoned")
-                                .exit_code
-                                == Some(70)
-                        });
-                        if panic_stop {
-                            deferred_panic.get_or_insert(error);
-                            continue;
-                        }
-                        return Err(error);
-                    }
-                    Err(error) => return Err(error),
-                }
+        let mut failure = None;
+        INTERPRETER_INTERRUPT_QUEUE.dispatch(&handlers, |index| {
+            if failure.is_some() {
+                return;
             }
+            let value = Self::callable_value(*index);
+            match self.call_callable(&value, Vec::new()) {
+                Ok(_) => {}
+                Err(error) if error.code == "SOFT_EXIT" => {
+                    let panic_stop = self.sink.as_ref().is_some_and(|sink| {
+                        sink.lock()
+                            .expect("evaluator sink poisoned")
+                            .exit_code
+                            == Some(70)
+                    });
+                    if panic_stop {
+                        deferred_panic.get_or_insert(error);
+                    } else {
+                        failure = Some(error);
+                    }
+                }
+                Err(error) => failure = Some(error),
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
         }
         if let Some(error) = deferred_panic {
             return Err(error);

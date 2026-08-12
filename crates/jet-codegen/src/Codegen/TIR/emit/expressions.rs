@@ -5318,6 +5318,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     emit_tir_call_args(args, cx)
                 )
             }
+            TFnValueKind::Interrupt { value } => {
+                let rendered = emit_tir_expr(value, cx);
+                // `core.os.on_interrupt` is a read-only registration. Local
+                // callback values already carry the canonical Arc-backed
+                // Send + Sync representation, so registration clones the
+                // box instead of moving the caller's reusable alias. Lambda
+                // and named-function values are fresh Arc values and stay
+                // untouched here.
+                if matches!(&value.kind, TExprKind::Local(_)) {
+                    format!("std::sync::Arc::clone(&({rendered}))")
+                } else {
+                    rendered
+                }
+            }
         },
         // c109 Phase 14: a cross-module call. The path form was resolved at lowering;
         // emit prepends `cx.root_prefix` exactly where the AST path does (both the

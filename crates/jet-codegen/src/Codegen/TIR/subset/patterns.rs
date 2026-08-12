@@ -227,6 +227,12 @@ pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String>
 /// An arm-head range pattern (`lo..hi -> …`), as `(lo, hi)`. Mirrors the parser's
 /// arm-head range lowering: a `PatternTest` whose pattern is `Pattern::Range`.
 pub(crate) fn arm_head_range(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
+    // Range arms are emitted as comparisons against the shared scalar local.
+    // A call/field/index subject needs the general pattern path instead; it is
+    // not a valid handoff to the range comparison emitter.
+    if !matches!(subject, Expr::Ident(..)) {
+        return None;
+    }
     match cond {
         Expr::PatternTest {
             subject: s,

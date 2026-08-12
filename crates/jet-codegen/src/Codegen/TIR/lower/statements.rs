@@ -110,6 +110,23 @@ fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
     }
 }
 
+fn interrupt_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
+    match expr {
+        Expr::Lambda(lam) => Some(lam),
+        Expr::Paren(inner, _) => interrupt_lambda(inner),
+        _ => None,
+    }
+}
+
+fn interrupt_lambda_captures(lam: &crate::AST::Lambda) -> HashSet<String> {
+    match &lam.body {
+        crate::AST::LambdaBody::Expr(body) => {
+            crate::Sema::block_free_var_reads(&[Stmt::Expr((**body).clone())])
+        }
+        crate::AST::LambdaBody::Block(body) => crate::Sema::block_free_var_reads(body),
+    }
+}
+
 fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
     let mut expr = expr;
     loop {
@@ -159,11 +176,13 @@ fn collect_interrupt_callback_scan(
                     ..
                 } => {
                     if method == "on_interrupt" && is_core_os_receiver(receiver, cx) {
-                        if let Some(name) = args
-                            .first()
-                            .and_then(|arg| interrupt_callback_ident(&arg.expr))
-                        {
-                            names.insert(name.to_string());
+                        if let Some(callback) = args.first().map(|arg| &arg.expr) {
+                            if let Some(name) = interrupt_callback_ident(callback) {
+                                names.insert(name.to_string());
+                            }
+                            if let Some(lam) = interrupt_lambda(callback) {
+                                names.extend(interrupt_lambda_captures(lam));
+                            }
                         }
                     }
                     for arg in args.iter().rev() {
@@ -447,6 +466,62 @@ fn collect_interrupt_callback_scan(
     }
 }
 
+fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String)>) {
+    match expr {
+        Expr::Lambda(lambda) => match &lambda.body {
+            crate::AST::LambdaBody::Expr(body) => {
+                collect_interrupt_aliases_expr(body, aliases)
+            }
+            crate::AST::LambdaBody::Block(body) => collect_interrupt_aliases(body, aliases),
+        },
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_interrupt_aliases_expr(receiver, aliases);
+            for arg in args {
+                collect_interrupt_aliases_expr(&arg.expr, aliases);
+            }
+        }
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_interrupt_aliases_expr(&arg.expr, aliases);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            collect_interrupt_aliases_expr(callee, aliases);
+            for arg in args {
+                collect_interrupt_aliases_expr(&arg.expr, aliases);
+            }
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_interrupt_aliases_expr(cond, aliases);
+            collect_interrupt_aliases(then_body, aliases);
+            collect_interrupt_aliases_expr(then_value, aliases);
+            collect_interrupt_aliases(else_body, aliases);
+            collect_interrupt_aliases_expr(else_value, aliases);
+        }
+        Expr::Paren(inner, _)
+        | Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _)
+        | Expr::Spread(inner, _)
+        | Expr::IncDec { operand: inner, .. } => collect_interrupt_aliases_expr(inner, aliases),
+        _ => {}
+    }
+}
+
 fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
     let mut work = TirWorklist::new();
     work.push(stmts);
@@ -457,10 +532,27 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                     if let Some(source) = interrupt_callback_ident(&binding.init) {
                         aliases.push((binding.name.clone(), source.to_string()));
                     }
+                    collect_interrupt_aliases_expr(&binding.init, aliases);
                 }
-                Stmt::CountedLoop { init, body, .. } => {
+                Stmt::CountedLoop {
+                    init,
+                    step,
+                    body,
+                    ..
+                } => {
                     if let Some(source) = interrupt_callback_ident(&init.init) {
                         aliases.push((init.name.clone(), source.to_string()));
+                    }
+                    collect_interrupt_aliases_expr(&init.init, aliases);
+                    if let Some(step) = step.as_deref() {
+                        if let Stmt::Assign { target, value, .. } = step {
+                            if let LValue::Local { name, .. } = target {
+                                if let Some(source) = interrupt_callback_ident(value) {
+                                    aliases.push((name.clone(), source.to_string()));
+                                }
+                            }
+                            collect_interrupt_aliases_expr(value, aliases);
+                        }
                     }
                     work.push(body);
                 }
@@ -512,8 +604,178 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                         work.push(body);
                     }
                 }
+                Stmt::Expr(expr) => collect_interrupt_aliases_expr(expr, aliases),
+                Stmt::Assign { target, value, .. } => {
+                    if let LValue::Local { name, .. } = target {
+                        if let Some(source) = interrupt_callback_ident(value) {
+                            aliases.push((name.clone(), source.to_string()));
+                        }
+                    }
+                    collect_interrupt_aliases_expr(value, aliases);
+                }
+                Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
+                    collect_interrupt_aliases_expr(value, aliases)
+                }
                 _ => {}
             }
+        }
+    }
+}
+fn collect_interrupt_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(String, String)>) {
+    match expr {
+        Expr::Lambda(lambda) => match &lambda.body {
+            crate::AST::LambdaBody::Expr(body) => {
+                collect_interrupt_lambda_captures_expr(body, captures)
+            }
+            crate::AST::LambdaBody::Block(body) => {
+                collect_interrupt_lambda_captures(body, captures)
+            }
+        },
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_interrupt_lambda_captures_expr(receiver, captures);
+            for arg in args {
+                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+            }
+        }
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            collect_interrupt_lambda_captures_expr(callee, captures);
+            for arg in args {
+                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+            }
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_interrupt_lambda_captures_expr(cond, captures);
+            collect_interrupt_lambda_captures(then_body, captures);
+            collect_interrupt_lambda_captures_expr(then_value, captures);
+            collect_interrupt_lambda_captures(else_body, captures);
+            collect_interrupt_lambda_captures_expr(else_value, captures);
+        }
+        Expr::Paren(inner, _)
+        | Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _)
+        | Expr::Spread(inner, _)
+        | Expr::IncDec { operand: inner, .. } => {
+            collect_interrupt_lambda_captures_expr(inner, captures)
+        }
+        _ => {}
+    }
+}
+
+fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String, String)>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Val(binding) => {
+                if let Some(lam) = interrupt_lambda(&binding.init) {
+                    for capture in interrupt_lambda_captures(lam) {
+                        captures.push((binding.name.clone(), capture));
+                    }
+                }
+                collect_interrupt_lambda_captures_expr(&binding.init, captures);
+            }
+            Stmt::Expr(expr) => collect_interrupt_lambda_captures_expr(expr, captures),
+            Stmt::Assign { target, value, .. } => {
+                if let LValue::Local { name, .. } = target {
+                    if let Some(lam) = interrupt_lambda(value) {
+                        for capture in interrupt_lambda_captures(lam) {
+                            captures.push((name.clone(), capture));
+                        }
+                    }
+                }
+                collect_interrupt_lambda_captures_expr(value, captures);
+            }
+            Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
+                collect_interrupt_lambda_captures_expr(value, captures)
+            }
+            Stmt::CountedLoop { init, step, body, .. } => {
+                if let Some(lam) = interrupt_lambda(&init.init) {
+                    for capture in interrupt_lambda_captures(lam) {
+                        captures.push((init.name.clone(), capture));
+                    }
+                }
+                collect_interrupt_lambda_captures_expr(&init.init, captures);
+                if let Some(step) = step.as_deref() {
+                    if let Stmt::Assign { target, value, .. } = step {
+                        if let LValue::Local { name, .. } = target {
+                            if let Some(lam) = interrupt_lambda(value) {
+                                for capture in interrupt_lambda_captures(lam) {
+                                    captures.push((name.clone(), capture));
+                                }
+                            }
+                        }
+                        collect_interrupt_lambda_captures_expr(value, captures);
+                    }
+                }
+                collect_interrupt_lambda_captures(body, captures);
+            }
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Switched { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ComptimeBlock { body, .. } => {
+                collect_interrupt_lambda_captures(body, captures)
+            }
+            Stmt::Switch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_interrupt_lambda_captures(&arm.body, captures);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_lambda_captures(body, captures);
+                }
+            }
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_interrupt_lambda_captures(then_body, captures);
+                if let Some(body) = else_body {
+                    collect_interrupt_lambda_captures(body, captures);
+                }
+            }
+            Stmt::ScopeMember { body, .. } => collect_interrupt_lambda_captures(body, captures),
+            Stmt::ComptimeSwitch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_interrupt_lambda_captures(&arm.body, captures);
+                }
+                if let Some(body) = else_body {
+                    collect_interrupt_lambda_captures(body, captures);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -524,6 +786,8 @@ pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &m
     let mut send = names;
     let mut aliases = Vec::new();
     collect_interrupt_aliases(stmts, &mut aliases);
+    let mut lambda_captures = Vec::new();
+    collect_interrupt_lambda_captures(stmts, &mut lambda_captures);
     loop {
         let before = send.len();
         for (target, source) in &aliases {
@@ -532,6 +796,11 @@ pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &m
             }
             if send.contains(source) {
                 send.insert(target.clone());
+            }
+        }
+        for (target, source) in &lambda_captures {
+            if send.contains(target) {
+                send.insert(source.clone());
             }
         }
         if send.len() == before {
@@ -546,34 +815,72 @@ pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &m
 pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
     let mut names = HashSet::new();
     collect_interrupt_callback_names_expr(expr, cx, &mut names);
+    let mut aliases = Vec::new();
+    collect_interrupt_aliases_expr(expr, &mut aliases);
+    let mut lambda_captures = Vec::new();
+    collect_interrupt_lambda_captures_expr(expr, &mut lambda_captures);
+    loop {
+        let before = names.len();
+        for (target, source) in &aliases {
+            if names.contains(target) {
+                names.insert(source.clone());
+            }
+            if names.contains(source) {
+                names.insert(target.clone());
+            }
+        }
+        for (target, source) in &lambda_captures {
+            if names.contains(target) {
+                names.insert(source.clone());
+            }
+        }
+        if names.len() == before {
+            break;
+        }
+    }
     for name in names {
         env.mark_send_fn(&name);
     }
 }
 
 fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
-    match &mut init.kind {
-        TExprKind::Lambda(lam) => {
-            lam.arc = true;
-            lam.rc = false;
-        }
+    if matches!(
+        &init.kind,
         TExprKind::FnValue {
-            kind:
-                TFnValueKind::NamedFn {
-                    name: Some(name), ..
-                },
-        } => {
-            init.kind = TExprKind::FnValue {
-                kind: TFnValueKind::NamedFn {
-                    wrapper: crate::Codegen::emit_named_fn_value_sync(cx, name, &init.ty),
-                    name: Some(name.clone()),
-                    lambda: None,
-                },
-            };
+            kind: TFnValueKind::Interrupt { .. },
         }
-        _ => {}
+    ) {
+        return init;
     }
-    init
+    if let TExprKind::Lambda(lam) = &mut init.kind {
+        lam.arc = true;
+        lam.rc = false;
+    } else if let Some(name) = match &init.kind {
+        TExprKind::FnValue {
+            kind: TFnValueKind::NamedFn {
+                name: Some(name), ..
+            },
+        } => Some(name.clone()),
+        _ => None,
+    } {
+        let ty = init.ty.clone();
+        init.kind = TExprKind::FnValue {
+            kind: TFnValueKind::NamedFn {
+                wrapper: crate::Codegen::emit_named_fn_value_sync(cx, &name, &ty),
+                name: Some(name),
+                lambda: None,
+            },
+        };
+    }
+    let ty = init.ty.clone();
+    TExpr {
+        ty,
+        kind: TExprKind::FnValue {
+            kind: TFnValueKind::Interrupt {
+                value: Box::new(init),
+            },
+        },
+    }
 }
 
 pub(crate) struct LowerBody<'a> {
@@ -1899,7 +2206,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // inferred binding.
             let let_ty = if ty.is_compute_view_mut() {
                 TLetTy::Inferred
-            } else if send_fn && b.ty.is_some() {
+            } else if send_fn {
                 TLetTy::SendFn(ty.clone())
             } else {
                 crate::Codegen::TIR::let_ty_for_opt(
@@ -1951,10 +2258,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 } else {
                     false
                 };
+                let mut value_t = lower_expr(value, cx, env);
+                if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
+                    // Keep every write to an indirect callback in the same
+                    // canonical representation as its declaration. Otherwise
+                    // a later hot-swapped registration could load an ordinary
+                    // Rc/raw function value into the Send crossing.
+                    value_t = force_interrupt_callback_value(value_t, cx);
+                }
                 TStmt::Assign {
                     place: TPlace::Local(env.local_of(name)),
                     op: *op,
-                    value: lower_expr(value, cx, env),
+                    value: value_t,
                     clone_value,
                     line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
                 }
@@ -1976,6 +2291,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // subset gate must have already excluded `IndexKind::Unknown` before
                 // routing here — an `Unknown` default reaching lowering means sema
                 // left an index kind unresolved and the gate missed it.
+                debug_assert!(
+                    !matches!(kind, IndexKind::Unknown),
+                    "sema-to-TIR handoff violated: unresolved index kind"
+                );
                 let kind = if matches!(kind, IndexKind::Unknown) {
                     &IndexKind::List
                 } else {
@@ -2273,13 +2592,34 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // The emitted outer Rust block owns the init binding and every loop-body
             // binding. Lower all of them in one child env so none survives the loop.
             let init_val = lower_expr(&init.init, cx, env);
-            let init_ty = init.ty.clone();
+            let init_ty = init
+                .ty
+                .clone()
+                .unwrap_or_else(|| init_val.ty.clone());
+            let mut_fn = interrupt_lambda(&init.init)
+                .is_some_and(|lam| lam.meta.escapes && lam.meta.needs_fn_mut);
+            let send_fn = env.is_send_fn(&init.name)
+                && matches!(&init_ty, Type::Fn { .. })
+                && !mut_fn;
+            let init_val = if send_fn {
+                force_interrupt_callback_value(init_val, cx)
+            } else {
+                init_val
+            };
             let mut scoped = clone_env(env);
-            scoped.bind(&init.name, TLocal::user(&init.name), init_ty);
+            scoped.bind(
+                &init.name,
+                TLocal::user(&init.name),
+                Some(init_ty.clone()),
+            );
             let init_stmt = Box::new(TStmt::Let {
                 name: init.name.clone(),
                 kw: "let mut",
-                let_ty: TLetTy::Inferred,
+                let_ty: if send_fn {
+                    TLetTy::SendFn(init_ty)
+                } else {
+                    TLetTy::Inferred
+                },
                 init: init_val,
                 gc_promotion: None,
                 gc_transferred: false,

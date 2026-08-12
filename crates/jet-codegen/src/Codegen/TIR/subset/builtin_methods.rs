@@ -129,7 +129,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
 
 /// c109 Phase 21 + D-COROUTINE1=A / D-TUPLE-DESTRUCT1: is `(method, nargs)` a
 /// Task/Receiver/Sender concurrency method (`emit_builtin_method`'s `Type::Apply`-
-/// receiver arms)? `Task.join()/detach()/pause()/resume()/cancel()`,
+/// receiver arms)? `Task.join()/wait()/detach()/pause()/resume()/cancel()/trace()`,
 /// `Receiver.receive()`, `Sender.send(v)`. The arg count disambiguates
 /// `Task.join()` (0 args) from the list `join(sep)` (1 arg, shape d) and `Sender.send(v)`
 /// (1 arg) — every name+arity here is disjoint from every other covered shape.

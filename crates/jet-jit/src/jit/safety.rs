@@ -1694,6 +1694,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 resident_safe_expr(callee, callees)
                     && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
             }
+            TIR::TFnValueKind::Interrupt { value } => resident_safe_expr(value, callees),
         },
         TExprKind::PatternMatches { subj, .. } => resident_safe_expr(subj, callees),
         TExprKind::OptionLift2 { f, a, b } => {

@@ -792,10 +792,9 @@ fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
 }
 
 mod jet_os_interrupt {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, OnceLock};
 
-    static PENDING: AtomicUsize = AtomicUsize::new(0);
+    static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
 
     enum Command {
@@ -819,7 +818,7 @@ mod jet_os_interrupt {
 
     fn note_interrupt() {
         // OS callbacks do no allocation, locking, or user work.
-        PENDING.fetch_add(1, Ordering::Relaxed);
+        QUEUE.note();
     }
 
     #[cfg(unix)]
@@ -829,16 +828,7 @@ mod jet_os_interrupt {
 
     #[cfg(unix)]
     fn install_platform_handler() -> Result<(), String> {
-        extern "C" {
-            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-        }
-        const SIGINT: i32 = 2;
-        let previous = unsafe { signal(SIGINT, unix_mark) };
-        if previous == usize::MAX {
-            Err("could not install the SIGINT handler".to_string())
-        } else {
-            Ok(())
-        }
+        super::jet_interrupt_install_unix_handler(unix_mark)
     }
 
     #[cfg(windows)]
@@ -854,24 +844,12 @@ mod jet_os_interrupt {
 
     #[cfg(windows)]
     fn install_platform_handler() -> Result<(), String> {
-        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
-        extern "system" {
-            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
-        }
-        // A parent may have disabled Ctrl-C with the documented NULL handler;
-        // clear that inherited process flag before installing Jet's handler.
-        unsafe { SetConsoleCtrlHandler(None, 0) };
-        let installed = unsafe { SetConsoleCtrlHandler(Some(windows_mark), 1) };
-        if installed == 0 {
-            Err("could not install the Windows console Ctrl-C handler".to_string())
-        } else {
-            Ok(())
-        }
+        super::jet_interrupt_install_windows_handler(Some(windows_mark))
     }
 
     #[cfg(not(any(unix, windows)))]
     fn install_platform_handler() -> Result<(), String> {
-        Err("interrupt handling is unavailable on this target".to_string())
+        Err(super::jet_interrupt_unavailable_error().to_string())
     }
 
     fn dispatcher() -> Result<&'static mpsc::Sender<Command>, String> {
@@ -883,7 +861,7 @@ mod jet_os_interrupt {
                 .spawn(move || {
                     let mut handlers: Vec<Arc<dyn Fn() + Send + Sync + 'static>> = Vec::new();
                     loop {
-                        match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                        match rx.recv_timeout(super::jet_interrupt_poll_interval()) {
                             Ok(Command::Register(handler, ready)) => {
                                 handlers.push(handler);
                                 let _ = ready.send(());
@@ -891,22 +869,19 @@ mod jet_os_interrupt {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        let count = PENDING.swap(0, Ordering::Acquire);
-                        for _ in 0..count {
-                            for handler in &handlers {
-                                if let Err(payload) = std::panic::catch_unwind(
-                                    std::panic::AssertUnwindSafe(|| {
-                                        let _boundary = PanicBoundary::enter();
-                                        handler();
-                                    }),
-                                ) {
-                                    super::jet_report_caught_unwind(payload);
-                                }
+                        QUEUE.dispatch(&handlers, |handler| {
+                            if let Err(payload) = std::panic::catch_unwind(
+                                std::panic::AssertUnwindSafe(|| {
+                                    let _boundary = PanicBoundary::enter();
+                                    handler();
+                                }),
+                            ) {
+                                super::jet_report_caught_unwind(payload);
                             }
-                        }
+                        });
                     }
                 })
-                .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;
+                .map_err(super::jet_interrupt_dispatcher_start_error)?;
             Ok(tx)
         }) {
             Ok(tx) => Ok(tx),
@@ -916,7 +891,11 @@ mod jet_os_interrupt {
 
     pub fn on_interrupt(handler: Arc<dyn Fn() + Send + Sync + 'static>) {
         let tx = dispatcher().unwrap_or_else(|message| {
-            super::jet_panic("<core.os>", 0, &format!("core.os.on_interrupt: {message}"))
+            super::jet_panic(
+                "<core.os>",
+                0,
+                &super::jet_interrupt_core_error(&message),
+            )
         });
         let (ready_tx, ready_rx) = mpsc::sync_channel(0);
         tx.send(Command::Register(handler, ready_tx))
@@ -924,7 +903,9 @@ mod jet_os_interrupt {
                 super::jet_panic(
                     "<core.os>",
                     0,
-                    "core.os.on_interrupt: interrupt dispatcher stopped",
+                    &super::jet_interrupt_core_error(
+                        super::jet_interrupt_dispatcher_stopped_error(),
+                    ),
                 )
             });
         ready_rx
@@ -933,7 +914,9 @@ mod jet_os_interrupt {
                 super::jet_panic(
                     "<core.os>",
                     0,
-                    "core.os.on_interrupt: interrupt dispatcher stopped",
+                    &super::jet_interrupt_core_error(
+                        super::jet_interrupt_dispatcher_stopped_error(),
+                    ),
                 )
             });
     }

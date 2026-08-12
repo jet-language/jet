@@ -114,6 +114,13 @@ impl<P: Plane> Facts<P> {
         self.rows.get(name)?.last().map(|row| &row.fact)
     }
 
+    /// The innermost fact for this binding, mutably. Callers use this only for
+    /// facts that are changed by a write to the binding itself; path merges
+    /// still go through [`FlowFacts::merge_paths`].
+    pub(crate) fn get_mut(&mut self, name: &str) -> Option<&mut P::Fact> {
+        self.rows.get_mut(name)?.last_mut().map(|row| &mut row.fact)
+    }
+
     /// The fact this binding carries at exactly one scope depth.
     pub(crate) fn get_at(&self, name: &str, depth: usize) -> Option<&P::Fact> {
         self.rows
@@ -363,14 +370,6 @@ fn keep_left<F: Clone>(left: Option<&F>, right: Option<&F>) -> Option<F> {
     left.or(right).cloned()
 }
 
-/// A refinement holds after the merge only when every path proved it.
-fn keep_if_both<F: Clone>(left: Option<&F>, right: Option<&F>) -> Option<F> {
-    match (left, right) {
-        (Some(left), Some(_)) => Some(left.clone()),
-        _ => None,
-    }
-}
-
 /// Everything a declaration says about one name.
 pub(crate) enum Binding {}
 
@@ -378,7 +377,26 @@ impl Plane for Binding {
     type Fact = super::LocalInfo;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_left(left, right)
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                let mut joined = left.clone();
+                // D-OSINTERRUPT1: this field is a path-sensitive proof, even
+                // though the rest of LocalInfo describes the declaration.
+                // A callback is safe after a branch only when every path kept
+                // the Send-safe representation.
+                joined.interrupt_sendable =
+                    left.interrupt_sendable && right.interrupt_sendable;
+                Some(joined)
+            }
+            (Some(one), None) | (None, Some(one)) => {
+                let mut joined = one.clone();
+                // A missing binding on one reaching path does not prove that
+                // the binding is interrupt-sendable on every path.
+                joined.interrupt_sendable = false;
+                Some(joined)
+            }
+            (None, None) => None,
+        }
     }
 }
 
@@ -391,7 +409,18 @@ impl Plane for Narrow {
     type Fact = super::LocalInfo;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_if_both(left, right)
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                let mut joined = left.clone();
+                // D-OSINTERRUPT1: a narrowed callback alias is still a
+                // path-sensitive proof. A branch join may retain it only when
+                // both reaching refinements carry the canonical Send form.
+                joined.interrupt_sendable =
+                    left.interrupt_sendable && right.interrupt_sendable;
+                Some(joined)
+            }
+            _ => None,
+        }
     }
 }
 

@@ -650,6 +650,14 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                             self.clear_moved_binding(name);
+                            if matches!(&info.ty, Type::Fn { .. }) {
+                                let sendable = !is_compound
+                                    && vt.as_ref().is_some_and(|value_ty| {
+                                        self.interrupt_callback_expr_sendable(value, value_ty)
+                                    })
+                                    && info.param_conv.is_none();
+                                self.set_interrupt_sendable(name, sendable);
+                            }
                             if let (Some(vt), false) =
                                 (vt.clone(), info.ty == Type::Named(String::new()))
                             {

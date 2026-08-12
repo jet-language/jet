@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{
-    clif_ty, fn_value_signature, func_has_receiver, func_signature, jit_fn_name, JitMeta,
+    clif_ty, fn_value_signature, func_has_receiver, func_signature,
+    interrupt_callback_signature, jit_fn_name, JitMeta,
 };
 use super::JitRuntime;
 use crate::{Cell, Collections};
@@ -455,10 +456,111 @@ pub(crate) fn lower_callable_lambda(
     spawn_site: &mut usize,
     runtime: &mut JitRuntime,
 ) -> Result<FuncId, String> {
-    let capturing = !lam.captures.is_empty();
-    // Capturing callables are supported when every capture is a resident scalar
-    // or opaque handle. `prep` is AOT-only Rust clone text; the target-neutral
-    // capture list below supplies the resident environment.
+    lower_callable_lambda_with_env(
+        module,
+        host,
+        meta,
+        lam,
+        func_ids,
+        spawn_func_ids,
+        spawn_lambdas,
+        spawn_site,
+        runtime,
+        false,
+    )
+}
+
+/// Compile the one callback ABI used by `core.os.on_interrupt`: every
+/// callback receives an environment handle, including capture-free lambdas.
+/// The zero environment value is the canonical empty environment.
+pub(crate) fn lower_interrupt_callable_lambda(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    lam: &TLambda,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+) -> Result<FuncId, String> {
+    lower_callable_lambda_with_env(
+        module,
+        host,
+        meta,
+        lam,
+        func_ids,
+        spawn_func_ids,
+        spawn_lambdas,
+        spawn_site,
+        runtime,
+        true,
+    )
+}
+
+/// Adapt a top-level `fn()` to the same `(environment)` callback ABI as an
+/// inline lambda. The environment is intentionally ignored; this keeps the
+/// dispatcher from selecting ABI variants at runtime.
+pub(crate) fn lower_interrupt_named_callback(
+    module: &mut JITModule,
+    name: &str,
+    ty: &Type,
+    meta: &JitMeta<'_>,
+    func_ids: &HashMap<String, FuncId>,
+) -> Result<FuncId, String> {
+    let target = func_ids
+        .get(name)
+        .copied()
+        .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
+    let wrapper_name = format!("__jet_jit_interrupt_{}", name.replace("::", "_"));
+    if let Some(cranelift_module::FuncOrDataId::Func(id)) = module.get_name(&wrapper_name) {
+        return Ok(id);
+    }
+    let sig = interrupt_callback_signature(module, ty, meta)?;
+    let id = module
+        .declare_function(&wrapper_name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig;
+    let mut fbcx = FunctionBuilderContext::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let target = module.declare_func_in_func(target, b.func);
+        let params = b.block_params(entry).to_vec();
+        let call = b.ins().call(target, &params[1..]);
+        let results = b.inst_results(call).to_vec();
+        b.ins().return_(&results);
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{wrapper_name}: verifier: {error:?}"))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    super::tier_cache::abort_capture();
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
+fn lower_callable_lambda_with_env(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    lam: &TLambda,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+    force_env: bool,
+) -> Result<FuncId, String> {
+    let capturing = force_env || !lam.captures.is_empty();
+    // Capturing callables are supported when every capture is an i64 handle/scalar
+    // (HTTPHandler middleware closures). Prep is AOT-only Rust clone text.
     if !lam.prep.is_empty() && !capturing {
         return Err("jit callable captures unsupported".to_string());
     }
@@ -475,8 +577,7 @@ pub(crate) fn lower_callable_lambda(
         TLambdaBody::Expr(_) => false,
     };
     let sig = if capturing {
-        let mut sig = fn_value_signature(module, &fn_ty, meta)?;
-        sig.params.insert(0, AbiParam::new(types::I64)); // env
+        let mut sig = interrupt_callback_signature(module, &fn_ty, meta)?;
         // Block-bodied lambdas often type as Unit when arms `return` Result;
         // Cranelift still needs the real return ABI.
         if (lam.ret.is_some() || block_returns_value) && sig.returns.is_empty() {
@@ -560,9 +661,14 @@ pub(crate) fn lower_callable_lambda(
             let line = lctx.b.ins().iconst(types::I32, 0);
             for (idx, (_outer, place, ty)) in lam.captures.iter().enumerate() {
                 let idx_v = lctx.b.ins().iconst(types::I64, idx as i64);
-                let host = lctx
-                    .module
-                    .declare_func_in_func(lctx.host.coll.list_get, lctx.b.func);
+                let host = lctx.module.declare_func_in_func(
+                    if matches!(ty, Type::Float) {
+                        lctx.host.coll.list_get_f64
+                    } else {
+                        lctx.host.coll.list_get
+                    },
+                    lctx.b.func,
+                );
                 let call = lctx.b.ins().call(host, &[env, idx_v, line]);
                 let raw = lctx.b.inst_results(call)[0];
                 let clif = meta.clif_ty(ty).unwrap_or(types::I64);

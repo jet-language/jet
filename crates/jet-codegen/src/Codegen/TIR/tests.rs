@@ -757,11 +757,11 @@ fn mk() {
 
     #[test]
     fn covers_optional_binding_if_condition() {
-        // c109 Phase 22: `if x == Val(b) { … b … }` lowers to `if let Some(b) = …`.
-        let src = "fn f(x: Int?) {\n if x == Val(n) {\n print(\"{n}\")\n }\n}\n";
+        // c109 Phase 22: `if x == .Val(b) { … b … }` lowers to `if let Some(b) = …`.
+        let src = "fn f(x: Int?) {\n if x == .Val(n) {\n print(\"{n}\")\n }\n}\n";
         assert!(covers(src, "f"));
-        // `x == None` lowers to `.is_none()`.
-        let isnone = "fn f(x: Int?) {\n if x == None {\n print(\"none\")\n }\n}\n";
+        // `x == .None` lowers to `.is_none()`.
+        let isnone = "fn f(x: Int?) {\n if x == .None {\n print(\"none\")\n }\n}\n";
         assert!(covers(isnone, "f"));
     }
 
@@ -2101,7 +2101,7 @@ fn run() {
     #[test]
     fn covers_wildcard_enum_payload_if_let() {
         // c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
-        // slot (`if w == Some(_)`). The `_` binds nothing; the if-let head renders
+        // slot (`if w == .Some(_)`). The `_` binds nothing; the if-let head renders
         // `if let user_Wrapper::user_Some(_) = user_w` (byte-for-byte the AST). Covered
         // when the variant is a single-payload variant of a covered enum.
         let src = "\

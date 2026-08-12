@@ -3804,7 +3804,8 @@ pub enum TCoreClosureKind {
     },
 }
 
-/// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
+/// c109 Phase 13: fn-typed values plus the canonical interrupt callback form
+/// (see `TExprKind::FnValue`).
 pub enum TFnValueKind {
     /// A bare function name used as a value. `wrapper` is the already-rendered
     /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
@@ -3823,6 +3824,12 @@ pub enum TFnValueKind {
         callee: Box<TExpr>,
         args: Vec<TCallArg>,
     },
+    /// D-OSINTERRUPT1: one Send-safe callback representation. `value` is the
+    /// already-lowered inline, named, or indirect callable. AOT emits its
+    /// `Arc<dyn Fn() + Send + Sync + 'static>` value; resident JIT marshals it
+    /// to one `(function, environment)` record; the interpreter keeps its
+    /// callable index. The engines do not infer callback policy here.
+    Interrupt { value: Box<TExpr> },
 }
 
 /// c109 Phase 12: a resolved numeric method form, one per numeric arm. The width

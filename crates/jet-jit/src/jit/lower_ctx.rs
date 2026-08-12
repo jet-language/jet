@@ -32,7 +32,8 @@ use super::safety::{
     jit_value_type, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
-    clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
+    clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty,
+    interrupt_callback_signature, JitMeta,
 };
 use super::JitRuntime;
 
@@ -7749,6 +7750,38 @@ impl LowerCtx<'_, '_> {
         self.lower_fn_call_values(callee, fn_ty, &values?)
     }
 
+    fn lower_interrupt_fn_call(
+        &mut self,
+        callback_record: Value,
+        fn_ty: &Type,
+        args: &[TCallArg],
+    ) -> Result<Value, String> {
+        let signature = interrupt_callback_signature(self.module, fn_ty, self.meta)?;
+        let sig_ref = self.b.import_signature(signature);
+        let callback_index = self.b.ins().iconst(types::I64, 0);
+        let environment_index = self.b.ins().iconst(types::I64, 1);
+        let callback =
+            self.call_host(self.host.struct_get_i64, &[callback_record, callback_index]);
+        let environment =
+            self.call_host(self.host.struct_get_i64, &[callback_record, environment_index]);
+        let values: Result<Vec<_>, _> =
+            args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+        let mut call_args =
+            Vec::with_capacity(values.as_ref().map_or(0, |values| values.len()) + 1);
+        call_args.push(environment);
+        call_args.extend(values?);
+        let call = self.b.ins().call_indirect(sig_ref, callback, &call_args);
+        let result = match fn_ty {
+            Type::Fn {
+                ret: Some(ret), ..
+            } if self.meta.clif_ty(ret).is_some() => Some(self.b.inst_results(call)[0]),
+            _ => None,
+        };
+        self.emit_trap_check()?;
+        Ok(result
+            .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+    }
+
     fn lower_fn_call_values(
         &mut self,
         callee: Value,
@@ -9978,6 +10011,95 @@ impl LowerCtx<'_, '_> {
             }
         }
         Ok(value)
+    }
+
+    fn make_interrupt_callback_record(
+        &mut self,
+        callback: Value,
+        environment: Value,
+    ) -> Value {
+        let fields = self.b.ins().iconst(types::I64, 2);
+        let record = self.call_host(self.host.struct_new, &[fields]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let set = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        self.b.ins().call(set, &[record, zero, callback]);
+        self.b.ins().call(set, &[record, one, environment]);
+        record
+    }
+
+    fn lower_interrupt_callback_value(&mut self, expr: &TExpr) -> Result<Value, String> {
+        let value = match &expr.kind {
+            TExprKind::FnValue {
+                kind: TFnValueKind::Interrupt { value },
+            } => value.as_ref(),
+            _ => expr,
+        };
+        match &value.kind {
+            TExprKind::Lambda(lam) => {
+                let id = super::functions_compile::lower_interrupt_callable_lambda(
+                    self.module,
+                    self.host,
+                    self.meta,
+                    lam,
+                    self.func_ids,
+                    self.spawn_func_ids,
+                    self.spawn_lambdas,
+                    self.spawn_site,
+                    self.runtime,
+                )?;
+                let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                let callback = self.b.ins().func_addr(types::I64, func_ref);
+                let environment = if lam.captures.is_empty() {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    let environment = self.call_host(self.host.coll.list_new, &[]);
+                    for (outer, _place, ty) in &lam.captures {
+                        let key = TIR::local_place(outer);
+                        let var = self.vars.get(&key).copied().ok_or_else(|| {
+                            format!("jit interrupt callback capture unknown `{outer}`")
+                        })?;
+                        let value = self.b.use_var(var);
+                        let push = self.module.declare_func_in_func(
+                            if matches!(ty, Type::Float) {
+                                self.host.coll.list_push_f64
+                            } else {
+                                self.host.coll.list_push
+                            },
+                            self.b.func,
+                        );
+                        self.b.ins().call(push, &[environment, value]);
+                    }
+                    environment
+                };
+                Ok(self.make_interrupt_callback_record(callback, environment))
+            }
+            TExprKind::FnValue {
+                kind:
+                    TFnValueKind::NamedFn {
+                        name: Some(name), ..
+                    },
+            } => {
+                let id = super::functions_compile::lower_interrupt_named_callback(
+                    self.module,
+                    name,
+                    &value.ty,
+                    self.meta,
+                    self.func_ids,
+                )?;
+                let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                let callback = self.b.ins().func_addr(types::I64, func_ref);
+                let environment = self.b.ins().iconst(types::I64, 0);
+                Ok(self.make_interrupt_callback_record(callback, environment))
+            }
+            TExprKind::Local(_) => self.lower_expr(value),
+            TExprKind::FnValue {
+                kind: TFnValueKind::Interrupt { .. },
+            } => self.lower_interrupt_callback_value(value),
+            _ => Err("jit interrupt callback is not a canonical function value".to_string()),
+        }
     }
 
     /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
@@ -13565,60 +13687,11 @@ impl LowerCtx<'_, '_> {
                     Err("jit http serve closure unsupported".to_string())
                 }
                 TCoreClosureKind::OnInterrupt { callback } => {
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let (callback_ptr, env) = match &callback.kind {
-                        TExprKind::Lambda(lam) => {
-                            let id = super::functions_compile::lower_callable_lambda(
-                                self.module,
-                                self.host,
-                                self.meta,
-                                lam,
-                                self.func_ids,
-                                self.spawn_func_ids,
-                                self.spawn_lambdas,
-                                self.spawn_site,
-                                self.runtime,
-                            )?;
-                            let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                            let callback_ptr = self.b.ins().func_addr(types::I64, func_ref);
-                            if lam.captures.is_empty() {
-                                (callback_ptr, zero)
-                            } else {
-                                let env = self.call_host(self.host.coll.list_new, &[]);
-                                let push = self.module.declare_func_in_func(
-                                    self.host.coll.list_push,
-                                    self.b.func,
-                                );
-                                for (outer, _place, _ty) in &lam.captures {
-                                    let key = TIR::local_place(outer);
-                                    let var = self
-                                        .vars
-                                        .get(&key)
-                                        .copied()
-                                        .ok_or_else(|| {
-                                            format!(
-                                                "jit interrupt callback capture unknown `{outer}`"
-                                            )
-                                        })?;
-                                    let value = self.b.use_var(var);
-                                    self.b.ins().call(push, &[env, value]);
-                                }
-                                (callback_ptr, env)
-                            }
-                        }
-                        _ => {
-                            let callable = self.lower_expr(callback)?;
-                            let callable =
-                                self.call_host(self.host.callable_normalize, &[callable]);
-                            let callback_ptr = self.call_host(self.host.callable_fn, &[callable]);
-                            let env = self.call_host(self.host.callable_env, &[callable]);
-                            (callback_ptr, env)
-                        }
-                    };
+                    let callback = self.lower_interrupt_callback_value(callback)?;
                     let host = self
                         .module
                         .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
-                    self.b.ins().call(host, &[callback_ptr, env]);
+                    self.b.ins().call(host, &[callback]);
                     self.emit_trap_check()?;
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
@@ -15718,10 +15791,22 @@ impl LowerCtx<'_, '_> {
                 } => {
                     Err("jit rendered fn coercion unsupported".to_string())
                 }
+                TFnValueKind::Interrupt { .. } => {
+                    self.lower_interrupt_callback_value(expr)
+                }
                 TFnValueKind::Call { callee, args } => {
                     let fn_ty = callee.ty.clone();
                     let value = self.lower_expr(callee)?;
-                    self.lower_fn_call(value, &fn_ty, args)
+                    if matches!(
+                        &callee.kind,
+                        TExprKind::FnValue {
+                            kind: TFnValueKind::Interrupt { .. },
+                        }
+                    ) {
+                        self.lower_interrupt_fn_call(value, &fn_ty, args)
+                    } else {
+                        self.lower_fn_call(value, &fn_ty, args)
+                    }
                 }
             },
             TExprKind::ModuleCall { form, args, .. } => match form {

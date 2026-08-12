@@ -4259,8 +4259,8 @@ impl<'a> Checker<'a> {
                 // wrapper, not as a captured Rc local.
                 continue;
             };
-            if matches!(info.ty, Type::Fn { .. }) {
-                if !info.interrupt_sendable {
+            if matches!(&info.ty, Type::Fn { .. }) {
+                if info.param_conv.is_some() || !info.interrupt_sendable {
                     return false;
                 }
                 continue;
@@ -4284,6 +4284,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether an expression already has the one representation that may
+    /// cross `core.os.on_interrupt`. This is intentionally narrower than
+    /// ordinary function typing: arbitrary function-producing expressions
+    /// must not reach codegen as an unexamined `Rc` value.
+    pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
+        if !matches!(ty, Type::Fn { .. }) {
+            return false;
+        }
+        match expr {
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
+                .unwrap_or_else(|| {
+                    self.funcs.contains_key(name)
+                        || self.unqualified.contains_key(name)
+                        || self.unqualified_file.contains_key(name)
+                }),
+            Expr::Paren(inner, _) => self.interrupt_callback_expr_sendable(inner, ty),
+            Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, ty),
+            _ => false,
+        }
+    }
+
     /// Reject a local function value that would otherwise reach the callback
     /// host as an ordinary Rc. Direct named functions and callback-safe aliases
     /// are admitted; function parameters and all other local function values
@@ -4299,12 +4322,72 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         }
+        fn lambda(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(_) => true,
+                Expr::Paren(inner, _) => lambda(inner),
+                _ => false,
+            }
+        }
+        fn needs_fn_mut(expr: &Expr) -> bool {
+            match expr {
+                Expr::Lambda(lam) => lam.meta.needs_fn_mut,
+                Expr::Paren(inner, _) => needs_fn_mut(inner),
+                _ => false,
+            }
+        }
+        fn lambda_span(expr: &Expr) -> Option<Span> {
+            match expr {
+                Expr::Lambda(lam) => Some(lam.span),
+                Expr::Paren(inner, _) => lambda_span(inner),
+                _ => None,
+            }
+        }
         let Some(name) = ident(expr) else {
+            if lambda(expr) {
+                // Lambda capture checking runs while the interrupt callback
+                // depth is active. It owns the detailed Send/'static proof.
+                // A mutable capture is the one callback-specific fact that
+                // capture sendability alone cannot express: it lowers to
+                // `FnMut`, while the retained ABI is `Fn() + Send + Sync`.
+                // Reject it here, before the Arc coercion reaches rustc.
+                if needs_fn_mut(expr)
+                    && !lambda_span(expr).is_some_and(|span| {
+                        self.diags
+                            .iter()
+                            .any(|diag| diag.code == "E1102" && diag.span == Some(span))
+                    })
+                {
+                    self.report_unsendable(
+                        "this callback",
+                        ty,
+                        SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ClosureCaptures,
+                        },
+                        SendCrossing::InterruptCallback,
+                        expr.span(),
+                    );
+                }
+                return;
+            }
+            self.report_unsendable(
+                "this callback",
+                ty,
+                SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ClosureCaptures,
+                },
+                SendCrossing::InterruptCallback,
+                expr.span(),
+            );
             return;
         };
         if self
             .lookup(name)
-            .map(|info| info.interrupt_sendable)
+            .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
             .unwrap_or_else(|| {
                 self.funcs.contains_key(name)
                     || self.unqualified.contains_key(name)
