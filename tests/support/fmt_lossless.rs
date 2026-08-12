@@ -168,6 +168,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/two_capability_markers.jet",
     "tests/ui/two_parse_errors.jet",
     "tests/ui/typed_binding_retired.jet",
+    "tests/ui/typed_head_path_invalid.jet",
     "tests/ui/uninit_annotated_retired.jet",
     "tests/ui/uninit_marker_retired.jet",
     "tests/ui/uninit_no_type.jet",
