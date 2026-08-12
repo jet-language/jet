@@ -112,6 +112,13 @@ pub struct CheckedPackage {
 #[derive(Debug, Clone)]
 pub enum AuthorityError {
     Missing(PathBuf),
+    /// `package.jet` parsed as text but violates the manifest vocabulary.
+    /// Kept typed so the registered manifest diagnostics (E1206/E1208/E1209/…)
+    /// reach the user instead of a generic E1334 wrapper.
+    ManifestParse {
+        path: PathBuf,
+        error: crate::Package::PackageParseError,
+    },
     Io {
         path: PathBuf,
         operation: &'static str,
@@ -171,6 +178,9 @@ impl AuthorityError {
                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)
             }
             Self::WorkspaceNoModule => crate::WorkspacePlan::e0995_no_workspace_module(),
+            Self::ManifestParse { path, error } => {
+                crate::Manifest::manifest_parse_diagnostic(path, error)
+            }
             Self::Missing(path) => Diagnostic::error(
                 "E1334",
                 format!("authority file `{}` is missing", path.display()),
@@ -289,6 +299,9 @@ impl std::fmt::Display for AuthorityError {
             ),
             Self::WorkspaceNoModule => f.write_str("canonical workspace source has no workspace module"),
             Self::Invalid { path, detail } => write!(f, "invalid authority `{}`: {detail}", path.display()),
+            Self::ManifestParse { path, error } => {
+                write!(f, "invalid manifest `{}`: {error}", path.display())
+            }
             Self::Changed(path) => write!(f, "authority object `{}` changed during resolution", path.display()),
             Self::Unsupported(detail) => f.write_str(detail),
         }
@@ -548,9 +561,9 @@ impl AuthorityResolver {
         };
         let text = file.text()?;
         let facts = PackageFacts::parse_uncomposed(&text, file.path.display().to_string())
-            .map_err(|error| AuthorityError::Invalid {
+            .map_err(|error| AuthorityError::ManifestParse {
                 path: file.path.clone(),
-                detail: error.to_string(),
+                error,
             })?;
         self.revalidate_file(&file)?;
         self.revalidate_root()?;

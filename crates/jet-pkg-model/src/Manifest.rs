@@ -286,7 +286,7 @@ pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     // an uncomposed read would reject any package whose default output is
     // declared in a `configs:`-referenced file.
     let facts = Package::PackageFacts::parse_uncomposed(raw, path.display().to_string())
-        .map_err(|e| to_diagnostic(path, &e))?;
+        .map_err(|e| manifest_parse_diagnostic(path, &e))?;
     Package::to_manifest(&facts, raw)
 }
 
@@ -429,7 +429,7 @@ pub fn new_template(name: &str, annotated: bool) -> String {
 // Diagnostics
 // ──────────────────────────────────────────────
 
-fn to_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
+pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
     let file = path.display().to_string();
     match err {
         PackageParseError::UnknownField(field) => e1206_unknown_field(field),
