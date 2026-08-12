@@ -28,7 +28,7 @@ use super::safety::{
     jit_list_int_type, jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type,
     jit_list_record_type,
     jit_list_string_type, jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type,
-    jit_value_type, opaque_host_handle_ty, record_type_key, user_type_name,
+    jit_value_type, is_packed_process_signal, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
     clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
@@ -4244,7 +4244,9 @@ impl LowerCtx<'_, '_> {
                 else_body,
                 fallthrough,
             } => {
-                if matches!(&scrutinee.ty, Type::Option(_)) {
+                if matches!(&scrutinee.ty, Type::Option(_))
+                    || is_packed_process_signal(scrutinee)
+                {
                     self.lower_option_enum_match(
                         scrutinee,
                         arms,
@@ -9713,6 +9715,14 @@ impl LowerCtx<'_, '_> {
                             self.host.net_http.udp_receive,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "ready_readable" if args.len() == 1 => (
+                            self.host.net_http.ready_readable,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "ready_writable" if args.len() == 1 => (
+                            self.host.net_http.ready_writable,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         "udp_packet_bytes" if args.len() == 1 => (
                             self.host.net_http.udp_packet_bytes,
                             vec![self.lower_expr(&args[0])?],
@@ -14616,10 +14626,11 @@ impl LowerCtx<'_, '_> {
         else_body: Option<&[TStmt]>,
         fallthrough: bool,
     ) -> Result<(), String> {
-        let Type::Option(inner) = &scrutinee.ty else {
-            return Err("jit option enum match on non-Option".to_string());
+        let inner_ty = match &scrutinee.ty {
+            Type::Option(inner) => inner.as_ref().clone(),
+            _ if is_packed_process_signal(scrutinee) => Type::Int,
+            _ => return Err("jit option enum match on non-Option".to_string()),
         };
-        let inner_ty = inner.as_ref().clone();
         let packed = self.lower_expr(scrutinee)?;
         let zero = self.b.ins().iconst(types::I64, 0);
         let is_some = self.b.ins().icmp(IntCC::NotEqual, packed, zero);
@@ -17459,6 +17470,14 @@ impl LowerCtx<'_, '_> {
                 let data = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.net_http.tcp_write_all_bytes, &[recv_val, data]))
             }
+            THandleOp::TcpStreamReady if args.len() == 2 => {
+                let interest = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tcp_ready,
+                    &[recv_val, interest, deadline],
+                ))
+            }
             THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes => {
                 Err("jit handle method unsupported".to_string())
             }
@@ -17469,13 +17488,40 @@ impl LowerCtx<'_, '_> {
             THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::UdpSocketReady if args.len() == 2 => {
+                let interest = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.udp_ready,
+                    &[recv_val, interest, deadline],
+                ))
+            }
+            THandleOp::UdpSocketReceiveDeadline if args.len() == 2 => {
+                let limit = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.udp_receive_deadline,
+                    &[recv_val, limit, deadline],
+                ))
+            }
+            THandleOp::UdpSocketSendToDeadline if args.len() == 3 => {
+                let data = self.lower_expr(&args[0])?;
+                let addr = self.lower_expr(&args[1])?;
+                let deadline = self.lower_expr(&args[2])?;
+                Ok(self.call_host(
+                    self.host.net_http.udp_send_bytes_to_deadline,
+                    &[recv_val, data, addr, deadline],
+                ))
+            }
+            THandleOp::UdpSocketClose => {
+                Ok(self.call_host(self.host.net_http.udp_close, &[recv_val]))
+            }
             THandleOp::TcpStreamReadBytes
             | THandleOp::TcpStreamWriteBytes
             | THandleOp::TcpStreamWriteText
             | THandleOp::TcpStreamShutdown
             | THandleOp::TcpStreamReady
             | THandleOp::UdpSocketReady
-            | THandleOp::UdpSocketClose
             | THandleOp::UdpSocketReceiveDeadline
             | THandleOp::UdpSocketSendToDeadline
             | THandleOp::UnixListenerAcceptDeadline
@@ -19342,7 +19388,23 @@ impl LowerCtx<'_, '_> {
         }
         let l = self.lower_expr(lhs)?;
         let r = self.lower_expr(rhs)?;
-        let _rhs_ty = self.expr_arith_type(rhs);
+        let rhs_ty = self.expr_arith_type(rhs);
+        // ProcessResult.signal uses the legacy packed Option carrier
+        // (0 = None, payload + 1 = Some). TIR reports CORE fields as Int;
+        // compare only this exact carrier so repeated signaled waits preserve
+        // their exact result without admitting generic Option equality.
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && is_packed_process_signal(lhs)
+            && is_packed_process_signal(rhs)
+        {
+            let equal = self.bool_from_icmp(IntCC::Equal, l, r);
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
+        }
         if Self::is_math_value_ty(&lhs_ty)
             || Self::is_math_value_ty(&rhs.ty)
             || Self::is_math_value_ty(&lhs.ty)

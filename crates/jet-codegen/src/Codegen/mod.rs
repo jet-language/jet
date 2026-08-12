@@ -956,6 +956,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
@@ -1111,7 +1112,7 @@ fn push_gc_prelude(out: &mut String) {
 /// `layout {}` block isn't limited to UI code.
 const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 
-/// Tower #126: emitted AOT programs that use tasks/networking ship AND select the
+/// Tower #126: emitted AOT programs that use tasks/networking/process/fs-runtime ship AND select the
 /// native readiness backend (epoll on Linux, kqueue on the BSD/Apple family), not
 /// just the portable poll. Other Core users retain the safe portable scheduler
 /// compatibility surface without inheriting unrelated native FFI (I1).
@@ -1164,7 +1165,22 @@ fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
 
 fn uses_native_scheduler(bundle: &ProgramBundle) -> bool {
     bundle.used_core.iter().any(|usage| {
-        ["core.tasks", "core.net", "core.http"]
+        [
+            "core.tasks",
+            "core.net",
+            "core.http",
+            "core.process",
+            "core.files",
+            "core.path",
+            "core.watcher",
+            "core.io",
+            "core.env",
+            "core.os",
+            "core.args",
+            "core.testing",
+            "core.perf",
+            "core.scope",
+        ]
             .iter()
             .any(|module| {
                 usage.strip_prefix(module).is_some_and(|suffix| {

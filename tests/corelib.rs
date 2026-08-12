@@ -3885,14 +3885,14 @@ fn build_and_run(
         }
         let out = child.wait_with_output().unwrap();
         return (
-            out.status.code().unwrap_or(0),
+            out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
         );
     }
     let out = cmd.output().unwrap();
     (
-        out.status.code().unwrap_or(0),
+        out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
@@ -3932,7 +3932,7 @@ fn build_and_run_multi(
     );
     let run = Command::new(&bin).current_dir(dir).output().unwrap();
     (
-        run.status.code().unwrap_or(0),
+        run.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&run.stdout).into_owned(),
         String::from_utf8_lossy(&run.stderr).into_owned(),
     )
@@ -4737,6 +4737,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent() {
     let dir = std::env::temp_dir().join(format!(
@@ -4757,17 +4758,17 @@ fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     interest :: NetReadyInterest.Read
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    waiter :: tasks.spawn(() => {
+    waiter :: task {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
             .Ok(_) -> panic("udp unexpectedly ready")
             .Err(error) -> print(net.error_message(error))
         }
-    })
+    }
     _ready :: ready_rx.receive() ?? panic("ready")
     time.sleep(10)
     waiter.cancel()
-    waiter.join()
+    waiter.join() ?? panic("udp readiness task failed")
 
     closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
     closed.close() ?? panic("close")
@@ -5065,29 +5066,29 @@ fn run() {{
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
     (udp_ready_tx, udp_ready_rx) :: tasks.channel<Int>()
-    udp_wait :: tasks.spawn(() => {{
+    udp_wait :: task {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
             .Ok(_) -> panic("udp cancel returned data")
             .Err(error) -> print(net.error_message(error))
         }}
-    }})
+    }}
     _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
     udp_wait.cancel()
-    udp_wait.join()
+    udp_wait.join() ?? panic("udp wait task failed")
 
     listener :: net.unix_listen("{socket}") ?? panic("unix listen")
     (unix_ready_tx, unix_ready_rx) :: tasks.channel<Int>()
-    unix_wait :: tasks.spawn(() => {{
+    unix_wait :: task {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{
             .Ok(_) -> panic("unix cancel accepted stream")
             .Err(error) -> print(net.error_message(error))
         }}
-    }})
+    }}
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
     unix_wait.cancel()
-    unix_wait.join()
+    unix_wait.join() ?? panic("unix wait task failed")
 }}
 "#
     );

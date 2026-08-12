@@ -188,7 +188,7 @@ thread_local! {
     static SHIELD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-fn jet_scheduler_shielded() -> bool {
+pub fn jet_scheduler_shielded() -> bool {
     SHIELD_DEPTH.with(|d| d.get() > 0)
 }
 
@@ -259,7 +259,7 @@ fn jet_task_unwind_cancel() -> ! {
 /// are inside a scheduler task (a catch frame exists to turn the unwind into a
 /// `Cancelled` result). Outside a task there is no catch frame, so return and let
 /// the caller fall back to its cooperative sentinel (None/false/Closed).
-fn jet_task_deliver_cancel() {
+pub fn jet_task_deliver_cancel() {
     if jet_scheduler_panic_should_unwind() {
         jet_task_unwind_cancel();
     }
@@ -1332,37 +1332,108 @@ impl IOPoller {
 // Unix-domain streams and UDP sockets cannot be represented as `TcpStream`,
 // but they must park on the same task slots instead of blocking worker threads.
 // One process-wide poller owns all raw-descriptor readiness registrations.
+// The token is the logical handle identity. It carries the descriptor number,
+// not a cloned OS handle, so close/cancel share one lifecycle.
 #[cfg(unix)]
-enum JetRawIoHandle {
-    TcpStream(std::net::TcpStream),
-    TcpListener(std::net::TcpListener),
-    UnixStream(std::os::unix::net::UnixStream),
-    UnixListener(std::os::unix::net::UnixListener),
-    UDP(std::net::UdpSocket),
+pub struct JetSchedulerRawIoHandle {
+    fd: i32,
+    closed: AtomicBool,
+    registrations: Mutex<HashMap<usize, std::sync::Weak<JetRawIoRegistration>>>,
 }
 
 #[cfg(unix)]
-impl JetRawIoHandle {
-    fn fd(&self) -> i32 {
-        use std::os::fd::AsRawFd;
-        match self {
-            JetRawIoHandle::TcpStream(handle) => handle.as_raw_fd(),
-            JetRawIoHandle::TcpListener(handle) => handle.as_raw_fd(),
-            JetRawIoHandle::UnixStream(handle) => handle.as_raw_fd(),
-            JetRawIoHandle::UnixListener(handle) => handle.as_raw_fd(),
-            JetRawIoHandle::UDP(handle) => handle.as_raw_fd(),
+impl JetSchedulerRawIoHandle {
+    pub fn new(fd: i32) -> Arc<Self> {
+        Arc::new(Self {
+            fd,
+            closed: AtomicBool::new(false),
+            registrations: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn add_registration(&self, registration: &Arc<JetRawIoRegistration>) -> bool {
+        let mut registrations = self.registrations.lock().unwrap();
+        if self.closed.load(Ordering::Acquire)
+            || !registration.active.load(Ordering::Acquire)
+        {
+            return false;
+        }
+        registrations.insert(registration.id, Arc::downgrade(registration));
+        true
+    }
+
+    fn remove_registration(&self, id: usize) {
+        self.registrations.lock().unwrap().remove(&id);
+    }
+
+    /// Close the logical handle once. Every live wait is woken and removed by
+    /// its registration guard; repeated close calls are no-ops.
+    pub fn close(&self) {
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let registrations = self
+            .registrations
+            .lock()
+            .unwrap()
+            .drain()
+            .filter_map(|(_, registration)| registration.upgrade())
+            .collect::<Vec<_>>();
+        for registration in registrations {
+            registration.close();
+        }
+    }
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_raw_io_handle(fd: i32) -> Arc<JetSchedulerRawIoHandle> {
+    JetSchedulerRawIoHandle::new(fd)
+}
+
+#[cfg(unix)]
+struct JetRawIoRegistration {
+    id: usize,
+    handle: Arc<JetSchedulerRawIoHandle>,
+    poller: std::sync::Weak<JetRawIoPoller>,
+    slot: Arc<ParkSlot>,
+    ready: Arc<Mutex<(bool, bool)>>,
+    active: AtomicBool,
+}
+
+#[cfg(unix)]
+impl JetRawIoRegistration {
+    fn close(&self) {
+        if !self.active.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        self.handle.remove_registration(self.id);
+        if let Some(poller) = self.poller.upgrade() {
+            poller.unregister(self.id);
+        }
+        self.slot.wake();
+    }
+
+    fn complete(&self, observed: (bool, bool)) {
+        if !self.active.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        self.handle.remove_registration(self.id);
+        *self.ready.lock().unwrap() = observed;
+        self.slot.wake();
+    }
+
+    fn deactivate(&self) {
+        if self.active.swap(false, Ordering::AcqRel) {
+            self.handle.remove_registration(self.id);
         }
     }
 }
 
 #[cfg(unix)]
 struct JetRawIoInterest {
-    id: usize,
-    handle: JetRawIoHandle,
-    slot: Arc<ParkSlot>,
+    registration: Arc<JetRawIoRegistration>,
     readable: bool,
     writable: bool,
-    ready: Arc<Mutex<(bool, bool)>>,
 }
 
 #[cfg(unix)]
@@ -1375,28 +1446,45 @@ struct JetRawIoPoller {
 #[cfg(unix)]
 impl JetRawIoPoller {
     fn register(
-        &self,
-        handle: JetRawIoHandle,
+        self: &Arc<Self>,
+        handle: Arc<JetSchedulerRawIoHandle>,
         readable: bool,
         writable: bool,
-    ) -> (usize, Arc<ParkSlot>, Arc<Mutex<(bool, bool)>>) {
+    ) -> Option<Arc<JetRawIoRegistration>> {
         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
         let slot = ParkSlot::new();
         let ready = Arc::new(Mutex::new((false, false)));
-        self.interests.lock().unwrap().push(JetRawIoInterest {
+        let registration = Arc::new(JetRawIoRegistration {
             id,
-            handle,
+            handle: handle.clone(),
+            poller: Arc::downgrade(self),
             slot: slot.clone(),
+            ready: ready.clone(),
+            active: AtomicBool::new(true),
+        });
+        self.interests.lock().unwrap().push(JetRawIoInterest {
+            registration: registration.clone(),
             readable,
             writable,
-            ready: ready.clone(),
         });
+        if !handle.add_registration(&registration) {
+            self.interests
+                .lock()
+                .unwrap()
+                .retain(|interest| interest.registration.id != id);
+            registration.deactivate();
+            self.notify.notify_one();
+            return None;
+        }
         self.notify.notify_one();
-        (id, slot, ready)
+        Some(registration)
     }
 
     fn unregister(&self, id: usize) {
-        self.interests.lock().unwrap().retain(|interest| interest.id != id);
+        self.interests
+            .lock()
+            .unwrap()
+            .retain(|interest| interest.registration.id != id);
         self.notify.notify_one();
     }
 
@@ -1422,13 +1510,16 @@ impl JetRawIoPoller {
                 let descriptors = interests
                     .iter()
                     .map(|interest| PollFd {
-                        fd: interest.handle.fd(),
+                        fd: interest.registration.handle.fd,
                         events: (if interest.readable { POLLIN } else { 0 })
                             | (if interest.writable { POLLOUT } else { 0 }),
                         revents: 0,
                     })
                     .collect::<Vec<_>>();
-                let ids = interests.iter().map(|interest| interest.id).collect::<Vec<_>>();
+                let ids = interests
+                    .iter()
+                    .map(|interest| interest.registration.id)
+                    .collect::<Vec<_>>();
                 (descriptors, ids)
             };
             let ready = unsafe { poll(descriptors.as_mut_ptr(), descriptors.len(), 50) };
@@ -1448,27 +1539,29 @@ impl JetRawIoPoller {
                 }))
                 .collect::<Vec<_>>();
             let ready_ids = ready_events.iter().map(|(id, _, _)| *id).collect::<HashSet<_>>();
-            let slots = {
+            let ready = {
                 let mut interests = self.interests.lock().unwrap();
-                for interest in interests.iter() {
-                    if let Some((_, readable, writable)) = ready_events.iter().find(|(id, _, _)| *id == interest.id) {
-                        *interest.ready.lock().unwrap() = (
-                            interest.readable && *readable,
-                            interest.writable && *writable,
-                        );
-                    }
-                }
-                let slots = interests
+                let ready = interests
                     .iter()
-                    .filter(|interest| ready_ids.contains(&interest.id))
-                    .map(|interest| interest.slot.clone())
+                    .filter_map(|interest| {
+                        let (_, readable, writable) = ready_events
+                            .iter()
+                            .find(|(id, _, _)| *id == interest.registration.id)?;
+                        Some((
+                            interest.registration.clone(),
+                            (
+                                interest.readable && *readable,
+                                interest.writable && *writable,
+                            ),
+                        ))
+                    })
                     .collect::<Vec<_>>();
-                interests.retain(|interest| !ready_ids.contains(&interest.id));
-                slots
+                interests.retain(|interest| !ready_ids.contains(&interest.registration.id));
+                ready
             };
-            METRIC_POLLER_WAKE.fetch_add(slots.len(), Ordering::Relaxed);
-            for slot in slots {
-                slot.wake();
+            METRIC_POLLER_WAKE.fetch_add(ready.len(), Ordering::Relaxed);
+            for (registration, observed) in ready {
+                registration.complete(observed);
             }
         }
     }
@@ -1493,49 +1586,44 @@ fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
 
 #[cfg(unix)]
 fn jet_scheduler_raw_io_wait(
-    handle: JetRawIoHandle,
+    handle: &Arc<JetSchedulerRawIoHandle>,
     readable: bool,
     writable: bool,
     wait_kind: &str,
 ) -> (bool, bool) {
     let poller = jet_raw_io_poller();
-    let (id, slot, ready) = poller.register(handle, readable, writable);
-    struct Registration(Arc<JetRawIoPoller>, usize);
+    let Some(registration) = poller.register(handle.clone(), readable, writable) else {
+        return (false, false);
+    };
+    struct Registration(Arc<JetRawIoRegistration>);
     impl Drop for Registration {
         fn drop(&mut self) {
-            self.0.unregister(self.1);
+            self.0.close();
         }
     }
-    let _registration = Registration(poller, id);
-    jet_scheduler_yield(wait_kind, &slot, None);
-    let observed = *ready.lock().unwrap();
-    observed
+    let _registration = Registration(registration.clone());
+    jet_scheduler_yield(wait_kind, &registration.slot, None);
+    *registration.ready.lock().unwrap()
 }
 
 #[cfg(unix)]
 pub fn jet_scheduler_unix_stream_io_wait(
-    stream: &std::os::unix::net::UnixStream,
+    handle: &Arc<JetSchedulerRawIoHandle>,
     read: bool,
     write: bool,
     wait_kind: &str,
 ) {
-    let handle = stream
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
-    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
 }
 
 #[cfg(unix)]
 pub fn jet_scheduler_unix_stream_ready_wait(
-    stream: &std::os::unix::net::UnixStream,
+    handle: &Arc<JetSchedulerRawIoHandle>,
     read: bool,
     write: bool,
     wait_kind: &str,
 ) -> (bool, bool) {
-    let handle = stream
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("unix stream clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::UnixStream(handle), read, write, wait_kind)
+    jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
 }
 
 #[cfg(unix)]
@@ -1545,10 +1633,9 @@ pub fn jet_scheduler_tcp_stream_ready_wait(
     write: bool,
     wait_kind: &str,
 ) -> (bool, bool) {
-    let handle = stream
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("tcp stream clone failed"));
-    jet_scheduler_raw_io_wait(JetRawIoHandle::TcpStream(handle), read, write, wait_kind)
+    use std::os::fd::AsRawFd;
+    let handle = JetSchedulerRawIoHandle::new(stream.as_raw_fd());
+    jet_scheduler_raw_io_wait(&handle, read, write, wait_kind)
 }
 
 #[cfg(unix)]
@@ -1556,10 +1643,9 @@ pub fn jet_scheduler_tcp_listener_io_wait(
     listener: &std::net::TcpListener,
     wait_kind: &str,
 ) {
-    let handle = listener
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("tcp listener clone failed"));
-    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::TcpListener(handle), true, false, wait_kind);
+    use std::os::fd::AsRawFd;
+    let handle = JetSchedulerRawIoHandle::new(listener.as_raw_fd());
+    let _ = jet_scheduler_raw_io_wait(&handle, true, false, wait_kind);
 }
 
 #[cfg(not(unix))]
@@ -1572,26 +1658,60 @@ pub fn jet_scheduler_tcp_listener_io_wait(
 
 #[cfg(unix)]
 pub fn jet_scheduler_unix_listener_io_wait(
-    listener: &std::os::unix::net::UnixListener,
+    handle: &Arc<JetSchedulerRawIoHandle>,
     wait_kind: &str,
 ) {
-    let handle = listener
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("unix listener clone failed"));
-    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::UnixListener(handle), true, false, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(handle, true, false, wait_kind);
 }
 
 #[cfg(unix)]
 pub fn jet_scheduler_udp_io_wait(
-    socket: &std::net::UdpSocket,
+    handle: &Arc<JetSchedulerRawIoHandle>,
     read: bool,
     write: bool,
     wait_kind: &str,
 ) {
-    let handle = socket
-        .try_clone()
-        .unwrap_or_else(|_| jet_scheduler_fatal("udp socket clone failed"));
-    let _ = jet_scheduler_raw_io_wait(JetRawIoHandle::UDP(handle), read, write, wait_kind);
+    let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_udp_ready_wait(
+    handle: &Arc<JetSchedulerRawIoHandle>,
+    read: bool,
+    write: bool,
+    wait_kind: &str,
+) -> (bool, bool) {
+    jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_raw_io_write_wait(
+    handle: &Arc<JetSchedulerRawIoHandle>,
+    wait_kind: &str,
+) {
+    let _ = jet_scheduler_raw_io_wait(handle, false, true, wait_kind);
+}
+
+#[cfg(unix)]
+pub fn jet_scheduler_raw_io_set_nonblocking(fd: i32) -> Result<(), String> {
+    extern "C" {
+        fn fcntl(fd: i32, command: i32, ...) -> i32;
+    }
+    const F_GETFL: i32 = 3;
+    const F_SETFL: i32 = 4;
+    #[cfg(target_os = "linux")]
+    const O_NONBLOCK: i32 = 0x800;
+    #[cfg(not(target_os = "linux"))]
+    const O_NONBLOCK: i32 = 0x4;
+
+    let flags = unsafe { fcntl(fd, F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    if flags & O_NONBLOCK == 0 && unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
 }
 
 // jet:scheduler-native-end

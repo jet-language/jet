@@ -449,6 +449,20 @@ fn run() {
         .Err(e) -> { print("signal-error") }
         else -> {}
     }
+
+    child :: process.cmd(["sh", "-c", "kill -TERM $$"]).spawn() ?? panic("signal spawn failed")
+    first :: child.wait() ?? panic("first signal wait failed")
+    second :: child.wait() ?? panic("second signal wait failed")
+    print("{first.code}:{first.success}:{second.code}:{second.success}")
+    if first.signal == second.signal {
+        print("repeat-signal-same")
+    } else {
+        print("repeat-signal-different")
+    }
+    if first.signal == {
+        .Val(signal) -> print("repeat-signal:{signal}")
+        .None -> print("repeat-signal:none")
+    }
 }
 "#,
     )
@@ -475,7 +489,7 @@ fn run() {
     assert_eq!(default.stdout, release.stdout);
     assert_eq!(
         String::from_utf8(default.stdout).unwrap(),
-        "true\n0\nfalse\n7\nchecked-error\nsignal-error\n"
+        "true\n0\nfalse\n7\nchecked-error\nsignal-error\n-1:false:-1:false\nrepeat-signal-same\nrepeat-signal:15\n"
     );
 
     let trace = String::from_utf8(default.stderr).unwrap();

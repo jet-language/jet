@@ -10,11 +10,21 @@
 
 use crate::JetShow;
 use jet_codegen::scheduler::{
-    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_blocking_wait_enter,
-    jet_scheduler_blocking_wait_leave, jet_scheduler_park_ms, jet_scheduler_sleep_ms,
-    jet_scheduler_spawn, jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_cancelled,
+    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms,
+    jet_scheduler_blocking_wait_enter,
+    jet_scheduler_blocking_wait_leave, jet_scheduler_io_wait, jet_scheduler_park_ms,
+    jet_scheduler_shielded, jet_scheduler_spawn, jet_scheduler_spawn_blocking_with_control,
+    jet_scheduler_task_cancelled, jet_scheduler_tcp_listener_io_wait,
     jet_scheduler_wait_point_cancelled, jet_scheduler_wait_without_unwind, jet_std_time_now,
+    jet_task_deliver_cancel,
     JetDeadlineGuard, JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
+};
+#[cfg(unix)]
+use jet_codegen::scheduler::{
+    jet_scheduler_raw_io_handle, jet_scheduler_tcp_stream_ready_wait, jet_scheduler_udp_io_wait,
+    jet_scheduler_udp_ready_wait, jet_scheduler_unix_listener_io_wait,
+    jet_scheduler_unix_stream_io_wait, jet_scheduler_unix_stream_ready_wait,
+    JetSchedulerRawIoHandle,
 };
 use std::sync::Arc;
 
@@ -84,24 +94,10 @@ fn jet_crypto_entropy_zeroize(buf: &mut [u8]) {
         *b = 0;
     }
 }
-fn jet_scheduler_io_wait(
-    _stream: &std::net::TcpStream,
-    _read: bool,
-    _write: bool,
-    _wait_kind: &str,
-) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-fn jet_scheduler_shielded() -> bool {
-    false
-}
 fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
     // RUNTIME_PANIC (exit 70): user-program panic path for include!d net host, not I2 ICE.
     eprintln!("panic: {msg}");
     std::process::exit(70);
-}
-fn jet_task_deliver_cancel() {
-    // Host-side cancel delivery is a no-op outside a live scheduler task frame.
 }
 fn jet_log_emit(_level: &str, _msg: &str, _fields: &[jet_std::LogField]) {}
 
@@ -244,71 +240,6 @@ pub mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
-}
-
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-}
-
-fn jet_deadline_check(_wait_kind: &str) {}
-
-fn jet_scheduler_tcp_listener_io_wait(_listener: &std::net::TcpListener, _wait_kind: &str) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-
-fn jet_scheduler_tcp_stream_io_wait(
-    _stream: &std::net::TcpStream,
-    _read: bool,
-    _write: bool,
-    _wait_kind: &str,
-) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-
-fn jet_scheduler_tcp_stream_ready_wait(
-    _stream: &std::net::TcpStream,
-    read: bool,
-    write: bool,
-    _wait_kind: &str,
-) -> (bool, bool) {
-    (read, write)
-}
-
-fn jet_scheduler_udp_io_wait(
-    _socket: &std::net::UdpSocket,
-    _read: bool,
-    _write: bool,
-    _wait_kind: &str,
-) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-
-#[cfg(unix)]
-fn jet_scheduler_unix_listener_io_wait(
-    _listener: &std::os::unix::net::UnixListener,
-    _wait_kind: &str,
-) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-
-#[cfg(unix)]
-fn jet_scheduler_unix_stream_io_wait(
-    _stream: &std::os::unix::net::UnixStream,
-    _read: bool,
-    _write: bool,
-    _wait_kind: &str,
-) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
-}
-
-#[cfg(unix)]
-fn jet_scheduler_unix_stream_ready_wait(
-    _stream: &std::os::unix::net::UnixStream,
-    read: bool,
-    write: bool,
-    _wait_kind: &str,
-) -> (bool, bool) {
-    (read, write)
 }
 
 #[allow(unused_imports)]
