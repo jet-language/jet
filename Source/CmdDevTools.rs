@@ -1852,20 +1852,11 @@ fn run_data_bind(format: &str, args: &[&String]) {
             .rsplit_once('.')
             .map(|(stem, _)| stem)
             .unwrap_or(base);
-        let mut safe = String::new();
-        for ch in stem.chars() {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                safe.push(ch.to_ascii_lowercase());
-            } else if !safe.ends_with('_') {
-                safe.push('_');
-            }
-        }
-        while safe.ends_with('_') {
-            safe.pop();
-        }
-        if safe.is_empty() {
-            safe.push_str("schema");
-        }
+        let safe = jet::Syntax::sanitize_generated_name(
+            stem,
+            jet::Syntax::NameCase::Snake,
+            "schema",
+        );
         format!("bindings/{safe}.{}", jet::Syntax::FILE_EXT)
     });
     let mut command = vec![
@@ -2106,7 +2097,7 @@ fn run_dart_bind(args:&[&String]){
     if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut compute=None;let mut i=1;
     while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--jet"=>{compute=args.get(i+1).map(|v|v.to_string());if compute.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind dart` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let Some(compute)=compute else{crate::cli_error!("E2104", "`bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");usage();exit(ExitCodes::USAGE)};
+    let Some(compute)=compute else{crate::cli_error!("E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");usage();exit(ExitCodes::USAGE)};
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});
     let source=std::fs::read_to_string(path).unwrap_or_else(|e|dart_bind_error(path,&format!("the Dart contract could not be read ({e})")));
     let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::DART_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
