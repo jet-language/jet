@@ -1819,7 +1819,7 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
             buffer_bytes: get(0),
             max_depth: get(1),
             max_item_bytes: get(2),
-            max_total_bytes: if total == 0 { Err(JetAbsent) } else { Ok(total) },
+            max_total_bytes: if total == 0 { Err(JetAbsent) } else { Ok(total - 1) },
             max_expansion_depth: get(4),
             max_expansion_bytes: get(5),
         };

@@ -46,7 +46,7 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             if !needs_mutation {
                 source.push_str(&serde_ordered_object_source(&s.serde_markers, &active));
             } else {
-                source.push_str("out: [String: DataTree] := []\n");
+                source.push_str("out := [String: DataTree].{}\n");
             for f in &s.fields {
                 if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
                 { continue; }
@@ -292,7 +292,7 @@ fn expand_builtin_enum_serde(
             }
         } else if let Some(tag_key) = &tag {
             source.push_str(&format!(
-                "tag_tree := tree.field({tag_key:?})?\ntag_value := FieldError.under({tag_key:?}, tag_tree.text())?\n"
+                "tag_value := FieldError.under({tag_key:?}, (tree.field({tag_key:?}) ?? DataTree.Null).decode<String>())?\n"
             ));
             for v in &e.variants {
                 let wire = serde_enum_variant_key(v);
@@ -581,10 +581,10 @@ fn serde_enum_decode_constructor(
     match &v.payload {
         crate::AST::VariantPayload::Unit => format!("{target}.{}", v.name),
         crate::AST::VariantPayload::Single(t, _) => {
-            let decoded = format!("{src}.decode<{}>()?", serde_type_source(t));
+            let decoded = format!("{src}.decode<{}>()", serde_type_source(t));
             let framed = single_segment
                 .map(|segment| format!("FieldError.under({segment:?}, {decoded})?"))
-                .unwrap_or(decoded);
+                .unwrap_or_else(|| format!("{decoded}?"));
             format!("{target}.{}({framed})", v.name)
         }
         crate::AST::VariantPayload::Named(_) => unreachable!("named enum payloads are lowered as statements"),
