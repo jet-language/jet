@@ -1984,15 +1984,15 @@ fn watching_dev_deopts_on_gap_edit_and_recovers() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-AUTH-TOKENPOLICY1=A: auth verification stays on the native path; tiered dev
-/// deopts instead of transparent AOT fallback.
+/// D-AUTH-TOKENPOLICY1=A: auth verification stays resident in the default JIT;
+/// forced interpretation uses the same ambient Prelude adapter.
 #[test]
-fn dev_default_deopts_for_auth_verification() {
+fn dev_default_runs_auth_verification_resident() {
     let _guard = FfiBridgeLock::acquire();
-    let dir = std::env::temp_dir().join(format!("jet_dev_auth_gap_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dev_auth_resident_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("auth_fallback.jet");
+    let file = dir.join("auth_resident.jet");
     fs::write(
         &file,
         r#"use core.auth as auth
@@ -2008,29 +2008,34 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().to_string();
 
-    match dev_iteration_with_timeout("auth_fallback_boundary", &shown, true) {
-        RunOutcome::Problems(diags) => assert!(diags.iter().any(|d| d.code == "E2201"), "{diags:?}"),
-        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.auth"),
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration_with_timeout("auth_resident_interpreter", &shown, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stdout.trim(), "gateway");
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            assert!(!jet_jit::jit_executed_for_test());
+            assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+        }
+        RunOutcome::Problems(diags) => panic!("forced auth interpreter failed: {diags:?}"),
     }
 
     jet_jit::reset_jit_trace_for_test();
-    match dev_iteration_with_timeout("auth_fallback", &shown, false) {
+    match dev_iteration_with_timeout("auth_resident", &shown, false) {
         RunOutcome::Ran { stdout, .. } => {
             assert!(
-                jet_jit::deopt_invoked_for_test(),
-                "default dev must deopt-run core.auth"
+                jet_jit::jit_executed_for_test(),
+                "default dev must execute core.auth in resident JIT"
             );
+            assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
             assert_eq!(stdout.trim(), "gateway");
         }
         RunOutcome::Problems(diags) => {
-            assert!(
-                !diags.iter().any(|d| d.code == "E2211"),
-                "E2211 retired: {diags:?}"
-            );
+            panic!("default resident JIT failed: {diags:?}");
         }
     }
 
-    let expected = compiled_binary_output(&dir, "auth_fallback", 0, "auth_fallback", &shown);
+    let expected = compiled_binary_output(&dir, "auth_resident", 0, "auth_resident", &shown);
     assert_eq!(expected.stdout.trim(), "gateway");
     let _ = fs::remove_dir_all(&dir);
 }

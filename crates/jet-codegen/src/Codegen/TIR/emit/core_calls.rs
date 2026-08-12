@@ -2140,14 +2140,14 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "shared_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_shared_secret_bytes_impl"), arg(0)),
         // D-AUTH-TOKENPOLICY1=A: fixed HS256 with required labelled key and
-        // audience. Optional issuer and clock_skew remain suffix controls in this
-        // API; omitted suffixes lower to their safe defaults here.
+        // audience. This bridge only marshals optional suffixes; Auth.rs owns
+        // the omitted-value policy for every execution tier.
         ("core.auth", "verify_jwt") => {
             let issuer = if args.len() >= 4 { format!("Some(&({}))", arg(3)) } else { "None".to_string() };
-            let skew = if args.len() >= 5 { format!("{}jet_duration_ms_value(&({}))", cx.root_prefix, arg(4)) } else { "0".to_string() };
+            let skew = if args.len() >= 5 { format!("Some({}jet_duration_ns_value(&({})))", cx.root_prefix, arg(4)) } else { "None".to_string() };
             format!(
                 "{}(&({}), &({}), &({}), {}, {})",
-                helper("jet_auth_verify_jwt_impl"),
+                helper("jet_auth_verify_jwt_defaulted"),
                 arg(0),
                 arg(1),
                 arg(2),
@@ -2157,12 +2157,12 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.auth", "verify_paseto") => {
             let issuer = if args.len() >= 4 { format!("Some(&({}))", arg(3)) } else { "None".to_string() };
-            let skew = if args.len() >= 5 { format!("{}jet_duration_ms_value(&({}))", cx.root_prefix, arg(4)) } else { "0".to_string() };
-            let footer = if args.len() >= 6 { arg(5) } else { "Vec::<u8>::new()".to_string() };
-            let implicit = if args.len() >= 7 { arg(6) } else { "Vec::<u8>::new()".to_string() };
+            let skew = if args.len() >= 5 { format!("Some({}jet_duration_ns_value(&({})))", cx.root_prefix, arg(4)) } else { "None".to_string() };
+            let footer = if args.len() >= 6 { format!("Some(&({}))", arg(5)) } else { "None".to_string() };
+            let implicit = if args.len() >= 7 { format!("Some(&({}))", arg(6)) } else { "None".to_string() };
             format!(
-                "{}(&({}), &({}), &({}), {}, {}, &({}), &({}), {})",
-                helper("jet_auth_verify_paseto_impl"), arg(0), arg(1), arg(2), issuer, skew,
+                "{}(&({}), &({}), &({}), {}, {}, {}, {}, {})",
+                helper("jet_auth_verify_paseto_defaulted"), arg(0), arg(1), arg(2), issuer, skew,
                 footer, implicit, regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"),
             )
         }

@@ -31,7 +31,8 @@ use super::safety::{
     jit_value_type, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
-    clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
+    clif_ty, core_struct_field_type, core_struct_field_uses_result_option_abi,
+    fn_value_signature, init_clif_ty, JitMeta,
 };
 use super::JitRuntime;
 
@@ -65,6 +66,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) meta: &'a JitMeta<'a>,
     pub(crate) vars: &'a mut HashMap<String, Variable>,
     pub(crate) var_tys: &'a mut HashMap<String, Type>,
+    /// Locals whose Option carrier is the tagged result arena rather than the
+    /// legacy value-plus-one representation.
+    pub(crate) result_option_vars: HashSet<String>,
     pub(crate) raw_slots: HashMap<String, StackSlot>,
     /// Pointer values minted from real local stack slots; synthetic place
     /// identities are deliberately absent so volatile access declines them.
@@ -296,11 +300,39 @@ impl LowerCtx<'_, '_> {
             || matches!(ty, Type::Apply { name, .. } if name == expected)
     }
 
-    fn uses_result_option_abi(expr: &TExpr) -> bool {
-        if !matches!(&expr.ty, Type::Option(_)) {
+    fn uses_result_option_abi(&self, expr: &TExpr) -> bool {
+        let Type::Option(inner) = &expr.ty else {
             return false;
+        };
+        if matches!(inner.as_ref(), Type::IntN { .. }) {
+            return true;
         }
         match &expr.kind {
+            TExprKind::Local(local) => self
+                .result_option_vars
+                .contains(&Self::local_key(local)),
+            TExprKind::Borrow { place, .. }
+            | TExprKind::DistinctCtor { arg: place, .. }
+            | TExprKind::Clone(place) => self.uses_result_option_abi(place),
+            TExprKind::Call { name, .. } => self.meta.result_option_target(name),
+            TExprKind::MethodCall {
+                recv,
+                method,
+                type_args,
+                ..
+            } => self
+                .method_key(&recv.ty, method, type_args)
+                .is_some_and(|key| self.meta.result_option_target(&key)),
+            TExprKind::FnValue {
+                kind: TFnValueKind::Call { callee, .. },
+            } => matches!(
+                &callee.kind,
+                TExprKind::FnValue {
+                    kind: TFnValueKind::NamedFn {
+                        name: Some(name), ..
+                    }
+                } if self.meta.result_option_target(name)
+            ),
             TExprKind::BuiltinMethod { op, recv, .. } => match op {
                 TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
                 TBuiltinOp::First | TBuiltinOp::Last => {
@@ -332,6 +364,10 @@ impl LowerCtx<'_, '_> {
                     if method == "remove"
                         && Self::receiver_is(&recv.ty, "Pool")
             ),
+            TExprKind::Field { recv, field, .. } => record_type_key(&recv.ty)
+                .is_some_and(|type_name| {
+                    core_struct_field_uses_result_option_abi(&type_name, field)
+                }),
             _ => false,
         }
     }
@@ -360,7 +396,6 @@ impl LowerCtx<'_, '_> {
         subject: Value,
         pattern: &Pattern,
         enum_name: Option<&str>,
-        heap: bool,
     ) -> Result<Value, String> {
         match pattern {
             Pattern::Range { lo, hi, .. } => {
@@ -373,8 +408,7 @@ impl LowerCtx<'_, '_> {
             Pattern::Or(alternatives, _) => {
                 let mut result = self.b.ins().iconst(types::I8, 0);
                 for alternative in alternatives {
-                    let condition =
-                        self.lower_pattern_condition(subject, alternative, enum_name, heap)?;
+                    let condition = self.lower_pattern_condition(subject, alternative, enum_name)?;
                     result = self.b.ins().bor(result, condition);
                 }
                 Ok(result)
@@ -387,6 +421,7 @@ impl LowerCtx<'_, '_> {
                 if indices.is_empty() {
                     return Err(format!("jit enum `{enum_name}::{variant}`"));
                 }
+                let heap = self.enum_variant_uses_heap(enum_name, variant);
                 let actual = self.enum_discriminant(subject, heap);
                 let mut matches_variant = self.b.ins().iconst(types::I8, 0);
                 for index in indices {
@@ -419,16 +454,74 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn pattern_binding(pattern: &Pattern) -> Option<(&str, &str)> {
+    fn pattern_variant_bindings(pattern: &Pattern) -> Option<(&str, &[PatSlot])> {
         match pattern {
             Pattern::Variant {
                 variant, bindings, ..
-            } => bindings
+            } => Some((variant.as_str(), bindings)),
+            Pattern::Or(alternatives, _) => alternatives
                 .first()
-                .and_then(PatSlot::as_bind)
-                .map(|binding| (variant.as_str(), binding)),
-            Pattern::Or(alternatives, _) => alternatives.first().and_then(Self::pattern_binding),
+                .and_then(Self::pattern_variant_bindings),
             _ => None,
+        }
+    }
+
+    fn bind_enum_payloads(
+        &mut self,
+        subject: Value,
+        enum_name: &str,
+        variant: &str,
+        bindings: &[PatSlot],
+    ) -> Result<Vec<(String, Option<Variable>, Option<Type>)>, String> {
+        let heap = self.enum_variant_uses_heap(enum_name, variant);
+        let mut bound = Vec::new();
+        for (index, slot) in bindings.iter().enumerate() {
+            let Some(name) = slot.as_bind() else {
+                continue;
+            };
+            let payload_ty = self
+                .meta
+                .enum_variant_payload_types(enum_name, variant)
+                .and_then(|types| types.get(index))
+                .cloned()
+                .unwrap_or(Type::Int);
+            let payload = if heap {
+                self.unpack_enum_heap_payload_at(subject, &payload_ty, index)?
+            } else {
+                self.unpack_enum_scalar(subject, &payload_ty)?
+            };
+            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
+            let var = self.fresh_var(payload_clif);
+            self.b.def_var(var, payload);
+            let key = TIR::local_place(name);
+            let old_var = self.vars.insert(key.clone(), var);
+            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
+            bound.push((key, old_var, old_ty));
+        }
+        Ok(bound)
+    }
+
+    fn restore_enum_payloads(
+        &mut self,
+        bound: Vec<(String, Option<Variable>, Option<Type>)>,
+    ) {
+        for (key, old_var, old_ty) in bound {
+            match old_var {
+                Some(var) => {
+                    self.vars.insert(key.clone(), var);
+                }
+                None => {
+                    self.vars.remove(&key);
+                }
+            }
+            match old_ty {
+                Some(ty) => {
+                    self.var_tys.insert(key, ty);
+                }
+                None => {
+                    self.var_tys.remove(&key);
+                }
+            }
         }
     }
 
@@ -685,6 +778,28 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn pack_auth_error(&mut self, disc: i64, payload: Option<Value>) -> Value {
+        let field_count = self
+            .b
+            .ins()
+            .iconst(types::I64, i64::from(payload.is_some()) + 1);
+        let handle = self.call_host(self.host.struct_new, &[field_count]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let disc = self.b.ins().iconst(types::I64, disc);
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        self.b.ins().call(set_i, &[handle, zero, disc]);
+        if let Some(payload) = payload {
+            let one = self.b.ins().iconst(types::I64, 1);
+            let set_s = self
+                .module
+                .declare_func_in_func(self.host.struct_set_str, self.b.func);
+            self.b.ins().call(set_s, &[handle, one, payload]);
+        }
+        handle
+    }
+
     fn unpack_enum_scalar(&mut self, packed: Value, payload_ty: &Type) -> Result<Value, String> {
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
@@ -709,23 +824,20 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// True when this enum match uses heap-boxed payloads (F64 or DataTree ABI).
-    fn enum_match_uses_f64_heap(&self, arms: &[TIR::TMatchArm]) -> bool {
-        arms.iter().any(|arm| {
-            let Some(variant) = arm.pattern.variant() else {
-                return false;
-            };
-            let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
-                return false;
-            };
-            if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
-                return true;
-            }
-            self.meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
-        })
+    /// True when this enum variant uses a heap carrier. AuthError uses one
+    /// tagged record for every variant; floats and DataTree also use records.
+    fn enum_variant_uses_heap(&self, enum_name: &str, variant: &str) -> bool {
+        if matches!(enum_name, "AuthError" | "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
+            return true;
+        }
+        self.meta
+            .enum_variant_payload_types(enum_name, variant)
+            .is_some_and(|types| {
+                types.len() > 1
+                    || types
+                        .first()
+                        .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
+            })
     }
 
     fn is_datatree_value_ty(ty: &Type) -> bool {
@@ -877,31 +989,43 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn unpack_enum_heap_payload(
+    fn unpack_enum_heap_payload_at(
         &mut self,
         packed: Value,
         payload_ty: &Type,
+        index: usize,
     ) -> Result<Value, String> {
-        let one = self.b.ins().iconst(types::I64, 1);
+        let field = self.b.ins().iconst(types::I64, (index + 1) as i64);
+        if Self::is_string_abi_ty(payload_ty) {
+            return Ok(self.call_host(self.host.struct_get_str, &[packed, field]));
+        }
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
-                Ok(self.call_host(self.host.struct_get_f64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_f64, &[packed, field]))
             }
             Some(types::I64) => {
-                Ok(self.call_host(self.host.struct_get_i64, &[packed, one]))
+                Ok(self.call_host(self.host.struct_get_i64, &[packed, field]))
             }
             Some(types::I8) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, field]);
                 Ok(self.b.ins().ireduce(types::I8, raw))
             }
             Some(types::I32) => {
-                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, field]);
                 Ok(self.b.ins().ireduce(types::I32, raw))
             }
             other => Err(format!(
                 "jit enum heap payload type unsupported: {payload_ty:?} ({other:?})"
             )),
         }
+    }
+
+    fn unpack_enum_heap_payload(
+        &mut self,
+        packed: Value,
+        payload_ty: &Type,
+    ) -> Result<Value, String> {
+        self.unpack_enum_heap_payload_at(packed, payload_ty, 0)
     }
 
     fn pack_datatree_enum(
@@ -2519,6 +2643,7 @@ impl LowerCtx<'_, '_> {
     fn lower_inline_block(&mut self, stmts: &[TStmt], ty: &Type) -> Result<Value, String> {
         let saved_vars = self.vars.clone();
         let saved_var_tys = self.var_tys.clone();
+        let saved_result_option_vars = self.result_option_vars.clone();
         let result = (|| {
             let (tail, prefix) = stmts
                 .split_last()
@@ -2532,6 +2657,7 @@ impl LowerCtx<'_, '_> {
         })();
         *self.vars = saved_vars;
         *self.var_tys = saved_var_tys;
+        self.result_option_vars = saved_result_option_vars;
         result
     }
 
@@ -2711,9 +2837,12 @@ impl LowerCtx<'_, '_> {
         }
         match stmt {
             TStmt::Let { name, init, .. } => {
+                let result_option_abi = self.uses_result_option_abi(init);
                 if Self::is_range_ty(&init.ty) {
                     let values = self.lower_range_expr(init)?;
-                    self.bind_range_local(&TIR::local_place(name), values);
+                    let place = TIR::local_place(name);
+                    self.bind_range_local(&place, values);
+                    self.result_option_vars.remove(&place);
                     return Ok(());
                 }
                 // Mutable field place (`left :: &counters.left`) → write-through
@@ -2745,8 +2874,10 @@ impl LowerCtx<'_, '_> {
                         let clif = types::I64;
                         let var = self.fresh_var(clif);
                         self.b.def_var(var, handle);
-                        self.vars.insert(TIR::local_place(name), var);
-                        self.var_tys.insert(TIR::local_place(name), ty);
+                        let place = TIR::local_place(name);
+                        self.vars.insert(place.clone(), var);
+                        self.var_tys.insert(place.clone(), ty);
+                        self.result_option_vars.remove(&place);
                         return Ok(());
                     }
                 }
@@ -2764,7 +2895,8 @@ impl LowerCtx<'_, '_> {
                 }
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
-                self.vars.insert(TIR::local_place(name), var);
+                let place = TIR::local_place(name);
+                self.vars.insert(place.clone(), var);
                 let stored_ty = if matches!(&init.ty, Type::Named(n) if n == "Unit")
                 {
                     Self::recover_core_return_ty(init).unwrap_or_else(|| match ty {
@@ -2776,7 +2908,12 @@ impl LowerCtx<'_, '_> {
                 } else {
                     init.ty.clone()
                 };
-                self.var_tys.insert(TIR::local_place(name), stored_ty);
+                self.var_tys.insert(place.clone(), stored_ty);
+                if result_option_abi {
+                    self.result_option_vars.insert(place);
+                } else {
+                    self.result_option_vars.remove(&place);
+                }
                 if Self::is_shared_guard_ty(&init.ty) {
                     self.deferred_shared_guards.push(name.clone());
                 }
@@ -3083,6 +3220,9 @@ impl LowerCtx<'_, '_> {
                 }
                 let local = place.as_local().ok_or("jit assign to non-local place")?;
                 let key = Self::local_key(local);
+                let result_option_abi = !local.deref
+                    && op.is_none()
+                    && self.uses_result_option_abi(value);
                 if self.var_tys.get(&key).is_some_and(Self::is_range_ty) {
                     if op.is_some() || local.deref {
                         return Err(
@@ -3223,6 +3363,13 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().stack_store(val, slot, 0);
                 } else {
                     self.b.def_var(var, val);
+                }
+                if !local.deref && op.is_none() {
+                    if result_option_abi {
+                        self.result_option_vars.insert(key);
+                    } else {
+                        self.result_option_vars.remove(&key);
+                    }
                 }
             }
             TStmt::IndexFieldAssign(assign) => {
@@ -3417,11 +3564,18 @@ impl LowerCtx<'_, '_> {
                         return Err("jit binding conjunction unsupported".to_string());
                     }
                     TIfCond::IsNone { subj } => {
-                        // Option ABI: 0 = None, else bits+1. `x == .None` → IsNone.
+                        // Legacy options use 0 = None; tagged options use the
+                        // result-arena presence bit.
                         // Mirror Plain `if`: skip merge jumps after break/return.
                         let packed = self.lower_expr(subj)?;
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let is_none = self.b.ins().icmp(IntCC::Equal, packed, zero);
+                        let is_none = if self.uses_result_option_abi(subj) {
+                            let is_some = self.call_host(self.host.result_is_ok, &[packed]);
+                            let zero = self.b.ins().iconst(types::I8, 0);
+                            self.b.ins().icmp(IntCC::Equal, is_some, zero)
+                        } else {
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            self.b.ins().icmp(IntCC::Equal, packed, zero)
+                        };
                         let then_block = self.b.create_block();
                         let else_block = self.b.create_block();
                         let merge_block = self.b.create_block();
@@ -3455,17 +3609,30 @@ impl LowerCtx<'_, '_> {
                         return Ok(());
                     }
                     TIfCond::Matches { pattern, subj } => {
+                        if matches!(&pattern.pattern, Pattern::Variant { bindings, .. } if bindings.iter().any(|slot| slot.as_bind().is_some())) {
+                            if Self::is_datatree_value_ty(&subj.ty) {
+                                self.lower_datatree_if_let(
+                                    pattern,
+                                    subj,
+                                    then_body,
+                                    else_body.as_deref(),
+                                )?;
+                            } else {
+                                self.lower_enum_if_let(
+                                    pattern,
+                                    subj,
+                                    then_body,
+                                    else_body.as_deref(),
+                                )?;
+                            }
+                            return Ok(());
+                        }
                         let value = self.lower_expr(subj)?;
                         let enum_name = pattern
                             .enum_type
                             .as_deref()
                             .or_else(|| user_type_name(&subj.ty));
-                        self.lower_pattern_condition(
-                            value,
-                            &pattern.pattern,
-                            enum_name,
-                            false,
-                        )?
+                        self.lower_pattern_condition(value, &pattern.pattern, enum_name)?
                     }
                 };
                 let then_block = self.b.create_block();
@@ -4265,7 +4432,6 @@ impl LowerCtx<'_, '_> {
                 // Ownership clone is a Rust spelling fact; the JIT already owns the
                 // value in a register, so the structured scrutinee is enough.
                 let subj = self.lower_expr(scrutinee)?;
-                let f64_heap = self.enum_match_uses_f64_heap(arms);
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -4290,55 +4456,19 @@ impl LowerCtx<'_, '_> {
                         subj,
                         &arm.pattern.pattern,
                         enum_name,
-                        f64_heap,
                     )?;
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    let bound = if let Some((variant, name)) =
-                        Self::pattern_binding(&arm.pattern.pattern)
-                    {
-                                let enum_name =
-                                    enum_name.ok_or("jit enum binding missing type")?;
-                                let payload_ty = self
-                                    .meta
-                                    .enum_variant_payload_types(enum_name, variant)
-                                    .and_then(|tys| tys.first())
-                                    .cloned()
-                                    .unwrap_or(Type::Int);
-                                let payload = if f64_heap {
-                                    self.unpack_enum_heap_payload(subj, &payload_ty)?
-                                } else {
-                                    self.unpack_enum_scalar(subj, &payload_ty)?
-                                };
-                                let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-                                let var = self.fresh_var(payload_clif);
-                                self.b.def_var(var, payload);
-                                let key = TIR::local_place(name);
-                                let old_var = self.vars.insert(key.clone(), var);
-                                let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-                                Some((key, old_var, old_ty))
-                    } else {
-                        None
-                    };
+                    let bound = Self::pattern_variant_bindings(&arm.pattern.pattern)
+                        .map(|(variant, bindings)| {
+                            let enum_name = enum_name.ok_or("jit enum binding missing type")?;
+                            self.bind_enum_payloads(subj, enum_name, variant, bindings)
+                        })
+                        .transpose()?;
                     self.lower_stmts_scoped(&arm.body)?;
-                    if let Some((key, old_var, old_ty)) = bound {
-                        match old_var {
-                            Some(var) => {
-                                self.vars.insert(key.clone(), var);
-                            }
-                            None => {
-                                self.vars.remove(&key);
-                            }
-                        }
-                        match old_ty {
-                            Some(ty) => {
-                                self.var_tys.insert(key, ty);
-                            }
-                            None => {
-                                self.var_tys.remove(&key);
-                            }
-                        }
+                    if let Some(bound) = bound {
+                        self.restore_enum_payloads(bound);
                     }
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
@@ -6898,7 +7028,7 @@ impl LowerCtx<'_, '_> {
         }
         // Cell.get_or_set / similar: bind outer captures into the inline scope
         // (same names the body Local refs use).
-        let mut saved: Vec<(String, Option<Variable>, Option<Type>)> = Vec::new();
+        let mut saved: Vec<(String, Option<Variable>, Option<Type>, bool)> = Vec::new();
         for (outer, place, ty) in &lambda.captures {
             let outer_key = TIR::local_place(outer);
             let outer_var = self
@@ -6925,11 +7055,18 @@ impl LowerCtx<'_, '_> {
                 .unwrap_or(types::I64);
             let old_var = self.vars.get(&bind_key).copied();
             let old_ty = self.var_tys.get(&bind_key).cloned();
+            let old_result_option = self.result_option_vars.contains(&bind_key);
+            let captured_result_option = self.result_option_vars.contains(&outer_key);
             let var = self.fresh_var(clif);
             self.b.def_var(var, val);
             self.vars.insert(bind_key.clone(), var);
             self.var_tys.insert(bind_key.clone(), ty.clone());
-            saved.push((bind_key, old_var, old_ty));
+            if captured_result_option {
+                self.result_option_vars.insert(bind_key.clone());
+            } else {
+                self.result_option_vars.remove(&bind_key);
+            }
+            saved.push((bind_key, old_var, old_ty, old_result_option));
         }
         let result = match &lambda.executable {
             TLambdaBody::Expr(expr) => self.lower_expr(expr),
@@ -6960,7 +7097,7 @@ impl LowerCtx<'_, '_> {
                 }
             }
         };
-        for (key, old_var, old_ty) in saved {
+        for (key, old_var, old_ty, old_result_option) in saved {
             match old_var {
                 Some(var) => {
                     self.vars.insert(key.clone(), var);
@@ -6971,11 +7108,16 @@ impl LowerCtx<'_, '_> {
             }
             match old_ty {
                 Some(ty) => {
-                    self.var_tys.insert(key, ty);
+                    self.var_tys.insert(key.clone(), ty);
                 }
                 None => {
                     self.var_tys.remove(&key);
                 }
+            }
+            if old_result_option {
+                self.result_option_vars.insert(key);
+            } else {
+                self.result_option_vars.remove(&key);
             }
         }
         result
@@ -7249,7 +7391,7 @@ impl LowerCtx<'_, '_> {
                         // IntN Option uses the result-arena ABI (nonzero handle);
                         // other Options use 0 = None, bits+1 = Some.
                         let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
-                            || Self::uses_result_option_abi(e);
+                            || self.uses_result_option_abi(e);
                         let is_none = if uses_result {
                             let ok = self.call_host(self.host.result_is_ok, &[val]);
                             let ok_wide = self.b.ins().uextend(types::I64, ok);
@@ -8223,6 +8365,11 @@ impl LowerCtx<'_, '_> {
             self.b.def_var(var, value);
             self.vars.insert(local.clone(), var);
             self.var_tys.insert(local.clone(), fallback_ty);
+            if core_struct_field_uses_result_option_abi(&type_name, field_jet) {
+                self.result_option_vars.insert(local.clone());
+            } else {
+                self.result_option_vars.remove(local);
+            }
         }
         Ok(())
     }
@@ -8519,11 +8666,17 @@ impl LowerCtx<'_, '_> {
             .enum_variant_index(type_name, variant)
             .ok_or_else(|| format!("jit comptime enum lit `{type_name}::{variant}`"))?;
         if args.is_empty() {
+            if type_name == "AuthError" {
+                return Ok(self.pack_auth_error(disc, None));
+            }
             return Ok(self.b.ins().iconst(types::I64, disc));
         }
         if args.len() == 1 && args[0].0.is_none() {
             let payload_ty = args[0].1.jet_type();
             let payload = self.lower_ct_value(&args[0].1)?;
+            if type_name == "AuthError" {
+                return Ok(self.pack_auth_error(disc, Some(payload)));
+            }
             return self.pack_enum_scalar(disc, payload, &payload_ty);
         }
         // Named / multi-arg: heap carrier [disc, field0, …].
@@ -8532,6 +8685,9 @@ impl LowerCtx<'_, '_> {
         let set_i = self
             .module
             .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let set_s = self
+            .module
+            .declare_func_in_func(self.host.struct_set_str, self.b.func);
         let zero = self.b.ins().iconst(types::I64, 0);
         let disc_v = self.b.ins().iconst(types::I64, disc);
         self.b.ins().call(set_i, &[handle, zero, disc_v]);
@@ -8539,6 +8695,10 @@ impl LowerCtx<'_, '_> {
             let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
             let payload = self.lower_ct_value(arg)?;
             let ty = arg.jet_type();
+            if Self::is_string_abi_ty(&ty) {
+                self.b.ins().call(set_s, &[handle, idx, payload]);
+                continue;
+            }
             let bits = match clif_ty(&ty) {
                 Some(t) if t == types::I64 => payload,
                 Some(t) if t == types::I8 => self.b.ins().uextend(types::I64, payload),
@@ -11101,7 +11261,13 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    let skew = if args.len() >= 5 {
+                    // ABI option marker: zero is absent; Auth.rs validates and
+                    // converts the exact signed duration when present.
+                    let skew_present = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(args.len() >= 5));
+                    let skew_ns = if args.len() >= 5 {
                         self.lower_expr(&args[4])?
                     } else {
                         self.b.ins().iconst(types::I64, 0)
@@ -11112,7 +11278,7 @@ impl LowerCtx<'_, '_> {
                     let call = self
                         .b
                         .ins()
-                        .call(host, &[token, key, audience, issuer, skew]);
+                        .call(host, &[token, key, audience, issuer, skew_ns, skew_present]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.auth"
@@ -11128,7 +11294,11 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    let skew = if args.len() >= 5 {
+                    let skew_present = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(args.len() >= 5));
+                    let skew_ns = if args.len() >= 5 {
                         self.lower_expr(&args[4])?
                     } else {
                         self.b.ins().iconst(types::I64, 0)
@@ -11136,20 +11306,135 @@ impl LowerCtx<'_, '_> {
                     let footer = if args.len() >= 6 {
                         self.lower_expr(&args[5])?
                     } else {
-                        self.call_host(self.host.coll.list_new, &[])
+                        self.b.ins().iconst(types::I64, 0)
                     };
+                    let footer_present = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(args.len() >= 6));
                     let implicit = if args.len() >= 7 {
                         self.lower_expr(&args[6])?
                     } else {
-                        self.call_host(self.host.coll.list_new, &[])
+                        self.b.ins().iconst(types::I64, 0)
                     };
+                    let implicit_present = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(args.len() >= 7));
                     let host = self
                         .module
                         .declare_func_in_func(self.host.crypto.verify_paseto, self.b.func);
                     let call = self.b.ins().call(
                         host,
-                        &[token, key, audience, issuer, skew, footer, implicit],
+                        &[
+                            token,
+                            key,
+                            audience,
+                            issuer,
+                            skew_ns,
+                            skew_present,
+                            footer,
+                            footer_present,
+                            implicit,
+                            implicit_present,
+                        ],
                     );
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.auth" {
+                    let (host_id, arg_values): (FuncId, Vec<Value>) = match (method.as_str(), args.as_slice()) {
+                        ("register_user", [user_id, password_hash]) => (
+                            self.host.crypto.auth_register_user,
+                            vec![self.lower_expr(user_id)?, self.lower_expr(password_hash)?],
+                        ),
+                        ("password_login", [user_id, password_hash, now_ms, ttl_ms]) => (
+                            self.host.crypto.auth_password_login,
+                            vec![
+                                self.lower_expr(user_id)?,
+                                self.lower_expr(password_hash)?,
+                                self.lower_expr(now_ms)?,
+                                self.lower_expr(ttl_ms)?,
+                            ],
+                        ),
+                        ("session_validate", [session_id, now_ms]) => (
+                            self.host.crypto.auth_session_validate,
+                            vec![self.lower_expr(session_id)?, self.lower_expr(now_ms)?],
+                        ),
+                        ("magic_link_issue", [user_id, now_ms, ttl_ms]) => (
+                            self.host.crypto.auth_magic_link_issue,
+                            vec![
+                                self.lower_expr(user_id)?,
+                                self.lower_expr(now_ms)?,
+                                self.lower_expr(ttl_ms)?,
+                            ],
+                        ),
+                        ("magic_link_consume", [token, now_ms, ttl_ms]) => (
+                            self.host.crypto.auth_magic_link_consume,
+                            vec![
+                                self.lower_expr(token)?,
+                                self.lower_expr(now_ms)?,
+                                self.lower_expr(ttl_ms)?,
+                            ],
+                        ),
+                        ("oauth_begin", [provider]) => (
+                            self.host.crypto.auth_oauth_begin,
+                            vec![self.lower_expr(provider)?],
+                        ),
+                        ("oauth_finish", [state, subject, now_ms, ttl_ms]) => (
+                            self.host.crypto.auth_oauth_finish,
+                            vec![
+                                self.lower_expr(state)?,
+                                self.lower_expr(subject)?,
+                                self.lower_expr(now_ms)?,
+                                self.lower_expr(ttl_ms)?,
+                            ],
+                        ),
+                        ("session_show", [session]) => (
+                            self.host.crypto.auth_session_show,
+                            vec![self.lower_expr(session)?],
+                        ),
+                        ("session_user", [session]) => (
+                            self.host.crypto.auth_session_user,
+                            vec![self.lower_expr(session)?],
+                        ),
+                        ("session_cookie", [session]) => (
+                            self.host.crypto.auth_session_cookie,
+                            vec![self.lower_expr(session)?],
+                        ),
+                        ("session_id", [session]) => (
+                            self.host.crypto.auth_session_id,
+                            vec![self.lower_expr(session)?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if (module == "app" || module == "core.web")
+                    && matches!(method.as_str(), "auth" | "auth_oauth" | "auth_routes" | "auth_show")
+                {
+                    let (host_id, arg_values): (FuncId, Vec<Value>) = match (method.as_str(), args.as_slice()) {
+                        ("auth", [users_table]) => (
+                            self.host.crypto.app_auth,
+                            vec![self.lower_expr(users_table)?],
+                        ),
+                        ("auth_oauth", [auth, providers]) => (
+                            self.host.crypto.app_auth_oauth,
+                            vec![self.lower_expr(auth)?, self.lower_expr(providers)?],
+                        ),
+                        ("auth_routes", [auth]) => (
+                            self.host.crypto.app_auth_routes,
+                            vec![self.lower_expr(auth)?],
+                        ),
+                        ("auth_show", [auth]) => (
+                            self.host.crypto.app_auth_show,
+                            vec![self.lower_expr(auth)?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.vault" || module == "core.vault.expert" {
@@ -12658,7 +12943,7 @@ impl LowerCtx<'_, '_> {
                     let fail_block = self.b.create_block();
                     let merge = self.b.create_block();
                     self.b.append_block_param(merge, types::I64);
-                    let is_result_option = Self::uses_result_option_abi(value);
+                    let is_result_option = self.uses_result_option_abi(value);
                     let present = if is_result_option {
                         self.call_host(self.host.result_is_ok, &[status])
                     } else {
@@ -13560,6 +13845,8 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     if is_datatree {
                         self.pack_datatree_enum(disc, None)
+                    } else if enum_type == "AuthError" {
+                        Ok(self.pack_auth_error(disc, None))
                     } else {
                         Ok(self.b.ins().iconst(types::I64, disc))
                     }
@@ -13573,6 +13860,8 @@ impl LowerCtx<'_, '_> {
                     let payload = self.lower_expr(&values[0].value)?;
                     if is_datatree {
                         self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
+                    } else if enum_type == "AuthError" {
+                        Ok(self.pack_auth_error(disc, Some(payload)))
                     } else {
                         self.pack_enum_scalar(disc, payload, &payload_ty)
                     }
@@ -13595,12 +13884,19 @@ impl LowerCtx<'_, '_> {
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let set_s = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_str, self.b.func);
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let disc_v = self.b.ins().iconst(types::I64, disc);
                     self.b.ins().call(set_i, &[handle, zero, disc_v]);
                     for (i, (_name, arg)) in fields.iter().enumerate() {
                         let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
                         let payload = self.lower_expr(&arg.value)?;
+                        if Self::is_string_abi_ty(&arg.value.ty) {
+                            self.b.ins().call(set_s, &[handle, idx, payload]);
+                            continue;
+                        }
                         let bits = match self.meta.clif_ty(&arg.value.ty).or_else(|| clif_ty(&arg.value.ty)) {
                             Some(ty) if ty == types::I64 => payload,
                             Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
@@ -14361,7 +14657,7 @@ impl LowerCtx<'_, '_> {
                     .enum_type
                     .as_deref()
                     .or_else(|| user_type_name(&subj.ty));
-                self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)
+                self.lower_pattern_condition(value, &pattern.pattern, enum_name)
             }
             TExprKind::OptionLift2 { f, a, b } => {
                 self.lower_option_lift2(f, a, b, &expr.ty)
@@ -14621,8 +14917,13 @@ impl LowerCtx<'_, '_> {
         };
         let inner_ty = inner.as_ref().clone();
         let packed = self.lower_expr(scrutinee)?;
+        let result_abi = self.uses_result_option_abi(scrutinee);
         let zero = self.b.ins().iconst(types::I64, 0);
-        let is_some = self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+        let is_some = if result_abi {
+            self.call_host(self.host.result_is_ok, &[packed])
+        } else {
+            self.b.ins().icmp(IntCC::NotEqual, packed, zero)
+        };
         let merge = self.b.create_block();
         let mut any_reaches_merge = false;
         let mut remaining = self.b.create_block();
@@ -14643,6 +14944,9 @@ impl LowerCtx<'_, '_> {
             let next = self.b.create_block();
             let condition = if want_some {
                 is_some
+            } else if result_abi {
+                let zero_b = self.b.ins().iconst(types::I8, 0);
+                self.b.ins().icmp(IntCC::Equal, is_some, zero_b)
             } else {
                 self.b.ins().icmp(IntCC::Equal, packed, zero)
             };
@@ -14651,7 +14955,11 @@ impl LowerCtx<'_, '_> {
             self.b.seal_block(then_block);
             let mut bound = None;
             if let Some(name) = binding.filter(|name| *name != "_") {
-                let value = self.unpack_option_payload(packed, &inner_ty)?;
+                let value = self.unpack_option_payload_with_abi(
+                    packed,
+                    &inner_ty,
+                    result_abi,
+                )?;
                 let clif = self.meta.clif_ty(&inner_ty).unwrap_or(types::I64);
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, value);
@@ -16456,12 +16764,19 @@ impl LowerCtx<'_, '_> {
     }
 
     /// Pack a Present payload into the JIT Option i64 ABI.
-    /// IntN uses a one-based result-arena handle; legacy payloads use `bits + 1`.
     fn pack_option_payload(&mut self, payload: Value, inner: &Type) -> Result<Value, String> {
-        if matches!(inner, Type::IntN { .. }) {
-            let ok = self.b.ins().iconst(types::I8, 1);
-            return Ok(self.call_host(self.host.result_new_i64, &[ok, payload]));
-        }
+        self.pack_option_payload_with_abi(payload, inner, false)
+    }
+
+    /// Pack an Option payload with an explicit carrier choice. Optional
+    /// NumericDate claims and IntN use the tagged result arena; legacy options
+    /// retain their existing packed carrier.
+    fn pack_option_payload_with_abi(
+        &mut self,
+        payload: Value,
+        inner: &Type,
+        result_abi: bool,
+    ) -> Result<Value, String> {
         let bits = match clif_ty(inner) {
             Some(ty) if ty == types::F64 => self.b.ins().bitcast(
                 types::I64,
@@ -16484,12 +16799,27 @@ impl LowerCtx<'_, '_> {
                 return Err(format!("jit Option payload unsupported: {inner:?} ({other:?})"));
             }
         };
+        if result_abi || matches!(inner, Type::IntN { .. }) {
+            let ok = self.b.ins().iconst(types::I8, 1);
+            return Ok(self.call_host(self.host.result_new_i64, &[ok, bits]));
+        }
         let one = self.b.ins().iconst(types::I64, 1);
         Ok(self.b.ins().iadd(bits, one))
     }
 
     fn unpack_option_payload(&mut self, packed: Value, inner: &Type) -> Result<Value, String> {
-        if matches!(inner, Type::IntN { .. }) {
+        self.unpack_option_payload_with_abi(packed, inner, false)
+    }
+
+    /// Unpack an Option payload with the same explicit carrier choice used by
+    /// `pack_option_payload_with_abi`.
+    fn unpack_option_payload_with_abi(
+        &mut self,
+        packed: Value,
+        inner: &Type,
+        result_abi: bool,
+    ) -> Result<Value, String> {
+        if result_abi || matches!(inner, Type::IntN { .. }) {
             return Ok(self.call_host(self.host.result_get_i64, &[packed]));
         }
         let one = self.b.ins().iconst(types::I64, 1);
@@ -16519,6 +16849,16 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn absent_option_value(&mut self, inner: &Type, result_abi: bool) -> Value {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        if result_abi || matches!(inner, Type::IntN { .. }) {
+            let tag = self.b.ins().iconst(types::I8, 0);
+            self.call_host(self.host.result_new_i64, &[tag, zero])
+        } else {
+            zero
+        }
+    }
+
     fn lower_option_zip(
         &mut self,
         recv: &TExpr,
@@ -16543,24 +16883,39 @@ impl LowerCtx<'_, '_> {
         }
         let a_val = self.lower_expr(recv)?;
         let b_val = self.lower_expr(other)?;
+        let a_result_abi = self.uses_result_option_abi(recv);
+        let b_result_abi = self.uses_result_option_abi(other);
         let none_block = self.b.create_block();
         let check_b = self.b.create_block();
         let some_block = self.b.create_block();
         let merge = self.b.create_block();
         self.b.append_block_param(merge, types::I64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let a_none = self.b.ins().icmp(IntCC::Equal, a_val, zero);
+        let a_none = if a_result_abi {
+            let a_some = self.call_host(self.host.result_is_ok, &[a_val]);
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, a_some, zero_b)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, a_val, zero)
+        };
         self.b.ins().brif(a_none, none_block, &[], check_b, &[]);
 
         self.b.switch_to_block(check_b);
         self.b.seal_block(check_b);
-        let b_none = self.b.ins().icmp(IntCC::Equal, b_val, zero);
+        let b_none = if b_result_abi {
+            let b_some = self.call_host(self.host.result_is_ok, &[b_val]);
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, b_some, zero_b)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, b_val, zero)
+        };
         self.b.ins().brif(b_none, none_block, &[], some_block, &[]);
 
         self.b.switch_to_block(some_block);
         self.b.seal_block(some_block);
-        let pa = self.unpack_option_payload(a_val, inner_a)?;
-        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        let pa = self.unpack_option_payload_with_abi(a_val, inner_a, a_result_abi)?;
+        let pb = self.unpack_option_payload_with_abi(b_val, inner_b, b_result_abi)?;
         // Build the named-tuple record in declaration field order (a, b).
         let n = self.b.ins().iconst(types::I64, 2);
         let handle = self.call_host(self.host.struct_new, &[n]);
@@ -16587,6 +16942,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(none_block);
         self.b.seal_block(none_block);
+        let zero = self.b.ins().iconst(types::I64, 0);
         self.b.ins().jump(merge, &[zero]);
 
         self.b.switch_to_block(merge);
@@ -16623,35 +16979,57 @@ impl LowerCtx<'_, '_> {
         let p1 = TIR::local_place(&lam.source_params[1]);
         let a_val = self.lower_expr(a)?;
         let b_val = self.lower_expr(b)?;
+        let a_result_abi = self.uses_result_option_abi(a);
+        let b_result_abi = self.uses_result_option_abi(b);
         let none_block = self.b.create_block();
         let check_b = self.b.create_block();
         let some_block = self.b.create_block();
         let merge = self.b.create_block();
         self.b.append_block_param(merge, types::I64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let a_none = self.b.ins().icmp(IntCC::Equal, a_val, zero);
+        let a_none = if a_result_abi {
+            let a_some = self.call_host(self.host.result_is_ok, &[a_val]);
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, a_some, zero_b)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, a_val, zero)
+        };
         self.b.ins().brif(a_none, none_block, &[], check_b, &[]);
 
         self.b.switch_to_block(check_b);
         self.b.seal_block(check_b);
-        let b_none = self.b.ins().icmp(IntCC::Equal, b_val, zero);
+        let b_none = if b_result_abi {
+            let b_some = self.call_host(self.host.result_is_ok, &[b_val]);
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, b_some, zero_b)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, b_val, zero)
+        };
         self.b.ins().brif(b_none, none_block, &[], some_block, &[]);
 
         self.b.switch_to_block(some_block);
         self.b.seal_block(some_block);
-        let pa = self.unpack_option_payload(a_val, inner_a)?;
-        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        let pa = self.unpack_option_payload_with_abi(a_val, inner_a, a_result_abi)?;
+        let pb = self.unpack_option_payload_with_abi(b_val, inner_b, b_result_abi)?;
         let mapped = self.with_bound_local(&p0, inner_a.as_ref().clone(), pa, |this| {
             this.with_bound_local(&p1, inner_b.as_ref().clone(), pb, |this| {
                 this.lower_expr(body)
             })
         })?;
-        let present = self.pack_option_payload(mapped, inner_ret)?;
+        let output_result_abi = (a_result_abi || b_result_abi)
+            && matches!(inner_ret.as_ref(), Type::Int);
+        let present = self.pack_option_payload_with_abi(
+            mapped,
+            inner_ret,
+            output_result_abi,
+        )?;
         self.b.ins().jump(merge, &[present]);
 
         self.b.switch_to_block(none_block);
         self.b.seal_block(none_block);
-        self.b.ins().jump(merge, &[zero]);
+        let absent = self.absent_option_value(inner_ret, output_result_abi);
+        self.b.ins().jump(merge, &[absent]);
 
         self.b.switch_to_block(merge);
         self.b.seal_block(merge);
@@ -16666,26 +17044,39 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let packed = self.lower_expr(recv)?;
+        let result_abi = self.uses_result_option_abi(recv);
+        let output_result_abi = result_abi && matches!(&body_expr.ty, Type::Int);
         let none_block = self.b.create_block();
         let some_block = self.b.create_block();
         let merge = self.b.create_block();
         self.b.append_block_param(merge, types::I64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let is_none = self.b.ins().icmp(IntCC::Equal, packed, zero);
+        let is_none = if result_abi {
+            let is_some = self.call_host(self.host.result_is_ok, &[packed]);
+            let zero = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, is_some, zero)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, packed, zero)
+        };
         self.b.ins().brif(is_none, none_block, &[], some_block, &[]);
 
         self.b.switch_to_block(some_block);
         self.b.seal_block(some_block);
-        let payload = self.unpack_option_payload(packed, inner)?;
+        let payload = self.unpack_option_payload_with_abi(packed, inner, result_abi)?;
         let mapped = self.with_bound_local(&param_place, inner.clone(), payload, |this| {
             this.lower_expr(body_expr)
         })?;
-        let present = self.pack_option_payload(mapped, &body_expr.ty)?;
+        let present = self.pack_option_payload_with_abi(
+            mapped,
+            &body_expr.ty,
+            output_result_abi,
+        )?;
         self.b.ins().jump(merge, &[present]);
 
         self.b.switch_to_block(none_block);
         self.b.seal_block(none_block);
-        self.b.ins().jump(merge, &[zero]);
+        let absent = self.absent_option_value(&body_expr.ty, output_result_abi);
+        self.b.ins().jump(merge, &[absent]);
 
         self.b.switch_to_block(merge);
         self.b.seal_block(merge);
@@ -19791,7 +20182,7 @@ impl LowerCtx<'_, '_> {
                         Type::IntN { signed: false, .. } => 4,
                         _ => return Err(format!("jit print type unsupported: Option<{inner_ty:?}>")),
                     };
-                    if Self::uses_result_option_abi(inner) {
+                    if self.uses_result_option_abi(inner) {
                         kind += 10;
                     }
                     let flag = self.b.ins().iconst(types::I64, kind);
@@ -21193,11 +21584,6 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let f64_heap = self
-            .meta
-            .enum_variant_payload_types(enum_name, variant)
-            .and_then(|tys| tys.first().cloned())
-            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
         let subject = self.lower_expr(subj)?;
         let ret_ty = clif_ty(result_ty).ok_or("jit if-expr result type unsupported")?;
         let then_block = self.b.create_block();
@@ -21208,7 +21594,6 @@ impl LowerCtx<'_, '_> {
             subject,
             &pattern.pattern,
             Some(enum_name),
-            f64_heap,
         )?;
         self.b
             .ins()
@@ -21216,28 +21601,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
-            let payload_ty = self
-                .meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .cloned()
-                .unwrap_or(Type::Int);
-            let payload = if f64_heap {
-                self.unpack_enum_heap_payload(subject, &payload_ty)?
-            } else {
-                self.unpack_enum_scalar(subject, &payload_ty)?
-            };
-            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-            let var = self.fresh_var(payload_clif);
-            self.b.def_var(var, payload);
-            let key = TIR::local_place(name);
-            let old_var = self.vars.insert(key.clone(), var);
-            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-            Some((key, old_var, old_ty))
-        } else {
-            None
-        };
+        let bound = self.bind_enum_payloads(subject, enum_name, variant, bindings)?;
         self.lower_stmts_scoped(then_body)?;
         let mut then_reaches_merge = !self.dead;
         if then_reaches_merge {
@@ -21248,24 +21612,7 @@ impl LowerCtx<'_, '_> {
                 then_reaches_merge = false;
             }
         }
-        if let Some((key, old_var, old_ty)) = bound {
-            match old_var {
-                Some(var) => {
-                    self.vars.insert(key.clone(), var);
-                }
-                None => {
-                    self.vars.remove(&key);
-                }
-            }
-            match old_ty {
-                Some(ty) => {
-                    self.var_tys.insert(key, ty);
-                }
-                None => {
-                    self.var_tys.remove(&key);
-                }
-            }
-        }
+        self.restore_enum_payloads(bound);
 
         self.b.switch_to_block(else_block);
         self.b.seal_block(else_block);
@@ -21323,11 +21670,6 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let f64_heap = self
-            .meta
-            .enum_variant_payload_types(enum_name, variant)
-            .and_then(|tys| tys.first().cloned())
-            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
         let subject = self.lower_expr(subj)?;
         let then_block = self.b.create_block();
         let else_block = self.b.create_block();
@@ -21336,7 +21678,6 @@ impl LowerCtx<'_, '_> {
             subject,
             &pattern.pattern,
             Some(enum_name),
-            f64_heap,
         )?;
         self.b
             .ins()
@@ -21344,47 +21685,9 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
-            let payload_ty = self
-                .meta
-                .enum_variant_payload_types(enum_name, variant)
-                .and_then(|tys| tys.first())
-                .cloned()
-                .unwrap_or(Type::Int);
-            let payload = if f64_heap {
-                self.unpack_enum_heap_payload(subject, &payload_ty)?
-            } else {
-                self.unpack_enum_scalar(subject, &payload_ty)?
-            };
-            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
-            let var = self.fresh_var(payload_clif);
-            self.b.def_var(var, payload);
-            let key = TIR::local_place(name);
-            let old_var = self.vars.insert(key.clone(), var);
-            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
-            Some((key, old_var, old_ty))
-        } else {
-            None
-        };
+        let bound = self.bind_enum_payloads(subject, enum_name, variant, bindings)?;
         then_action(self)?;
-        if let Some((key, old_var, old_ty)) = bound {
-            match old_var {
-                Some(var) => {
-                    self.vars.insert(key.clone(), var);
-                }
-                None => {
-                    self.vars.remove(&key);
-                }
-            }
-            match old_ty {
-                Some(ty) => {
-                    self.var_tys.insert(key, ty);
-                }
-                None => {
-                    self.var_tys.remove(&key);
-                }
-            }
-        }
+        self.restore_enum_payloads(bound);
         let then_dead = self.dead;
         if !then_dead {
             self.b.ins().jump(merge_block, &[]);
@@ -21545,7 +21848,7 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
-    /// `if opt == Val(x)` — Option ABI is 0 = None, value+1 = Some.
+    /// `if opt == Val(x)` — use the option's declared JIT carrier.
     fn lower_option_present_if_let(
         &mut self,
         pattern: &TPattern,
@@ -21561,8 +21864,13 @@ impl LowerCtx<'_, '_> {
         };
         let inner_ty = inner.as_ref().clone();
         let packed = self.lower_expr(subj)?;
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let is_some = self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+        let result_abi = self.uses_result_option_abi(subj);
+        let is_some = if result_abi {
+            self.call_host(self.host.result_is_ok, &[packed])
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::NotEqual, packed, zero)
+        };
 
         let then_block = self.b.create_block();
         let else_block = self.b.create_block();
@@ -21573,7 +21881,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let payload = self.unpack_option_payload(packed, &inner_ty)?;
+        let payload = self.unpack_option_payload_with_abi(packed, &inner_ty, result_abi)?;
         let place = TIR::local_place(binding);
         let clif = clif_ty(&inner_ty).unwrap_or(types::I64);
         let old_var = self.vars.remove(&place);
@@ -22816,7 +23124,14 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
         "TextWidth" => &["ambiguous", "controls"],
-        "Claims" => &["subject", "audience", "issuer", "expires_at", "issued_at"],
+        "Claims" => &[
+            "subject",
+            "audience",
+            "issuer",
+            "expires_at",
+            "not_before",
+            "issued_at",
+        ],
         "Rotation" => &["previous", "current"],
         _ => return None,
     };

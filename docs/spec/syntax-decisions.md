@@ -3394,10 +3394,13 @@ index, not a substitute for that law.
   clock_skew:])` accepts HS256 only and requires valid `exp` and `aud` claims.
   `verify_paseto(token, key:, audience:, [issuer:, clock_skew:, footer:,
   implicit:])` accepts PASETO v4.public only, verifies Ed25519 over PAE, and
-  applies the same claims policy. Unknown algorithms, versions, and purposes
-  fail closed. Both return `Result<Claims, AuthError>`; `Claims.audience`
-  preserves the validated audience for downstream authorization. Future
-  `app.auth` reuses these functions rather than creating another mechanism.
+  applies the same claims policy. Optional `nbf` is checked with the same
+  signed NumericDate policy; `iat`, `nbf`, and `exp` remain exact integer
+  claims, while `clock_skew` keeps exact nanoseconds. Unknown algorithms,
+  versions, and purposes fail closed. Both return `Result<Claims, AuthError>`;
+  `Claims.audience` preserves the validated audience for downstream
+  authorization. Future `app.auth` reuses these functions rather than
+  creating another mechanism.
 - **D-SYNC1=A**: `core.sync` CRDT value types — `SyncText`,
   `SyncMap<K,V>`, `SyncList<T>`, `SyncCounter`; `#Codable`,
   deterministic merge, ride the live-query channel via

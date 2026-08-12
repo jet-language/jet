@@ -216,7 +216,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "max_reply_line_bytes" | "max_reply_lines" | "max_capabilities" |
             "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
-        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
+        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "not_before" | "issued_at"),
         "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
         "Auth" => matches!(member, "users_table"),
         n if n == Syntax::TYPE_TYPE_INFO => {
@@ -319,6 +319,7 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
+            "not_before" => Some(Type::Option(Box::new(Type::Int))),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };

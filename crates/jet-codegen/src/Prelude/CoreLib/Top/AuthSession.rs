@@ -58,6 +58,19 @@ fn jet_auth_valid_identifier(value: &str, max: usize) -> bool {
         && value.chars().all(|c| !c.is_control())
 }
 
+// Secret-bearing session values must not use an early-exit string equality.
+// The length is public framing; every byte position through the longer input
+// is still visited before the result is returned.
+fn jet_auth_constant_time_text_eq(left: &str, right: &str) -> bool {
+    let mut difference = u8::from(left.len() != right.len());
+    for index in 0..left.len().max(right.len()) {
+        let a = left.as_bytes().get(index).copied().unwrap_or(0);
+        let b = right.as_bytes().get(index).copied().unwrap_or(0);
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
 fn jet_auth_delivery_capability(value: &str) -> Option<String> {
     if value.len() > 254 || value.matches('@').count() != 1 {
         return None;
@@ -174,7 +187,10 @@ fn jet_auth_password_login(
     let ok = store
         .users
         .iter()
-        .any(|user| user.user_id == user_id && user.password_hash == password_hash);
+        .any(|user| {
+            user.user_id == user_id
+                && jet_auth_constant_time_text_eq(&user.password_hash, &password_hash)
+        });
     if !ok {
         return Err("invalid credentials".to_string());
     }
@@ -195,7 +211,7 @@ fn jet_auth_session_validate(
     store
         .sessions
         .iter()
-        .find(|session| &session.id == session_id)
+        .find(|session| jet_auth_constant_time_text_eq(&session.id, session_id))
         .cloned()
         .ok_or_else(|| "missing: session".to_string())
         .and_then(|session| {
@@ -252,7 +268,9 @@ fn jet_auth_magic_link_consume(
     let idx = store
         .magic_tokens
         .iter()
-        .position(|entry| entry.token == token && now_ms < entry.expires_at)
+        .position(|entry| {
+            jet_auth_constant_time_text_eq(&entry.token, &token) && now_ms < entry.expires_at
+        })
         .ok_or_else(|| "token expired".to_string())?;
     let entry = store.magic_tokens[idx].clone();
     let Some(user) = store.users.iter().find(|user| user.user_id == entry.user_id) else {
@@ -310,7 +328,7 @@ fn jet_auth_oauth_finish(
     let idx = store
         .oauth_states
         .iter()
-        .position(|entry| entry.state == state)
+        .position(|entry| jet_auth_constant_time_text_eq(&entry.state, &state))
         .ok_or_else(|| "missing: oauth_state".to_string())?;
     let provider = store.oauth_states.remove(idx).provider;
     let user_id = format!("{provider}:{subject}");
@@ -385,4 +403,87 @@ fn jet_app_auth_show(auth: &JetAuthApp) -> String {
         auth.users_table,
         auth.providers.join(",")
     )
+}
+
+// Resident/interpreter adapters call these wrappers so AuthSession.rs remains
+// the one policy and state seam. The wrappers expose no alternate behavior.
+pub fn auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
+    jet_auth_register_user(user_id, password_hash)
+}
+
+pub fn auth_password_login(
+    user_id: String,
+    password_hash: String,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<JetAuthSession, String> {
+    jet_auth_password_login(user_id, password_hash, now_ms, ttl_ms)
+}
+
+pub fn auth_session_validate(
+    session_id: &String,
+    now_ms: i64,
+) -> Result<JetAuthSession, String> {
+    jet_auth_session_validate(session_id, now_ms)
+}
+
+pub fn auth_magic_link_issue(
+    user_id: String,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<String, String> {
+    jet_auth_magic_link_issue(user_id, now_ms, ttl_ms)
+}
+
+pub fn auth_magic_link_consume(
+    token: String,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<JetAuthSession, String> {
+    jet_auth_magic_link_consume(token, now_ms, ttl_ms)
+}
+
+pub fn auth_oauth_begin(provider: String) -> Result<String, String> {
+    jet_auth_oauth_begin(provider)
+}
+
+pub fn auth_oauth_finish(
+    state: String,
+    subject: String,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<JetAuthSession, String> {
+    jet_auth_oauth_finish(state, subject, now_ms, ttl_ms)
+}
+
+pub fn auth_session_show(session: &JetAuthSession) -> String {
+    jet_auth_session_show(session)
+}
+
+pub fn auth_session_user(session: &JetAuthSession) -> String {
+    jet_auth_session_user(session)
+}
+
+pub fn auth_session_cookie(session: &JetAuthSession) -> String {
+    jet_auth_session_cookie(session)
+}
+
+pub fn auth_session_id(session: &JetAuthSession) -> String {
+    jet_auth_session_id(session)
+}
+
+pub fn app_auth(users_table: String) -> JetAuthApp {
+    jet_app_auth(users_table)
+}
+
+pub fn app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp {
+    jet_app_auth_oauth(auth, providers)
+}
+
+pub fn app_auth_routes(auth: &JetAuthApp) -> String {
+    jet_app_auth_routes(auth)
+}
+
+pub fn app_auth_show(auth: &JetAuthApp) -> String {
+    jet_app_auth_show(auth)
 }

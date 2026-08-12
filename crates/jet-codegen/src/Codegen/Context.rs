@@ -2770,6 +2770,9 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
                 field("actual", Type::Option(Box::new(Type::String))),
             ]),
         ));
+        // Keep the existing discriminants stable; append the new unit
+        // variant to the canonical AuthError surface.
+        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
         for (variant, _) in &variants {
             cx.variant_owner.insert(variant.clone(), "AuthError".to_string());
         }

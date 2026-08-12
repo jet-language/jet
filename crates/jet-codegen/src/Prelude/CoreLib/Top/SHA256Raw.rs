@@ -13,7 +13,7 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         0xc67178f2,
     ];
     const H0: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53, 0x510e527f, 0x9b05688c,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
         0x1f83d9ab, 0x5be0cd19,
     ];
     let mut state = H0;

@@ -12235,6 +12235,22 @@ fn core_auth_strict_jwt_and_paseto_hostile_matrix() {
     let dir = std::env::temp_dir().join(format!("jet_core_auth_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let high_range = auth_test_jwt(r#"{"aud":"gateway","exp":9007199254740993}"#);
+    let lower_bound_expiry = auth_test_jwt(r#"{"aud":"gateway","exp":-9223372036854775}"#);
+    let below_lower_bound_expiry = auth_test_jwt(r#"{"aud":"gateway","exp":-9223372036854776}"#);
+    let overflow_expiry = auth_test_jwt(r#"{"aud":"gateway","exp":9223372036854775808}"#);
+    let negative_zero_expiry = auth_test_jwt(r#"{"aud":"gateway","exp":-0}"#);
+    let negative_zero_issued_at =
+        auth_test_jwt(r#"{"aud":"gateway","exp":4102444800,"iat":-0}"#);
+    let unicode_whitespace = auth_test_jwt(
+        "{\"aud\":\"gateway\",\"exp\":\u{00a0}4102444800}",
+    );
+    let noncanonical_payload =
+        auth_test_noncanonical_b64url(br#"{"aud":"gateway","iss":"partner","exp":4102444800}"#);
+    let noncanonical_base64 = auth_test_jwt_signed(
+        &auth_test_b64url(br#"{"alg":"HS256","typ":"JWT"}"#),
+        &noncanonical_payload,
+    );
     let source = r#"
 use core.auth as auth
 
@@ -12254,8 +12270,7 @@ fn run() {
     object_expiry := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjp7Im4iOjQxMDI0NDQ4MDB9fQ.X1BTPgGav4pUqxQVq2uMYt4_VYEHfMRGP1aI5V50k2g"
     wrong_issuer := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiaXNzIjoib3RoZXIiLCJleHAiOjQxMDI0NDQ4MDB9.ZVsh0LK7bvsylhpzu4i8TrgthCbSaelpKaoxWqF5-G4"
     expired := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo5NDY2ODQ4MDB9.P-GYVR6Tc1zwSdZCEX6kbv4eSryvnxlevXfHU0MJMEg"
-    overflow_expiry := "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo5MjIzMzcyMDM2ODU0Nzc1MDAwfQ.jHiJ1xzrrSVPwIEX-EujI-xiDDdgc7AvP6HsMWrb_L8"
-    noncanonical_base64 := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrZ"
+    overflow_expiry := "@OVERFLOW_EXPIRY"
     if auth.verify_jwt(valid_jwt, key: jwt_key, audience: "gateway", issuer: "partner", clock_skew: no_skew) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
@@ -12282,7 +12297,58 @@ fn run() {
     if auth.verify_jwt(wrong_issuer, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("issuer-accepted") } .Err(_) -> { print("issuer-rejected") } }
     if auth.verify_jwt(expired, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("expired-accepted") } .Err(_) -> { print("expired-rejected") } }
     if auth.verify_jwt(overflow_expiry, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("overflow-accepted") } .Err(_) -> { print("overflow-rejected") } }
-    if auth.verify_jwt(noncanonical_base64, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("noncanonical-accepted") } .Err(_) -> { print("noncanonical-rejected") } }
+    if auth.verify_jwt("@LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("lower-bound-accepted") }
+        .Err(error) -> { if error == { .TokenExpired -> { print("lower-bound-expired") } else -> { print("lower-bound-wrong-error") } } }
+    }
+    if auth.verify_jwt("@BELOW_LOWER_BOUND_EXPIRY", key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("below-lower-bound-accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("below-lower-bound-malformed") }
+                .TokenExpired -> { print("below-lower-bound-expired") }
+                else -> { print("below-lower-bound-wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@HIGH_RANGE", key: jwt_key, audience: "gateway") == { .Ok(claims) -> { print("high-range:{claims.expires_at}") } .Err(_) -> { print("high-range-rejected") } }
+    if auth.verify_jwt("@NEGATIVE_ZERO_EXPIRY", key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("negative-zero-expiry-accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(reason) -> { print("negative-zero-expiry:{reason}") }
+                else -> { print("negative-zero-expiry-wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@NEGATIVE_ZERO_ISSUED_AT", key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("negative-zero-iat-accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(reason) -> { print("negative-zero-iat:{reason}") }
+                else -> { print("negative-zero-iat-wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@UNICODE_WHITESPACE", key: jwt_key, audience: "gateway") == {
+        .Ok(_) -> { print("unicode-whitespace-accepted") }
+        .Err(error) -> {
+            if error == {
+                .DecodeError(reason) -> { print("unicode-whitespace:{reason}") }
+                else -> { print("unicode-whitespace-wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@NONCANONICAL_BASE64", key: jwt_key, audience: "gateway", issuer: "partner") == {
+        .Ok(_) -> { print("noncanonical-accepted") }
+        .Err(error) -> {
+            if error == {
+                .DecodeError(reason) -> { print("noncanonical:{reason}") }
+                .InvalidSignature -> { print("noncanonical-invalid-signature") }
+                else -> { print("noncanonical-wrong-error") }
+            }
+        }
+    }
     weak_key :: [U8].{ 115, 104, 111, 114, 116 }
     if auth.verify_jwt(valid_jwt, key: weak_key, audience: "gateway") == { .Ok(_) -> { print("weak-key-accepted") } .Err(error) -> { if error == { .WeakKey -> { print("weak-key-rejected") } else -> { print("weak-key-wrong-error") } } } }
 
@@ -12307,14 +12373,277 @@ fn run() {
     if auth.verify_paseto(paseto, key: zero_key, audience: "gateway") == { .Ok(_) -> { print("zero-paseto-key-accepted") } .Err(_) -> { print("zero-paseto-key-rejected") } }
     if auth.verify_paseto(bad_signature, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == { .Ok(_) -> { print("bad-signature-accepted") } .Err(_) -> { print("bad-signature-rejected") } }
 }
-"#;
-    let (code, stdout, stderr) = build_and_run(&dir, "strict_tokens", source, &[], None);
+"#
+    .replace("@HIGH_RANGE", &high_range)
+    .replace("@LOWER_BOUND_EXPIRY", &lower_bound_expiry)
+    .replace("@BELOW_LOWER_BOUND_EXPIRY", &below_lower_bound_expiry)
+    .replace("@OVERFLOW_EXPIRY", &overflow_expiry)
+    .replace("@NEGATIVE_ZERO_EXPIRY", &negative_zero_expiry)
+    .replace("@NEGATIVE_ZERO_ISSUED_AT", &negative_zero_issued_at)
+    .replace("@UNICODE_WHITESPACE", &unicode_whitespace)
+    .replace("@NONCANONICAL_BASE64", &noncanonical_base64);
+    let (code, stdout, stderr) = build_and_run(&dir, "strict_tokens", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "ok:gateway\naud:gateway:billing\nrejected\nrejected\nrejected\nrejected\nduplicate-header-rejected\nescaped-duplicate-header-rejected\nduplicate-audience-rejected\nescaped-duplicate-audience-rejected\nobject-audience-rejected\nobject-expiry-rejected\nissuer-rejected\nexpired-rejected\noverflow-rejected\nnoncanonical-rejected\nweak-key-rejected\nok:gateway\nrejected\nrejected\nwrong-version-rejected\nwrong-purpose-rejected\nshort-paseto-key-rejected\nzero-paseto-key-rejected\nbad-signature-rejected\n"
+        "ok:gateway\naud:gateway:billing\nrejected\nrejected\nrejected\nrejected\nduplicate-header-rejected\nescaped-duplicate-header-rejected\nduplicate-audience-rejected\nescaped-duplicate-audience-rejected\nobject-audience-rejected\nobject-expiry-rejected\nissuer-rejected\nexpired-rejected\noverflow-rejected\nlower-bound-expired\nbelow-lower-bound-expired\nhigh-range:9007199254740993\nnegative-zero-expiry:claim `exp` must be an exact integer\nnegative-zero-iat:claim `iat` must be an exact integer\nunicode-whitespace:expected a JSON value\nnoncanonical:non-canonical base64 trailing bits\nweak-key-rejected\nok:gateway\nrejected\nrejected\nwrong-version-rejected\nwrong-purpose-rejected\nshort-paseto-key-rejected\nzero-paseto-key-rejected\nbad-signature-rejected\n"
     );
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_auth_jwt_audience_shapes_match_aot_jit_and_interpreter() {
+    let dir = std::env::temp_dir().join(format!("jet_core_auth_audience_shapes_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let scalar = auth_test_jwt(r#"{"aud":"gateway","exp":4102444800}"#);
+    let list = auth_test_jwt(r#"{"aud":["gateway","billing"],"exp":4102444800}"#);
+    let wrong_list = auth_test_jwt(r#"{"aud":["billing"],"exp":4102444800}"#);
+    let empty = auth_test_jwt(r#"{"aud":[],"exp":4102444800}"#);
+    let mixed = auth_test_jwt(r#"{"aud":["gateway",7],"exp":4102444800}"#);
+    let nested = auth_test_jwt(r#"{"aud":[["gateway"]],"exp":4102444800}"#);
+    let future_not_before =
+        auth_test_jwt(r#"{"aud":"gateway","exp":4102444800,"nbf":4102444800}"#);
+    let past_not_before =
+        auth_test_jwt(r#"{"aud":"gateway","exp":4102444800,"nbf":1700000000}"#);
+    let src = r#"
+use core.auth as auth
+
+fn run() {
+    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    if auth.verify_jwt("@SCALAR", key: key, audience: "gateway") == {
+        .Ok(claims) -> { print("scalar:{claims.audience}") }
+        .Err(_) -> { print("scalar:rejected") }
+    }
+    if auth.verify_jwt("@LIST", key: key, audience: "gateway") == {
+        .Ok(claims) -> { print("list:{claims.audience}") }
+        .Err(_) -> { print("list:rejected") }
+    }
+    if auth.verify_jwt("@WRONG_LIST", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("wrong:accepted") }
+        .Err(error) -> {
+            if error == {
+                .WrongAudience(expected, actual) -> { print("wrong:{expected}:{actual}") }
+                else -> { print("wrong:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@EMPTY", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("empty:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("empty:malformed") }
+                else -> { print("empty:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@MIXED", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("mixed:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("mixed:malformed") }
+                else -> { print("mixed:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@NESTED", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("nested:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("nested:malformed") }
+                else -> { print("nested:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@FUTURE_NBF", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("future-nbf:accepted") }
+        .Err(error) -> {
+            if error == {
+                .TokenNotYetValid -> { print("future-nbf:not-yet-valid") }
+                else -> { print("future-nbf:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("@PAST_NBF", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            if claims.not_before == {
+                .Val(value) -> { print("past-nbf:{value}") }
+                else -> { print("past-nbf:none") }
+            }
+        }
+        .Err(_) -> { print("past-nbf:rejected") }
+    }
+    public_key :: [U8].{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
+    footer :: [U8].{ 107, 105, 100, 45, 49 }
+    implicit :: [U8].{ 116, 101, 110, 97, 110, 116, 45, 97 }
+    no_skew :: Duration.milliseconds(0) ?? panic("duration")
+    paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
+    if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
+        .Ok(claims) -> { print("paseto:{claims.audience}") }
+        .Err(_) -> { print("paseto:rejected") }
+    }
+    if auth.verify_paseto(paseto, key: public_key, audience: "billing", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
+        .Ok(_) -> { print("paseto-wrong:accepted") }
+        .Err(error) -> {
+            if error == {
+                .WrongAudience(expected, actual) -> { print("paseto-wrong:{expected}:{actual}") }
+                else -> { print("paseto-wrong:wrong-error") }
+            }
+        }
+    }
+}
+"#
+    .replace("@SCALAR", &scalar)
+    .replace("@LIST", &list)
+    .replace("@WRONG_LIST", &wrong_list)
+    .replace("@EMPTY", &empty)
+    .replace("@MIXED", &mixed)
+    .replace("@NESTED", &nested)
+    .replace("@FUTURE_NBF", &future_not_before)
+    .replace("@PAST_NBF", &past_not_before);
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "audience_shapes", &src, &[], None);
+    assert_eq!(code, 0, "audience-shape AOT failed: {stderr}");
+    let expected = "scalar:gateway\nlist:gateway\nwrong:gateway:billing\nempty:malformed\nmixed:malformed\nnested:malformed\nfuture-nbf:not-yet-valid\npast-nbf:1700000000\npaseto:gateway\npaseto-wrong:billing:gateway\n";
+    assert_eq!(aot_stdout, expected);
+
+    let path = dir.join("audience_shapes");
+    fs::write(&path, &src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match jet::Interpreter::dev_iteration(&shown, false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("audience-shape forced interpreter failed: {diags:?}")
+        }
+    };
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+    assert_eq!(interpreted, expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match jet::Interpreter::dev_iteration(&shown, false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("audience-shape resident JIT failed: {diags:?}")
+        }
+    };
+    assert!(jet_jit::jit_executed_for_test(), "auth parity must execute resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(), "auth parity must not deopt or fall back");
+    assert_eq!(resident, expected);
+    assert_eq!(resident, interpreted);
+    assert_eq!(resident, aot_stdout);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_auth_jwt_iat_option_int_boundaries_match_aot_jit_and_interpreter() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_auth_iat_boundaries_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let negative = auth_test_jwt(r#"{"aud":"gateway","exp":4102444800,"iat":-1}"#);
+    let maximum = auth_test_jwt(
+        r#"{"aud":"gateway","exp":4102444800,"iat":9223372036854775807}"#,
+    );
+    let src = r#"
+use core.auth as auth
+
+fn run() {
+    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    if auth.verify_jwt("@NEGATIVE", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            negative_iat :: claims.issued_at
+            negative_copy :: negative_iat
+            if negative_copy == .Val(value) {
+                print("iat-neg")
+                print(value)
+            } else {
+                print("iat-neg:none")
+            }
+        }
+        .Err(_) -> { print("iat-neg:error") }
+    }
+    if auth.verify_jwt("@MAXIMUM", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            maximum_iat :: claims.issued_at
+            maximum_copy :: maximum_iat
+            if maximum_copy == .Val(value) {
+                print("iat-max")
+                print(value)
+            } else {
+                print("iat-max:none")
+            }
+        }
+        .Err(_) -> { print("iat-max:error") }
+    }
+}
+"#
+    .replace("@NEGATIVE", &negative)
+    .replace("@MAXIMUM", &maximum);
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "iat_boundaries", &src, &[], None);
+    assert_eq!(code, 0, "iat-boundary AOT failed: {stderr}");
+    let expected = "iat-neg\n-1\niat-max\n9223372036854775807\n";
+    assert_eq!(aot_stdout, expected);
+
+    let path = dir.join("iat_boundaries");
+    fs::write(&path, &src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match jet::Interpreter::dev_iteration(&shown, false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("iat-boundary forced interpreter failed: {diags:?}")
+        }
+    };
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+    assert_eq!(interpreted, expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match jet::Interpreter::dev_iteration(&shown, false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("iat-boundary resident JIT failed: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "iat boundary parity must execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "iat boundary parity must not deopt or fall back"
+    );
+    assert_eq!(resident, expected);
+    assert_eq!(resident, interpreted);
+    assert_eq!(resident, aot_stdout);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -12334,10 +12663,24 @@ fn auth_test_b64url(bytes: &[u8]) -> String {
     out
 }
 
-fn auth_test_jwt(payload: &str) -> String {
+fn auth_test_noncanonical_b64url(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let remainder = bytes.len() % 3;
+    assert!(remainder != 0);
+    let mut encoded = auth_test_b64url(bytes);
+    let last = encoded.pop().unwrap();
+    let index = TABLE
+        .iter()
+        .position(|byte| *byte as char == last)
+        .unwrap();
+    let unused_bits: usize = if remainder == 1 { 4 } else { 2 };
+    assert_eq!(index & ((1usize << unused_bits) - 1), 0);
+    encoded.push(TABLE[index | 1] as char);
+    encoded
+}
+
+fn auth_test_jwt_signed(header: &str, payload: &str) -> String {
     let key = b"0123456789abcdef0123456789abcdef";
-    let header = auth_test_b64url(br#"{"alg":"HS256"}"#);
-    let payload = auth_test_b64url(payload.as_bytes());
     let signed = format!("{header}.{payload}");
     let mut block = [0u8; 64];
     block[..key.len()].copy_from_slice(key);
@@ -12351,33 +12694,153 @@ fn auth_test_jwt(payload: &str) -> String {
     format!("{signed}.{}", auth_test_b64url(&jet::SHA256::sha256(&outer)))
 }
 
+fn auth_test_jwt(payload: &str) -> String {
+    let header = auth_test_b64url(br#"{"alg":"HS256"}"#);
+    let payload = auth_test_b64url(payload.as_bytes());
+    auth_test_jwt_signed(&header, &payload)
+}
+
 #[test]
-fn core_auth_expiry_equality_and_subsecond_skew() {
+fn core_auth_expiry_equality_and_nanosecond_skew() {
     let dir = std::env::temp_dir().join(format!("jet_core_auth_clock_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let src = r#"
+
+    struct AuthClockFixture {
+        token: String,
+        skew_token: String,
+        now_ns: i64,
+        skew_expires_at: i64,
+        equality_second: i64,
+        equality: String,
+        upper: String,
+        above_upper: String,
+        lower: String,
+        below_lower: String,
+        i64_max: String,
+        i64_min: String,
+        invalid: String,
+    }
+
+    let fresh_fixture = || {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        let now_ns = i64::try_from(now.as_nanos()).unwrap();
+        let now_secs = now_ns / 1_000_000_000;
+        let expires_at = now_secs.checked_add(86_400).unwrap();
+        let skew_expires_at = now_secs.checked_sub(60).unwrap();
+        let token = auth_test_jwt(&format!(
+            r#"{{"aud":"gateway","iss":"clock","exp":{expires_at}}}"#
+        ));
+        let skew_token = auth_test_jwt(&format!(
+            r#"{{"aud":"gateway","iss":"clock","exp":{skew_expires_at}}}"#
+        ));
+        let mut invalid = token.clone();
+        let last = invalid.pop().unwrap();
+        invalid.push(if last == 'A' { 'B' } else { 'A' });
+        AuthClockFixture {
+            token,
+            skew_token,
+            now_ns,
+            skew_expires_at,
+            equality_second: now_secs,
+            equality: auth_test_jwt(&format!(
+                r#"{{"aud":"gateway","iss":"clock","exp":{now_secs}}}"#
+            )),
+            upper: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":9223372036854775}"#,
+            ),
+            above_upper: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":9223372036854775808}"#,
+            ),
+            lower: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":-9223372036854775}"#,
+            ),
+            below_lower: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":-9223372036854776}"#,
+            ),
+            i64_max: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":9223372036854775807}"#,
+            ),
+            i64_min: auth_test_jwt(
+                r#"{"aud":"gateway","iss":"clock","exp":-9223372036854775808}"#,
+            ),
+            invalid,
+        }
+    };
+    let source_for = |fixture: &AuthClockFixture| {
+        r#"
 use core.auth as auth
-use core.env as env
+
+fn check(token: String, key: [U8], label: String, skew: Duration) {
+    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: skew) == {
+        .Ok(_) -> { print("{label}-accepted") }
+        .Err(error) -> {
+            if error == {
+                .TokenExpired -> { print("{label}-expired") }
+                .MalformedToken(_) -> { print("{label}-malformed") }
+                .InvalidSignature -> { print("{label}-invalid") }
+                else -> { print("{label}-wrong-error") }
+            }
+        }
+    }
+}
 
 fn run() {
     key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
-    token := env.get("JET_AUTH_CLOCK_TOKEN") ?? panic("token")
+    skew_token := "@SKEW_TOKEN"
+    skew_expiry :: @SKEW_EXPIRY
+    base_ns :: @NOW_NS - skew_expiry * 1000000000
+    boundary_ns :: base_ns
+    next_boundary_ns :: base_ns + 1
+    boundary :: Duration.nanoseconds(boundary_ns) ?? panic("boundary")
+    next_boundary :: Duration.nanoseconds(next_boundary_ns) ?? panic("next boundary")
+    boundary_read :: boundary.in(.Nanoseconds) ?? panic("boundary read")
+    next_boundary_read :: next_boundary.in(.Nanoseconds) ?? panic("next boundary read")
+    if boundary_read == boundary_ns { print("skew-boundary-exact") } else { print("skew-boundary-truncated") }
+    if next_boundary_read == next_boundary_ns { print("skew-boundary-plus-one-exact") } else { print("skew-boundary-plus-one-truncated") }
+    margin_ns :: 2000000000000
+    expired_skew :: Duration.nanoseconds(base_ns - margin_ns) ?? panic("expired skew")
+    accepted_skew :: Duration.nanoseconds(base_ns + margin_ns) ?? panic("accepted skew")
+    check(skew_token, key, "skew-margin-before", expired_skew)
+    check(skew_token, key, "skew-margin-after", accepted_skew)
+    token := "@TOKEN"
     zero :: Duration.milliseconds(0) ?? panic("zero")
-    skew :: Duration.milliseconds(1500) ?? panic("skew")
-    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: zero) == {
-        .Ok(_) -> { print("equality-accepted") }
-        .Err(error) -> { if error == { .TokenExpired -> { print("equality-expired") } else -> { print("wrong-error") } } }
-    }
-    if auth.verify_jwt(token, key: key, audience: "gateway", issuer: "clock", clock_skew: skew) == {
-        .Ok(_) -> { print("subsecond-skew-accepted") }
-        .Err(_) -> { print("subsecond-skew-rejected") }
-    }
+    check(token, key, "future", zero)
+    check("@EQUALITY", key, "equality", zero)
+    check("@UPPER", key, "upper", zero)
+    check("@ABOVE_UPPER", key, "above-upper", zero)
+    check("@LOWER", key, "lower", zero)
+    check("@BELOW_LOWER", key, "below-lower", zero)
+    check("@I64_MAX", key, "i64-max", zero)
+    check("@I64_MIN", key, "i64-min", zero)
+    check("@INVALID", key, "invalid", zero)
+    max_skew :: Duration.nanoseconds(9223372036854775807) ?? panic("max skew")
+    min_skew :: Duration.nanoseconds(-9223372036854775807 - 1) ?? panic("min skew")
+    check(token, key, "max-skew", max_skew)
+    check(token, key, "min-skew", min_skew)
 }
-"#;
+"#
+        .replace("@TOKEN", &fixture.token)
+        .replace("@SKEW_TOKEN", &fixture.skew_token)
+        .replace("@NOW_NS", &fixture.now_ns.to_string())
+        .replace("@SKEW_EXPIRY", &fixture.skew_expires_at.to_string())
+        .replace("@EQUALITY", &fixture.equality)
+        .replace("@UPPER", &fixture.upper)
+        .replace("@ABOVE_UPPER", &fixture.above_upper)
+        .replace("@LOWER", &fixture.lower)
+        .replace("@BELOW_LOWER", &fixture.below_lower)
+        .replace("@I64_MAX", &fixture.i64_max)
+        .replace("@I64_MIN", &fixture.i64_min)
+        .replace("@INVALID", &fixture.invalid)
+    };
+
+    let aot_fixture = fresh_fixture();
+    let src = source_for(&aot_fixture);
     let shown = dir.join("clock.jet");
-    fs::write(&shown, src).unwrap();
-    let compiled = jet::compile_with_path(src, shown.to_str().unwrap()).unwrap();
+    fs::write(&shown, &src).unwrap();
+    let compiled = jet::compile_with_path(&src, shown.to_str().unwrap()).unwrap();
     let rs = dir.join("clock.rs");
     let bin = dir.join("clock");
     let mut rustc = Command::new("rustc");
@@ -12396,16 +12859,69 @@ fn run() {
     let built = rustc.output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
 
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-    let expires_at = now.as_secs() + 2;
-    let token = auth_test_jwt(&format!(r#"{{"aud":"gateway","iss":"clock","exp":{expires_at}}}"#));
-    let boundary_ms = u128::from(expires_at) * 1_000;
-    while std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() < boundary_ms {
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-    let run = Command::new(&bin).env("JET_AUTH_CLOCK_TOKEN", token).output().unwrap();
+    let wait_until_unix_second_after = |second: i64| {
+        loop {
+            let now_secs = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            )
+            .unwrap();
+            if now_secs > second {
+                break;
+            }
+            std::thread::yield_now();
+        }
+    };
+    wait_until_unix_second_after(aot_fixture.equality_second);
+    let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "equality-expired\nsubsecond-skew-accepted\n");
+    let aot_stdout = String::from_utf8_lossy(&run.stdout).into_owned();
+    let expected = "skew-boundary-exact\nskew-boundary-plus-one-exact\nskew-margin-before-expired\nskew-margin-after-accepted\nfuture-accepted\nequality-expired\nupper-accepted\nabove-upper-malformed\nlower-expired\nbelow-lower-expired\ni64-max-accepted\ni64-min-expired\ninvalid-invalid\nmax-skew-accepted\nmin-skew-expired\n";
+    assert_eq!(aot_stdout, expected);
+
+    let interpreter_fixture = fresh_fixture();
+    let interpreter_src = source_for(&interpreter_fixture);
+    fs::write(&shown, &interpreter_src).unwrap();
+    let shown_text = shown.to_string_lossy().into_owned();
+    wait_until_unix_second_after(interpreter_fixture.equality_second);
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match jet::Interpreter::dev_iteration(&shown_text, false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("clock forced interpreter failed: {diags:?}")
+        }
+    };
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+    assert_eq!(interpreted, expected);
+
+    let resident_fixture = fresh_fixture();
+    let resident_src = source_for(&resident_fixture);
+    fs::write(&shown, &resident_src).unwrap();
+    let shown_text = shown.to_string_lossy().into_owned();
+    wait_until_unix_second_after(resident_fixture.equality_second);
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match jet::Interpreter::dev_iteration(&shown_text, false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(stderr, "");
+            assert_eq!(exit_code, 0);
+            stdout
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("clock resident JIT failed: {diags:?}")
+        }
+    };
+    assert!(jet_jit::jit_executed_for_test(), "clock auth must execute resident JIT");
+    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(), "clock auth must not deopt or fall back");
+    assert_eq!(resident, expected);
+    assert_eq!(resident, interpreted);
+    assert_eq!(resident, aot_stdout);
     let _ = fs::remove_dir_all(&dir);
 }
 

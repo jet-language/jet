@@ -112,7 +112,6 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
         // `core.time` / `core.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
         // fail at the expression if unsupported.
-        "core.auth" => Some("verifies signed authentication tokens using the native crypto runtime"),
         _ => None,
     }
 }

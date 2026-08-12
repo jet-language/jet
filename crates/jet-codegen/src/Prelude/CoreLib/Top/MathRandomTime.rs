@@ -197,6 +197,9 @@ fn jet_duration_in(
 fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
     d.as_millis()
 }
+fn jet_duration_ns_value(d: &jet_std::Duration) -> i64 {
+    d.ns
+}
 fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
     jet_duration_kernel_is_zero(d.ns)
 }

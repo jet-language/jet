@@ -28,32 +28,33 @@ pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
-    pub fn auth_verify_jwt(
+    pub fn auth_verify_jwt_defaulted(
         token: &String,
         key: &Vec<u8>,
         audience: &String,
         issuer: Option<&String>,
-        clock_skew_ms: i64,
+        clock_skew_ns: Option<i64>,
     ) -> Result<JetAuthClaims, JetAuthError> {
-        jet_auth_verify_jwt_impl(token, key, audience, issuer, clock_skew_ms)
+        jet_auth_verify_jwt_defaulted(token, key, audience, issuer, clock_skew_ns)
     }
 
-    pub fn auth_verify_paseto(
+    pub fn auth_verify_paseto_defaulted(
         token: &String,
         key: &Vec<u8>,
         audience: &String,
         issuer: Option<&String>,
-        clock_skew_ms: i64,
-        footer: &Vec<u8>,
-        implicit: &Vec<u8>,
+        clock_skew_ns: Option<i64>,
+        footer: Option<&Vec<u8>>,
+        implicit: Option<&Vec<u8>>,
     ) -> Result<JetAuthClaims, JetAuthError> {
-        jet_auth_verify_paseto_impl(
+        jet_auth_verify_paseto_defaulted(
             token,
             key,
             audience,
             issuer,
-            clock_skew_ms,
+            clock_skew_ns,
             footer,
             implicit,
             jet_crypto_expert_ed25519_verify_strict_impl,
@@ -163,7 +164,7 @@ fn err_debug(err: impl std::fmt::Debug) -> i64 {
 
 fn claims_record(claims: runtime::JetAuthClaims) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let record = rt.heap.alloc_record(5);
+        let record = rt.heap.alloc_record(6);
         let subject = claims
             .subject
             .map(|value| rt.heap.alloc_string(value) + 1)
@@ -173,15 +174,102 @@ fn claims_record(claims: runtime::JetAuthClaims) -> i64 {
             .issuer
             .map(|value| rt.heap.alloc_string(value) + 1)
             .unwrap_or(0);
+        let (not_before_ok, not_before_bits) = match claims.not_before {
+            Some(value) => (true, value as u64),
+            None => (false, 0),
+        };
+        let not_before =
+            crate::runtime_host::alloc_jit_result(rt, not_before_ok, not_before_bits);
+        let (issued_at_ok, issued_at_bits) = match claims.issued_at {
+            Some(value) => (true, value as u64),
+            None => (false, 0),
+        };
+        // Optional NumericDate claims use the tagged result arena: `ok` is
+        // presence and `bits` is the exact i64 payload. No scalar value is
+        // reserved for absence.
+        let issued_at = crate::runtime_host::alloc_jit_result(rt, issued_at_ok, issued_at_bits);
         let _ = rt.heap.record_set_int(record, 0, subject);
         let _ = rt.heap.record_set_string(record, 1, audience);
         let _ = rt.heap.record_set_int(record, 2, issuer);
         let _ = rt.heap.record_set_int(record, 3, claims.expires_at);
-        let _ = rt
-            .heap
-            .record_set_int(record, 4, claims.issued_at.map(|value| value + 1).unwrap_or(0));
+        let _ = rt.heap.record_set_int(record, 4, not_before);
+        let _ = rt.heap.record_set_int(record, 5, issued_at);
         record
     })
+}
+
+// JIT ABI adapter only: encode the already-decided Prelude error into the
+// tagged heap enum representation; verification policy remains in Auth.rs.
+fn auth_error_bits(error: runtime::JetAuthError) -> u64 {
+    const INVALID_SIGNATURE: u64 = 0;
+    const WEAK_KEY: u64 = 1;
+    const TOKEN_EXPIRED: u64 = 2;
+    const MALFORMED_TOKEN: u64 = 3;
+    const UNSUPPORTED_TOKEN: u64 = 4;
+    const MISSING_CLAIM: u64 = 5;
+    const DECODE_ERROR: u64 = 6;
+    const WRONG_AUDIENCE: u64 = 7;
+    const WRONG_ISSUER: u64 = 8;
+    const TOKEN_NOT_YET_VALID: u64 = 9;
+    enum AuthErrorField {
+        Text(String),
+        OptionalText(Option<String>),
+    }
+    let named = |disc: u64, fields: Vec<AuthErrorField>| {
+        Concurrency::with_runtime_mut(|rt| {
+            let handle = rt.heap.alloc_record(fields.len() + 1);
+            let _ = rt.heap.record_set_int(handle, 0, disc as i64);
+            for (index, value) in fields.into_iter().enumerate() {
+                let field = index as i64 + 1;
+                match value {
+                    AuthErrorField::Text(value) => {
+                        let text = rt.heap.alloc_string(value);
+                        let _ = rt.heap.record_set_string(handle, field, text);
+                    }
+                    AuthErrorField::OptionalText(value) => {
+                        let bits = value
+                            .map(|value| rt.heap.alloc_string(value) + 1)
+                            .unwrap_or(0);
+                        let _ = rt.heap.record_set_int(handle, field, bits);
+                    }
+                }
+            }
+            handle as u64
+        })
+    };
+    match error {
+        runtime::JetAuthError::InvalidSignature => named(INVALID_SIGNATURE, vec![]),
+        runtime::JetAuthError::WeakKey => named(WEAK_KEY, vec![]),
+        runtime::JetAuthError::TokenExpired => named(TOKEN_EXPIRED, vec![]),
+        runtime::JetAuthError::MalformedToken(value) => {
+            named(MALFORMED_TOKEN, vec![AuthErrorField::Text(value)])
+        }
+        runtime::JetAuthError::UnsupportedToken(value) => {
+            named(UNSUPPORTED_TOKEN, vec![AuthErrorField::Text(value)])
+        }
+        runtime::JetAuthError::MissingClaim(value) => {
+            named(MISSING_CLAIM, vec![AuthErrorField::Text(value)])
+        }
+        runtime::JetAuthError::DecodeError(value) => {
+            named(DECODE_ERROR, vec![AuthErrorField::Text(value)])
+        }
+        runtime::JetAuthError::WrongAudience { expected, actual } => {
+            named(
+                WRONG_AUDIENCE,
+                vec![AuthErrorField::Text(expected), AuthErrorField::Text(actual)],
+            )
+        }
+        runtime::JetAuthError::WrongIssuer { expected, actual } => {
+            named(
+                WRONG_ISSUER,
+                vec![
+                    AuthErrorField::Text(expected),
+                    AuthErrorField::OptionalText(actual),
+                ],
+            )
+        }
+        runtime::JetAuthError::TokenNotYetValid => named(TOKEN_NOT_YET_VALID, vec![]),
+    }
 }
 
 fn take_crypto(handle: i64) -> Option<CryptoValue> {
@@ -699,15 +787,23 @@ extern "C" fn jet_jit_auth_verify_jwt(
     key: i64,
     audience: i64,
     issuer: i64,
-    skew_ms: i64,
+    skew_ns: i64,
+    skew_present: i64,
 ) -> i64 {
     let token = clone_string(token);
     let key = clone_bytes(key);
     let audience = clone_string(audience);
     let issuer = (issuer != 0).then(|| clone_string(issuer - 1));
-    match runtime::auth_verify_jwt(&token, &key, &audience, issuer.as_ref(), skew_ms) {
+    let clock_skew_ns = (skew_present != 0).then_some(skew_ns);
+    match runtime::auth_verify_jwt_defaulted(
+        &token,
+        &key,
+        &audience,
+        issuer.as_ref(),
+        clock_skew_ns,
+    ) {
         Ok(claims) => result(true, claims_record(claims) as u64),
-        Err(err) => err_debug(err),
+        Err(err) => result(false, auth_error_bits(err)),
     }
 }
 
@@ -716,26 +812,239 @@ extern "C" fn jet_jit_auth_verify_paseto(
     key: i64,
     audience: i64,
     issuer: i64,
-    skew_ms: i64,
+    skew_ns: i64,
+    skew_present: i64,
     footer: i64,
+    footer_present: i64,
     implicit: i64,
+    implicit_present: i64,
 ) -> i64 {
     let token = clone_string(token);
     let key = clone_bytes(key);
     let audience = clone_string(audience);
     let issuer = (issuer != 0).then(|| clone_string(issuer - 1));
-    match runtime::auth_verify_paseto(
+    let clock_skew_ns = (skew_present != 0).then_some(skew_ns);
+    let footer = (footer_present != 0).then(|| clone_bytes(footer));
+    let implicit = (implicit_present != 0).then(|| clone_bytes(implicit));
+    match runtime::auth_verify_paseto_defaulted(
         &token,
         &key,
         &audience,
         issuer.as_ref(),
-        skew_ms,
-        &clone_bytes(footer),
-        &clone_bytes(implicit),
+        clock_skew_ns,
+        footer.as_ref(),
+        implicit.as_ref(),
     ) {
         Ok(claims) => result(true, claims_record(claims) as u64),
-        Err(err) => err_debug(err),
+        Err(err) => result(false, auth_error_bits(err)),
     }
+}
+
+// Session/app adapters only translate heap values to the shared AuthSession
+// Prelude structs. State, validation, expiry, and error meaning stay there.
+fn session_record(session: runtime::JetAuthSession) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(4);
+        let id = rt.heap.alloc_string(session.id);
+        let user_id = rt.heap.alloc_string(session.user_id);
+        let cookie = rt.heap.alloc_string(session.cookie);
+        let _ = rt.heap.record_set_string(record, 0, id);
+        let _ = rt.heap.record_set_string(record, 1, user_id);
+        let _ = rt.heap.record_set_int(record, 2, session.expires_at);
+        let _ = rt.heap.record_set_string(record, 3, cookie);
+        record
+    })
+}
+
+fn session_from_record(handle: i64) -> Option<runtime::JetAuthSession> {
+    Concurrency::with_runtime_mut(|rt| {
+        let id = rt.heap.record_get_string(handle, 0)?;
+        let user_id = rt.heap.record_get_string(handle, 1)?;
+        let expires_at = rt.heap.record_get_int(handle, 2)?;
+        let cookie = rt.heap.record_get_string(handle, 3)?;
+        Some(runtime::JetAuthSession {
+            id: rt.heap.clone_string(id)?,
+            user_id: rt.heap.clone_string(user_id)?,
+            expires_at,
+            cookie: rt.heap.clone_string(cookie)?,
+        })
+    })
+}
+
+fn app_record(app: runtime::JetAuthApp) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let users_table = rt.heap.alloc_string(app.users_table);
+        let providers = rt.heap.alloc_empty_list();
+        for provider in app.providers {
+            let value = rt.heap.alloc_string(provider);
+            let _ = rt.heap.list_push_int(providers, value);
+        }
+        let _ = rt.heap.record_set_string(record, 0, users_table);
+        let _ = rt.heap.record_set_int(record, 1, providers);
+        record
+    })
+}
+
+fn app_from_record(handle: i64) -> Option<runtime::JetAuthApp> {
+    Concurrency::with_runtime_mut(|rt| {
+        let users_table = rt.heap.record_get_string(handle, 0)?;
+        let providers = rt.heap.record_get_int(handle, 1)?;
+        let len = rt.heap.list_len(providers)?;
+        Some(runtime::JetAuthApp {
+            users_table: rt.heap.clone_string(users_table)?,
+            providers: (0..len)
+                .map(|index| rt.heap.list_get_string(providers, index))
+                .collect::<Option<Vec<_>>>()?,
+        })
+    })
+}
+
+fn invalid_auth_handle(kind: &str) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.set_trap(kind));
+    0
+}
+
+fn result_text(value: String) -> i64 {
+    let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+    result(true, handle as u64)
+}
+
+extern "C" fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
+    match runtime::auth_register_user(clone_string(user_id), clone_string(password_hash)) {
+        Ok(()) => result(true, 0),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_password_login(
+    user_id: i64,
+    password_hash: i64,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> i64 {
+    match runtime::auth_password_login(
+        clone_string(user_id),
+        clone_string(password_hash),
+        now_ms,
+        ttl_ms,
+    ) {
+        Ok(session) => result(true, session_record(session) as u64),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64 {
+    let session_id = clone_string(session_id);
+    match runtime::auth_session_validate(&session_id, now_ms) {
+        Ok(session) => result(true, session_record(session) as u64),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_magic_link_issue(
+    user_id: i64,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> i64 {
+    match runtime::auth_magic_link_issue(clone_string(user_id), now_ms, ttl_ms) {
+        Ok(token) => result_text(token),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_magic_link_consume(
+    token: i64,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> i64 {
+    match runtime::auth_magic_link_consume(clone_string(token), now_ms, ttl_ms) {
+        Ok(session) => result(true, session_record(session) as u64),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_oauth_begin(provider: i64) -> i64 {
+    match runtime::auth_oauth_begin(clone_string(provider)) {
+        Ok(state) => result_text(state),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_oauth_finish(
+    state: i64,
+    subject: i64,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> i64 {
+    match runtime::auth_oauth_finish(
+        clone_string(state),
+        clone_string(subject),
+        now_ms,
+        ttl_ms,
+    ) {
+        Ok(session) => result(true, session_record(session) as u64),
+        Err(message) => error(message),
+    }
+}
+
+extern "C" fn jet_jit_auth_session_show(session: i64) -> i64 {
+    let Some(session) = session_from_record(session) else {
+        return invalid_auth_handle("invalid Session handle");
+    };
+    let value = runtime::auth_session_show(&session);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+}
+
+extern "C" fn jet_jit_auth_session_user(session: i64) -> i64 {
+    let Some(session) = session_from_record(session) else {
+        return invalid_auth_handle("invalid Session handle");
+    };
+    let value = runtime::auth_session_user(&session);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+}
+
+extern "C" fn jet_jit_auth_session_cookie(session: i64) -> i64 {
+    let Some(session) = session_from_record(session) else {
+        return invalid_auth_handle("invalid Session handle");
+    };
+    let value = runtime::auth_session_cookie(&session);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+}
+
+extern "C" fn jet_jit_auth_session_id(session: i64) -> i64 {
+    let Some(session) = session_from_record(session) else {
+        return invalid_auth_handle("invalid Session handle");
+    };
+    let value = runtime::auth_session_id(&session);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+}
+
+extern "C" fn jet_jit_app_auth(users_table: i64) -> i64 {
+    app_record(runtime::app_auth(clone_string(users_table)))
+}
+
+extern "C" fn jet_jit_app_auth_oauth(auth: i64, providers: i64) -> i64 {
+    let Some(auth) = app_from_record(auth) else {
+        return invalid_auth_handle("invalid Auth handle");
+    };
+    app_record(runtime::app_auth_oauth(auth, clone_string(providers)))
+}
+
+extern "C" fn jet_jit_app_auth_routes(auth: i64) -> i64 {
+    let Some(auth) = app_from_record(auth) else {
+        return invalid_auth_handle("invalid Auth handle");
+    };
+    let value = runtime::app_auth_routes(&auth);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+}
+
+extern "C" fn jet_jit_app_auth_show(auth: i64) -> i64 {
+    let Some(auth) = app_from_record(auth) else {
+        return invalid_auth_handle("invalid Auth handle");
+    };
+    let value = runtime::app_auth_show(&auth);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
 extern "C" fn jet_jit_vault_get(name: i64) -> i64 {
@@ -1364,9 +1673,16 @@ host_fns! {
         quaternary.params.push(AbiParam::new(types::I64));
         let mut quinary = quaternary.clone();
         quinary.params.push(AbiParam::new(types::I64));
-        let mut septenary = quinary.clone();
+        let mut senary = quinary.clone();
+        senary.params.push(AbiParam::new(types::I64));
+        let mut septenary = senary.clone();
         septenary.params.push(AbiParam::new(types::I64));
-        septenary.params.push(AbiParam::new(types::I64));
+        let mut octonary = septenary.clone();
+        octonary.params.push(AbiParam::new(types::I64));
+        let mut nonary = octonary.clone();
+        nonary.params.push(AbiParam::new(types::I64));
+        let mut denary = nonary.clone();
+        denary.params.push(AbiParam::new(types::I64));
 
 
     }
@@ -1408,8 +1724,23 @@ host_fns! {
     expert_x25519: "jet_jit_crypto_expert_x25519" => jet_jit_crypto_expert_x25519: ternary;
     expert_hkdf_sha256: "jet_jit_crypto_expert_hkdf_sha256" => jet_jit_crypto_expert_hkdf_sha256: quaternary;
     expert_secret_bytes: "jet_jit_crypto_expert_secret_bytes" => jet_jit_crypto_expert_secret_bytes: unary;
-    verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: quinary;
-    verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: septenary;
+    verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: senary;
+    verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: denary;
+    auth_register_user: "jet_jit_auth_register_user" => jet_jit_auth_register_user: binary;
+    auth_password_login: "jet_jit_auth_password_login" => jet_jit_auth_password_login: quaternary;
+    auth_session_validate: "jet_jit_auth_session_validate" => jet_jit_auth_session_validate: binary;
+    auth_magic_link_issue: "jet_jit_auth_magic_link_issue" => jet_jit_auth_magic_link_issue: ternary;
+    auth_magic_link_consume: "jet_jit_auth_magic_link_consume" => jet_jit_auth_magic_link_consume: ternary;
+    auth_oauth_begin: "jet_jit_auth_oauth_begin" => jet_jit_auth_oauth_begin: unary;
+    auth_oauth_finish: "jet_jit_auth_oauth_finish" => jet_jit_auth_oauth_finish: quaternary;
+    auth_session_show: "jet_jit_auth_session_show" => jet_jit_auth_session_show: unary;
+    auth_session_user: "jet_jit_auth_session_user" => jet_jit_auth_session_user: unary;
+    auth_session_cookie: "jet_jit_auth_session_cookie" => jet_jit_auth_session_cookie: unary;
+    auth_session_id: "jet_jit_auth_session_id" => jet_jit_auth_session_id: unary;
+    app_auth: "jet_jit_app_auth" => jet_jit_app_auth: unary;
+    app_auth_oauth: "jet_jit_app_auth_oauth" => jet_jit_app_auth_oauth: binary;
+    app_auth_routes: "jet_jit_app_auth_routes" => jet_jit_app_auth_routes: unary;
+    app_auth_show: "jet_jit_app_auth_show" => jet_jit_app_auth_show: unary;
     vault_get: "jet_jit_vault_get" => jet_jit_vault_get: unary;
     vault_key_ref_show: "jet_jit_vault_key_ref_show" => jet_jit_vault_key_ref_show: unary;
     vault_current: "jet_jit_vault_current" => jet_jit_vault_current: binary;
@@ -1439,7 +1770,3 @@ host_fns! {
     vault_expert_prepare_import_signing: "jet_jit_vault_expert_prepare_import_signing" => jet_jit_vault_expert_prepare_import_signing: binary;
     vault_expert_commit_import_signing: "jet_jit_vault_expert_commit_import_signing" => jet_jit_vault_expert_commit_import_signing: binary;
 }
-
-
-
-
