@@ -3,10 +3,70 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
 pub(crate) use crate::Syntax::edit_distance;
-use crate::AST::{BinOp, Expr, Pattern, Stmt, Type, VariantPayload};
+use crate::AST::{BinOp, Expr, Pattern, Stmt, StrPart, Type, TypedLitBody, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) const WRITE_CAPABILITY_MARKER: &str = Syntax::WRITE_CAPABILITY_LABEL;
+
+/// E0956 for the tier-0 Browser adapter. The host supplies only the dynamic
+/// value fact; the registered row owns the user-facing wording and fix.
+pub fn browser_tier0_unsupported(what: &str, span: Span) -> Diagnostic {
+    Diagnostic::e0956_unsupported(&format!("Browser {what}"), span)
+}
+
+/// D-BOUND-HEAD1: validate a raw boundary literal before the TIR evaluator
+/// lowers it. Normal source checking performs the same validation while
+/// rewriting the typed head; this seam covers comptime fragments that reach
+/// TIR before that rewrite.
+pub fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
+    let Expr::TypedLit {
+        head: Some(Type::Named(type_name)),
+        body: TypedLitBody::Value(inner),
+        ..
+    } = e
+    else {
+        return None;
+    };
+    let Expr::Str(parts, literal_span) = inner.as_ref() else {
+        return None;
+    };
+    let mut has_holes = false;
+    let mut literals = vec![String::new()];
+    for part in parts {
+        match part {
+            StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
+            StrPart::Interp(..) => {
+                has_holes = true;
+                literals.push(String::new());
+            }
+        }
+    }
+    let Some(kind) = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary()) else {
+        return None;
+    };
+    if kind.forbids_holes() && has_holes {
+        return Some(Diagnostic::error(
+            "E0155",
+            "a `DateTime` literal cannot contain interpolation".to_string(),
+            "DateTime values are checked as complete RFC3339 literals before the program runs"
+                .to_string(),
+            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+                .to_string(),
+            Some(*literal_span),
+        ));
+    }
+    let reason = crate::Comptime::validate_typed_boundary_literal(kind, &literals).err()?;
+    Some(Diagnostic::error(
+        "E0155",
+        format!("this `{}` literal is invalid", kind.source_name()),
+        reason,
+        format!(
+            "fix the literal, or parse a runtime String with the ordinary `{}` constructor",
+            kind.source_name()
+        ),
+        Some(*literal_span),
+    ))
+}
 
 pub(crate) fn operator_label(op: BinOp) -> String {
     match op {

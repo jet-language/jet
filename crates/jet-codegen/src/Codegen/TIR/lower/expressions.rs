@@ -51,7 +51,7 @@ use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::tuple_fields_plain;
 use crate::Codegen::tuple_struct_name;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -358,6 +358,18 @@ fn expr_cache_end() {
         cache.types.clear();
         cache.method_sigs.clear();
     });
+}
+
+struct ExprCacheOwner {
+    owns_cache: bool,
+}
+
+impl Drop for ExprCacheOwner {
+    fn drop(&mut self) {
+        if self.owns_cache {
+            expr_cache_end();
+        }
+    }
 }
 
 fn expr_cache_take(expr: &Expr) -> Option<TExpr> {
@@ -1147,12 +1159,13 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     if let Some(value) = expr_cache_take(e) {
         return canonicalize_pre_tier_expr(value);
     }
-    let owns_cache = expr_cache_begin();
+    let cache_owner = ExprCacheOwner {
+        owns_cache: expr_cache_begin(),
+    };
     let value = lower_expr_segment(e, cx, env);
-    if owns_cache {
-        expr_cache_end();
-    }
-    canonicalize_pre_tier_expr(value)
+    let value = canonicalize_pre_tier_expr(value);
+    drop(cache_owner);
+    value
 }
 
 /// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
@@ -1198,62 +1211,6 @@ fn lower_boundary_typed_lit(
                 holes,
             },
         )),
-    })
-}
-
-/// D-BOUND-HEAD1=A: comptime evaluation can reach this seam before sema has
-/// rewritten the typed head. Apply the same boundary parser checks first, so
-/// invalid heads retain their normal E0155 diagnostic instead of becoming a
-/// plain TIR value.
-pub(crate) fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
-    let Expr::TypedLit {
-        head: Some(Type::Named(type_name)),
-        body: TypedLitBody::Value(inner),
-        ..
-    } = e
-    else {
-        return None;
-    };
-    let Expr::Str(parts, literal_span) = inner.as_ref() else {
-        return None;
-    };
-    let mut has_holes = false;
-    let mut literals = vec![String::new()];
-    for part in parts.iter() {
-        match part {
-            StrPart::Lit(text) => {
-                literals.last_mut().unwrap().push_str(text);
-            }
-            StrPart::Interp(..) => {
-                has_holes = true;
-                literals.push(String::new());
-            }
-        }
-    }
-    let Some(kind) = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary()) else {
-        return None;
-    };
-    let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
-    if kind.forbids_holes() && has_holes {
-        return Some(Diagnostic::error(
-            "E0155",
-            "a `DateTime` literal cannot contain interpolation".to_string(),
-            "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
-            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
-            Some(*literal_span),
-        ));
-    }
-    validation.err().map(|reason| {
-        Diagnostic::error(
-            "E0155",
-            format!("this `{}` literal is invalid", kind.source_name()),
-            reason,
-            format!(
-                "fix the literal, or parse a runtime String with the ordinary `{}` constructor",
-                kind.source_name()
-            ),
-            Some(*literal_span),
-        )
     })
 }
 
@@ -1358,6 +1315,10 @@ fn lower_unit_text(
                 original_ty
                     .quantity_parts()
                     .map(|(_, dimension)| cx.quantity_unit_label(dimension, style))
+            })
+            .or_else(|| {
+                cx.quantity_dimension(&original_ty)
+                    .map(|dimension| cx.quantity_unit_label(dimension, style))
             })
             .expect("sema accepted unit formatting only for unit values");
         parts.push(TStrPart::Lit(format!(" {label}")));

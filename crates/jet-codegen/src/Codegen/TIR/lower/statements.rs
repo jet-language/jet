@@ -2310,7 +2310,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 span,
             } => {
                 debug_assert!(
-                    !matches!(kind, IndexKind::Unknown),
+                    super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
                     "sema-to-TIR handoff violated"
                 );
                 // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
@@ -2318,7 +2318,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // routing here — an `Unknown` default reaching lowering means sema
                 // left an index kind unresolved and the gate missed it.
                 debug_assert!(
-                    !matches!(kind, IndexKind::Unknown),
+                    super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
                     "sema-to-TIR handoff violated: unresolved index kind"
                 );
                 let kind = if matches!(kind, IndexKind::Unknown) {

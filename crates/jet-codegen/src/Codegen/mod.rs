@@ -1176,7 +1176,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
+        out.push_str("mod jet_sync {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
+        out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
     if needs_services {
         out.push_str(include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs"));

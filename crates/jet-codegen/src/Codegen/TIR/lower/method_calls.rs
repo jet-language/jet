@@ -3095,14 +3095,13 @@ fn lower_method_call_impl(
                         let params = vec![Type::Named("WatchEvent".to_string())];
                         let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
                         let idx = cx.jit_spawn_lambdas.borrow().len();
-                        cx.jit_spawn_lambdas.borrow_mut().push(
-                            lower_spawn_lambda_for_jit_expecting(
-                                lam,
-                                cx,
-                                env,
-                                &[Type::Named("WatchEvent".to_string())],
-                            ),
+                        let jit_lambda = lower_spawn_lambda_for_jit_expecting(
+                            lam,
+                            cx,
+                            env,
+                            &[Type::Named("WatchEvent".to_string())],
                         );
+                        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                         callback_index = Some(idx);
                         return TExpr {
                             ty: Type::Fn {

@@ -1,14 +1,17 @@
 // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
 
-const MAX_SYNC_TEXT: usize = 1024 * 1024;
+use super::{__jet_Decode, __jet_Encode, JetShow};
+use super::jet_std;
+
+pub(crate) const MAX_SYNC_TEXT: usize = 1024 * 1024;
 /// Tombstones outlive the characters they replace, so a document holds more
 /// atoms than it shows.  This bounds the whole atom set, checked before a
 /// write rather than by discarding atoms during a merge.
-const MAX_SYNC_ATOMS: usize = 4 * 1024 * 1024;
-const MAX_SYNC_REPLICAS: usize = 4096;
-const MAX_SYNC_ENTRIES: usize = 100_000;
-const MAX_SYNC_SESSION: usize = 256;
-const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_SYNC_ATOMS: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_SYNC_REPLICAS: usize = 4096;
+pub(crate) const MAX_SYNC_ENTRIES: usize = 100_000;
+pub(crate) const MAX_SYNC_SESSION: usize = 256;
+pub(crate) const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
 
 /// D-SYNC1: SyncText is a sequence CRDT, not a copy per replica.  Every
 /// character is one atom carrying a unique `(replica, counter)` identity and
@@ -89,7 +92,7 @@ pub struct JetSyncListGeneric<T> {
 /// counter, then descending replica, so concurrent inserts at one point land
 /// in the same order on every replica.  An atom whose anchor is absent is
 /// unreachable and stays out of the order rather than moving to the start.
-fn jet_sync_text_order(doc: &JetSyncText) -> Vec<usize> {
+pub(crate) fn jet_sync_text_order(doc: &JetSyncText) -> Vec<usize> {
     let mut children: std::collections::BTreeMap<Option<(String, u64)>, Vec<usize>> =
         std::collections::BTreeMap::new();
     for (index, atom) in doc.atoms.iter().enumerate() {
@@ -180,7 +183,7 @@ fn jet_sync_text_insert_after(
     }
 }
 
-fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
+pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
     let mut doc = JetSyncText { atoms: Vec::new() };
     if !jet_sync_token_is_valid(&replica) || text.chars().count() > MAX_SYNC_TEXT {
         return doc;
@@ -192,7 +195,7 @@ fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
 /// Replace the whole document: every visible atom becomes a tombstone and the
 /// new text is written at the start.  The tombstones stay so a replica that
 /// never saw them still converges here after a merge.
-fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
+pub(crate) fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
     let inserted = text.chars().count();
     if !jet_sync_token_is_valid(&replica)
         || inserted > MAX_SYNC_TEXT
@@ -211,7 +214,7 @@ fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> Jet
 /// Apply one edit at a visible-character position.  Indices are Unicode scalar
 /// positions, never byte offsets.  The insert anchors to the character before
 /// the replaced range, so it survives a concurrent edit to that range.
-fn jet_sync_text_edit(
+pub(crate) fn jet_sync_text_edit(
     mut doc: JetSyncText,
     replica: String,
     index: i64,
@@ -250,7 +253,7 @@ fn jet_sync_text_edit(
 /// Union the two atom sets.  Nothing is dropped: a merge that discarded atoms
 /// to stay under a limit would lose a replica's writing.  A deletion is
 /// monotone, so once either side has seen it the merged atom stays deleted.
-fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
+pub(crate) fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
     let mut merged: std::collections::BTreeMap<(String, u64), JetSyncTextAtom> =
         std::collections::BTreeMap::new();
     for atom in a.atoms.iter().chain(&b.atoms) {
@@ -283,14 +286,14 @@ fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
     }
 }
 
-fn jet_sync_text_show(doc: &JetSyncText) -> String {
+pub(crate) fn jet_sync_text_show(doc: &JetSyncText) -> String {
     format!("SyncText({})", jet_sync_text_read(doc))
 }
 
 /// The highest counter each replica has written, plus the document clock.
 /// This is not a vector clock: a Lamport counter records when a replica wrote,
 /// never what it had seen, so it orders edits but cannot decide causality.
-fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
+pub(crate) fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
     let mut clocks: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for atom in &doc.atoms {
         let slot = clocks.entry(atom.replica.as_str()).or_insert(0);
@@ -306,7 +309,7 @@ fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
     format!("LamportClock({parts})")
 }
 
-fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
+pub(crate) fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
     if !jet_sync_token_is_valid(&replica) {
         return JetSyncCounter { counts: Vec::new() };
     }
@@ -319,7 +322,7 @@ fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
     }
 }
 
-fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String, delta: i64) -> JetSyncCounter {
+pub(crate) fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String, delta: i64) -> JetSyncCounter {
     if !jet_sync_token_is_valid(&replica) {
         return counter;
     }
@@ -347,7 +350,7 @@ fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String, delta: i64
     counter
 }
 
-fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCounter {
+pub(crate) fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCounter {
     let mut merged = std::collections::BTreeMap::<String, (u64, u64)>::new();
     for (replica, positive, negative) in a.counts.iter().chain(&b.counts) {
         if !jet_sync_token_is_valid(replica) {
@@ -366,7 +369,7 @@ fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCoun
     }
 }
 
-fn jet_sync_counter_value(counter: &JetSyncCounter) -> i64 {
+pub(crate) fn jet_sync_counter_value(counter: &JetSyncCounter) -> i64 {
     counter.counts.iter().fold(0i64, |sum, (_, positive, negative)| {
         let value = if positive >= negative {
             i64::try_from(positive - negative).unwrap_or(i64::MAX)
@@ -394,7 +397,7 @@ fn jet_sync_counter_metadata(counter: &JetSyncCounter) -> String {
     format!("PNCounter({parts})")
 }
 
-fn jet_sync_map_new() -> JetSyncMap {
+pub(crate) fn jet_sync_map_new() -> JetSyncMap {
     JetSyncMap {
         entries: Vec::new(),
     }
@@ -437,18 +440,18 @@ fn jet_sync_map_set_replica(
     map
 }
 
-fn jet_sync_map_set(map: JetSyncMap, key: String, value: String) -> JetSyncMap {
+pub(crate) fn jet_sync_map_set(map: JetSyncMap, key: String, value: String) -> JetSyncMap {
     jet_sync_map_set_replica(map, "local".to_string(), key, value)
 }
 
-fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String> {
+pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String> {
     map.entries
         .iter()
         .find(|(k, _, _, _)| k == key)
         .map(|(_, v, _, _)| v.clone())
 }
 
-fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
+pub(crate) fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
     let mut merged = std::collections::BTreeMap::<String, (String, u64, String)>::new();
     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
         if !jet_sync_token_is_valid(key)
@@ -476,7 +479,7 @@ fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
     }
 }
 
-fn jet_sync_map_show(map: &JetSyncMap) -> String {
+pub(crate) fn jet_sync_map_show(map: &JetSyncMap) -> String {
     let parts = map
         .entries
         .iter()
@@ -626,7 +629,7 @@ where
     format!("LWWMap({parts})")
 }
 
-fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, String> {
+pub(crate) fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, String> {
     let table = table.trim().to_string();
     let expression = expression.trim().to_string();
     let valid_table = table
@@ -662,7 +665,7 @@ fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, 
     })
 }
 
-fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_owner: &String) -> bool {
+pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_owner: &String) -> bool {
     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
         return false;
     }
@@ -672,15 +675,15 @@ fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_owner: &String
     }
 }
 
-fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
+pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
     format!("RowPolicy(table={}, expr={})", policy.table, policy.expression)
 }
 
-fn jet_sync_list_new() -> JetSyncList {
+pub(crate) fn jet_sync_list_new() -> JetSyncList {
     JetSyncList { items: Vec::new() }
 }
 
-fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> JetSyncList {
+pub(crate) fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> JetSyncList {
     if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
         return list;
     }
@@ -693,7 +696,7 @@ fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> J
     list
 }
 
-fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncList {
+pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncList {
     let mut out = a.clone();
     for (replica, item) in &b.items {
         if !out
@@ -712,13 +715,13 @@ fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncList {
     out
 }
 
-fn jet_sync_token_is_valid(value: &str) -> bool {
+pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
     !value.trim().is_empty()
         && value.len() <= MAX_SYNC_TEXT
         && !value.chars().any(char::is_control)
 }
 
-fn jet_sync_list_show(list: &JetSyncList) -> String {
+pub(crate) fn jet_sync_list_show(list: &JetSyncList) -> String {
     let parts = list
         .items
         .iter()
@@ -1713,13 +1716,13 @@ fn jet_sync_publish(session_id: String, doc_show: String) -> String {
     .show()
 }
 
-fn jet_app_sync_over(session_id: String, doc_show: String) -> String {
+pub(crate) fn jet_app_sync_over(session_id: String, doc_show: String) -> String {
     jet_sync_publish(session_id, doc_show)
 }
 
 /// D-SYNC1: the ratified surface puts the document first and names the
 /// session with `over:`. Keep the legacy `sync_over(session, doc)` adapter for
 /// compatibility, but give the canonical spelling its own typed entry point.
-fn jet_app_sync(doc_show: String, session_id: String) -> String {
+pub(crate) fn jet_app_sync(doc_show: String, session_id: String) -> String {
     jet_app_sync_over(session_id, doc_show)
 }
