@@ -343,6 +343,25 @@ fn run() {
 }
 
 #[test]
+fn numeric_distinct_operator_borrows_synthetic_rhs() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "#UnitFamily(Length, base: meter) { meter }\n\
+fn run() {\n\
+    distance :: 12meter\n\
+    area :: distance * distance\n\
+    print(area)\n\
+}\n";
+    let out = jet::compile(src).expect("unit multiplication must compile");
+    assert!(
+        out.rust.contains("__jet_Mul::__jet_mul_at(&(__jet_distance), &(__jet_distance),"),
+        "synthetic numeric operators must borrow both trait operands:\n{}",
+        out.rust
+    );
+}
+
+#[test]
 fn distinct_and_unit_numeric_source_matrix() {
     if !have_rustc() {
         return;

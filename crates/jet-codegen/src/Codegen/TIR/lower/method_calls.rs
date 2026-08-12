@@ -5885,7 +5885,7 @@ fn lower_method_call_impl(
             },
         };
     }
-    let targs = lower_method_args(args, &sig, env, cx);
+    let mut targs = lower_method_args(args, &sig, env, cx);
     let resolved_type_args = resolved_method_type_args(
         cx,
         lookup_ty_name,
@@ -5913,6 +5913,12 @@ fn lower_method_call_impl(
         && !cx.distinct_ranges.contains_key(lookup_ty_name)
         && matches!(method, "add" | "sub" | "mul" | "div")
         && args.len() == 1;
+    if distinct_numeric_operator {
+        // The synthetic numeric traits use `fn op(&self, rhs: &Self)`. There is
+        // no ordinary Jet method signature for this compiler-owned path, so the
+        // borrow convention must be recorded on the TIR argument explicitly.
+        targs[0].borrow = true;
+    }
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
     // a plain user method is `user_<method>`. Numeric distinct operators are also
     // emitted through the bare synthetic operator trait, even though sema does not

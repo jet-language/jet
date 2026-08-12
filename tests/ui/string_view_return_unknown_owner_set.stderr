@@ -11,5 +11,5 @@ Error [E0120]: `view` was not moved here, so it cannot be returned as-is
     |
   2 |     return view
     |            ^^^^
- Why: this function has read access only and does not own the value; the move-capability marker `^` is required to return it as an owned value
+ Why: this function has read access only and does not own the value
  Fix: return a copy: `return ~view;` — or take ownership with the move-capability marker `^`: `view: ^View<str>`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership

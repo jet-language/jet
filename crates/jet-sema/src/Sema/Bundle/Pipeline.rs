@@ -2128,9 +2128,27 @@ fn check_bundle_opts_for_output_inner(
     check_region_caps(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
-    for pending in module_pending_diagnostics.into_iter().flatten() {
-        if !failed_diagnostic_phases.contains(&pending.function_key) {
-            diags.push(pending.diagnostic);
+    for (module_index, pending_diagnostics) in module_pending_diagnostics.into_iter().enumerate() {
+        let module_alias = name_ledger
+            .module_alias(module_index)
+            .unwrap_or(&bundle.modules[module_index].alias);
+        let identity_prefix = name_ledger
+            .module_identity(module_index)
+            .map(|identity| format!("{identity}::"));
+        for pending in pending_diagnostics {
+            let loader_key = identity_prefix.as_deref().and_then(|prefix| {
+                pending
+                    .function_key
+                    .strip_prefix(prefix)
+                    .map(|local| format!("{module_alias}::{local}"))
+            });
+            if !failed_diagnostic_phases.contains(&pending.function_key)
+                && !loader_key
+                    .as_deref()
+                    .is_some_and(|key| failed_diagnostic_phases.contains(key))
+            {
+                diags.push(pending.diagnostic);
+            }
         }
     }
 

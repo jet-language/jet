@@ -2018,7 +2018,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             }
             let skip_ct_list_bake =
                 binding_ty.is_some_and(|ty| list_needs_lowering(ty, &is_trait_elem));
-            if b.ct.is_some() && !skip_ct_list_bake {
+            let skip_ct_view_bake = binding_ty.is_some_and(|ty| cx.type_contains_view(ty));
+            if b.ct.is_some() && !skip_ct_list_bake && !skip_ct_view_bake {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init_ty = b
                     .ty

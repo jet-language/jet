@@ -3645,6 +3645,41 @@ fn run() { print(domain("user@example.com").value) }
 }
 
 #[test]
+fn returned_view_constant_aggregate_keeps_borrowed_field_lowering() {
+    let src = r#"
+struct Token {
+    text: View<str>
+    rest: View<str>
+}
+
+fn scan(source: String) => Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn run() {
+    source :: "name:value"
+    token :: scan(source)
+    print(token.text)
+    print(token.rest)
+}
+"#;
+    let out = jet::compile(src).expect("constant returned-view aggregate must compile");
+    assert!(
+        out.rust.contains("let __jet_token: __jet_Token = __jet_scan(&(__jet_source));"),
+        "view-bearing constants must lower through the borrow-preserving call path:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("__jet_text: \"name\".to_string()")
+            && !out.rust.contains("__jet_rest: \"value\".to_string()"),
+        "view fields must not be emitted as owned Strings:\n{}",
+        out.rust
+    );
+}
+
+#[test]
 fn returned_string_view_field_cannot_outlive_local_owner() {
     let src = r#"
 struct Domain { value: View<str> }

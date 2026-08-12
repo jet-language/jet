@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
-        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let mut sig = if owner == self.module_idx {
             self.registry.method(leaf, method).cloned()?
@@ -199,7 +199,7 @@ impl<'a> Checker<'a> {
         sig: &mut MethodSig,
         args: &[Type],
     ) {
-        let (_, leaf) = Self::split_type_name(type_name);
+        let (_, leaf) = self.struct_type_name_parts(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
@@ -384,7 +384,7 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(method, span));
         }
-        let (_, dispatch_type_name) = Self::split_type_name(type_name);
+        let (_, dispatch_type_name) = self.struct_type_name_parts(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
@@ -462,7 +462,28 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let subst = match inferred {
-                    Ok(subst) => subst,
+                    Ok(subst) => {
+                        for param in &declared {
+                            let Some(concrete) = subst.get(&param.name) else {
+                                continue;
+                            };
+                            if let Some(bound) = param
+                                .bounds
+                                .iter()
+                                .find(|bound| !self.type_satisfies_bound(concrete, bound))
+                            {
+                                let concrete_name = concrete.name();
+                                self.diags.push(crate::Generics::e0905(
+                                    &concrete_name,
+                                    bound,
+                                    span,
+                                    false,
+                                ));
+                                return None;
+                            }
+                        }
+                        subst
+                    }
                     Err(_) => {
                         let mut unbounded = declared.clone();
                         for param in &mut unbounded {
@@ -1211,6 +1232,13 @@ impl<'a> Checker<'a> {
         &self,
         type_name: &'b str,
     ) -> (Option<&'b str>, &'b str) {
+        // D-PROTO1/D-PROTO2: generated protocol handles are local nominal
+        // types whose dots are part of the type name, not an import namespace.
+        // Preserve that identity for field and method lookup; imported names
+        // still use the ordinary namespace/leaf split below.
+        if self.registry.contains(type_name) {
+            return (None, type_name);
+        }
         Self::split_type_name(type_name)
     }
 
@@ -1224,7 +1252,7 @@ impl<'a> Checker<'a> {
         &self,
         type_name: &str,
     ) -> Option<&[(String, Span, Type)]> {
-        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         self.struct_fields_of(owner, leaf)
     }
@@ -1234,7 +1262,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         trait_name: &str,
     ) -> bool {
-        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return self.trait_reg.implements_trait(type_name, trait_name);
         };
@@ -1260,7 +1288,7 @@ impl<'a> Checker<'a> {
             Type::Apply { name, args } => (name.as_str(), Some(args.as_slice())),
             _ => return (ty.clone(), self.registry, self.trait_reg),
         };
-        let (import_ns, leaf) = Self::split_type_name(name);
+        let (import_ns, leaf) = self.struct_type_name_parts(name);
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return (ty.clone(), self.registry, self.trait_reg);
         };
@@ -1654,7 +1682,13 @@ impl<'a> Checker<'a> {
         // keyed by the owner-local leaf, while the returned type below keeps
         // the canonical identity. Split only for this local lookup; never
         // reintroduce the short name as semantic identity.
-        let (qualified_namespace, leaf_name) = Self::split_type_name(type_name);
+        let (qualified_namespace, leaf_name) = if import_ns.is_none()
+            && self.registry.contains(type_name)
+        {
+            (None, type_name)
+        } else {
+            Self::split_type_name(type_name)
+        };
         let import_ns = import_ns.or(qualified_namespace);
         let type_name = leaf_name;
         let display_type_name = self.display_type_name(type_name, None);

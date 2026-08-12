@@ -180,7 +180,7 @@ fn expand_json_is_canonical_and_lens_scoped() {
     assert_eq!(first.stdout, second.stdout, "expand JSON must be byte-stable");
     let stdout = String::from_utf8_lossy(&first.stdout);
     assert!(stdout.starts_with('{'), "JSON mode must not print human headers: {stdout}");
-    assert!(stdout.contains("\"schema_version\":12"), "must reuse semindex schema: {stdout}");
+    assert!(stdout.contains("\"schema_version\":13"), "must reuse semindex schema: {stdout}");
     assert!(stdout.contains("\"expand\":{\"selection\":\"inline\""), "missing expand projection: {stdout}");
     assert!(stdout.contains("\"contract\":\"#Inline"), "inline facts missing: {stdout}");
     assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");
@@ -228,7 +228,8 @@ fn expand_layout_human_and_json_are_deterministic() {
     assert!(json.contains("\"kind\":\"c\"") && json.contains("\"kind\":\"columnar\""));
     assert!(json.contains("\"type\":\"PacketState\"") && json.contains("\"size\":null"));
     assert!(json.contains("\"offset\":null"));
-    assert!(json.contains("\"byte_facts\":{\"status\":\"unavailable\""));
+    assert!(json.contains("\"byte_facts\":{\"diagnostic\""));
+    assert!(json.contains("\"status\":\"unavailable\""));
     assert!(json.contains("\"code\":\"E0959\""));
 }
 
@@ -244,7 +245,9 @@ fn expand_effects_and_layout_report_checked_facts() {
     assert_eq!(effects.status.code(), Some(0));
     let effects_human = scrub_fixture(&String::from_utf8_lossy(&effects.stdout), &fixture);
     assert!(effects_human.contains("audit"), "{effects_human}");
-    assert!(effects_human.contains("resolved=[Log.Audit]"), "{effects_human}");
+    // `=[Log.Audit]=>` is an upper bound. The pure fixture body resolves to
+    // an empty inferred row; a declaration is not an executed effect.
+    assert!(effects_human.contains("resolved=[]"), "{effects_human}");
 
     let layout = Command::new(jet())
         .args(["inspect", "expand", "--facts", "layout"])
@@ -272,7 +275,7 @@ fn expand_effects_and_layout_report_checked_facts() {
     let effects_json = String::from_utf8_lossy(&effects_json.stdout);
     assert!(parse_json(&effects_json).is_ok(), "{effects_json}");
     assert!(effects_json.contains("\"selection\":\"effects\""));
-    assert!(effects_json.contains("\"inferred\":[\"Log.Audit\"]"));
+    assert!(effects_json.contains("\"inferred\":[]"));
 
     let layout_json = Command::new(jet())
         .args(["inspect", "expand", "--facts", "layout", "--json"])
@@ -284,7 +287,8 @@ fn expand_effects_and_layout_report_checked_facts() {
     let layout_json = String::from_utf8_lossy(&layout_json.stdout);
     assert!(parse_json(&layout_json).is_ok(), "{layout_json}");
     assert!(layout_json.contains("\"selection\":\"layout\""));
-    assert!(layout_json.contains("\"byte_facts\":{\"status\":\"unavailable\""));
+    assert!(layout_json.contains("\"byte_facts\":{\"diagnostic\""));
+    assert!(layout_json.contains("\"status\":\"unavailable\""));
     assert!(layout_json.contains("\"code\":\"E0959\""));
 }
 

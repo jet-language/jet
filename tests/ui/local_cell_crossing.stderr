@@ -1,39 +1,39 @@
 Error [E0106]: the name `Cache` is built in and can't be redefined
-  --> tests/ui/local_cell_crossing.jet:14:8
+  --> tests/ui/local_cell_crossing.jet:12:8
     |
- 14 | struct Cache {
+ 12 | struct Cache {
     |        ^^^^^
  Why: `Cache` is provided by the language itself
  Fix: choose a different name for this struct
 
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
-  --> tests/ui/local_cell_crossing.jet:4:27
+  --> tests/ui/local_cell_crossing.jet:2:20
     |
   2 |     worker :: task {
-    |                ^^^^
+    |                    ^
  Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
  Fix: create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
 
 Error [E0120]: `cell` was not moved here, so it cannot be taken with the move-capability marker `^`
-  --> tests/ui/local_cell_crossing.jet:5:14
+  --> tests/ui/local_cell_crossing.jet:3:14
     |
-  5 |         _ :: cell
+  3 |         _ :: cell
     |              ^^^^
  Why: this function has read access only and does not own the value
  Fix: copy it instead: `_ :: ~cell`
 
 Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:11:22
+  --> tests/ui/local_cell_crossing.jet:9:22
     |
- 11 |     _ :: Shared.new(^cell)
+  9 |     _ :: Shared.new(^cell)
     |                      ^^^^
  Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
  Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`
 
 Error [E0119]: there's no type called `Cache`
-  --> tests/ui/local_cell_crossing.jet:18:31
+  --> tests/ui/local_cell_crossing.jet:16:31
     |
- 18 | fn cross_shared_nested(cache: Cache) {
+ 16 | fn cross_shared_nested(cache: Cache) {
     |                               ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first

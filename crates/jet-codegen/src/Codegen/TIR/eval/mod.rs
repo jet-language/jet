@@ -2106,7 +2106,18 @@ impl<'a> EvalCtx<'a> {
             .map(|value| self.take_task_entry(value).map(|(_, task)| task))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
-            unreachable!("sema must reject an empty task group combinator");
+            let method_label = match mode {
+                crate::task_group::JetTaskSelectMode::All => "`task.all`",
+                crate::task_group::JetTaskSelectMode::Race => "`task.race`",
+                crate::task_group::JetTaskSelectMode::Any => "`task.any`",
+            };
+            return Err(Diagnostic::error(
+                "E1112",
+                format!("{method_label} needs at least one task branch"),
+                "a task combinator must have a child to join or select".to_string(),
+                format!("write {method_label} {{ work() }} with one or more branches"),
+                Some(self.span()),
+            ));
         }
         match select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()) {
             Ok(mut values) => {

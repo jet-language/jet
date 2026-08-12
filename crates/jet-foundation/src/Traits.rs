@@ -759,7 +759,7 @@ impl TraitRegistry {
             diags.push(e0908(type_name, trait_name, span));
             return;
         }
-        let local_type = !type_name.contains('.') && self.local_types.contains(type_name);
+        let local_type = self.local_types.contains(type_name);
         let local_trait = !trait_name.contains('.')
             && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
         let operator_trait = matches!(

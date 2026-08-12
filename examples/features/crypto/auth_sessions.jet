@@ -1,17 +1,18 @@
 // D-AUTH1=A (#506): sessions, password login, OAuth begin/finish, magic links.
 use core.auth as auth
+use core.text as text
 use app
 
 fn run() {
     auth.register_user("alice", "argon2id:demo") ?? panic("register")
     sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
     show :: auth.session_show(sess)
-    print("show:{show.byte_count() > 0}")
+    print("show:{text.byte_count(show) > 0}")
     print("user:{auth.session_user(sess)}")
     cookie :: auth.session_cookie(sess)
-    print("cookie:{cookie.byte_count() > 0}")
+    print("cookie:{text.byte_count(cookie) > 0}")
     id :: auth.session_id(sess)
-    print("id:{id.byte_count() > 0}")
+    print("id:{text.byte_count(id) > 0}")
     validated :: auth.session_validate(id, 1_700_000_000_001) ?? panic("validate")
     print("validated:{auth.session_user(validated)}")
 

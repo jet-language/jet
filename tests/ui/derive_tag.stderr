@@ -1,7 +1,15 @@
 Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
-  --> tests/ui/derive_tag.jet:7:2
+  --> tests/ui/derive_tag.jet:5:2
     |
-  7 | #Reviewed
+  5 | #Reviewed
     |  ^^^^^^^^
  Why: a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`
  Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
+
+Error [E0927]: `#Reviewed` isn't a known applied rule
+  --> tests/ui/derive_tag.jet:5:2
+    |
+  5 | #Reviewed
+    |  ^^^^^^^^
+ Why: `Reviewed` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list.

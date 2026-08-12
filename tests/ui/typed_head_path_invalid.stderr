@@ -1,7 +1,7 @@
-Error [E0155]: this `Path` literal is invalid
-  --> tests/ui/typed_head_path_invalid.jet:2:18
+Error [E0001]: `\0` isn't an escape Jet knows
+  --> tests/ui/typed_head_path_invalid.jet:2:24
     |
   2 |     value :: Path.{"bad\0path"}
-    |                  ^^^^^^^^^^^
- Why: a Path cannot contain a NUL character
- Fix: fix the literal, or parse a runtime String with the ordinary `Path` constructor
+    |                        ^^
+ Why: inside quoted text, `\` starts an escape: `\n` (new line), `\t` (tab), `\"` (quote), `\\` (backslash)
+ Fix: write `\\` for a real backslash

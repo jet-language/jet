@@ -280,9 +280,12 @@ fn crypto_misuse_diagnostic(
             "password_hash_with_salt",
         ));
     }
-    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert")
-        && name == "hkdf_sha256"
-    {
+    let hkdf_operation = match (module, name) {
+        ("jet.crypto" | "core.crypto", "hkdf_sha256") => Some("hkdf_sha256"),
+        ("core.crypto.expert", "hkdf_sha256_raw") => Some("hkdf_sha256_raw"),
+        _ => None,
+    };
+    if let Some(operation) = hkdf_operation {
         let length = args.get(3)?;
         let actual = literal_int(&length.expr)?;
         if !(0..=8160).contains(&actual) {
@@ -291,7 +294,7 @@ fn crypto_misuse_diagnostic(
                 "pass an output length from 0 through 8160 bytes".to_string(),
                 length.expr.span(),
                 CryptoMisuseReason::OutputLength,
-                "hkdf_sha256",
+                operation,
                 "0..8160",
                 i128::from(actual),
             ));
@@ -3250,7 +3253,7 @@ impl<'a> Checker<'a> {
                     ]));
                 }
                 // D-ROUTE1=A: jet.http.router() → HTTPRouter.
-                ("jet.http", "router") => {
+                ("core.http", "router") => {
                     if !args.is_empty() {
                         self.diags
                             .push(wrong_core_arity("router", 0, args.len(), span));
@@ -3261,7 +3264,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("HTTPRouter".to_string()));
                 }
                 // D-ROUTE1=A: http.parse(raw_string) → HTTPRequest (parses HTTP/1.1 bytes).
-                ("jet.http", "parse") => {
+                ("core.http", "parse") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("parse", 1, args.len(), span));
@@ -3274,7 +3277,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("HTTPRequest".to_string()));
                 }
                 // D-HTTP-CORE2=A: the router's sole Handler propagates HTTPError.
-                ("jet.http", "dispatch") => {
+                ("core.http", "dispatch") => {
                     if args.len() != 2 {
                         self.diags
                             .push(wrong_core_arity("dispatch", 2, args.len(), span));
@@ -3324,7 +3327,7 @@ impl<'a> Checker<'a> {
                 }
                 // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
                 // handler: fn(HTTPRequest) => HTTPResponse (lambda) or HTTPRouter.
-                ("jet.http", "serve") => {
+                ("core.http", "serve") => {
                     if args.len() != 2 {
                         self.diags
                             .push(wrong_core_arity("serve", 2, args.len(), span));
@@ -3397,7 +3400,7 @@ impl<'a> Checker<'a> {
                 // D-REACT1=B: reactive.signal(initial) → Signal<T>. The value type is
                 // inferred from the initial value; an explicit annotation may guide an
                 // empty/ambiguous literal via `expected_type`.
-                ("jet.reactive", "signal") => {
+                ("core.reactive", "signal") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("signal", 1, args.len(), span));
@@ -3428,7 +3431,7 @@ impl<'a> Checker<'a> {
                 // D-REACT1=B: reactive.derived(() => expr) → Derived<T>. The compute
                 // closure takes no parameters; `T` is its return type. Reading a signal
                 // (`.get()`) inside the body subscribes the derived to it.
-                ("jet.reactive", "derived") => {
+                ("core.reactive", "derived") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("derived", 1, args.len(), span));
@@ -3472,7 +3475,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // D-SIGNAL1: `reactive.computed` is a canonical alias for `derived`.
-                ("jet.reactive", "computed") => {
+                ("core.reactive", "computed") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("computed", 1, args.len(), span));
@@ -3681,7 +3684,7 @@ impl<'a> Checker<'a> {
                 // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
                 // whenever a signal it read changes. The body is a zero-parameter,
                 // unit-returning closure; the call returns a retained Effect.
-                ("jet.reactive", "effect") => {
+                ("core.reactive", "effect") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("effect", 1, args.len(), span));

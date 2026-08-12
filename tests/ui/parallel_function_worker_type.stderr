@@ -14,7 +14,7 @@ Error [E1111]: parallel result cannot use `[fn(Int) => Int]` across workers
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
-Error [E1111]: parallel result cannot use `[fn(Int) => Int]` across workers
+Error [E1111]: parallel result cannot use `[fn(Int) =[]=> Int]` across workers
   --> tests/ui/parallel_function_worker_type.jet:11:23
     |
  11 |     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
@@ -22,7 +22,23 @@ Error [E1111]: parallel result cannot use `[fn(Int) => Int]` across workers
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
-Error [E1111]: parallel result cannot use `fn(Int) => Int` across workers
+Error [E0108]: argument 2 to `.para_fold()` should be fn(fn(Int) =[]=> Int, Int) => fn(Int) =[]=> Int, not fn(fn(Int) => Int, Int) =[]=> fn(Int) =[]=> Int
+  --> tests/ui/parallel_function_worker_type.jet:12:51
+    |
+ 12 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) => Int, n: Int) => callback, (left: fn(Int) => Int, right: fn(Int) => Int) => left)
+    |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: built-in methods need arguments of the right type
+ Fix: use fn(fn(Int) =[]=> Int, Int) => fn(Int) =[]=> Int here
+
+Error [E0108]: argument 3 to `.para_fold()` should be fn(fn(Int) =[]=> Int, fn(Int) =[]=> Int) => fn(Int) =[]=> Int, not fn(fn(Int) => Int, fn(Int) => Int) =[]=> fn(Int) =[]=> Int
+  --> tests/ui/parallel_function_worker_type.jet:12:99
+    |
+ 12 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) => Int, n: Int) => callback, (left: fn(Int) => Int, right: fn(Int) => Int) => left)
+    |                                                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: built-in methods need arguments of the right type
+ Fix: use fn(fn(Int) =[]=> Int, fn(Int) =[]=> Int) => fn(Int) =[]=> Int here
+
+Error [E1111]: parallel result cannot use `fn(Int) =[]=> Int` across workers
   --> tests/ui/parallel_function_worker_type.jet:12:20
     |
  12 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) => Int, n: Int) => callback, (left: fn(Int) => Int, right: fn(Int) => Int) => left)
