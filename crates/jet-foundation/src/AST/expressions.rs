@@ -744,6 +744,89 @@ impl Expr {
             Expr::MethodCall { method_span, .. } => *method_span,
         }
     }
+
+    /// Move diagnostics for a compiler-generated expression back to the source
+    /// construct that requested it. Generated Jet fragments are parsed through
+    /// the ordinary parser, so their byte offsets belong to the temporary
+    /// fragment rather than the user's file.
+    pub fn reanchor(&mut self, span: Span) {
+        match self {
+            Expr::Str(_, current)
+            | Expr::StrMatchLit(_, current)
+            | Expr::BinMatchLit(_, current)
+            | Expr::Int(_, current, _, _)
+            | Expr::Float(_, current, _)
+            | Expr::Bool(_, current)
+            | Expr::Char(_, current)
+            | Expr::ListLit(_, current)
+            | Expr::Spread(_, current)
+            | Expr::TupleLit(_, current, _)
+            | Expr::MapLit(_, current)
+            | Expr::Index { span: current, .. }
+            | Expr::Slice { span: current, .. }
+            | Expr::Range { span: current, .. }
+            | Expr::Ident(_, current)
+            | Expr::Unary(_, _, current)
+            | Expr::Binary(_, _, _, current)
+            | Expr::CompareChain { span: current, .. }
+            | Expr::Deref(_, current)
+            | Expr::RawOf(_, current)
+            | Expr::Copy(_, current)
+            | Expr::Place(_, _, current)
+            | Expr::Field(_, _, current)
+            | Expr::EnumLit { span: current, .. }
+            | Expr::Tainted(_, _, current)
+            | Expr::Present(_, current)
+            | Expr::Absent(current)
+            | Expr::Todo { span: current, .. }
+            | Expr::NoElse(current)
+            | Expr::ReduceMarker(_, current)
+            | Expr::Ok(_, current)
+            | Expr::Err(_, current)
+            | Expr::Try(_, current, _)
+            | Expr::OrFallback { span: current, .. }
+            | Expr::PatternTest { span: current, .. }
+            | Expr::If { span: current, .. }
+            | Expr::CallValue { span: current, .. }
+            | Expr::PtrFromAddr { span: current, .. }
+            | Expr::ComptimeName { span: current, .. }
+            | Expr::UnitLit { span: current, .. }
+            | Expr::IncDec { span: current, .. }
+            | Expr::Paren(_, current) => *current = span,
+            Expr::MemberSpread {
+                members,
+                span: current,
+                ..
+            } => {
+                *current = span;
+                for (_, member_span) in members {
+                    *member_span = span;
+                }
+            }
+            Expr::OptField {
+                member_span,
+                span: current,
+                ..
+            } => {
+                *current = span;
+                *member_span = span;
+            }
+            Expr::StructLit {
+                fields,
+                span: current,
+                ..
+            } => {
+                *current = span;
+                for (_, field_span, _) in fields {
+                    *field_span = span;
+                }
+            }
+            Expr::TypedLit { span: current, .. } => *current = span,
+            Expr::Call(call) => call.name_span = span,
+            Expr::MethodCall { method_span, .. } => *method_span = span,
+            Expr::Lambda(lambda) => lambda.span = span,
+        }
+    }
 }
 
 impl Func {

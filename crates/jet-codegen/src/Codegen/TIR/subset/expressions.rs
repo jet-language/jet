@@ -43,6 +43,13 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // path's `operand_is_integer`, so the overflow trap is never wrongly claimed.)
             (cx.consts.contains_key(name) && !locals.contains(name))
                 || locals.contains(name)
+                // D-NARG-D2: the shared sema call binder replaces an omitted
+                // default's earlier-parameter reference with a compiler-private
+                // slot name. The call-argument lowerer installs that slot in its
+                // local binder environment before lowering the expression, so it
+                // is covered even though it is not a source binding in the
+                // enclosing function.
+                || is_binder_ref_name(name)
                 || ident_is_named_fn_value(name, cx, locals)
         }
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
@@ -826,6 +833,23 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // Everything else (tuples, …) is out.
         _ => false,
     }
+}
+
+/// D-NARG-D2: is `name` one of the compiler-private slot names that the shared
+/// call binder creates for an omitted default argument? The lowerer installs
+/// these names only while lowering that argument; accepting their shape here
+/// keeps the coverage proof aligned with that total lowering fact.
+fn is_binder_ref_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("__jet_binder_ref_") else {
+        return false;
+    };
+    let Some((site, slot)) = rest.split_once('_') else {
+        return false;
+    };
+    !site.is_empty()
+        && !slot.is_empty()
+        && site.chars().all(|ch| ch.is_ascii_digit())
+        && slot.chars().all(|ch| ch.is_ascii_digit())
 }
 
 /// c109 Phase 13: is `name` a bare top-level function used as a VALUE? It must be a

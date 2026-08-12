@@ -159,9 +159,10 @@ pub(crate) fn lower_call_arg_value(
     let saved_binder_refs = env.binder_refs.clone();
     let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
     for (name, slot, ty) in &a.flags.binder_refs {
+        let temp = jet_format!("{jet_prefix}arg{site}_{slot}");
         env.binder_refs.insert(
             name.clone(),
-            (jet_format!("{jet_prefix}arg{site}_{slot}"), ty.clone()),
+            (temp, ty.clone()),
         );
     }
     // A bare lambda flowing into a user fn-typed parameter takes its param
@@ -223,8 +224,15 @@ pub(crate) fn lower_one_call_arg(
         (&a.expr, &conv),
         (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
     );
-    let value = super::take_scheduled_expr(&a.expr)
-        .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
+    // Default expressions carry private references to earlier declaration
+    // slots. A plain worklist pass cannot install that mapping, so never reuse
+    // its cached value here; lower the argument through the binder-aware path.
+    let value = if a.flags.binder_refs.is_empty() {
+        super::take_scheduled_expr(&a.expr)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
     let value = match (&conv, value) {
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {

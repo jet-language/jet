@@ -366,6 +366,26 @@ fn expand_builtin_enum_serde(
     }
 }
 
+fn reanchor_generated_items(items: &mut [Item], trigger_span: crate::Diagnostics::Span) {
+    for item in items {
+        match item {
+            Item::Func(function) => {
+                for statement in &mut function.body {
+                    statement.for_each_expr_mut(|expr| expr.reanchor(trigger_span));
+                }
+            }
+            Item::Impl(implementation) => {
+                for method in &mut implementation.methods {
+                    for statement in &mut method.body {
+                        statement.for_each_expr_mut(|expr| expr.reanchor(trigger_span));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) fn parse_generated_fragment(
     source: &str,
     what: String,
@@ -385,7 +405,10 @@ pub(crate) fn parse_generated_fragment(
         // spelling in the source contract: the test guards that expansion
         // still returns parsed top-level items rather than transplanting an
         // AST fragment into the user type.
-        Ok(generated) => Some(generated.items),
+        Ok(mut generated) => {
+            reanchor_generated_items(&mut generated.items, trigger_span);
+            Some(generated.items)
+        }
         Err(errors) => {
             let detail = errors
                 .first()
@@ -450,6 +473,31 @@ mod serde_source_tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code, "E2710");
         assert_eq!(diags[0].span, Some(trigger));
+    }
+
+    #[test]
+    fn generated_expression_spans_reanchor_to_derive_trigger() {
+        let trigger = Span::new(80, 83);
+        let mut diags = Vec::new();
+        let items = parse_generated_fragment(
+            "impl Box.Equatable { fn equal(self, rhs: Box) => Bool { return self.raw() == rhs.raw() } }",
+            "generated equality is invalid".to_string(),
+            "fix the generated equality".to_string(),
+            trigger,
+            &mut diags,
+        ).expect("generated fragment parses");
+        assert!(diags.is_empty(), "generated source must parse: {diags:?}");
+
+        let Item::Impl(implementation) = &items[0] else {
+            panic!("generated fragment must remain a top-level impl");
+        };
+        let mut spans = Vec::new();
+        for statement in &implementation.methods[0].body {
+            let mut statement = statement.clone();
+            statement.for_each_expr_mut(|expr| spans.push(expr.span()));
+        }
+        assert!(!spans.is_empty());
+        assert!(spans.iter().all(|span| *span == trigger), "unanchored spans: {spans:?}");
     }
 }
 

@@ -410,6 +410,182 @@ pub enum Stmt {
 }
 
 impl Stmt {
+    /// Visit every expression in this statement, including expressions in
+    /// nested statement bodies. This is used when a parsed compiler-owned
+    /// fragment needs its expression diagnostics reanchored to the user item
+    /// that caused the fragment to be generated.
+    pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expr)) {
+        fn visit_expr(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
+            expr.for_each_expr_mut(f);
+        }
+
+        fn visit_body(body: &mut [Stmt], f: &mut impl FnMut(&mut Expr)) {
+            for stmt in body {
+                visit_stmt(stmt, f);
+            }
+        }
+
+        fn visit_lvalue(lvalue: &mut LValue, f: &mut impl FnMut(&mut Expr)) {
+            match lvalue {
+                LValue::Local { .. } => {}
+                LValue::Index { base, index, .. } => {
+                    visit_expr(base, f);
+                    visit_expr(index, f);
+                }
+                LValue::Field { base, .. } => visit_expr(base, f),
+            }
+        }
+
+        fn visit_for_kind(kind: &mut ForKind, f: &mut impl FnMut(&mut Expr)) {
+            match kind {
+                ForKind::Range { start, end, step, .. } => {
+                    visit_expr(start, f);
+                    visit_expr(end, f);
+                    if let Some(step) = step {
+                        visit_expr(step, f);
+                    }
+                }
+                ForKind::In { collection, step } => {
+                    visit_expr(collection, f);
+                    if let Some(step) = step {
+                        visit_expr(step, f);
+                    }
+                }
+            }
+        }
+
+        fn visit_stmt(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
+            match stmt {
+                Stmt::Expr(expr) => visit_expr(expr, f),
+                Stmt::Val(binding) => visit_expr(&mut binding.init, f),
+                Stmt::Assign { target, value, .. } => {
+                    visit_lvalue(target, f);
+                    visit_expr(value, f);
+                }
+                Stmt::Return(value, _) => {
+                    if let Some(value) = value {
+                        visit_expr(value, f);
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    visit_expr(cond, f);
+                    visit_body(body, f);
+                }
+                Stmt::For { kind, body, .. } => {
+                    visit_for_kind(kind, f);
+                    visit_body(body, f);
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                }
+                | Stmt::ComptimeSwitch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    visit_expr(subject, f);
+                    for arm in arms {
+                        visit_expr(&mut arm.cond, f);
+                        visit_body(&mut arm.body, f);
+                    }
+                    if let Some(body) = else_body {
+                        visit_body(body, f);
+                    }
+                }
+                Stmt::BreakValue(value, _) | Stmt::Yield(value, _) => visit_expr(value, f),
+                Stmt::BreakLabelValue(_, _, value, _) => visit_expr(value, f),
+                Stmt::Loop { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ComptimeBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::Layout { body, .. } => visit_body(body, f),
+                Stmt::Unsafe {
+                    audit_expr, body, ..
+                } => {
+                    if let Some(expr) = audit_expr {
+                        visit_expr(expr, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::Impure {
+                    reason_expr, body, ..
+                } => {
+                    if let Some(expr) = reason_expr {
+                        visit_expr(expr, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    visit_expr(&mut init.init, f);
+                    visit_expr(cond, f);
+                    if let Some(step) = step {
+                        visit_stmt(step, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::TaskGroup { limit, body, .. } => {
+                    if let Some(limit) = limit {
+                        visit_expr(limit, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::ContextBlock { fields, body, .. } => {
+                    for (_, value, _) in fields {
+                        visit_expr(value, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::AssumeDet {
+                    reason_expr, body, ..
+                } => {
+                    visit_expr(reason_expr, f);
+                    visit_body(body, f);
+                }
+                Stmt::ComptimeIf {
+                    cond,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    visit_expr(cond, f);
+                    visit_body(then_body, f);
+                    if let Some(body) = else_body {
+                        visit_body(body, f);
+                    }
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        visit_expr(arg, f);
+                    }
+                    visit_body(body, f);
+                }
+                Stmt::Break(_)
+                | Stmt::Continue(_)
+                | Stmt::BreakLabel(..)
+                | Stmt::ContinueLabel(..) => {}
+            }
+        }
+
+        visit_stmt(self, &mut f);
+    }
+
     /// The source span this statement occupies, used by the source-level
     /// debugger (D-DBG3) to resolve a Jet line for a breakpoint or `<- here`
     /// caret. For statements that carry no explicit `span` field, this falls

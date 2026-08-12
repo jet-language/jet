@@ -104,6 +104,16 @@ pub(super) fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic
                 (is_base || used_members.contains(&member.name))
                     && !occupied.contains(&crate::AST::UnitFamilyDef::type_name(&member.name))
             });
+            let family_anchor = standard
+                .members
+                .iter()
+                .find_map(|member| source_unit_member_span(&module.source, &member.name))
+                .or_else(|| source_identifier_span(&module.source, &standard.family))
+                .unwrap_or(Span::new(0, 0));
+            for member in &mut standard.members {
+                member.name_span = source_unit_member_span(&module.source, &member.name)
+                    .unwrap_or(family_anchor);
+            }
             module.items.push(Item::UnitFamily(standard));
         }
     }
@@ -142,6 +152,37 @@ fn source_mentions_unit_member(source: &str, member: &str) -> bool {
                 .next_back()
                 .is_some_and(|ch| ch.is_ascii_digit())
         })
+}
+
+fn source_unit_member_span(source: &str, member: &str) -> Option<Span> {
+    let type_name = crate::AST::UnitFamilyDef::type_name(member);
+    source_identifier_span(source, &type_name)
+        .or_else(|| {
+            let qualified = format!("from_{member}");
+            source
+                .match_indices(&qualified)
+                .next()
+                .map(|(start, _)| Span::new(start + 5, start + qualified.len()))
+        })
+        .or_else(|| {
+            source.match_indices(member).find_map(|(start, _)| {
+                source[..start]
+                    .chars()
+                    .next_back()
+                    .filter(char::is_ascii_digit)
+                    .map(|_| Span::new(start, start + member.len()))
+            })
+        })
+}
+
+fn source_identifier_span(source: &str, name: &str) -> Option<Span> {
+    source.match_indices(name).find_map(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + name.len()..].chars().next();
+        (!before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_'))
+            .then_some(Span::new(start, start + name.len()))
+    })
 }
 
 fn source_mentions_unqualified_identifier(source: &str, name: &str) -> bool {
