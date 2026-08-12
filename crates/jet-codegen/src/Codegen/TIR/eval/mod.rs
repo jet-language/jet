@@ -301,28 +301,34 @@ pub(super) fn range_window(
         Some(CtValue::Int(value)) => *value,
         _ => return Err(unsupported("Range.end", span)),
     };
-    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
-    range_semantics::jet_range_bounds(start, end, exclusive, len as i64)
-        .ok_or_else(|| view_bounds_diagnostic(len, start, end, exclusive, span))
+    let exclusive = match field("exclusive") {
+        Some(CtValue::Bool(value)) => *value,
+        _ => return Err(unsupported("Range.exclusive", span)),
+    };
+    checked_view_window(start, end, exclusive, len, span)
 }
 
-pub(super) fn view_bounds_diagnostic(
-    len: usize,
+pub(super) fn checked_view_window(
     start: i64,
     end: i64,
     exclusive: bool,
+    len: usize,
+    span: Span,
+) -> Result<(i64, i64), Diagnostic> {
+    range_semantics::jet_checked_view_bounds(start, end, exclusive, len as i64)
+        .map_err(|message| view_bounds_diagnostic(message, span))
+}
+
+pub(super) fn view_bounds_diagnostic(
+    message: String,
     span: Span,
 ) -> Diagnostic {
     // Same E0953 voice as the JIT trap / comptime panic path so every tier
     // reports one code for an out-of-bounds view (I9).
-    let msg = format!(
-        "can't view {len} items from {start} to {end} ({})",
-        if exclusive { "exclusive" } else { "inclusive" }
-    );
     Diagnostic::error(
         "E0953",
         "your comptime code stopped the build".to_string(),
-        format!("while computing this value at compile time, the program panicked: {msg}"),
+        format!("while computing this value at compile time, the program panicked: {message}"),
         "this is the sanctioned way to validate at compile time — fix the input the check rejects"
             .to_string(),
         Some(span),
@@ -820,18 +826,36 @@ pub(super) fn materialize_view_mut_window(
         }
     }
     let items = load_view_mut_owner_list(fields, scope, span)?;
-    if start < 0
-        || end < start - 1
-        || (end >= start && end as usize >= items.len())
-        || start as usize > items.len()
-    {
-        return Err(unsupported("view-mut bounds", span));
-    }
-    if end < start {
-        Ok(CtValue::List(Vec::new()))
+    let (start, end_exclusive) = if end < start {
+        if end.checked_add(1) != Some(start) {
+            return Err(view_bounds_diagnostic(
+                range_semantics::jet_view_bounds_error(
+                    start,
+                    end,
+                    false,
+                    items.len() as i64,
+                ),
+                span,
+            ));
+        }
+        range_semantics::jet_checked_view_bounds(start, start, true, items.len() as i64)
+            .map_err(|_| {
+                view_bounds_diagnostic(
+                    range_semantics::jet_view_bounds_error(
+                        start,
+                        end,
+                        false,
+                        items.len() as i64,
+                    ),
+                    span,
+                )
+            })?
     } else {
-        Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
-    }
+        checked_view_window(start, end, false, items.len(), span)?
+    };
+    Ok(CtValue::List(
+        items[start as usize..end_exclusive as usize].to_vec(),
+    ))
 }
 
 fn rebase_view_mut_owners(

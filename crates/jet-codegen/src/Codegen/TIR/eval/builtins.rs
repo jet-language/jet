@@ -447,7 +447,9 @@ pub(super) fn eval_builtin(
             }
             Ok(CtValue::Present(Box::new(CtValue::List(out))))
         }
-        // CtValue has no distinct View type — materialize the inclusive window as a List.
+        // Interpreter adapter only: decode the CtValue list/range ABI, then
+        // delegate bounds and the shared failure message to Prelude-backed
+        // `checked_view_window` / `range_window`.
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
             let CtValue::List(xs) = recv else {
                 return Err(unsupported("view receiver", span));
@@ -461,16 +463,7 @@ pub(super) fn eval_builtin(
                 let CtValue::Int(z) = second else {
                     return Err(unsupported("view end", span));
                 };
-                if a < 0 || z < a || z as usize >= xs.len() {
-                    return Err(super::view_bounds_diagnostic(
-                        xs.len(),
-                        a,
-                        z,
-                        false,
-                        span,
-                    ));
-                }
-                (a, z + 1)
+                super::checked_view_window(a, z, false, xs.len(), span)?
             } else {
                 super::range_window(&first, xs.len(), span)?
             };

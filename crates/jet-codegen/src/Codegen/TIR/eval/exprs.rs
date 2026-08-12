@@ -4330,16 +4330,7 @@ impl<'a> EvalCtx<'a> {
                     } else {
                         let start = as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
                         let end = as_int(&self.eval_expr_child(&args[1], scope)?, self.span())?;
-                        if start < 0 || end < start || end as usize >= xs.len() {
-                            return Err(super::view_bounds_diagnostic(
-                                xs.len(),
-                                start,
-                                end,
-                                false,
-                                self.span(),
-                            ));
-                        }
-                        (start, end + 1)
+                        super::checked_view_window(start, end, false, xs.len(), self.span())?
                     };
                     let end = i64::try_from(end_exclusive)
                         .map_err(|_| unsupported("view-mut end is too large", self.span()))?

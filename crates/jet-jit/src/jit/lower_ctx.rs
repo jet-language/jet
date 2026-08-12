@@ -8478,14 +8478,14 @@ impl LowerCtx<'_, '_> {
         matches!(ty, Type::Apply { name, .. } if name == "__JetFieldMut")
     }
 
-    fn lower_range_window(
+    fn lower_checked_view_window(
         &mut self,
         list: Value,
-        range: &TExpr,
+        start: Value,
+        end: Value,
+        exclusive: Value,
         line: usize,
     ) -> Result<(Value, Value), String> {
-        let [start, end, exclusive] = self.lower_range_expr(range)?;
-        let exclusive = self.b.ins().uextend(types::I64, exclusive);
         let line = self.b.ins().iconst(types::I32, line as i64);
         let host = self
             .module
@@ -8497,6 +8497,17 @@ impl LowerCtx<'_, '_> {
         let end_exclusive = self.b.inst_results(call)[0];
         self.emit_trap_check()?;
         Ok((start, end_exclusive))
+    }
+
+    fn lower_range_window(
+        &mut self,
+        list: Value,
+        range: &TExpr,
+        line: usize,
+    ) -> Result<(Value, Value), String> {
+        let [start, end, exclusive] = self.lower_range_expr(range)?;
+        let exclusive = self.b.ins().uextend(types::I64, exclusive);
+        self.lower_checked_view_window(list, start, end, exclusive, line)
     }
 
     /// Write-through window: heap record `[list, start, end]` (inclusive ends).
@@ -17278,8 +17289,14 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| "jit view needs end".to_string())?;
                     let start = self.lower_expr(start)?;
                     let end = self.lower_expr(end)?;
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    (start, self.b.ins().iadd(end, one))
+                    let exclusive = self.b.ins().iconst(types::I64, 0);
+                    self.lower_checked_view_window(
+                        recv_val,
+                        start,
+                        end,
+                        exclusive,
+                        *line,
+                    )?
                 };
                 let line_c = self.b.ins().iconst(types::I32, *line as i64);
                 let host_ref = self
@@ -17308,17 +17325,14 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| "jit view-mut needs end".to_string())?;
                     let start = self.lower_expr(start)?;
                     let end = self.lower_expr(end)?;
-                    let inclusive = self.b.ins().iconst(types::I64, 0);
-                    let line = self.b.ins().iconst(types::I32, *line as i64);
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_range_end, self.b.func);
-                    let call = self
-                        .b
-                        .ins()
-                        .call(host, &[recv_val, start, end, inclusive, line]);
-                    let end_exclusive = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
+                    let exclusive = self.b.ins().iconst(types::I64, 0);
+                    let (start, end_exclusive) = self.lower_checked_view_window(
+                        recv_val,
+                        start,
+                        end,
+                        exclusive,
+                        *line,
+                    )?;
                     let one = self.b.ins().iconst(types::I64, 1);
                     (start, self.b.ins().isub(end_exclusive, one))
                 };
