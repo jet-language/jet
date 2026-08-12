@@ -268,6 +268,7 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    pub(crate) jit_spawn_sites: std::cell::RefCell<HashMap<(String, usize, usize), usize>>,
     /// Global offset for spawn sites lowered from an imported module.
     pub(crate) jit_spawn_site_base: usize,
     /// Concrete generic owner methods reached while lowering executable TIR.
@@ -2819,7 +2820,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.package_edition = bundle.edition.clone();
 }
 
-fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+pub(crate) fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     for (name, path) in bundle.name_ledger.canonical_paths(module_idx) {
         cx.reflect_paths.insert(name, path);
     }
@@ -3222,6 +3223,7 @@ pub(crate) fn build_cx_items(
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        jit_spawn_sites: std::cell::RefCell::new(HashMap::new()),
         jit_spawn_site_base: 0,
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),

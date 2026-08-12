@@ -3300,6 +3300,7 @@ pub fn emit_bundle_dbg(
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
+        register_bundle_reflect_paths(&mut cx, bundle, i);
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
         // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
@@ -3369,6 +3370,7 @@ pub fn emit_bundle_dbg(
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
+    register_bundle_reflect_paths(&mut cx, bundle, bundle.entry);
     for import in &entry.imports {
         if bundle
             .name_ledger

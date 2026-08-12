@@ -698,7 +698,7 @@ pub(crate) fn emit_tir_core_call(
                 _ => "Vec::new()".to_string(),
             };
             format!(
-                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: \"{type_name}\".to_string(), path: \"{path}\".to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
+                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: {type_name}.to_string(), path: {path}.to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
                 arg0 = arg(0),
                 root = cx.root_prefix,
                 type_name = escape_rust_str(&type_name),

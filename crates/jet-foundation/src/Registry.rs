@@ -522,7 +522,18 @@ fn render_template(template: &str, holes: &[(&str, &str)]) -> String {
     out
 }
 
+/// A row field whose text itself contains backticks is written as a markdown
+/// code span (`` … ``) in Diagnostics.jet. The fence is table notation, not
+/// product copy — strip it before the template is stored.
+fn strip_code_span_fence(value: &str) -> &str {
+    value
+        .strip_prefix("`` ")
+        .and_then(|rest| rest.strip_suffix(" ``"))
+        .unwrap_or(value)
+}
+
 fn unescape_source(value: &str) -> String {
+    let value = strip_code_span_fence(value);
     let mut out = String::with_capacity(value.len());
     let mut escaped = false;
     for character in value.chars() {
