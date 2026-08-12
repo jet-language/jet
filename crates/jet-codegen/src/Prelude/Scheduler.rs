@@ -1603,7 +1603,8 @@ fn jet_scheduler_raw_io_wait(
     }
     let _registration = Registration(registration.clone());
     jet_scheduler_yield(wait_kind, &registration.slot, None);
-    *registration.ready.lock().unwrap()
+    let ready = *registration.ready.lock().unwrap();
+    ready
 }
 
 #[cfg(unix)]
