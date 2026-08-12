@@ -164,18 +164,25 @@ impl PkgResolution {
 /// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
 /// the separate realize step). So a declared-but-unbuilt library is a friendly
 /// "run `jetpack build`" (E0983), never a silent network fetch.
-fn collect_pkg_resolution(raw: &str) -> PkgResolution {
+fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
     let mut declared_deps = HashSet::new();
-    if let Ok(facts) = crate::Package::PackageFacts::parse(raw, "package.jet") {
-        for (name, source) in &facts.deps {
-            // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
-            // package — it must not shadow `use <pkg>` resolution (e.g. a dep
-            // named `c`). Skip it here; CFFI.rs reads it for link flags.
-            if matches!(source, crate::Package::DepSource::CLib { .. }) {
-                continue;
-            }
-            declared_deps.insert(name.clone());
+    let facts = crate::Package::PackageFacts::parse(raw, "package.jet").map_err(|error| {
+        Diagnostic::error(
+            "E1206",
+            "invalid package manifest".to_string(),
+            error.to_string(),
+            "fix the fields in package.jet before loading the project".to_string(),
+            None,
+        )
+    })?;
+    for (name, source) in &facts.deps {
+        // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
+        // package — it must not shadow `use <pkg>` resolution (e.g. a dep
+        // named `c`). Skip it here; CFFI.rs reads it for link flags.
+        if matches!(source, crate::Package::DepSource::CLib { .. }) {
+            continue;
         }
+        declared_deps.insert(name.clone());
     }
 
     let mut realized_libs = HashMap::new();
@@ -193,11 +200,11 @@ fn collect_pkg_resolution(raw: &str) -> PkgResolution {
         }
     }
 
-    PkgResolution {
+    Ok(PkgResolution {
         realized_libs,
         realized_exes,
         declared_deps,
-    }
+    })
 }
 
 pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
@@ -664,7 +671,16 @@ fn load_entry_with_overlays_mode_with_sink(
                     }
                 };
                 // U17: declared package kinds + realized library staging dirs.
-                let resolution = collect_pkg_resolution(&raw);
+                let resolution = collect_pkg_resolution(&raw).map_err(|diagnostic| {
+                    record_loader_error(
+                        &mut sink,
+                        LoaderError::at(
+                            &pack_path.display().to_string(),
+                            &raw,
+                            vec![diagnostic],
+                        ),
+                    )
+                })?;
                 let mut policy = organization_policy.clone();
                 let auto_derive = package_manifest.policy.auto_derive.unwrap_or(true);
                 policy.extend(package_manifest.policy.memory);
@@ -753,6 +769,13 @@ fn load_entry_with_overlays_mode_with_sink(
         .collect::<Vec<_>>();
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&project_root, &project_part_overlays);
+    if let Some(failure) = project_part_failures.iter().find(|failure| failure.authority) {
+        let file = relative_display(&project_root, &failure.path);
+        return Err(record_loader_error(
+            &mut sink,
+            LoaderError::at(&file, "", vec![failure.problem.clone()]),
+        ));
+    }
 
     if let Err(error) = load_file(
         &entry_abs,
@@ -1118,13 +1141,15 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
     Ok(declarations)
 }
 
-/// Return the manifest path owned by `root`, preferring canonical
-/// `package.jet` over migration-era `pkg.jet`.
+/// Return the canonical manifest path for legacy read-only callers.
+/// Authority-sensitive callers must use `manifest_path_checked` so metadata
+/// failures cannot become an absent Package.
 pub fn manifest_path(root: &Path) -> Option<PathBuf> {
     manifest_path_checked(root).ok().flatten()
 }
 
-/// Return the checked canonical manifest path without hiding authority errors.
+/// Return the checked canonical manifest path without following symlinks or
+/// hiding authority errors. `pkg.jet` is never a fallback.
 pub fn manifest_path_checked(root: &Path) -> Result<Option<PathBuf>, Diagnostic> {
     let resolver = match AuthorityResolver::open(root) {
         Ok(resolver) => resolver,
@@ -1148,15 +1173,10 @@ pub fn manifest_path_checked(root: &Path) -> Result<Option<PathBuf>, Diagnostic>
 /// returned so an inner malformed or ambiguous workspace cannot expose an
 /// outer package authority.
 pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = fs::canonicalize(start).map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't resolve project boundary `{}`", start.display()),
-            error.to_string(),
-            "use an existing project directory".to_string(),
-            None,
-        )
-    })?;
+    let mut dir = AuthorityResolver::open(start)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
         let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
         match resolver.resolve_workspace_source() {
@@ -1195,25 +1215,28 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
 
 /// Name the package/module authority from the canonical `run.jet` entry when
 /// one exists. A retired `main.jet` never becomes the authority fallback.
-pub fn authority_name_for_entry(entry: &Path) -> String {
-    let authority = entry.parent().and_then(|parent| {
-        let resolver = AuthorityResolver::open(parent).ok()?;
-        let run = resolver
-            .checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE))
-            .ok()?;
-        resolver.revalidate_file(&run).ok()?;
-        Some(run.path)
-    });
-    let authority = authority.as_deref().unwrap_or(entry);
+pub fn authority_name_for_entry(entry: &Path) -> Result<String, Diagnostic> {
+    let parent = entry.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = AuthorityResolver::open(parent).map_err(|error| error.diagnostic())?;
+    let authority = match resolver.checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE)) {
+        Ok(run) => {
+            resolver
+                .revalidate_file(&run)
+                .map_err(|error| error.diagnostic())?;
+            run.path
+        }
+        Err(error) if error.is_missing() => entry.to_path_buf(),
+        Err(error) => return Err(error.diagnostic()),
+    };
     let legacy_stem = Syntax::LEGACY_ENTRY_FILE
         .strip_suffix(".jet")
         .unwrap_or(Syntax::LEGACY_ENTRY_FILE);
-    authority
+    Ok(authority
         .file_stem()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty() && *name != legacy_stem)
         .unwrap_or("app")
-        .to_string()
+        .to_string())
 }
 
 /// Walk upward from `start` to find the nearest workspace declaration and
@@ -1223,15 +1246,10 @@ pub fn authority_name_for_entry(entry: &Path) -> String {
 /// workspace nested below a package root must own file and module imports
 /// inside that workspace instead of inheriting the package's wider tree.
 pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = fs::canonicalize(start).map_err(|error| {
-        Diagnostic::error(
-            "E1334",
-            format!("couldn't resolve project boundary `{}`", start.display()),
-            error.to_string(),
-            "use an existing project directory".to_string(),
-            None,
-        )
-    })?;
+    let mut dir = AuthorityResolver::open(start)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
         let resolver = AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
         match resolver.resolve_workspace_source() {
@@ -1253,7 +1271,7 @@ pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diag
 /// "no pkg.jet found" message into the E1226 teaching diagnostic when the
 /// user's project still carries an old filename.
 pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
-    let mut dir = fs::canonicalize(start).ok()?;
+    let mut dir = AuthorityResolver::open(start).ok()?.root().to_path_buf();
     loop {
         let resolver = AuthorityResolver::open(&dir).ok()?;
         match resolver.checked_manifest(Path::new(".")) {
@@ -1466,7 +1484,7 @@ fn project_resolution(
         .revalidate_file(&checked.file)
         .map_err(|error| error.diagnostic())?;
     let dep_dirs = collect_dep_dirs(&mf, project_root)?;
-    Ok((dep_dirs, collect_pkg_resolution(&raw)))
+    Ok((dep_dirs, collect_pkg_resolution(&raw)?))
 }
 
 fn auto_derive_default_for_file(
@@ -1480,7 +1498,8 @@ fn auto_derive_default_for_file(
         .filter(|dependency| path.starts_with(&dependency.source_root))
         .max_by_key(|dependency| dependency.source_root.components().count());
     if let Some(dependency) = dependency {
-        let package = crate::Package::PackageFacts::load(&dependency.manifest_root)
+        let package = crate::Package::PackageFacts::load_checked(&dependency.manifest_root)
+            .map_err(|error| error.diagnostic())?
             .ok_or_else(|| {
                 Diagnostic::error(
                     "E1334",
@@ -1490,15 +1509,6 @@ fn auto_derive_default_for_file(
                     ),
                     "a dependency source root must have one checked package manifest".to_string(),
                     "restore `package.jet` in the dependency root".to_string(),
-                    None,
-                )
-            })?
-            .map_err(|error| {
-                Diagnostic::error(
-                    "E1206",
-                    "invalid package manifest".to_string(),
-                    error.to_string(),
-                    "fix the fields in package.jet before loading the project".to_string(),
                     None,
                 )
             })?;
@@ -2090,20 +2100,24 @@ fn resolve_module_import(
     if let Some(dependency) = pkg_dep_dirs.get(first_segment) {
         let dep_root = &dependency.source_root;
         // Search within the dep's source tree for the module.
-        let dep_matches = find_module_files(name, dep_root);
+        let dep_matches = find_module_files(name, dep_root)?;
         if !dep_matches.is_empty() {
             return Ok(dep_matches[0].clone());
         }
         // If the dep root itself has the dep name as the top-level module,
         // anchor the package authority on the canonical run entry.
         if name == first_segment {
-            if let Ok(resolver) = AuthorityResolver::open(dep_root) {
-                if let Ok(run_jet) = resolver.checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE)) {
+            let resolver = AuthorityResolver::open(dep_root)
+                .map_err(|error| error.diagnostic())?;
+            match resolver.checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE)) {
+                Ok(run_jet) => {
                     resolver
                         .revalidate_file(&run_jet)
                         .map_err(|error| error.diagnostic())?;
                     return Ok(run_jet.path);
                 }
+                Err(error) if error.is_missing() => {}
+                Err(error) => return Err(error.diagnostic()),
             }
         }
     }
@@ -2115,7 +2129,7 @@ fn resolve_module_import(
     if !pkg_resolution.is_empty() {
         // Realized library → resolve through its staged source tree.
         if let Some(staged) = pkg_resolution.realized_libs.get(first_segment) {
-            let lib_matches = find_module_files(name, staged);
+            let lib_matches = find_module_files(name, staged)?;
             if !lib_matches.is_empty() {
                 return Ok(lib_matches[0].clone());
             }
@@ -2129,14 +2143,14 @@ fn resolve_module_import(
         // Declared as a dependency but not realized yet → run `jetpack build`
         // (E0983), rather than a generic unknown-module error.
         if pkg_resolution.declared_deps.contains(first_segment)
-            && find_module_files(name, project_root).is_empty()
+            && find_module_files(name, project_root)?.is_empty()
             && !pkg_dep_dirs.contains_key(first_segment)
         {
             return Err(e0983_unrealized_library(first_segment, span));
         }
     }
 
-    let matches = find_module_files(name, project_root);
+    let matches = find_module_files(name, project_root)?;
     match matches.len() {
         0 => Err(Diagnostic::error(
             "E0603",
@@ -2177,13 +2191,11 @@ fn resolve_module_import(
     }
 }
 
-fn find_module_files(name: &str, project_root: &Path) -> Vec<PathBuf> {
-    let Ok(resolver) = AuthorityResolver::open(project_root) else {
-        return Vec::new();
-    };
-    let Ok(files) = resolver.discover_source_files() else {
-        return Vec::new();
-    };
+fn find_module_files(name: &str, project_root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+    let resolver = AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())?;
+    let files = resolver
+        .discover_source_files()
+        .map_err(|error| error.diagnostic())?;
     let direct_name = format!("{name}.{}", Syntax::FILE_EXT);
     let matches = files
         .into_iter()
@@ -2207,7 +2219,7 @@ fn find_module_files(name: &str, project_root: &Path) -> Vec<PathBuf> {
     let mut found = matches;
     found.sort();
     found.dedup();
-    found
+    Ok(found)
 }
 
 /// File stems become Rust `mod user_<alias>` names, so the alias must be a
@@ -2260,6 +2272,9 @@ pub fn resolve_import_target(
     let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root)?;
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&bundle.project_root, &[]);
+    if let Some(failure) = project_part_failures.iter().find(|failure| failure.authority) {
+        return Err(failure.problem.clone());
+    }
     let target_path = match resolve_import(
         imp,
         &importing.path,
@@ -2359,13 +2374,13 @@ fn relative_display(root: &Path, path: &Path) -> String {
 /// Compare existing paths by physical identity so a symlink cannot widen a
 /// workspace or project boundary.
 pub fn is_physically_within(root: &Path, path: &Path) -> bool {
-    let Ok(root) = fs::canonicalize(root) else {
+    let Ok(root) = AuthorityResolver::open(root) else {
         return false;
     };
-    let Ok(path) = fs::canonicalize(path) else {
+    let Ok(path) = AuthorityResolver::open(path) else {
         return false;
     };
-    path.starts_with(root)
+    path.root().starts_with(root.root())
 }
 
 #[cfg(test)]
@@ -2617,11 +2632,14 @@ mod stale_manifest_name_tests {
         let module_dir = dir.join("tool");
         fs::create_dir_all(&module_dir).unwrap();
         fs::write(module_dir.join("main.jet"), "pub fn run() {}").unwrap();
-        assert!(find_module_files("tool", &dir).is_empty());
+        assert!(find_module_files("tool", &dir).unwrap().is_empty());
 
         let run = module_dir.join(Syntax::DEFAULT_ENTRY_FILE);
         fs::write(&run, "pub fn run() {}\n").unwrap();
-        assert_eq!(find_module_files("tool", &dir), vec![normalize_path(&run)]);
+        assert_eq!(
+            find_module_files("tool", &dir).unwrap(),
+            vec![normalize_path(&run)]
+        );
     }
 
     #[test]
@@ -2629,11 +2647,11 @@ mod stale_manifest_name_tests {
         let dir = tempdir("authority-entry-name");
         let main = dir.join(Syntax::LEGACY_ENTRY_FILE);
         fs::write(&main, "fn run() {}\n").unwrap();
-        assert_eq!(authority_name_for_entry(&main), "app");
+        assert_eq!(authority_name_for_entry(&main).unwrap(), "app");
 
         let run = dir.join(Syntax::DEFAULT_ENTRY_FILE);
         fs::write(&run, "fn run() {}\n").unwrap();
-        assert_eq!(authority_name_for_entry(&main), "run");
+        assert_eq!(authority_name_for_entry(&main).unwrap(), "run");
     }
 
     #[test]

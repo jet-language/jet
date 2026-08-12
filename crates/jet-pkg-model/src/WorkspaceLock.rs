@@ -10,7 +10,7 @@
 //! read path for callers that only need to read.
 
 use crate::{
-    Authority::AuthorityResolver,
+    Authority::{AuthorityResolver, CheckedFile},
     Lock::{self, LockedWorkspaceMember},
     Syntax,
     WorkspacePlan::{WorkspaceMember, WorkspacePlan},
@@ -26,11 +26,24 @@ pub const WORKSPACE_LOCK: &str = Syntax::UNIFIED_LOCK_FILE;
 /// state as an empty workspace.
 pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     let resolver = AuthorityResolver::open(workspace_root).ok()?;
+    load_with_resolver(&resolver)
+}
+
+/// Load workspace facts from an already-open authority root.
+pub fn load_with_resolver(resolver: &AuthorityResolver) -> Option<WorkspacePlan> {
     let lock_file = match resolver.checked_file(Path::new(WORKSPACE_LOCK)) {
         Ok(file) => file,
         Err(error) if error.is_missing() => return None,
         Err(_) => return None,
     };
+    load_checked_file(resolver, lock_file)
+}
+
+/// Consume one checked lock file without reopening it by pathname.
+pub fn load_checked_file(
+    resolver: &AuthorityResolver,
+    lock_file: CheckedFile,
+) -> Option<WorkspacePlan> {
     let raw = lock_file.text().ok()?;
     resolver.revalidate_file(&lock_file).ok()?;
     let lock = Lock::parse(&raw).ok()?;
@@ -77,6 +90,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     if is_index && !lock.workspace_members.is_empty() {
         let mut physical_paths = Vec::new();
         let mut names = Vec::new();
+        let mut checked_members = Vec::new();
         for member in &lock.workspace_members {
             let relative = Path::new(&member.path);
             if member.name.is_empty()
@@ -96,6 +110,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             }
             let checked = resolver.checked_package(relative).ok()?;
             resolver.revalidate_member(&checked.member).ok()?;
+            checked_members.push(checked.member.clone());
             let physical_path = checked.member.directory.path.clone();
             let canonical_relative = resolver.relative_identity(&checked.member.directory).ok()?;
             if canonical_relative != member.canonical_path {
@@ -120,6 +135,12 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
             if let Some(source) = &source {
                 resolver.revalidate_source(source).ok()?;
             }
+        }
+        for member in &checked_members {
+            resolver.revalidate_member(member).ok()?;
+        }
+        if let Some(source) = &source {
+            resolver.revalidate_source(source).ok()?;
         }
     }
     let plan_source_digest = lock

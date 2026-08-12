@@ -4,7 +4,7 @@
 use crate::AST::{ImportKind, Item};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::{Lexer, Parser, Syntax};
-use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -43,6 +43,7 @@ pub struct ProjectPartScanFailure {
     pub path: PathBuf,
     pub module_names: Vec<String>,
     pub problem: Diagnostic,
+    pub authority: bool,
 }
 
 impl ProjectPartScanFailure {
@@ -121,11 +122,14 @@ pub fn scan_with_diagnostics(
     root: &Path,
     overlays: &[(PathBuf, String)],
 ) -> (ProjectPartsReport, Vec<ProjectPartScanFailure>) {
-    let resolver = AuthorityResolver::open(root).ok();
-    let checked_files = resolver
-        .as_ref()
-        .and_then(|resolver| resolver.discover_source_files().ok())
-        .unwrap_or_default();
+    let (resolver, checked_files, authority_failure) = match AuthorityResolver::open(root) {
+        Ok(resolver) => match resolver.discover_source_files() {
+            Ok(files) => (Some(resolver), files, None),
+            Err(error) => (Some(resolver), Vec::new(), Some((root.to_path_buf(), error))),
+        },
+        Err(error) if error.is_missing() => (None, Vec::new(), None),
+        Err(error) => (None, Vec::new(), Some((root.to_path_buf(), error))),
+    };
     let mut files = checked_files
         .iter()
         .filter(|file| {
@@ -151,6 +155,10 @@ pub fn scan_with_diagnostics(
     let mut explicit = BTreeSet::new();
     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
     let mut failures = Vec::new();
+    if let Some((path, error)) = authority_failure {
+        failures.push(authority_failure_for(path, error));
+        return (ProjectPartsReport::default(), failures);
+    }
     for path in files {
         let source = if let Some((_, source)) = overlays.iter().rev().find(|(p, _)| p == &path) {
             source.clone()
@@ -159,8 +167,9 @@ pub fn scan_with_diagnostics(
                 continue;
             };
             if let Some(resolver) = resolver.as_ref() {
-                if resolver.revalidate_file(file).is_err() {
-                    continue;
+                if let Err(error) = resolver.revalidate_file(file) {
+                    failures.push(authority_failure_for(file.path.clone(), error));
+                    return (ProjectPartsReport::default(), failures);
                 }
             }
             match file.text() {
@@ -174,8 +183,9 @@ pub fn scan_with_diagnostics(
                             .unwrap_or_default(),
                         problem: error.diagnostic(),
                         path,
+                        authority: true,
                     });
-                    continue;
+                    return (ProjectPartsReport::default(), failures);
                 }
             }
         };
@@ -185,6 +195,7 @@ pub fn scan_with_diagnostics(
                 path,
                 module_names: declared_module_names(&tokens),
                 problem: lex_diags[0].clone(),
+                authority: false,
             });
             continue;
         }
@@ -195,16 +206,17 @@ pub fn scan_with_diagnostics(
                     path,
                     module_names: declared_module_names(&tokens),
                     problem: parse_diags[0].clone(),
+                    authority: false,
                 });
                 continue;
             }
         };
         if let Some(file) = checked_files.iter().find(|file| file.path == path) {
-            if resolver
-                .as_ref()
-                .is_some_and(|resolver| resolver.revalidate_file(file).is_err())
-            {
-                continue;
+            if let Some(resolver) = resolver.as_ref() {
+                if let Err(error) = resolver.revalidate_file(file) {
+                    failures.push(authority_failure_for(file.path.clone(), error));
+                    return (ProjectPartsReport::default(), failures);
+                }
             }
         }
         for import in &program.imports {
@@ -255,11 +267,21 @@ pub fn scan_with_diagnostics(
         }
     }
     if let Some(resolver) = resolver {
-        if resolver.revalidate_root().is_err() {
-            return (ProjectPartsReport::default(), Vec::new());
+        if let Err(error) = resolver.revalidate_root() {
+            failures.push(authority_failure_for(root.to_path_buf(), error));
+            return (ProjectPartsReport::default(), failures);
         }
     }
     (report, failures)
+}
+
+fn authority_failure_for(path: PathBuf, error: AuthorityError) -> ProjectPartScanFailure {
+    ProjectPartScanFailure {
+        path,
+        module_names: Vec::new(),
+        problem: error.diagnostic(),
+        authority: true,
+    }
 }
 
 fn declared_module_names(tokens: &[Lexer::Token]) -> Vec<String> {

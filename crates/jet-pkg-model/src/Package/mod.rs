@@ -477,6 +477,24 @@ impl PackageFacts {
         Some(result.map(|_| facts))
     }
 
+    /// Load one complete Package while preserving authority failures. A
+    /// missing root is the only absent result; malformed, nonregular, or
+    /// changed metadata remains an error for authority-sensitive callers.
+    pub fn load_checked(
+        dir: &std::path::Path,
+    ) -> Result<Option<Self>, AuthorityError> {
+        let resolver = match AuthorityResolver::open(dir) {
+            Ok(resolver) => resolver,
+            Err(error) if error.is_missing() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        match resolver.checked_package(Path::new(".")) {
+            Ok(package) => Ok(Some(package.facts)),
+            Err(error) if error.is_missing() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Load and merge the root's declared Config files. Config paths are
     /// project-relative and are resolved before any facts are changed.
     pub fn compose_configs(&mut self, dir: &std::path::Path) -> Result<(), PackageParseError> {
@@ -514,19 +532,13 @@ impl PackageFacts {
                     match resolver.checked_file(&with_extension) {
                         Ok(file) => file,
                         Err(error) if error.is_missing() => {
-                            let discovered = discover_config_path(resolver, &relative)?;
-                            resolver
-                                .checked_file(&discovered)
-                                .map_err(authority_package_error)?
+                            discover_config_path(resolver, &relative)?
                         }
                         Err(error) => return Err(authority_package_error(error)),
                     }
                 }
                 Err(error) if error.is_missing() => {
-                    let discovered = discover_config_path(resolver, &relative)?;
-                    resolver
-                        .checked_file(&discovered)
-                        .map_err(authority_package_error)?
+                    discover_config_path(resolver, &relative)?
                 }
                 Err(error) => return Err(authority_package_error(error)),
             };
@@ -668,47 +680,46 @@ impl PackageFacts {
     }
 
     /// Resolve the selected runnable output. A canonical checked `run.jet`
-    /// wins before typed output selection; retired `main.jet` is never a
-    /// fallback.
+    /// wins before any other selector; retired `main.jet` is never a
+    /// fallback or an ambiguity source.
     pub fn resolve_run_entry(
         &self,
         root: &std::path::Path,
     ) -> Result<Option<std::path::PathBuf>, String> {
+        let resolver = AuthorityResolver::open(root)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        self.resolve_run_entry_checked(&resolver)
+            .map(|file| file.map(|file| file.path))
+    }
+
+    /// Resolve the runnable Package entry from one already-open authority
+    /// root. The returned checked file is the same descriptor/data snapshot
+    /// used to select the entry; callers must not reopen its path.
+    pub fn resolve_run_entry_checked(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<Option<CheckedFile>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
-        let resolver = AuthorityResolver::open(root).map_err(|error| {
-            format!("{}: {error}", self.origin)
-        })?;
-        let run = match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
-            Ok(file) => Some(file),
-            Err(error) if error.is_missing() => None,
+        match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
+            Ok(file) => {
+                resolver
+                    .revalidate_file(&file)
+                    .map_err(|error| format!("{}: {error}", self.origin))?;
+                return Ok(Some(file));
+            }
+            Err(error) if error.is_missing() => {}
             Err(error) => return Err(format!("{}: {error}", self.origin)),
-        };
+        }
         let main = match resolver.checked_file(Path::new(crate::Syntax::LEGACY_ENTRY_FILE)) {
             Ok(file) => Some(file),
             Err(error) if error.is_missing() => None,
             Err(error) => return Err(format!("{}: {error}", self.origin)),
         };
-        if let Some(run) = &run {
-            resolver
-                .revalidate_file(run)
-                .map_err(|error| format!("{}: {error}", self.origin))?;
-        }
-        if let Some(main) = &main {
-            resolver
-                .revalidate_file(main)
-                .map_err(|error| format!("{}: {error}", self.origin))?;
-        }
         if let Some(main) = main {
-            if run.is_some() {
-                return Err(format!(
-                    "{}: both canonical `{}` and retired `{}` exist; remove `{}`",
-                    self.origin,
-                    crate::Syntax::DEFAULT_ENTRY_FILE,
-                    crate::Syntax::LEGACY_ENTRY_FILE,
-                    crate::Syntax::LEGACY_ENTRY_FILE
-                ));
-            }
+            resolver
+                .revalidate_file(&main)
+                .map_err(|error| format!("{}: {error}", self.origin))?;
             return Err(format!(
                 "{}: package entry requires canonical `{}`; retired `{}` is not accepted",
                 self.origin,
@@ -719,12 +730,6 @@ impl PackageFacts {
                     .unwrap_or(crate::Syntax::LEGACY_ENTRY_FILE)
             ));
         }
-        if let Some(run) = run {
-            resolver
-                .revalidate_file(&run)
-                .map_err(|error| format!("{}: {error}", self.origin))?;
-            return Ok(Some(run.path));
-        }
         if self
             .outputs
             .values()
@@ -734,7 +739,7 @@ impl PackageFacts {
                 .select_output("run", None, None)
                 .map_err(|error| format!("{}: {error}", self.origin))?;
             let Some(entry) = self
-                .entry_path_checked(&resolver, output)
+                .entry_file_checked(resolver, output)
                 .map_err(|error| format!("{}: {error}", self.origin))?
             else {
                 return Err(format!(
@@ -758,9 +763,11 @@ impl PackageFacts {
         &self,
         root: &std::path::Path,
         output: &OutputFact,
-    ) -> Option<std::path::PathBuf> {
-        let resolver = AuthorityResolver::open(root).ok()?;
-        self.entry_path_checked(&resolver, output).ok().flatten()
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        let resolver = AuthorityResolver::open(root)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        self.entry_path_checked(&resolver, output)
+            .map_err(|error| format!("{}: {error}", self.origin))
     }
 
     fn entry_path_checked(
@@ -768,6 +775,15 @@ impl PackageFacts {
         resolver: &AuthorityResolver,
         output: &OutputFact,
     ) -> Result<Option<std::path::PathBuf>, AuthorityError> {
+        self.entry_file_checked(resolver, output)
+            .map(|file| file.map(|file| file.path))
+    }
+
+    fn entry_file_checked(
+        &self,
+        resolver: &AuthorityResolver,
+        output: &OutputFact,
+    ) -> Result<Option<CheckedFile>, AuthorityError> {
         let Some(entry) = output.entry.as_deref() else {
             return Ok(None);
         };
@@ -777,6 +793,22 @@ impl PackageFacts {
         {
             return Ok(None);
         }
+        let canonical_run_name = crate::Syntax::DEFAULT_ENTRY_FILE
+            .strip_suffix(".jet")
+            .unwrap_or(crate::Syntax::DEFAULT_ENTRY_FILE);
+        if parts.len() == 1 && parts[0] == canonical_run_name {
+            match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
+                Ok(file) => {
+                    resolver.revalidate_file(&file)?;
+                    return Ok(Some(file));
+                }
+                // `run` is the canonical entry selector. A missing canonical
+                // file is a closed negative result; never reinterpret it as
+                // an arbitrary source-file search.
+                Err(error) if error.is_missing() => return Ok(None),
+                Err(error) => return Err(error),
+            }
+        }
         let files = self.source_files_checked(resolver)?;
         let result = if parts.len() == 1 {
             let matches = files
@@ -785,7 +817,8 @@ impl PackageFacts {
                 .filter(|file| file_has_top_level_function(file, parts[0]))
                 .map(|file| file.path.clone())
                 .collect::<Vec<_>>();
-            (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+            (matches.len() == 1)
+                .then(|| matches.into_iter().next().unwrap())
         } else {
             let Some(sources) = parse_sources(&files) else {
                 return Ok(None);
@@ -818,16 +851,18 @@ impl PackageFacts {
             resolver.revalidate_file(file)?;
         }
         resolver.revalidate_root()?;
-        Ok(result)
+        Ok(result.and_then(|path| files.into_iter().find(|file| file.path == path)))
     }
 
-    fn source_files(&self, root: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let Ok(resolver) = AuthorityResolver::open(root) else {
-            return Vec::new();
-        };
+    fn source_files(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<Vec<std::path::PathBuf>, String> {
+        let resolver = AuthorityResolver::open(root)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
         self.source_files_checked(&resolver)
             .map(|files| files.into_iter().map(|file| file.path).collect())
-            .unwrap_or_default()
+            .map_err(|error| format!("{}: {error}", self.origin))
     }
 
     fn source_files_checked(
@@ -2452,7 +2487,7 @@ fn config_wrapper<'a>(text: &'a str) -> Result<Option<(String, &'a str)>, Packag
 fn discover_config_path(
     resolver: &AuthorityResolver,
     name: &str,
-) -> Result<std::path::PathBuf, PackageParseError> {
+) -> Result<CheckedFile, PackageParseError> {
     let mut matches = Vec::new();
     let files = resolver
         .discover_files(Path::new("."), Some(crate::Syntax::FILE_EXT))
@@ -2468,15 +2503,15 @@ fn discover_config_path(
         }
         let text = file.text().map_err(authority_package_error)?;
         match ConfigFacts::parse(&text, file.path.display().to_string()) {
-            Ok(facts) if facts.name.as_deref() == Some(name) => matches.push(file.relative),
+            Ok(facts) if facts.name.as_deref() == Some(name) => matches.push(file),
             Ok(_) => {}
             Err(error) if text.contains("Config") => return Err(error),
             Err(_) => {}
         }
     }
-    matches.sort();
+    matches.sort_by(|left, right| left.relative.cmp(&right.relative));
     match matches.as_slice() {
-        [path] => Ok(path.clone()),
+        [file] => Ok(file.clone()),
         [] => Err(PackageParseError::Composition(format!(
             "Config `{name}` was not found under `{}`",
             resolver.root().display()
@@ -3071,10 +3106,12 @@ dev :: Config.{
             .is_some_and(|origins| origins.contains(&dir.join("one.jet").display().to_string())));
         assert!(facts
             .source_files(&dir)
+            .unwrap()
             .iter()
             .all(|path| path.file_name().and_then(|name| name.to_str()) != Some("one.jet")));
         assert!(facts
             .source_files(&dir)
+            .unwrap()
             .iter()
             .any(|path| path.file_name().and_then(|name| name.to_str()) == Some("ordinary.jet")));
         std::fs::remove_dir_all(dir).ok();
@@ -3172,7 +3209,7 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         )
         .unwrap();
         let output = facts.outputs.get("app").unwrap();
-        assert_eq!(facts.entry_path(&dir, output), Some(dir.join("run.jet")));
+        assert_eq!(facts.entry_path(&dir, output).unwrap(), Some(dir.join("run.jet")));
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -3195,24 +3232,40 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
     }
 
     #[test]
-    fn convention_entry_resolution_accepts_only_run_jet() {
+    fn public_entry_selectors_reject_main_and_prefer_run() {
         let dir = temp_dir("canonical-run");
         std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
         let facts = PackageFacts::parse(
             r#"name: "demo"
-version: "0.1.0""#,
+version: "0.1.0"
+outputs: .{ app: .Executable.{ entry: run } }"#,
             "package.jet",
         )
         .unwrap();
+        assert_eq!(facts.select_output("run", Some("app"), None).unwrap().name, "app");
         let error = facts.resolve_run_entry(&dir).unwrap_err();
         assert!(error.contains("requires canonical `run.jet`"));
         assert!(error.contains("retired `main.jet`"));
+        let output = facts
+            .outputs
+            .get("app")
+            .expect("typed selector fixture has one output");
+        assert_eq!(facts.entry_path(&dir, output).unwrap(), None);
 
         std::fs::write(dir.join("run.jet"), "fn run() { print(2) }\n").unwrap();
-        let error = facts.resolve_run_entry(&dir).unwrap_err();
-        assert!(error.contains("both canonical `run.jet` and retired `main.jet`"));
+        std::fs::write(dir.join("other.jet"), "fn run() { print(3) }\n").unwrap();
+        assert_eq!(facts.select_output("run", Some("app"), None).unwrap().name, "app");
+        assert_eq!(
+            facts.resolve_run_entry(&dir).unwrap(),
+            Some(dir.join("run.jet"))
+        );
+        assert_eq!(
+            facts.entry_path(&dir, output).unwrap(),
+            Some(dir.join("run.jet"))
+        );
 
         std::fs::remove_file(dir.join("main.jet")).unwrap();
+        assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("run.jet"))

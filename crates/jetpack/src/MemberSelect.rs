@@ -13,7 +13,7 @@ use std::process::Command;
 
 use crate::Diagnostics::Diagnostic;
 use crate::WorkspaceFile::{WorkspaceMember, WorkspacePlan};
-use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::Authority::{AuthorityResolver, CheckedPackage};
 
 /// CLI selection request for a workspace command.
 #[derive(Debug, Clone, Default)]
@@ -90,10 +90,24 @@ pub fn dependency_order(
     dependency_order_checked(&resolver, members).map_err(|error| error.diagnostic())
 }
 
-fn dependency_order_checked(
+pub fn dependency_order_checked(
     resolver: &AuthorityResolver,
     members: &[WorkspaceMember],
 ) -> Result<Vec<WorkspaceMember>, jet_pkg_model::Authority::AuthorityError> {
+    Ok(dependency_order_packages_checked(resolver, members)?
+        .into_iter()
+        .map(|(member, _package)| member)
+        .collect())
+}
+
+/// Return members in dependency order together with the package snapshots used
+/// to inspect their dependencies. The caller must pass these snapshots through
+/// to realization; reopening a member by its path after ordering would create a
+/// validation/consumption gap.
+pub fn dependency_order_packages_checked(
+    resolver: &AuthorityResolver,
+    members: &[WorkspaceMember],
+) -> Result<Vec<(WorkspaceMember, CheckedPackage)>, jet_pkg_model::Authority::AuthorityError> {
     let names: HashMap<&str, usize> = members
         .iter()
         .enumerate()
@@ -101,11 +115,12 @@ fn dependency_order_checked(
         .collect();
     let mut dependents = vec![Vec::<usize>::new(); members.len()];
     let mut indegree = vec![0usize; members.len()];
+    let mut checked_packages = Vec::with_capacity(members.len());
 
     for (index, member) in members.iter().enumerate() {
-        let checked = resolver.checked_member(Path::new(&member.path))?;
-        resolver.revalidate_member(&checked)?;
-        let manifest = checked.manifest.facts;
+        let checked = resolver.checked_package(Path::new(&member.path))?;
+        resolver.revalidate_member(&checked.member)?;
+        let manifest = &checked.facts;
         let mut seen = HashSet::new();
         for dependency_name in manifest.deps.keys() {
             let Some(&dependency_index) = names.get(dependency_name.as_str()) else {
@@ -117,6 +132,7 @@ fn dependency_order_checked(
             dependents[dependency_index].push(index);
             indegree[index] += 1;
         }
+        checked_packages.push(Some(checked));
     }
 
     // `(source position, member index)` makes ready-node selection stable even
@@ -127,11 +143,11 @@ fn dependency_order_checked(
             ready.insert((index, index));
         }
     }
-    let mut ordered = Vec::with_capacity(members.len());
+    let mut ordered_indices = Vec::with_capacity(members.len());
     let mut emitted = vec![false; members.len()];
     while let Some((_, index)) = ready.pop_first() {
         emitted[index] = true;
-        ordered.push(members[index].clone());
+        ordered_indices.push(index);
         for dependent in &dependents[index] {
             indegree[*dependent] -= 1;
             if indegree[*dependent] == 0 {
@@ -142,13 +158,23 @@ fn dependency_order_checked(
 
     // Keep a malformed dependency cycle deterministic and let the package
     // resolver report the actual cycle when realization runs.
-    for (index, member) in members.iter().enumerate() {
+    for (index, _member) in members.iter().enumerate() {
         if !emitted[index] {
-            ordered.push(member.clone());
+            ordered_indices.push(index);
         }
     }
     resolver.revalidate_root()?;
-    Ok(ordered)
+    ordered_indices
+        .into_iter()
+        .map(|index| {
+            let package = checked_packages[index]
+                .take()
+                .ok_or_else(|| jet_pkg_model::Authority::AuthorityError::Unsupported(
+                    "workspace member snapshot was consumed before realization".to_string(),
+                ))?;
+            Ok((members[index].clone(), package))
+        })
+        .collect()
 }
 
 /// Persist member input hashes after a successful workspace build so the next

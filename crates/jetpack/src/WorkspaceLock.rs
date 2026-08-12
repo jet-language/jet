@@ -4,7 +4,9 @@
 //! re-exported here for call sites that use `jetpack::WorkspaceLock::load`.
 //! The write path stays here because it needs `RuntimePolicy` for file locking.
 
-pub use jet_pkg_model::WorkspaceLock::{load, WORKSPACE_LOCK};
+pub use jet_pkg_model::WorkspaceLock::{
+    load, load_checked_file, load_with_resolver, WORKSPACE_LOCK,
+};
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspacePlan, WorkspaceSourceRole};
 

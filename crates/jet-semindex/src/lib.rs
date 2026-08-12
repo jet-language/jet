@@ -59,15 +59,18 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
 /// ambiguous package sources are returned as errors instead of becoming an
 /// empty projection.
 pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, String> {
-    let mut dir = entry
-        .canonicalize()
-        .unwrap_or_else(|_| entry.to_path_buf());
-    if !dir.is_dir() {
-        let Some(parent) = dir.parent() else {
-            return Ok(None);
-        };
-        dir = parent.to_path_buf();
-    }
+    let dir = match jet_pkg_model::Authority::AuthorityResolver::open(entry) {
+        Ok(resolver) => resolver.root().to_path_buf(),
+        Err(jet_pkg_model::Authority::AuthorityError::WrongKind { .. }) => {
+            let parent = entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            jet_pkg_model::Authority::AuthorityResolver::open(parent)
+                .map_err(|error| error.to_string())?
+                .root()
+                .to_path_buf()
+        }
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
     let Some(root) = jet_driver::Loader::find_manifest_root_checked(&dir)
         .map_err(|diagnostic| {
             format!(
@@ -78,11 +81,8 @@ pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, Str
     else {
         return Ok(None);
     };
-    match PackageFacts::load(&root) {
-        Some(Ok(facts)) => Ok(Some(facts)),
-        Some(Err(error)) => Err(error.to_string()),
-        None => Err(format!("Package facts are missing at `{}`", root.display())),
-    }
+    PackageFacts::load_checked(&root)
+        .map_err(|error| error.to_string())
 }
 
 /// Render the registered package-shape diagnostic shared by semantic-index
@@ -108,18 +108,21 @@ pub fn workspace_overlay_policy_for_entry(
     let Some(parent) = entry.parent() else {
         return Ok(None);
     };
-    let mut dir = parent
-        .canonicalize()
-        .unwrap_or_else(|_| parent.to_path_buf());
+    let mut dir = jet_pkg_model::Authority::AuthorityResolver::open(parent)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
-        match jet_pkg_model::WorkspacePlan::resolve_workspace_source(&dir) {
-            Some(Err(diagnostic)) => return Err(diagnostic),
-            Some(Ok(_)) => {
-                return Ok(workspace_lock_at(&dir)?
+        let resolver = jet_pkg_model::Authority::AuthorityResolver::open(&dir)
+            .map_err(|error| error.diagnostic())?;
+        match resolver.resolve_workspace_source() {
+            Err(error) => return Err(error.workspace_diagnostic()),
+            Ok(Some(_)) => {
+                return Ok(workspace_lock_at(&resolver)?
                     .and_then(|plan| (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)))
             }
-            None => {
-                if let Some(plan) = workspace_lock_at(&dir)? {
+            Ok(None) => {
+                if let Some(plan) = workspace_lock_at(&resolver)? {
                     return Ok((!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy));
                 }
             }
@@ -138,31 +141,26 @@ pub fn workspace_overlay_policy_for_entry(
 /// workspace-lock diagnostic. `Some(plan)` is also a boundary marker when the
 /// policy itself is empty, so callers do not continue into an outer authority.
 fn workspace_lock_at(
-    dir: &Path,
+    resolver: &jet_pkg_model::Authority::AuthorityResolver,
 ) -> Result<Option<jet_pkg_model::WorkspacePlan::WorkspacePlan>, Diagnostic> {
-    if let Some(plan) = jet_pkg_model::WorkspaceLock::load(dir) {
-        return Ok(Some(plan));
+    let lock_file = match resolver
+        .checked_file(Path::new(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE))
+    {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let lock_path = lock_file.path.clone();
+    let raw = lock_file.text().map_err(|error| error.diagnostic())?;
+    if !jet_pkg_model::Lock::looks_like_workspace_lock(&raw) {
+        return Ok(None);
     }
-    let lock_path = dir.join(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE);
-    match std::fs::read_to_string(&lock_path) {
-        Ok(raw) if jet_pkg_model::Lock::looks_like_workspace_lock(&raw) => {
-            return Err(jet_pkg_model::Lock::e1202_workspace(
-                &lock_path.display().to_string(),
-            ));
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            let mut diagnostic = jet_pkg_model::Lock::e1202_workspace(
-                &lock_path.display().to_string(),
-            );
-            diagnostic.why = format!(
-                "the workspace lock could not be read, so its authority is not trusted: {error}"
-            );
-            return Err(diagnostic);
-        }
+    match jet_pkg_model::WorkspaceLock::load_checked_file(resolver, lock_file) {
+        Some(plan) => Ok(Some(plan)),
+        None => Err(jet_pkg_model::Lock::e1202_workspace(
+            &lock_path.display().to_string(),
+        )),
     }
-    Ok(None)
 }
 
 fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemIndexError> {

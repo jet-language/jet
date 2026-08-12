@@ -109,7 +109,7 @@ fn nested_entry_points_share_root_and_stale_diagnostic() {
         .expect("semantic index must use package root");
     assert_eq!(facts.name, "root");
 
-    let graph = jet_devserver::WatchGraph::from_entry(&entry, &[]);
+    let graph = jet_devserver::WatchGraph::from_entry(&entry, &[]).unwrap();
     assert!(graph.watched_paths().contains(&expected.join("package.jet")));
 
     let project = jet_devserver::Canvas::project_json_for_entry(&entry);

@@ -5,7 +5,10 @@ use super::realize::{
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
-use super::workspace_sources::{cwd_table, load_workspace, project_root, workspace_root};
+use super::workspace_sources::{
+    cwd_table, load_workspace_for_source, project_root, workspace_index_required_diagnostic,
+    workspace_root_snapshot_or_exit,
+};
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
@@ -18,6 +21,7 @@ use crate::Syntax;
 use crate::Trust;
 use crate::WorkspaceFile::WorkspaceMember;
 use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
@@ -674,81 +678,41 @@ fn run_workspace_members(
     theme: &Theme,
     parsed: &Parsed,
     dir: &std::path::Path,
+    checked_source: &(AuthorityResolver, WorkspaceSource),
     plan_members: &[WorkspaceMember],
     action: WorkspaceAction,
 ) -> i32 {
     let roots = Store::resolve();
     let mut ok = true;
     let mut built: Vec<WorkspaceMember> = Vec::new();
-    let resolver = match AuthorityResolver::open(dir) {
-        Ok(resolver) => resolver,
-        Err(error) => return report_select_error(theme, &error.diagnostic()),
-    };
-    let source = match resolver.resolve_workspace_source() {
-        Ok(Some(source))
-            if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index =>
-        {
-            source
-        }
-        Ok(Some(_)) => {
-            let diagnostic = crate::Diagnostics::Diagnostic::error(
-                "E1239",
-                "workspace build needs workspace.jet as the index".to_string(),
-                "an authority declaration is not a member index".to_string(),
-                "move members into workspace.jet and keep one workspace index".to_string(),
-                None,
-            );
-            return report_select_error(theme, &diagnostic);
-        }
-        Ok(None) => {
-            let diagnostic = crate::Diagnostics::Diagnostic::error(
-                "E0995",
-                "workspace authority is missing".to_string(),
-                "workspace member realization requires a checked workspace.jet source".to_string(),
-                "restore workspace.jet before building workspace members".to_string(),
-                None,
-            );
-            return report_select_error(theme, &diagnostic);
-        }
-        Err(error) => return report_select_error(theme, &error.workspace_diagnostic()),
-    };
-    if let Err(error) = resolver.revalidate_source(&source) {
+    let (resolver, source) = checked_source;
+    if source.role != WorkspaceSourceRole::Index {
+        return report_select_error(theme, &workspace_index_required_diagnostic());
+    }
+    if let Err(error) = resolver.revalidate_source(source) {
         return report_select_error(theme, &error.diagnostic());
     }
-    let ordered_members = match MemberSelect::dependency_order(dir, plan_members) {
+    let ordered_members = match MemberSelect::dependency_order_packages_checked(resolver, plan_members) {
         Ok(ordered_members) => ordered_members,
-        Err(diagnostic) => return report_select_error(theme, &diagnostic),
+        Err(error) => {
+            let diagnostic = error.diagnostic();
+            return report_select_error(theme, &diagnostic);
+        }
     };
-    for (idx, member) in ordered_members.iter().enumerate() {
-        let checked = match resolver.checked_member(std::path::Path::new(&member.path)) {
-            Ok(checked) => checked,
-            Err(error) => {
-                ok = false;
-                let diagnostic = error.diagnostic();
-                let _ = report_select_error(theme, &diagnostic);
-                continue;
-            }
-        };
-        if let Err(error) = resolver.revalidate_member(&checked) {
+    for (idx, (member, checked_package)) in ordered_members.iter().enumerate() {
+        if let Err(error) = resolver.revalidate_member(&checked_package.member) {
             ok = false;
             let diagnostic = error.diagnostic();
             let _ = report_select_error(theme, &diagnostic);
             continue;
         }
-        let abs = checked.directory.path.clone();
-        if let Err(error) = resolver.revalidate_source(&source) {
+        if let Err(error) = resolver.revalidate_source(source) {
             ok = false;
             let diagnostic = error.diagnostic();
             let _ = report_select_error(theme, &diagnostic);
             continue;
         }
         theme.status(&format!("{} workspace member: {}", action.present(), member.name));
-        let table = RefSpec::SourceTable::from_decls([(
-            member.name.clone(),
-            format!("path:{}", abs.display()),
-            ProviderKind::Core,
-        )]);
-        let raw = format!("{}@{}", member.name, member.name);
         if ordered_members.len() > 1 {
             theme.progress_chain(
                 action.present(),
@@ -758,6 +722,13 @@ fn run_workspace_members(
                 "workspace",
             );
         }
+        let abs = checked_package.member.directory.path.clone();
+        let table = RefSpec::SourceTable::from_decls([(
+            member.name.clone(),
+            format!("path:{}", abs.display()),
+            ProviderKind::Core,
+        )]);
+        let raw = format!("{}@{}", member.name, member.name);
         let spec = match RefSpec::classify_in(&raw, &table) {
             Ok(s) => s,
             Err(e) => {
@@ -766,6 +737,15 @@ fn run_workspace_members(
                 continue;
             }
         };
+        if let Err(error) = resolver
+            .revalidate_source(source)
+            .and_then(|_| resolver.revalidate_member(&checked_package.member))
+        {
+            ok = false;
+            let diagnostic = error.diagnostic();
+            let _ = report_select_error(theme, &diagnostic);
+            continue;
+        }
         let realized = realize_ref(
             theme,
             &roots,
@@ -775,22 +755,25 @@ fn run_workspace_members(
             member.name.len().max(8),
         );
         let authority_valid = resolver
-            .revalidate_source(&source)
-            .and_then(|_| resolver.revalidate_member(&checked));
+            .revalidate_source(source)
+            .and_then(|_| resolver.revalidate_member(&checked_package.member));
         if let Err(error) = authority_valid {
             ok = false;
             let diagnostic = error.diagnostic();
             let _ = report_select_error(theme, &diagnostic);
         } else if realized.is_none() {
             ok = false;
-        } else if action == WorkspaceAction::Test && !run_jet_tests(&abs) {
-            ok = false;
+        } else if action == WorkspaceAction::Test {
+            if run_jet_tests(&checked_package.member.directory.path) {
+            } else {
+                ok = false;
+            }
         } else {
             built.push(member.clone());
         }
     }
     if ok {
-        if let Err(error) = resolver.revalidate_source(&source) {
+        if let Err(error) = resolver.revalidate_source(source) {
             return report_select_error(theme, &error.diagnostic());
         }
         MemberSelect::record_member_input_hashes(dir, &built);
@@ -809,15 +792,16 @@ fn run_workspace_members(
 pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
-    let workspace_dir = workspace_root(&dir);
+    let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
 
     // D-WORKSPACE1=B: if a workspace declaration is present, build selected
     // members via the first-party core provider (no Nix required).
-    if let Some(result) = load_workspace(&workspace_dir) {
-        return match result {
+    if let Some(checked) = workspace_source.as_ref() {
+        if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
+            return match result {
             Err(code) => code,
             Ok(plan) => {
                 let req = select_request_from_flags(&parsed.flags);
@@ -833,11 +817,13 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     &workspace_dir,
+                    checked,
                     &selected,
                     WorkspaceAction::Build,
                 )
             }
-        };
+            };
+        }
     }
 
     let mut plan = match parsed.positional.first() {
@@ -1018,12 +1004,13 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
 
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
-    let workspace_dir = workspace_root(&dir);
+    let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
-    if let Some(result) = load_workspace(&workspace_dir) {
-        return match result {
+    if let Some(checked) = workspace_source.as_ref() {
+        if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
+            return match result {
             Err(code) => code,
             Ok(plan) => {
                 let req = select_request_from_flags(&parsed.flags);
@@ -1041,11 +1028,13 @@ pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     &workspace_dir,
+                    checked,
                     &selected,
                     WorkspaceAction::Test,
                 )
             }
-        };
+            };
+        }
     }
     // Non-workspace: identical realize path to build, then run the package's
     // tests with the compiler's canonical test semantics.

@@ -10,6 +10,7 @@ use crate::Shell::Env;
 use crate::Store;
 use crate::Syntax;
 use crate::Trust;
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -1040,54 +1041,70 @@ pub(super) fn find_jet_binary() -> String {
 /// Project entry for bare `jetpack dev`, matching `jet`'s run-first convention.
 /// Kept local because jetpack and jet are separate binaries (D-JPK-DISPATCH1).
 pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
-    match package_output_entry(project_dir) {
-        Ok(Some(entry)) => return entry,
-        Ok(None) => {}
-        Err(error) => {
-            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
-                "the project entry could not be selected",
-                &error,
-                "repair the typed Package output or point at a `.jet` file directly",
-            );
-            std::process::exit(jet_foundation::ExitCodes::USER_ERROR);
+    let resolver = match AuthorityResolver::open(project_dir) {
+        Ok(resolver) => resolver,
+        Err(error) => report_entry_authority_error(error.diagnostic()),
+    };
+    let package = match resolver.checked_package(Path::new(".")) {
+        Ok(package) => Some(package),
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error.diagnostic()),
+    };
+    if let Some(package) = &package {
+        match package.facts.resolve_run_entry_checked(&resolver) {
+            Ok(Some(entry)) => return entry.path,
+            Ok(None) => {}
+            Err(error) => {
+                Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
+                    "the project entry could not be selected",
+                    &error,
+                    "repair the typed Package output or point at a `.jet` file directly",
+                );
+                std::process::exit(jet_foundation::ExitCodes::USER_ERROR);
+            }
         }
     }
-    let default = project_dir.join(Syntax::DEFAULT_ENTRY_FILE);
-    if default.is_file() {
-        return default;
+    let default = Path::new(Syntax::DEFAULT_ENTRY_FILE);
+    if let Some(entry) = checked_project_entry(&resolver, default) {
+        return entry;
     }
-    let src_default = project_dir.join("src").join(Syntax::DEFAULT_ENTRY_FILE);
-    if src_default.is_file() {
-        return src_default;
+    let src_default = Path::new("src").join(Syntax::DEFAULT_ENTRY_FILE);
+    if let Some(entry) = checked_project_entry(&resolver, &src_default) {
+        return entry;
     }
-    if let Some(Ok(manifest)) = jet_pkg_model::Package::PackageFacts::load(project_dir) {
-        let named = project_dir.join(format!("{}.{}", manifest.name, Syntax::FILE_EXT));
-        if named.is_file() {
-            return named;
+    if let Some(package) = &package {
+        let named = PathBuf::from(format!(
+            "{}.{}",
+            package.facts.name,
+            Syntax::FILE_EXT
+        ));
+        if let Some(entry) = checked_project_entry(&resolver, &named) {
+            return entry;
         }
     }
-    default
+    resolver.root().join(Syntax::DEFAULT_ENTRY_FILE)
 }
 
-/// D-ENV-PACKAGE1 / #1003: a canonical Package output is the first entry
-/// selection rule. `run.jet` is the only convention fallback for projects
-/// that do not declare a typed Package output.
-fn package_output_entry(project_dir: &Path) -> Result<Option<PathBuf>, String> {
-    let Some(package) = jet_pkg_model::Package::PackageFacts::load(project_dir) else {
-        return Ok(None);
-    };
-    let package = match package {
-        Ok(package) => package,
-        Err(error) => {
-        let source = if project_dir.join(Syntax::PACKAGE_FILE).is_file() {
-            project_dir.join(Syntax::PACKAGE_FILE)
-        } else {
-            project_dir.join(Syntax::PAYLOAD_FILE)
-        };
-            return Err(format!("typed Package `{}` is invalid: {error}", source.display()));
+fn checked_project_entry(
+    resolver: &AuthorityResolver,
+    relative: &Path,
+) -> Option<PathBuf> {
+    match resolver.checked_file(relative) {
+        Ok(file) => {
+            if let Err(error) = resolver.revalidate_file(&file) {
+                report_entry_authority_error(error.diagnostic());
+            }
+            Some(file.path)
         }
-    };
-    package.resolve_run_entry(project_dir)
+        Err(error) if error.is_missing() => None,
+        Err(error) => report_entry_authority_error(error.diagnostic()),
+    }
+}
+
+fn report_entry_authority_error(diagnostic: jet_driver::Diagnostics::Diagnostic) -> ! {
+    let theme = Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto);
+    theme.error_coded(&diagnostic.code, &diagnostic.what, &diagnostic.why, &diagnostic.fix);
+    std::process::exit(jet_foundation::ExitCodes::USER_ERROR);
 }
 
 /// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's

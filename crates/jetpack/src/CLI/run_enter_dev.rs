@@ -12,7 +12,9 @@ use super::services_secrets_config::{
     wait_for_services_ready,
 };
 use super::trust_env_build::compose_env;
-use super::workspace_sources::{cwd_table, load_workspace};
+use super::workspace_sources::{
+    cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
+};
 use crate::EnvFile;
 use crate::EnvFiles;
 use crate::EnvHook;
@@ -44,6 +46,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
+    let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&cwd);
     let select_req = SelectRequest {
         packages: parsed.flags.workspace_members.clone(),
         affected: parsed.flags.affected,
@@ -51,50 +54,55 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     // D-JPK-SELECTOR1=C: workspace + selection flags → realize only those members.
     if select_req.is_restricting() {
-        if let Some(result) = load_workspace(&project_dir) {
-            return match result {
-                Err(code) => code,
-                Ok(plan) => match MemberSelect::select_members(&project_dir, &plan, &select_req) {
-                    Ok(selected) if selected.is_empty() => {
-                        theme.status("no workspace members matched the selection.");
-                        0
-                    }
-                    Ok(_) => {
-                        // Realize selected members through the build path.
-                        let code = super::trust_env_build::cmd_build(theme, parsed);
-                        if code != 0 {
-                            return code;
-                        }
-                        match &parsed.command {
-                            Some(cmd) if !cmd.is_empty() => {
-                                let mut plan = match load_project_plan_with_selections(
-                                    theme,
-                                    parsed.flags.preset.as_deref(),
-                                    parsed.flags.environment.as_deref(),
-                                ) {
-                                    Ok(plan) => plan,
-                                    Err(code) => return code,
-                                };
-                                if let Err(code) =
-                                    apply_locked_channels(theme, &project_dir, &mut plan.table)
-                                {
+        if let Some(checked) = workspace_source.as_ref() {
+            if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
+                return match result {
+                    Err(code) => code,
+                    Ok(plan) => {
+                        match MemberSelect::select_members(&workspace_dir, &plan, &select_req) {
+                            Ok(selected) if selected.is_empty() => {
+                                theme.status("no workspace members matched the selection.");
+                                0
+                            }
+                            Ok(_) => {
+                                // Realize selected members through the build path.
+                                let code = super::trust_env_build::cmd_build(theme, parsed);
+                                if code != 0 {
                                     return code;
                                 }
-                                let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
-                                    Ok(env) => env,
-                                    Err(code) => return code,
-                                };
-                                run_visible_command(theme, &env, &plan.refs, cmd)
+                                match &parsed.command {
+                                    Some(cmd) if !cmd.is_empty() => {
+                                        let mut plan = match load_project_plan_with_selections(
+                                            theme,
+                                            parsed.flags.preset.as_deref(),
+                                            parsed.flags.environment.as_deref(),
+                                        ) {
+                                            Ok(plan) => plan,
+                                            Err(code) => return code,
+                                        };
+                                        if let Err(code) =
+                                            apply_locked_channels(theme, &project_dir, &mut plan.table)
+                                        {
+                                            return code;
+                                        }
+                                        let env = match compose_env(theme, &roots, &parsed.flags, &plan)
+                                        {
+                                            Ok(env) => env,
+                                            Err(code) => return code,
+                                        };
+                                        run_visible_command(theme, &env, &plan.refs, cmd)
+                                    }
+                                    _ => 0,
+                                }
                             }
-                            _ => 0,
+                            Err(d) => {
+                                theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
+                                2
+                            }
                         }
                     }
-                    Err(d) => {
-                        theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
-                        2
-                    }
-                },
-            };
+                };
+            }
         }
     }
 

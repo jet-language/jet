@@ -9644,7 +9644,7 @@ fn ul6_native_watch_matrix_budget_and_reconnect() {
     fs::write(&asset, "body{}\n").unwrap();
     fs::write(&entry, "fn run() {\n    print(\"v1\")\n}\n").unwrap();
 
-    let mut graph = jet_devserver::WatchGraph::from_entry(&entry, &[lib.clone()]);
+    let mut graph = jet_devserver::WatchGraph::from_entry(&entry, &[lib.clone()]).unwrap();
     graph.upsert(asset.clone(), jet_devserver::RootKind::Style);
     graph.link(
         std::fs::canonicalize(&entry).unwrap_or(entry.clone()),
@@ -9677,7 +9677,7 @@ fn ul6_native_watch_matrix_budget_and_reconnect() {
         receipt.edit_to_visible_ms
     );
     assert!(receipt.render().contains("\"generation\":"));
-    session.acknowledge(&receipt);
+    session.acknowledge(&receipt).unwrap();
 
     // Crash/reconnect: recover stamps, then a fresh edit still fires once.
     std::thread::sleep(Duration::from_millis(30));
@@ -9687,7 +9687,7 @@ fn ul6_native_watch_matrix_budget_and_reconnect() {
     std::thread::sleep(Duration::from_millis(30));
     fs::write(&entry, "fn run() {\n    print(\"v4\")\n}\n").unwrap();
     let again = session.poll().expect("post-reconnect edit");
-    session.acknowledge(&again);
+    session.acknowledge(&again).unwrap();
 
     // AOT parity: one-shot run of the final source.
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))

@@ -1471,11 +1471,18 @@ fn nested_workspace_is_the_module_import_root() {
     );
 
     let errors = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
-    assert!(
-        errors
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0603" && diagnostic.what.contains("_outside")),
-        "{errors:#?}"
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0603")
+        .expect("project-local import must fail at the nested workspace root");
+    assert_eq!(diagnostic.what, "can't find a project module named `_outside`");
+    assert_eq!(
+        diagnostic.why,
+        "project-local imports resolve declared module names, not filenames"
+    );
+    assert_eq!(
+        diagnostic.fix,
+        "declare `module _outside { ... }` under this project"
     );
 }
 
@@ -1499,6 +1506,7 @@ fn module_directory_entry_requires_run_jet_not_main_jet() {
         "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
     );
     assert_eq!(diagnostic.fix, "add `tool.jet` under this project, or fix the `use` name");
+    assert!(diagnostic.why.contains("run.jet"));
     assert!(!diagnostic.why.contains("main.jet"));
 }
 

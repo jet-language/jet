@@ -66,6 +66,15 @@ pub fn load_checked(dir: &Path) -> Option<Result<WorkspaceSnapshot, Diagnostic>>
         Err(error) if error.is_missing() => return None,
         Err(error) => return Some(Err(error.workspace_diagnostic())),
     };
+    load_checked_with_resolver(&resolver)
+}
+
+/// Load and evaluate the index selected by an already-open authority root.
+/// The resolver and source snapshot cross the evaluation boundary together;
+/// this function never reopens the selected source by pathname.
+pub fn load_checked_with_resolver(
+    resolver: &AuthorityResolver,
+) -> Option<Result<WorkspaceSnapshot, Diagnostic>> {
     let source = match resolver.resolve_workspace_source() {
         Ok(Some(source)) => source,
         Ok(None) => return None,
@@ -77,14 +86,43 @@ pub fn load_checked(dir: &Path) -> Option<Result<WorkspaceSnapshot, Diagnostic>>
     if source.role != WorkspaceSourceRole::Index {
         return None;
     }
-    let plan = match evaluate_with_resolver(&source.source, dir, source.role, &resolver) {
-        Ok(plan) => plan,
-        Err(diagnostic) => return Some(Err(diagnostic)),
-    };
-    if let Err(error) = resolver.revalidate_source(&source) {
-        return Some(Err(error.diagnostic()));
+    Some(load_checked_source(resolver, source))
+}
+
+/// Evaluate an index from the same checked source snapshot selected by a
+/// caller. The caller transfers the snapshot after selecting it; no second
+/// authority read can silently replace its path, bytes, role, or identity.
+pub fn load_checked_source(
+    resolver: &AuthorityResolver,
+    expected: WorkspaceSource,
+) -> Result<WorkspaceSnapshot, Diagnostic> {
+    if expected.role != WorkspaceSourceRole::Index {
+        return Err(changed_workspace_source_diagnostic(resolver.root()));
     }
-    Some(Ok(WorkspaceSnapshot { source, plan }))
+    resolver
+        .revalidate_source(&expected)
+        .map_err(|error| error.diagnostic())?;
+    let plan = evaluate_checked_source(&expected, resolver)?;
+    resolver
+        .revalidate_source(&expected)
+        .map_err(|error| error.diagnostic())?;
+    Ok(WorkspaceSnapshot {
+        source: expected,
+        plan,
+    })
+}
+
+pub fn changed_workspace_source_diagnostic(dir: &Path) -> Diagnostic {
+    Diagnostic::error(
+        "E1334",
+        "workspace authority changed during resolution".to_string(),
+        format!(
+            "the checked workspace source at `{}` changed identity or role before its plan was used",
+            dir.display()
+        ),
+        "restore one stable workspace source and retry".to_string(),
+        None,
+    )
 }
 
 /// Return whether a workspace source declares the optional top-level build
@@ -130,7 +168,14 @@ pub fn evaluate_checked_source(
     source: &WorkspaceSource,
     resolver: &AuthorityResolver,
 ) -> Result<WorkspacePlan, Diagnostic> {
-    evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)
+    resolver
+        .revalidate_source(source)
+        .map_err(|error| error.diagnostic())?;
+    let plan = evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)?;
+    resolver
+        .revalidate_source(source)
+        .map_err(|error| error.diagnostic())?;
+    Ok(plan)
 }
 
 fn evaluate_with_resolver(

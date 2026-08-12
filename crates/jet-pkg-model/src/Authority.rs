@@ -386,12 +386,22 @@ impl AuthorityResolver {
         &self.root
     }
 
+    /// Scope a resolver to an already-open checked directory. This carries
+    /// the directory handle and identity forward without reopening its path.
+    pub fn from_checked_directory(directory: &CheckedDirectory) -> Self {
+        Self {
+            root: directory.path.clone(),
+            root_identity: directory.identity.clone(),
+            root_handle: Arc::clone(&directory.handle),
+        }
+    }
+
     /// Open one regular file below the pinned root and read its bytes from the
     /// same opened object.
     pub fn checked_file(&self, path: &Path) -> Result<CheckedFile, AuthorityError> {
         let relative = self.relative_path(path)?;
         let full = self.root.join(&relative);
-        let handle = platform::open_relative(&self.root_handle, &relative, false)
+        let mut handle = platform::open_relative(&self.root_handle, &relative, false)
             .map_err(|error| Self::map_io(&full, error, false))?;
         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
             path: full.clone(),
@@ -406,25 +416,29 @@ impl AuthorityResolver {
             });
         }
         let identity = FileIdentity::from_metadata(&metadata, AuthorityKind::File);
-        let handle = Arc::new(handle);
-        let mut reader = handle.try_clone().map_err(|error| AuthorityError::Io {
-            path: full.clone(),
-            operation: "clone",
-            detail: error.to_string(),
-        })?;
         let mut bytes = Vec::new();
-        reader
+        handle
             .read_to_end(&mut bytes)
             .map_err(|error| AuthorityError::Io {
                 path: full.clone(),
                 operation: "read",
                 detail: error.to_string(),
             })?;
+        let final_metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+            path: full.clone(),
+            operation: "revalidate",
+            detail: error.to_string(),
+        })?;
+        if !final_metadata.is_file()
+            || FileIdentity::from_metadata(&final_metadata, AuthorityKind::File) != identity
+        {
+            return Err(AuthorityError::Changed(full));
+        }
         let checked = CheckedFile {
             path: full,
             relative,
             identity,
-            handle,
+            handle: Arc::new(handle),
             bytes,
         };
         self.revalidate_file(&checked)?;
@@ -483,12 +497,6 @@ impl AuthorityResolver {
                 detail: error.to_string(),
             })?;
         self.revalidate_file(&file)?;
-        if self
-            .probe_file(&directory.join(Syntax::PAYLOAD_FILE))?
-            .is_some()
-        {
-            return Err(AuthorityError::AmbiguousManifest(self.root.join(&directory)));
-        }
         self.revalidate_root()?;
         Ok(CheckedManifest { file, facts })
     }
@@ -508,6 +516,16 @@ impl AuthorityResolver {
     /// Compose one checked Package without reopening its authority paths.
     pub fn checked_package(&self, path: &Path) -> Result<CheckedPackage, AuthorityError> {
         let member = self.checked_member(path)?;
+        self.complete_checked_package(member)
+    }
+
+    /// Complete a member from an already-open checked directory and manifest.
+    /// The caller transfers the snapshot; this method composes Config files and
+    /// validates the resulting facts without reopening the manifest path.
+    pub fn complete_checked_package(
+        &self,
+        member: CheckedMember,
+    ) -> Result<CheckedPackage, AuthorityError> {
         let mut facts = member.manifest.facts.clone();
         facts
             .compose_configs_checked(self)
@@ -597,14 +615,6 @@ impl AuthorityResolver {
         let mut files = Vec::new();
         for entry in entries {
             let name = entry.file_name();
-            if extension.is_some_and(|extension| {
-                Path::new(&name)
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    != Some(extension)
-            }) {
-                continue;
-            }
             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
                 path: entry.path(),
                 operation: "inspect",
@@ -614,8 +624,21 @@ impl AuthorityResolver {
             if file_type.is_symlink() {
                 return Err(AuthorityError::Symlink(self.root.join(relative)));
             }
-            if !file_type.is_file() {
+            let matches_extension = extension.is_none_or(|extension| {
+                Path::new(&name)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    == Some(extension)
+            });
+            if !matches_extension {
                 continue;
+            }
+            if !file_type.is_file() {
+                return Err(AuthorityError::WrongKind {
+                    path: self.root.join(&relative),
+                    expected: KIND_FILE,
+                    actual: kind_name_from_file_type(&file_type),
+                });
             }
             let file = self.checked_file(&relative)?;
             self.revalidate_file(&file)?;
@@ -742,8 +765,9 @@ impl AuthorityResolver {
 
     /// Revalidate the root and one checked file before using its bytes.
     pub fn revalidate_file(&self, file: &CheckedFile) -> Result<(), AuthorityError> {
+        self.validate_checked_path(&file.path, &file.relative)?;
         self.revalidate_root()?;
-        self.revalidate_path(&file.path, AuthorityKind::File, &file.identity)?;
+        self.revalidate_handle(&file.path, AuthorityKind::File, &file.identity, &file.handle)?;
         Ok(())
     }
 
@@ -752,11 +776,13 @@ impl AuthorityResolver {
         &self,
         directory: &CheckedDirectory,
     ) -> Result<(), AuthorityError> {
+        self.validate_checked_path(&directory.path, &directory.relative)?;
         self.revalidate_root()?;
-        self.revalidate_path(
+        self.revalidate_handle(
             &directory.path,
             AuthorityKind::Directory,
             &directory.identity,
+            &directory.handle,
         )?;
         Ok(())
     }
@@ -764,7 +790,8 @@ impl AuthorityResolver {
     /// Revalidate a complete member snapshot before realizing it.
     pub fn revalidate_member(&self, member: &CheckedMember) -> Result<(), AuthorityError> {
         self.revalidate_directory(&member.directory)?;
-        self.revalidate_file(&member.manifest.file)
+        self.revalidate_file(&member.manifest.file)?;
+        self.revalidate_root()
     }
 
     /// Revalidate a workspace source snapshot before realizing it.
@@ -772,6 +799,11 @@ impl AuthorityResolver {
         &self,
         source: &crate::WorkspacePlan::WorkspaceSource,
     ) -> Result<(), AuthorityError> {
+        if source.path != source.checked.path
+            || source.source.as_bytes() != source.checked.bytes.as_slice()
+        {
+            return Err(AuthorityError::Changed(source.path.clone()));
+        }
         self.revalidate_file(&source.checked)
     }
 
@@ -781,12 +813,7 @@ impl AuthorityResolver {
         directory: &CheckedDirectory,
     ) -> Result<String, AuthorityError> {
         self.revalidate_directory(directory)?;
-        let canonical = fs::canonicalize(&directory.path).map_err(|error| AuthorityError::Io {
-            path: directory.path.clone(),
-            operation: "resolve",
-            detail: error.to_string(),
-        })?;
-        self.revalidate_directory(directory)?;
+        let canonical = self.root.join(&directory.relative);
         if !canonical.starts_with(&self.root) {
             return Err(AuthorityError::Escapes(directory.path.clone()));
         }
@@ -822,12 +849,6 @@ impl AuthorityResolver {
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let name = entry.file_name();
-            let name_text = name.to_string_lossy();
-            if name_text.starts_with('.')
-                || matches!(name_text.as_ref(), "target" | "build" | "node_modules")
-            {
-                continue;
-            }
             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
                 path: entry.path(),
                 operation: "inspect",
@@ -837,14 +858,26 @@ impl AuthorityResolver {
             if file_type.is_symlink() {
                 return Err(AuthorityError::Symlink(self.root.join(relative)));
             }
+            let name_text = name.to_string_lossy();
+            if name_text.starts_with('.')
+                || matches!(name_text.as_ref(), "target" | "build" | "node_modules")
+            {
+                continue;
+            }
             if file_type.is_dir() {
                 self.discover_source_files_from(&relative, files)?;
-            } else if file_type.is_file()
-                && Path::new(&name)
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    == Some(crate::Syntax::FILE_EXT)
+            } else if Path::new(&name)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                == Some(crate::Syntax::FILE_EXT)
             {
+                if !file_type.is_file() {
+                    return Err(AuthorityError::WrongKind {
+                        path: self.root.join(&relative),
+                        expected: KIND_FILE,
+                        actual: kind_name_from_file_type(&file_type),
+                    });
+                }
                 let file = self.checked_file(&relative)?;
                 self.revalidate_file(&file)?;
                 files.push(file);
@@ -883,29 +916,26 @@ impl AuthorityResolver {
     }
 
     pub fn revalidate_root(&self) -> Result<(), AuthorityError> {
-        self.revalidate_path(&self.root, AuthorityKind::Directory, &self.root_identity)
+        self.revalidate_handle(
+            &self.root,
+            AuthorityKind::Directory,
+            &self.root_identity,
+            &self.root_handle,
+        )
     }
 
-    fn revalidate_path(
+    fn revalidate_handle(
         &self,
         path: &Path,
         kind: AuthorityKind,
         expected: &FileIdentity,
+        handle: &File,
     ) -> Result<(), AuthorityError> {
-        let metadata = fs::symlink_metadata(path).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                AuthorityError::Missing(path.to_path_buf())
-            } else {
-                AuthorityError::Io {
-                    path: path.to_path_buf(),
-                    operation: "revalidate",
-                    detail: error.to_string(),
-                }
-            }
+        let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+            path: path.to_path_buf(),
+            operation: "revalidate",
+            detail: error.to_string(),
         })?;
-        if metadata.file_type().is_symlink() {
-            return Err(AuthorityError::Symlink(path.to_path_buf()));
-        }
         let actual_kind = if metadata.is_dir() {
             AuthorityKind::Directory
         } else if metadata.is_file() {
@@ -922,43 +952,13 @@ impl AuthorityResolver {
         {
             return Err(AuthorityError::Changed(path.to_path_buf()));
         }
-        let canonical = fs::canonicalize(path).map_err(|error| AuthorityError::Io {
-            path: path.to_path_buf(),
-            operation: "revalidate",
-            detail: error.to_string(),
-        })?;
-        if !canonical.starts_with(&self.root) {
+        Ok(())
+    }
+
+    fn validate_checked_path(&self, path: &Path, relative: &Path) -> Result<(), AuthorityError> {
+        let expected = self.root.join(relative);
+        if !relative.is_relative() || path != expected || !path.starts_with(&self.root) {
             return Err(AuthorityError::Escapes(path.to_path_buf()));
-        }
-        let relative = path
-            .strip_prefix(&self.root)
-            .map_err(|_| AuthorityError::Escapes(path.to_path_buf()))?;
-        let handle = platform::open_relative(
-            &self.root_handle,
-            relative,
-            kind == AuthorityKind::Directory,
-        )
-        .map_err(|error| Self::map_io(path, error, kind == AuthorityKind::Directory))?;
-        let opened = handle.metadata().map_err(|error| AuthorityError::Io {
-            path: path.to_path_buf(),
-            operation: "revalidate",
-            detail: error.to_string(),
-        })?;
-        let opened_kind = if opened.is_dir() {
-            AuthorityKind::Directory
-        } else if opened.is_file() {
-            AuthorityKind::File
-        } else {
-            return Err(AuthorityError::WrongKind {
-                path: path.to_path_buf(),
-                expected: kind_name_for(kind),
-                actual: kind_name(&opened),
-            });
-        };
-        if opened_kind != kind
-            || FileIdentity::from_metadata(&opened, opened_kind) != *expected
-        {
-            return Err(AuthorityError::Changed(path.to_path_buf()));
         }
         Ok(())
     }
@@ -990,6 +990,18 @@ fn kind_name(metadata: &Metadata) -> &'static str {
         KIND_DIRECTORY
     } else if metadata.is_file() {
         KIND_FILE
+    } else {
+        "special file"
+    }
+}
+
+fn kind_name_from_file_type(file_type: &std::fs::FileType) -> &'static str {
+    if file_type.is_dir() {
+        KIND_DIRECTORY
+    } else if file_type.is_file() {
+        KIND_FILE
+    } else if file_type.is_symlink() {
+        "symlink"
     } else {
         "special file"
     }

@@ -6,7 +6,9 @@ use crate::RefSpec::{self, ProviderKind};
 use crate::Syntax;
 use crate::WorkspaceFile;
 use crate::WorkspaceLock;
+use jet_driver::Diagnostics::Diagnostic;
 use jet_pkg_model::Authority::AuthorityResolver;
+use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 use std::path::{Path, PathBuf};
 
 /// Resolve the fixtures dir (explicit flag, env, or none). `--offline` only
@@ -19,48 +21,87 @@ pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
 /// below a project directory. Explicit refs and project plans must use the
 /// same source facts from that root.
 pub(super) fn project_root(start: &Path) -> PathBuf {
-    nearest_project_root(start)
-        .unwrap_or_else(|| start.to_path_buf())
+    match nearest_project_root(start) {
+        Ok(Some(root)) => root,
+        Ok(None) => start.to_path_buf(),
+        Err(diagnostic) => report_authority_error(diagnostic),
+    }
 }
 
 /// Workspace member lookup has a wider boundary than a member Package. Keep
 /// it on the nearest workspace declaration so a package inside a monorepo
 /// still sees the monorepo's member index.
 pub(super) fn workspace_root(start: &Path) -> PathBuf {
-    nearest_workspace_root(start)
-        .unwrap_or_else(|| start.to_path_buf())
+    match nearest_workspace_root(start) {
+        Ok(Some(root)) => root,
+        Ok(None) => start.to_path_buf(),
+        Err(diagnostic) => report_authority_error(diagnostic),
+    }
 }
 
-fn workspace_source_present(dir: &Path) -> bool {
+fn report_authority_error(diagnostic: Diagnostic) -> ! {
+    eprint!(
+        "{}",
+        crate::Diagnostics::render_all(
+            Syntax::WORKSPACE_FILE,
+            "",
+            std::slice::from_ref(&diagnostic),
+        )
+    );
+    std::process::exit(2)
+}
+
+type CheckedWorkspaceSource = (AuthorityResolver, WorkspaceSource);
+
+fn checked_workspace_source(dir: &Path) -> Result<Option<CheckedWorkspaceSource>, Diagnostic> {
     match AuthorityResolver::open(dir) {
         Ok(resolver) => match resolver.resolve_workspace_source() {
-            Ok(Some(_)) | Err(_) => true,
-            Ok(None) => false,
+            Ok(Some(source)) => {
+                resolver
+                    .revalidate_source(&source)
+                    .map_err(|error| error.diagnostic())?;
+                Ok(Some((resolver, source)))
+            }
+            Ok(None) => Ok(None),
+            Err(error) => Err(error.workspace_diagnostic()),
         },
-        Err(error) => !error.is_missing(),
+        Err(error) if error.is_missing() => Ok(None),
+        Err(error) => Err(error.diagnostic()),
     }
 }
 
-fn package_manifest_present(dir: &Path) -> bool {
+fn workspace_source_present(dir: &Path) -> Result<bool, Diagnostic> {
+    Ok(checked_workspace_source(dir)?.is_some())
+}
+
+fn package_manifest_present(dir: &Path) -> Result<bool, Diagnostic> {
     match AuthorityResolver::open(dir) {
         Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
-            Ok(_) | Err(jet_pkg_model::Authority::AuthorityError::AmbiguousManifest(_)) => true,
-            Err(error) => !error.is_missing(),
+            Ok(manifest) => {
+                resolver
+                    .revalidate_file(&manifest.file)
+                    .map_err(|error| error.diagnostic())?;
+                Ok(true)
+            }
+            Err(error) if error.is_missing() => Ok(false),
+            Err(error) => Err(error.diagnostic()),
         },
-        Err(error) => !error.is_missing(),
+        Err(error) if error.is_missing() => Ok(false),
+        Err(error) => Err(error.diagnostic()),
     }
 }
 
-fn nearest_project_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start
-        .canonicalize()
-        .unwrap_or_else(|_| start.to_path_buf());
+fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let mut dir = AuthorityResolver::open(start)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
-        if package_manifest_present(&dir)
-            || env_file_present(&dir)
-            || workspace_source_present(&dir)
+        if package_manifest_present(&dir)?
+            || env_file_present(&dir)?
+            || workspace_source_present(&dir)?
         {
-            return Some(dir);
+            return Ok(Some(dir));
         }
         let Some(parent) = dir.parent() else {
             break;
@@ -70,26 +111,58 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         }
         dir = parent.to_path_buf();
     }
-    None
+    Ok(None)
 }
 
-fn env_file_present(dir: &Path) -> bool {
+fn env_file_present(dir: &Path) -> Result<bool, Diagnostic> {
     match AuthorityResolver::open(dir) {
         Ok(resolver) => match resolver.checked_file(Path::new(Syntax::ENV_FILE)) {
-            Ok(file) => resolver.revalidate_file(&file).is_ok(),
-            Err(error) => !error.is_missing(),
+            Ok(file) => {
+                resolver
+                    .revalidate_file(&file)
+                    .map_err(|error| error.diagnostic())?;
+                Ok(true)
+            }
+            Err(error) if error.is_missing() => Ok(false),
+            Err(error) => Err(error.diagnostic()),
         },
-        Err(error) => !error.is_missing(),
+        Err(error) if error.is_missing() => Ok(false),
+        Err(error) => Err(error.diagnostic()),
     }
 }
 
-fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start
-        .canonicalize()
-        .unwrap_or_else(|_| start.to_path_buf());
+fn checked_env_file(dir: &Path) -> Result<Option<EnvFile>, Diagnostic> {
+    let resolver = match AuthorityResolver::open(dir) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let file = match resolver.checked_file(Path::new(Syntax::ENV_FILE)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(None),
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let source = file.text().map_err(|error| error.diagnostic())?;
+    resolver
+        .revalidate_file(&file)
+        .map_err(|error| error.diagnostic())?;
+    Ok(Some(EnvFile::parse(&source)))
+}
+
+fn nearest_workspace_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    Ok(nearest_workspace_source(start)?.map(|(root, _, _)| root))
+}
+
+fn nearest_workspace_source(
+    start: &Path,
+) -> Result<Option<(PathBuf, AuthorityResolver, WorkspaceSource)>, Diagnostic> {
+    let mut dir = AuthorityResolver::open(start)
+        .map_err(|error| error.diagnostic())?
+        .root()
+        .to_path_buf();
     loop {
-        if workspace_source_present(&dir) {
-            return Some(dir);
+        if let Some((resolver, source)) = checked_workspace_source(&dir)? {
+            return Ok(Some((dir, resolver, source)));
         }
         let Some(parent) = dir.parent() else {
             break;
@@ -99,7 +172,51 @@ fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
         }
         dir = parent.to_path_buf();
     }
-    None
+    Ok(None)
+}
+
+pub(super) fn workspace_root_snapshot(
+    start: &Path,
+) -> Result<(PathBuf, Option<CheckedWorkspaceSource>), Diagnostic> {
+    match nearest_workspace_source(start)? {
+        Some((root, resolver, source)) => Ok((root, Some((resolver, source)))),
+        None => Ok((start.to_path_buf(), None)),
+    }
+}
+
+pub(super) fn workspace_root_snapshot_or_exit(
+    start: &Path,
+) -> (PathBuf, Option<CheckedWorkspaceSource>) {
+    workspace_root_snapshot(start).unwrap_or_else(report_authority_error)
+}
+
+pub(super) fn workspace_index_required_diagnostic() -> Diagnostic {
+    Diagnostic::error(
+        "E1239",
+        "workspace build needs workspace.jet as the index".to_string(),
+        "an authority declaration is not a member index".to_string(),
+        "move members into workspace.jet and keep one workspace index".to_string(),
+        None,
+    )
+}
+
+fn workspace_snapshot_from_source(
+    resolver: &AuthorityResolver,
+    expected: &WorkspaceSource,
+) -> Result<WorkspaceFile::WorkspaceSnapshot, Diagnostic> {
+    WorkspaceFile::load_checked_source(resolver, expected.clone())
+}
+
+fn load_workspace_snapshot(
+    dir: &Path,
+) -> Result<Option<WorkspaceFile::WorkspaceSnapshot>, Diagnostic> {
+    let Some((resolver, source)) = checked_workspace_source(dir)? else {
+        return Ok(None);
+    };
+    if source.role != WorkspaceSourceRole::Index {
+        return Ok(None);
+    }
+    workspace_snapshot_from_source(&resolver, &source).map(Some)
 }
 
 /// Load and evaluate the declaration-resolved workspace source from `dir`,
@@ -107,7 +224,38 @@ fn nearest_workspace_root(start: &Path) -> Option<PathBuf> {
 /// Returns `None` when no source declares a workspace. Prints the diagnostic to
 /// stderr and returns `Err(2)` when discovery or evaluation fails.
 pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
-    let result = WorkspaceFile::load_checked(dir)?.map(|snapshot| snapshot.plan);
+    finish_workspace_load(dir, load_workspace_snapshot(dir))
+}
+
+pub(super) fn load_workspace_for_source(
+    dir: &Path,
+    checked: &CheckedWorkspaceSource,
+) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+    let (resolver, source) = checked;
+    if let Err(error) = resolver.revalidate_source(source) {
+        return finish_workspace_load(dir, Err(error.diagnostic()));
+    }
+    if source.role != WorkspaceSourceRole::Index {
+        return finish_workspace_load(
+            dir,
+            Err(workspace_index_required_diagnostic()),
+        );
+    }
+    finish_workspace_load(
+        dir,
+        workspace_snapshot_from_source(resolver, source).map(Some),
+    )
+}
+
+fn finish_workspace_load(
+    dir: &Path,
+    result: Result<Option<WorkspaceFile::WorkspaceSnapshot, Diagnostic>, Diagnostic>,
+) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+    let result = match result {
+        Ok(Some(snapshot)) => Ok(snapshot.plan),
+        Ok(None) => return None,
+        Err(diagnostic) => Err(diagnostic),
+    };
     match result {
         Ok(plan) => {
             match WorkspaceLock::write(dir, &plan) {
@@ -183,9 +331,11 @@ pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (Ref
 /// inline declarations win on conflict).
 pub(super) fn cwd_table() -> RefSpec::SourceTable {
     let dir = project_root(&std::env::current_dir().unwrap_or_default());
-    let mut table = EnvFile::load(&dir)
-        .map(|ef| ef.source_table())
-        .unwrap_or_else(RefSpec::SourceTable::empty);
+    let mut table = match checked_env_file(&dir) {
+        Ok(Some(env)) => env.source_table(),
+        Ok(None) => RefSpec::SourceTable::empty(),
+        Err(diagnostic) => report_authority_error(diagnostic),
+    };
     // Merge jetpack.toml [sources] as defaults (non-overriding).
     // Ignore parse errors here — cwd_table is used for explicit CLI refs;
     // load_project_plan handles the hard-exit case for project-scoped commands.
@@ -201,50 +351,40 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
-    let dir = workspace_root(&std::env::current_dir().unwrap_or_default());
-    let plan = match WorkspaceFile::load_checked(&dir) {
-        Some(Ok(snapshot)) => Some(snapshot.plan),
-        // A malformed workspace source is source failure, never permission to
-        // reuse a stale lock mirror.
-        Some(Err(diagnostic)) => {
-            eprint!(
-                "{}",
-                crate::Diagnostics::render_all(
-                    Syntax::WORKSPACE_FILE,
-                    "",
-                    std::slice::from_ref(&diagnostic)
-                )
-            );
-            std::process::exit(2);
+    let (dir, source) = workspace_root_snapshot(&std::env::current_dir().unwrap_or_default())
+        .unwrap_or_else(report_authority_error);
+    let (plan, allow_lock) = match source {
+        Some((resolver, source)) if source.role == WorkspaceSourceRole::Index => {
+            let snapshot = workspace_snapshot_from_source(&resolver, &source)
+                .unwrap_or_else(report_authority_error);
+            (Some(snapshot.plan), false)
         }
-        None => {
-            let lock = WorkspaceLock::load(&dir);
-            if lock.is_none() {
-                let (path, looks_like_workspace_lock) = match workspace_lock_source(&dir) {
-                    Ok(Some((path, source))) => {
-                        (path, crate::Lock::looks_like_workspace_lock(&source))
-                    }
-                    Ok(None) => (dir.join(Syntax::UNIFIED_LOCK_FILE), false),
-                    Err(error) => {
-                        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
-                        let mut diagnostic = crate::Lock::e1202_workspace(
-                            &path.display().to_string(),
-                        );
-                        diagnostic.why = format!(
-                            "the workspace lock could not be read, so its authority is not trusted: {error}"
-                        );
-                        eprint!(
-                            "{}",
-                            crate::Diagnostics::render_all(
-                                Syntax::WORKSPACE_FILE,
-                                "",
-                                std::slice::from_ref(&diagnostic),
-                            )
-                        );
-                        std::process::exit(2);
-                    }
-                };
-                if looks_like_workspace_lock {
+        // An authority source is a boundary, not an index. Do not fall
+        // through to a stale lock when one is present.
+        Some(_) => (None, false),
+        None => (None, true),
+    };
+    let plan = if allow_lock {
+        let resolver = AuthorityResolver::open(&dir).unwrap_or_else(|error| {
+            report_authority_error(error.diagnostic())
+        });
+        let lock_file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
+            Ok(file) => Some(file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => report_authority_error(error.diagnostic()),
+        };
+        match lock_file {
+            Some(lock_file) => {
+                let path = lock_file.path.clone();
+                let source = lock_file
+                    .text()
+                    .unwrap_or_else(|error| report_authority_error(error.diagnostic()));
+                resolver
+                    .revalidate_file(&lock_file)
+                    .unwrap_or_else(|error| report_authority_error(error.diagnostic()));
+                let looks_like_workspace_lock = crate::Lock::looks_like_workspace_lock(&source);
+                let lock = WorkspaceLock::load_checked_file(&resolver, lock_file);
+                if lock.is_none() && looks_like_workspace_lock {
                     let diagnostic = crate::Lock::e1202_workspace(&path.display().to_string());
                     eprint!(
                         "{}",
@@ -256,9 +396,12 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
                     );
                     std::process::exit(2);
                 }
+                lock
             }
-            lock
+            None => None,
         }
+    } else {
+        plan
     };
     match plan {
         Some(plan) => RefSpec::WorkspaceIndex::from_members(
@@ -266,20 +409,6 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
         ),
         None => RefSpec::WorkspaceIndex::empty(),
     }
-}
-
-fn workspace_lock_source(
-    dir: &Path,
-) -> Result<Option<(PathBuf, String)>, jet_pkg_model::Authority::AuthorityError> {
-    let resolver = AuthorityResolver::open(dir)?;
-    let file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
-        Ok(file) => file,
-        Err(error) if error.is_missing() => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let source = file.text()?;
-    resolver.revalidate_file(&file)?;
-    Ok(Some((file.path, source)))
 }
 
 #[cfg(test)]
