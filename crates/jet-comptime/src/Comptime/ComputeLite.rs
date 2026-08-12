@@ -1402,7 +1402,7 @@ pub fn apply(
                 .lock()
                 .map_err(|_| unsupported("Tensor handle", span))?;
             match jet_compute_set(
-                &mut tensor,
+                &mut *tensor,
                 &as_i64_list(one(1)?, span)?,
                 as_float(one(2)?, span)?,
             ) {

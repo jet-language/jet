@@ -98,7 +98,10 @@ mod time_kernel {
 }
 
 mod crypto_entropy_kernel {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
 
 fn runtime_date_value(date: time_kernel::JetDate) -> CtValue {
