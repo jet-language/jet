@@ -118,6 +118,31 @@
     }
 
     #[test]
+    fn default_parameter_call_sites_are_tir_covered() {
+        install_comptime_bridge();
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/features/basics/default_refs.jet"
+        ));
+        let bundle = checked_bundle(source);
+        let module = &bundle.modules[bundle.entry];
+        let cx = build_cx_items(&module.items, source, "default_refs.jet", None, &HashMap::new());
+        let function = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function),
+                _ => None,
+        })
+            .expect("default_refs must define run");
+        assert!(tir_covers(function, &cx));
+        let tir = lower_func(function, &cx);
+        let mut generated = String::new();
+        crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
+        assert!(!generated.contains("__jet_binder_ref_"), "unlowered default reference: {generated}");
+    }
+
+    #[test]
     fn script_body_is_lowered_as_the_canonical_run_function() {
         let source = "print(\"script\"); fn helper() {}\n";
         let bundle = checked_bundle(source);

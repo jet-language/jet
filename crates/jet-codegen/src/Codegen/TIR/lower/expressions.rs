@@ -1156,6 +1156,17 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     // Keep expression descent off the native stack. Value-if and inline-loop nodes
     // use the same continuation worklist as every other expression.
     let e = strip_expr_parens(e);
+    // A cached worklist value may have been produced before a default argument's
+    // binder mapping was installed. Resolve the private name first so cache
+    // reuse cannot bypass the declaration-slot substitution.
+    if let Expr::Ident(name, _) = e {
+        if let Some((temp, ty)) = env.binder_ref(name).cloned() {
+            return TExpr {
+                ty,
+                kind: TExprKind::Local(TLocal::user(temp)),
+            };
+        }
+    }
     if let Some(value) = expr_cache_take(e) {
         return canonicalize_pre_tier_expr(value);
     }

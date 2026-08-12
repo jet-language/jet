@@ -5771,7 +5771,7 @@ mod source_map_tests {
             "const label = \"😀\";\n  {SOURCE_MAP_MARKER} file 0\n  {SOURCE_MAP_MARKER} line 2\n  run();\n"
         );
 
-        let (js, map) = finish_js_source_map(raw, &sources, SOURCE_MAP_MARKER);
+        let (js, map) = finish_js_source_map(&raw, &sources, SOURCE_MAP_MARKER);
 
         assert_eq!(js, "const label = \"😀\";\n  run();\n");
         assert!(map.contains("\"mappings\":\";EACA\""), "{map}");
