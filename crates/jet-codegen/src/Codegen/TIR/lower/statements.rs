@@ -3191,7 +3191,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 .collect();
             // D-STM1=A (card #506): lower the body with `in_stm_transact` raised so a
             // `Shared<T>.edit` inside routes to the deferred `edit_txn`. `stm_touched`
-            // is reset first and read after, so `uses_stm` reflects THIS block only
+            // is reset first and read after, so the emitted STM handle reflects THIS
+            // block only
             // (save/restore isolates nested blocks); a Shared edit in a nested
             // `#Transact` attaches to that inner block's own transaction, not this one.
             let prev_in = cx.in_stm_transact.replace(true);
@@ -3199,13 +3200,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
                 move |mut lowered| {
-                    let uses_stm = cx.stm_touched.get();
+                    let stm = cx.stm_touched.get().then(TLocal::stm);
                     cx.in_stm_transact.set(prev_in);
                     cx.stm_touched.set(prev_touched);
                     TStmt::Transact {
                         handle,
                         snapshots,
-                        uses_stm,
+                        stm,
                         body: lowered.pop().expect("transaction body was deferred"),
                     }
                 },

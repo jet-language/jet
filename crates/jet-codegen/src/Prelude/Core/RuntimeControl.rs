@@ -115,119 +115,20 @@ mod jet_txn {
 // ── D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of #Transact ──
 // `#Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
 //   { let mut tx = jet_transaction();
-//     let __jet_stm = jet_stm::begin();
+//     let mut __jet_stm = jet_stm::begin();
 //     from.edit_txn(&mut __jet_stm, move |b| …);
 //     to.edit_txn(&mut __jet_stm, move |b| …);
 //     __jet_stm.commit(); tx.commit(); }
 //
-// Each `edit_txn` DEFERS its mutation onto the explicit transaction guard
-// instead of taking a lock now. `begin()` creates a fresh transaction;
-// `commit()` applies every deferred edit at once: it sorts the touched handles into a
-// canonical order by their `Arc` pointer, takes ALL their write locks (held
-// simultaneously via a recursive fold), runs each handle's buffered mutations
-// against a fresh `&mut T` under that lock, then releases. Because the locks are
-// taken in one fixed order there is no lock-ordering deadlock (the deadlock class
-// STM was invented to remove), and because they are all held together no other
-// task observes a half-applied transfer. A `?`-failure or early return skips
-// `commit()`, so the guard's Drop discards every deferred edit — nothing lands.
-//
-// Purely safe std Rust (the raw pointer is only read as an ordering key, never
-// dereferenced); no external crate (I6); the compiler decides WHICH `.edit`
-// calls defer (any inside a Shared-touching `#Transact`), this module is the
-// dumb runtime (I3). E0746 keeps rejecting irreversible effects inside, so a
-// deferred, all-or-nothing commit is always safe.
+// Each `edit_txn` defers its payload closure onto the explicit transaction
+// guard. The shared Prelude owns participant identity, lock ordering, commit,
+// and rollback; this generated module only preserves the emitter's existing
+// `jet_stm::begin()` spelling.
 mod jet_stm {
-    use std::sync::Arc;
-
-    struct Txn {
-        parts: Vec<Participant>,
-    }
-
-    // One touched Shared protocol plus every type-erased mutation deferred
-    // against it. Payload access stays inside the closure supplied by
-    // JetShared<T>; lock ordering and atomic commit live here.
-    struct Participant {
-        protocol: Arc<crate::JetSharedProtocol>,
-        addr: usize,
-        deltas: Vec<Box<dyn FnOnce()>>,
-    }
-
-    /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the explicit
-    /// guard; the actual write happens at `commit()`.
-    fn record_edit(
-        txn: &mut Txn,
-        protocol: Arc<crate::JetSharedProtocol>,
-        delta: Box<dyn FnOnce()>,
-    ) {
-        let addr = Arc::as_ptr(&protocol) as *const () as usize;
-        for p in txn.parts.iter_mut() {
-            if p.addr == addr {
-                p.deltas.push(delta);
-                return;
-            }
-        }
-        txn.parts.push(Participant {
-            protocol,
-            addr,
-            deltas: vec![delta],
-        });
-    }
-
-    /// The RAII guard for one `#Transact` block's Shared plane. Dropping it
-    /// without `commit()` (a `?`-failure / early return) discards every deferred
-    /// edit — the all-or-nothing guarantee.
-    pub(crate) struct Guard {
-        txn: Option<Txn>,
-        committed: bool,
-    }
+    pub(crate) type Guard = crate::JetSharedTransaction;
 
     pub(crate) fn begin() -> Guard {
-        Guard {
-            txn: Some(Txn { parts: Vec::new() }),
-            committed: false,
-        }
-    }
-
-    impl Guard {
-        pub(crate) fn record_edit(
-            &mut self,
-            protocol: Arc<crate::JetSharedProtocol>,
-            delta: Box<dyn FnOnce()>,
-        ) {
-            let txn = self
-                .txn
-                .as_mut()
-                .expect("edit_txn called after #Transact commit (compiler invariant)");
-            record_edit(txn, protocol, delta);
-        }
-
-        pub(crate) fn commit(mut self) {
-            self.committed = true;
-            if let Some(txn) = self.txn.take() {
-                apply(txn.parts);
-            }
-        }
-    }
-
-    impl Drop for Guard {
-        fn drop(&mut self) { self.txn.take(); }
-    }
-
-    // The shared Prelude protocol takes every touched handle's write lock in
-    // canonical pointer order. This adapter only applies buffered payload edits
-    // while those permits remain alive.
-    fn apply(mut parts: Vec<Participant>) {
-        let _permits = crate::jet_shared_acquire_ordered(
-            parts
-                .iter()
-                .map(|participant| participant.protocol.clone())
-                .collect(),
-        );
-        for participant in &mut parts {
-            for delta in participant.deltas.drain(..) {
-                delta();
-            }
-        }
+        crate::jet_shared_transaction_begin()
     }
 }
 trait __jet_Serialize {

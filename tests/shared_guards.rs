@@ -219,7 +219,6 @@ fn assert_native_and_default(
     source: &str,
     expected: &str,
     tag: &str,
-    expect_deopt: bool,
 ) {
     assert!(common::have_rustc(), "SharedGuard parity proof needs rustc");
 
@@ -267,15 +266,19 @@ fn assert_native_and_default(
     jet_jit::reset_jit_trace_for_test();
     match backend.run(&bundle, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-            assert_eq!(
-                jet_jit::deopt_invoked_for_test(),
-                expect_deopt,
-                "unexpected SharedGuard JIT deopt state"
-            );
+            assert!(!jet_jit::deopt_invoked_for_test());
+            assert!(!jet_jit::fallback_invoked_for_test());
             assert_eq!(stdout, expected);
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("default SharedGuard tier failed: {diagnostics:?}")
+        }
+    }
+
+    match jet::Interpreter::dev_iteration(default_path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced SharedGuard interpreter failed: {diagnostics:?}")
         }
     }
 }
@@ -293,28 +296,28 @@ fn with_compiler_stack(test: impl FnOnce() + Send + 'static) {
 #[test]
 fn shared_guard_queue_matches_native_and_default_tiers() {
     with_compiler_stack(|| {
-        assert_native_and_default(QUEUE, "7\n", "jet_shared_guard_queue", true)
+        assert_native_and_default(QUEUE, "7\n", "jet_shared_guard_queue")
     });
 }
 
 #[test]
 fn cancelling_condition_wait_unregisters_and_releases_guard() {
     with_compiler_stack(|| {
-        assert_native_and_default(CANCEL_WAIT, "7\n1\n", "jet_shared_guard_cancel", true)
+        assert_native_and_default(CANCEL_WAIT, "7\n1\n", "jet_shared_guard_cancel")
     });
 }
 
 #[test]
 fn return_and_error_paths_release_guard() {
     with_compiler_stack(|| {
-        assert_native_and_default(EARLY_EXITS, "3\n", "jet_shared_guard_early_exit", true)
+        assert_native_and_default(EARLY_EXITS, "3\n", "jet_shared_guard_early_exit")
     });
 }
 
 #[test]
 fn named_guard_spans_read_and_write_helpers_on_all_tiers() {
     with_compiler_stack(|| {
-        assert_native_and_default(HELPERS, "4\n5\n", "jet_shared_guard_helpers", true)
+        assert_native_and_default(HELPERS, "4\n5\n", "jet_shared_guard_helpers")
     });
 }
 
@@ -325,7 +328,6 @@ fn returned_named_guard_reads_and_releases_on_all_tiers() {
             RETURNED_GUARD,
             "6\n7\n",
             "jet_shared_guard_returned",
-            false,
         )
     });
 }
@@ -337,7 +339,6 @@ fn concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers() {
             TRANSACTION_DELTAS,
             "2\n",
             "jet_shared_guard_transaction_deltas",
-            false,
         )
     });
 }
@@ -349,7 +350,6 @@ fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
             MAP_AND_SPLIT,
             "13\n10\n",
             "jet_shared_guard_projection",
-            true,
         )
     });
 }
@@ -361,7 +361,6 @@ fn stored_and_returned_guards_move_as_read_capabilities_on_all_tiers() {
             STORED_GUARDS,
             "8\n10\n9\n",
             "jet_shared_guard_storage",
-            true,
         )
     });
 }

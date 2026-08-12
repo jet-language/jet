@@ -580,6 +580,61 @@ fn append_shared_guard_path(value: &mut CtValue, suffix: &[String]) -> bool {
     true
 }
 
+fn set_shared_guard_editable(value: &mut CtValue, editable: bool) -> bool {
+    let CtValue::Struct { type_name, fields } = value else {
+        return false;
+    };
+    if type_name != "__JetTirSharedGuard" {
+        return false;
+    }
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "editable") {
+        *value = CtValue::Bool(editable);
+    } else {
+        fields.push(("editable".to_string(), CtValue::Bool(editable)));
+    }
+    true
+}
+
+fn set_shared_guard_lease(value: &mut CtValue, lease: usize) -> bool {
+    let CtValue::Struct { type_name, fields } = value else {
+        return false;
+    };
+    if type_name != "__JetTirSharedGuard" {
+        return false;
+    }
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "lease") {
+        *value = CtValue::Int(lease as i64);
+        true
+    } else {
+        false
+    }
+}
+
+fn shared_guard_field_id(field: &str) -> i64 {
+    // Evaluator payload projections use field names. The Prelude state still
+    // records the same projection sequence as a compact identity token; the
+    // evaluator resolves the names against its CtValue payload.
+    field.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
+        hash.wrapping_mul(0x100000001b3)
+            .wrapping_add(u64::from(byte))
+    }) as i64
+}
+
+fn map_shared_guard_state(
+    mut state: std::sync::Arc<super::shared_protocol::JetSharedGuardState>,
+    path: &[String],
+    editable: bool,
+) -> Result<std::sync::Arc<super::shared_protocol::JetSharedGuardState>, &'static str> {
+    for field in path {
+        state = super::shared_protocol::jet_shared_guard_map(
+            &state,
+            shared_guard_field_id(field),
+            editable,
+        )?;
+    }
+    Ok(state)
+}
+
 fn condition_index(value: &CtValue) -> Option<usize> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
@@ -3835,15 +3890,26 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CharLit(c) => Ok(CtValue::Char(*c)),
             TExprKind::SharedGuardValue { guard, .. } => {
                 let guard = self.eval_expr_child(guard, scope)?;
-                let (index, _, _, path) = shared_guard_parts(&guard)
+                let (index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard handle", self.span()))?;
-                let value = self.runtime
-                    .lock()
-                    .expect("evaluator runtime poisoned")
-                    .shared_values
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| unsupported("SharedGuard value", self.span()))?;
+                let (shared, held) = {
+                    let runtime = self.runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned");
+                    let held = runtime
+                        .shared_guards
+                        .get(lease_index)
+                        .is_some_and(|state| state.held());
+                    let shared = runtime.shared_values.get(index).cloned();
+                    (shared, held)
+                };
+                if !held {
+                    return Err(unsupported(
+                        super::shared_protocol::JET_SHARED_GUARD_INVALID,
+                        self.span(),
+                    ));
+                }
+                let value = shared.ok_or_else(|| unsupported("SharedGuard value", self.span()))?;
                 let value = value
                     .value
                     .lock()
@@ -3852,23 +3918,86 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard projection", self.span()))
             }
-            TExprKind::SharedGuardMap { guard, path, .. } => {
+            TExprKind::SharedGuardMap {
+                guard,
+                path,
+                editable,
+            } => {
                 let mut guard = self.eval_expr_child(guard, scope)?;
-                append_shared_guard_path(&mut guard, path)
-                    .then_some(guard)
-                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))
+                let (_, lease_index, _, _) = shared_guard_parts(&guard)
+                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))?;
+                let state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard map", self.span()))?;
+                let mapped = map_shared_guard_state(state, path, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let mapped_lease = {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let mapped_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(mapped);
+                    mapped_lease
+                };
+                self.shared_guards.retain(|index| *index != lease_index);
+                self.shared_guards.push(mapped_lease);
+                if append_shared_guard_path(&mut guard, path)
+                    && set_shared_guard_editable(&mut guard, *editable)
+                    && set_shared_guard_lease(&mut guard, mapped_lease)
+                {
+                    Ok(guard)
+                } else {
+                    Err(unsupported("SharedGuard map", self.span()))
+                }
             }
             TExprKind::SharedGuardSplit {
                 guard,
                 first,
                 second,
-                ..
+                editable,
             } => {
                 let guard = self.eval_expr_child(guard, scope)?;
+                let (_, lease_index, _, _) = shared_guard_parts(&guard)
+                    .ok_or_else(|| unsupported("SharedGuard split", self.span()))?;
+                let state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard split", self.span()))?;
+                let second_state = super::shared_protocol::jet_shared_guard_clone(
+                    &state,
+                    *editable,
+                )
+                .map_err(|message| unsupported(message, self.span()))?;
+                let first_state = map_shared_guard_state(state, first, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let second_state = map_shared_guard_state(second_state, second, *editable)
+                    .map_err(|message| unsupported(message, self.span()))?;
+                let (first_lease, second_lease) = {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let first_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(first_state);
+                    let second_lease = runtime.shared_guards.len();
+                    runtime.shared_guards.push(second_state);
+                    (first_lease, second_lease)
+                };
+                self.shared_guards.retain(|index| *index != lease_index);
+                self.shared_guards.push(first_lease);
+                self.shared_guards.push(second_lease);
                 let mut first_guard = guard.clone();
                 let mut second_guard = guard;
                 if !append_shared_guard_path(&mut first_guard, first)
                     || !append_shared_guard_path(&mut second_guard, second)
+                    || !set_shared_guard_editable(&mut first_guard, *editable)
+                    || !set_shared_guard_editable(&mut second_guard, *editable)
+                    || !set_shared_guard_lease(&mut first_guard, first_lease)
+                    || !set_shared_guard_lease(&mut second_guard, second_lease)
                 {
                     return Err(unsupported("SharedGuard split", self.span()));
                 }
@@ -3886,13 +4015,8 @@ impl<'a> EvalCtx<'a> {
                 predicate,
             } => {
                 let guard = self.eval_expr_child(guard, scope)?;
-                let (shared_index, lease_index, editable, path) = shared_guard_parts(&guard)
+                let (shared_index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard wait", self.span()))?;
-                if !editable {
-                    return Ok(CtValue::failed(Box::new(CtValue::Str(
-                        "a condition wait needs an edit guard".to_string(),
-                    ))));
-                }
                 let condition = self.eval_expr_child(condition, scope)?;
                 let condition_index = condition_index(&condition)
                     .ok_or_else(|| unsupported("Condition wait", self.span()))?;
@@ -3904,7 +4028,7 @@ impl<'a> EvalCtx<'a> {
                     .get(condition_index)
                     .cloned()
                     .ok_or_else(|| unsupported("Condition wait", self.span()))?;
-                let lease = self
+                let guard_state = self
                     .runtime
                     .lock()
                     .expect("evaluator runtime poisoned")
@@ -3912,6 +4036,8 @@ impl<'a> EvalCtx<'a> {
                     .get(lease_index)
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard wait lease", self.span()))?;
+                super::shared_protocol::jet_shared_guard_require_edit(&guard_state)
+                    .map_err(|message| unsupported(message, self.span()))?;
                 let shared = self
                     .runtime
                     .lock()
@@ -3921,10 +4047,7 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard wait value", self.span()))?;
                 let cancel = self.task_cancel.clone();
-                match super::shared_protocol::jet_shared_condition_wait(
-                    &lease,
-                    &state,
-                    || {
+                loop {
                     let root = shared
                         .value
                         .lock()
@@ -3933,25 +4056,38 @@ impl<'a> EvalCtx<'a> {
                         .cloned()
                         .ok_or_else(|| unsupported("SharedGuard wait value", self.span()))?;
                     drop(root);
-                        match self.eval_tlambda(predicate, vec![value], scope)? {
-                            CtValue::Bool(ready) => Ok(ready),
-                            _ => Err(unsupported(
+                    match self.eval_tlambda(predicate, vec![value], scope)? {
+                        CtValue::Bool(true) => {
+                            return Ok(CtValue::Present(Box::new(CtValue::Unit)));
+                        }
+                        CtValue::Bool(false) => {}
+                        _ => {
+                            return Err(unsupported(
                                 "SharedGuard wait predicate result",
                                 self.span(),
-                            )),
+                            ));
                         }
-                    },
-                    || {
-                        std::sync::Arc::new(super::EvalConditionWaiter::new(cancel.clone()))
-                    },
-                ) {
-                    Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                    Err(super::shared_protocol::JetConditionWaitError::Predicate(error)) => {
-                        Err(error)
                     }
-                    Err(super::shared_protocol::JetConditionWaitError::Cancelled) => {
-                        self.task_wait_cancel_check()?;
-                        Err(unsupported("SharedGuard condition wait", self.span()))
+                    let waiter = std::sync::Arc::new(super::EvalConditionWaiter::new(
+                        cancel.clone(),
+                        self.context_deadline,
+                    ));
+                    match super::shared_protocol::jet_shared_guard_wait_once(
+                        Some(guard_state.as_ref()),
+                        Some(&state),
+                        waiter,
+                    ) {
+                        Ok(()) => {}
+                        Err(super::shared_protocol::JetSharedGuardWaitError::Cancelled) => {
+                            self.task_wait_cancel_check()?;
+                            return Err(unsupported(
+                                super::shared_protocol::JET_SHARED_GUARD_WAIT_CANCELLED,
+                                self.span(),
+                            ));
+                        }
+                        Err(error) => {
+                            return Err(unsupported(error.message(), self.span()));
+                        }
                     }
                 }
             }
@@ -3968,9 +4104,9 @@ impl<'a> EvalCtx<'a> {
                     .cloned()
                     .ok_or_else(|| unsupported("Condition notify", self.span()))?;
                 if *all {
-                    state.notify_all();
+                    super::shared_protocol::jet_shared_condition_notify_all(&state);
                 } else {
-                    state.notify_one();
+                    super::shared_protocol::jet_shared_condition_notify_one(&state);
                 }
                 Ok(CtValue::Unit)
             }
@@ -5980,13 +6116,13 @@ impl<'a> EvalCtx<'a> {
                                 .get(index)
                                 .cloned()
                                 .ok_or_else(|| unsupported("shared handle", self.span()))?;
-                            let lease = shared
-                                .acquire(editable, self.task_cancel.as_ref())
+                            let state = shared
+                                .acquire_guard(editable, self.task_cancel.as_ref())
                                 .ok_or_else(|| Diagnostic::task_cancelled(Some(self.span())))?;
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let lease_index = runtime.shared_guards.len();
-                            runtime.shared_guards.push(lease);
+                            runtime.shared_guards.push(state);
                             drop(runtime);
                             self.shared_guards.push(lease_index);
                             return Ok(CtValue::Struct {
@@ -6023,7 +6159,10 @@ impl<'a> EvalCtx<'a> {
                                     self.span(),
                                 ));
                             };
-                            transaction.push(super::EvalSharedDelta {
+                            transaction
+                                .transaction
+                                .touch(shared.protocol.clone());
+                            transaction.deltas.push(super::EvalSharedDelta {
                                 shared_index: index,
                                 lambda,
                                 captured: scope.clone(),
@@ -7200,11 +7339,18 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::SharedGuardValue { guard, .. } => {
                 let guard = self.eval_expr_child(guard, scope)?;
-                let (index, _, editable, path) = shared_guard_parts(&guard)
+                let (index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))?;
-                if !editable {
-                    return Err(unsupported("read SharedGuard write-back", self.span()));
-                }
+                let guard_state = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .shared_guards
+                    .get(lease_index)
+                    .cloned()
+                    .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))?;
+                super::shared_protocol::jet_shared_guard_require_edit(&guard_state)
+                    .map_err(|message| unsupported(message, self.span()))?;
                 let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                 let shared = runtime
                     .shared_values

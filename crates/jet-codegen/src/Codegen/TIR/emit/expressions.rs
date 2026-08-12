@@ -222,9 +222,11 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .collect::<Vec<_>>()
                 .join(", ");
             if method == "edit_txn" {
+                let stm = crate::Codegen::TIR::TLocal::stm().rust_place();
                 return format!(
-                    "({}).edit_txn(&mut __jet_stm, {})",
+                    "({}).edit_txn(&mut {}, {})",
                     emit_tir_expr(recv, cx),
+                    stm,
                     arg_str
                 );
             }

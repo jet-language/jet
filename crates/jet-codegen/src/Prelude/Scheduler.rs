@@ -594,6 +594,11 @@ pub fn jet_scheduler_wait_point_cancelled() -> bool {
     jet_scheduler_task_cancelled() && !jet_scheduler_shielded()
 }
 
+pub fn jet_scheduler_wait_point_interrupted() -> bool {
+    jet_scheduler_wait_point_cancelled()
+        || matches!(jet_deadline_remaining_ms(), Some(milliseconds) if milliseconds <= 0)
+}
+
 thread_local! {
     static JET_BLOCKING_WAIT_COMPENSATION: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
 }

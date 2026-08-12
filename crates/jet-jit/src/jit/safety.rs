@@ -2475,7 +2475,8 @@ fn enum_payload_value_type(ty: &Type) -> bool {
 
 fn resident_safe_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
     fields.iter().all(|(_, value)| {
-        matches!(&value.ty, Type::Int | Type::Float) && resident_safe_expr(value, callees)
+        jit_value_type(&value.ty)
+            && resident_safe_expr(value, callees)
     })
 }
 
@@ -3272,7 +3273,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         | BinOp::FloorDiv
                         | BinOp::Mod
                 ),
-                Type::Float => {
+                Type::Float | Type::Float32 => {
                     matches!(
                         op,
                         BinOp::Add
@@ -3300,9 +3301,14 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             TExprKind::PoolSlot { field: Some(_), .. }
                         )
                 );
+            let shared_guard_value = matches!(
+                place,
+                TIR::TPlace::Expr(expr)
+                    if matches!(&expr.kind, TExprKind::SharedGuardValue { .. })
+            );
             (!clone_value || jit_value_type(&value.ty))
                 && compound
-                && (local || field)
+                && (local || field || shared_guard_value)
                 && resident_safe_expr(value, callees)
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),

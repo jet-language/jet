@@ -80,7 +80,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         pools: Vec::new(),
         shareds: Vec::new(),
         conditions: Vec::new(),
-        shared_guard_permits: HashMap::new(),
+        shared_guard_states: HashMap::new(),
         expirings: Vec::new(),
         secrets: Vec::new(),
         crypto_values: Vec::new(),
@@ -172,7 +172,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.byte_buffers.clear();
     rt.allocators.clear();
     rt.pools.clear();
-    rt.shared_guard_permits.clear();
+    rt.shared_guard_states.clear();
     rt.shareds.clear();
     rt.conditions.clear();
     rt.expirings.clear();

@@ -722,6 +722,14 @@ impl LowerCtx<'_, '_> {
                 Self::scalar_bitcast_memflags(),
                 value,
             ),
+            types::F32 => {
+                let value = self.b.ins().fpromote(types::F64, value);
+                self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                )
+            }
             types::I8 => self.b.ins().uextend(types::I64, value),
             types::I32 => self.b.ins().uextend(types::I64, value),
             types::I64 => value,
@@ -2257,7 +2265,7 @@ impl LowerCtx<'_, '_> {
         s.replace("\\\"", "\"").replace("\\\\", "\\")
     }
 
-    pub(crate) fn emit_scope_guards(&mut self) -> Result<(), String> {
+    fn emit_scope_guards_preserving(&mut self, preserve: &[String]) -> Result<(), String> {
         // Keep the stack: early returns and sibling exit paths each need the
         // same LIFO cleanup (D-DEFER1). Cleared when the function finishes.
         let closes: Vec<(String, Type)> = self.deferred_closes.iter().rev().cloned().collect();
@@ -2274,14 +2282,10 @@ impl LowerCtx<'_, '_> {
         }
         let shared_guards: Vec<String> = self.deferred_shared_guards.iter().rev().cloned().collect();
         for place in shared_guards {
-            let key = TIR::local_place(&place);
-            if let Some(var) = self.vars.get(&key).copied() {
-                let guard = self.b.use_var(var);
-                let end = self
-                    .module
-                    .declare_func_in_func(self.host.memory.shared_guard_end, self.b.func);
-                self.b.ins().call(end, &[guard]);
+            if preserve.iter().any(|candidate| candidate == &place) {
+                continue;
             }
+            self.emit_shared_guard_end(&place);
         }
         let guards: Vec<FuncId> = self.scope_guards.iter().rev().copied().collect();
         for id in guards {
@@ -2289,6 +2293,55 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(func_ref, &[]);
         }
         Ok(())
+    }
+
+    fn emit_shared_guard_end(&mut self, place: &str) {
+        let key = TIR::local_place(place);
+        if let Some(var) = self.vars.get(&key).copied() {
+            let guard = self.b.use_var(var);
+            let end = self
+                .module
+                .declare_func_in_func(self.host.memory.shared_guard_end, self.b.func);
+            self.b.ins().call(end, &[guard]);
+        }
+    }
+
+    fn emit_shared_guard_scope_ends(&mut self, mark: usize) {
+        let places: Vec<String> = self.deferred_shared_guards[mark..]
+            .iter()
+            .rev()
+            .cloned()
+            .collect();
+        for place in places {
+            self.emit_shared_guard_end(&place);
+        }
+    }
+
+    fn collect_returned_shared_guard_locals(expr: &TExpr, out: &mut Vec<String>) {
+        if let TExprKind::Local(local) = &expr.kind {
+            if Self::is_shared_guard_ty(&expr.ty) {
+                out.push(local.name.clone());
+            }
+            return;
+        }
+        match &expr.kind {
+            TExprKind::StructLit { fields, .. } => {
+                for (_, value, _) in fields {
+                    Self::collect_returned_shared_guard_locals(value, out);
+                }
+            }
+            TExprKind::TupleLit { fields, .. } => {
+                for (_, value) in fields {
+                    Self::collect_returned_shared_guard_locals(value, out);
+                }
+            }
+            TExprKind::Present(value)
+            | TExprKind::Clone(value)
+            | TExprKind::MaterializeView(value) => {
+                Self::collect_returned_shared_guard_locals(value, out);
+            }
+            _ => {}
+        }
     }
 
     fn emit_stream_consumer_closes(&mut self) {
@@ -2317,6 +2370,146 @@ impl LowerCtx<'_, '_> {
             }
             _ => false,
         }
+    }
+
+    fn shared_guard_payload_ty(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Tagged { inner, .. } => Self::shared_guard_payload_ty(inner),
+            Type::Apply { name, args }
+                if name == jet_foundation::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+            {
+                Some(args[0].clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn shared_guard_path_indices(
+        &self,
+        guard_ty: &Type,
+        path: &[String],
+    ) -> Result<Vec<i64>, String> {
+        let mut value_ty = Self::shared_guard_payload_ty(guard_ty)
+            .ok_or_else(|| format!("jit SharedGuard payload type unsupported: {guard_ty:?}"))?;
+        let mut indices = Vec::with_capacity(path.len());
+        for field in path {
+            let type_name = record_type_key(&value_ty)
+                .ok_or_else(|| format!("jit SharedGuard projection type: {value_ty:?}"))?;
+            let index = self
+                .meta
+                .struct_field_index(&type_name, field)
+                .or_else(|| core_struct_field_index(&type_name, field))
+                .ok_or_else(|| format!("jit SharedGuard field `{field}` on `{type_name}`"))?;
+            value_ty = self
+                .meta
+                .struct_field_ty(&type_name, field)
+                .or_else(|| core_struct_field_type(&type_name, field))
+                .ok_or_else(|| format!("jit SharedGuard field type `{field}` on `{type_name}`"))?;
+            indices.push(index as i64);
+        }
+        Ok(indices)
+    }
+
+    fn shared_guard_value_host(&self, ty: &Type) -> Result<FuncId, String> {
+        let abi_ty = self.erase_distinct_ty(ty);
+        match &abi_ty {
+            Type::Float | Type::Float32 => Ok(self.host.memory.shared_guard_value_f64),
+            Type::Bool => Ok(self.host.memory.shared_guard_value_bool),
+            Type::Char => Ok(self.host.memory.shared_guard_value_char),
+            Type::String => Ok(self.host.memory.shared_guard_value_string),
+            other if self.meta.clif_ty(other).or_else(|| clif_ty(other)) == Some(types::I64) => {
+                Ok(self.host.memory.shared_guard_value)
+            }
+            other => Err(format!("jit SharedGuard value type unsupported: {other:?}")),
+        }
+    }
+
+    fn shared_guard_set_host(&self, ty: &Type) -> Result<FuncId, String> {
+        let abi_ty = self.erase_distinct_ty(ty);
+        match &abi_ty {
+            Type::Float | Type::Float32 => Ok(self.host.memory.shared_guard_set_value_f64),
+            Type::Bool => Ok(self.host.memory.shared_guard_set_value_bool),
+            Type::Char => Ok(self.host.memory.shared_guard_set_value_char),
+            Type::String => Ok(self.host.memory.shared_guard_set_value_string),
+            other if self.meta.clif_ty(other).or_else(|| clif_ty(other)) == Some(types::I64) => {
+                Ok(self.host.memory.shared_guard_set_value)
+            }
+            other => Err(format!("jit SharedGuard assignment type unsupported: {other:?}")),
+        }
+    }
+
+    fn lower_shared_guard_value_handle(
+        &mut self,
+        guard: Value,
+        ty: &Type,
+    ) -> Result<Value, String> {
+        let host = self.shared_guard_value_host(ty)?;
+        let value = self.call_host(host, &[guard]);
+        Ok(if self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) == Some(types::F32) {
+            self.b.ins().fdemote(types::F32, value)
+        } else {
+            value
+        })
+    }
+
+    fn lower_shared_guard_set_value_handle(
+        &mut self,
+        guard: Value,
+        ty: &Type,
+        value: Value,
+    ) -> Result<(), String> {
+        let host = self.shared_guard_set_host(ty)?;
+        let value = if self.b.func.dfg.value_type(value) == types::F32 {
+            self.b.ins().fpromote(types::F64, value)
+        } else {
+            value
+        };
+        let host = self.module.declare_func_in_func(host, self.b.func);
+        self.b.ins().call(host, &[guard, value]);
+        Ok(())
+    }
+
+    fn pack_shared_value(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
+        Ok(match self.b.func.dfg.value_type(value) {
+            types::F64 => self.b.ins().bitcast(
+                types::I64,
+                Self::scalar_bitcast_memflags(),
+                value,
+            ),
+            types::F32 => {
+                let value = self.b.ins().fpromote(types::F64, value);
+                self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                )
+            }
+            types::I8 => self.b.ins().uextend(types::I64, value),
+            types::I32 => self.b.ins().uextend(types::I64, value),
+            types::I64 => value,
+            other => return Err(format!("jit Shared value ABI unsupported: {ty:?} ({other})")),
+        })
+    }
+
+    fn lower_shared_guard_projection_value(
+        &mut self,
+        guard: Value,
+        guard_ty: &Type,
+        path: &[String],
+        editable: bool,
+    ) -> Result<Value, String> {
+        let indices = self.shared_guard_path_indices(guard_ty, path)?;
+        let mut guard = guard;
+        let editable = self.b.ins().iconst(types::I64, i64::from(editable));
+        for index in indices {
+            let index = self.b.ins().iconst(types::I64, index);
+            guard = self.call_host(
+                self.host.memory.shared_guard_map,
+                &[guard, index, editable],
+            );
+            self.emit_trap_check()?;
+        }
+        Ok(guard)
     }
 
     fn emit_taskgroup_closes(&mut self) -> Option<Value> {
@@ -2509,11 +2702,31 @@ impl LowerCtx<'_, '_> {
         force_dummy: bool,
         active_shield_depth: u32,
     ) -> Result<(), String> {
+        self.emit_lexical_exit_preserving(value, force_dummy, active_shield_depth, &[])
+    }
+
+    fn emit_lexical_exit_preserving(
+        &mut self,
+        value: Option<Value>,
+        force_dummy: bool,
+        active_shield_depth: u32,
+        preserve_shared_guards: &[String],
+    ) -> Result<(), String> {
         match value {
             Some(value) => {
-                self.emit_lexical_values_exit(&[value], force_dummy, active_shield_depth)
+                self.emit_lexical_values_exit(
+                    &[value],
+                    force_dummy,
+                    active_shield_depth,
+                    preserve_shared_guards,
+                )
             }
-            None => self.emit_lexical_values_exit(&[], force_dummy, active_shield_depth),
+            None => self.emit_lexical_values_exit(
+                &[],
+                force_dummy,
+                active_shield_depth,
+                preserve_shared_guards,
+            ),
         }
     }
 
@@ -2522,6 +2735,7 @@ impl LowerCtx<'_, '_> {
         values: &[Value],
         force_dummy: bool,
         active_shield_depth: u32,
+        preserve_shared_guards: &[String],
     ) -> Result<(), String> {
         self.track_compute_locals()?;
         self.emit_compute_resource_closes(0, values);
@@ -2540,7 +2754,7 @@ impl LowerCtx<'_, '_> {
         }
         self.emit_stream_consumer_closes();
         self.in_lexical_exit = true;
-        let guards = self.emit_scope_guards();
+        let guards = self.emit_scope_guards_preserving(preserve_shared_guards);
         self.in_lexical_exit = false;
         guards?;
         if self.cell_frame {
@@ -2784,8 +2998,26 @@ impl LowerCtx<'_, '_> {
     /// `dead` because a `break`/`return` in a PRIOR sibling branch must not
     /// suppress this branch's own statements.
     fn lower_stmts_scoped(&mut self, stmts: &[TStmt]) -> Result<(), String> {
+        self.lower_stmts_scoped_mode(stmts, true)
+    }
+
+    fn lower_stmts_scoped_defer_guards(&mut self, stmts: &[TStmt]) -> Result<(), String> {
+        self.lower_stmts_scoped_mode(stmts, false)
+    }
+
+    fn lower_stmts_scoped_mode(
+        &mut self,
+        stmts: &[TStmt],
+        close_shared_guards: bool,
+    ) -> Result<(), String> {
         let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
-        self.lower_stmts_scoped_with_names(stmts, &outer_names)
+        let resource_mark = self.compute_resources.len();
+        self.lower_stmts_scoped_with_names_from_mode(
+            stmts,
+            &outer_names,
+            resource_mark,
+            close_shared_guards,
+        )
     }
 
     fn lower_stmts_scoped_with_names(
@@ -2794,7 +3026,12 @@ impl LowerCtx<'_, '_> {
         outer_names: &HashSet<String>,
     ) -> Result<(), String> {
         let resource_mark = self.compute_resources.len();
-        self.lower_stmts_scoped_with_names_from(stmts, outer_names, resource_mark)
+        self.lower_stmts_scoped_with_names_from_mode(
+            stmts,
+            outer_names,
+            resource_mark,
+            true,
+        )
     }
 
     fn lower_stmts_scoped_with_names_from(
@@ -2803,7 +3040,18 @@ impl LowerCtx<'_, '_> {
         outer_names: &HashSet<String>,
         resource_mark: usize,
     ) -> Result<(), String> {
+        self.lower_stmts_scoped_with_names_from_mode(stmts, outer_names, resource_mark, true)
+    }
+
+    fn lower_stmts_scoped_with_names_from_mode(
+        &mut self,
+        stmts: &[TStmt],
+        outer_names: &HashSet<String>,
+        resource_mark: usize,
+        close_shared_guards: bool,
+    ) -> Result<(), String> {
         self.dead = false;
+        let guard_mark = self.deferred_shared_guards.len();
         let push = self
             .module
             .declare_func_in_func(self.host.watcher.event_scope_frame_push, self.b.func);
@@ -2815,6 +3063,9 @@ impl LowerCtx<'_, '_> {
             self.emit_compute_resource_closes(resource_mark, &preserve);
             self.compute_retrack_names.extend(outer_names.iter().cloned());
             self.discard_compute_resources(resource_mark);
+            if close_shared_guards {
+                self.emit_shared_guard_scope_ends(guard_mark);
+            }
             let pop = self
                 .module
                 .declare_func_in_func(self.host.watcher.event_scope_frame_pop, self.b.func);
@@ -2822,6 +3073,9 @@ impl LowerCtx<'_, '_> {
         }
         self.discard_compute_resources(resource_mark);
         self.restore_scope_vars(outer_names);
+        if close_shared_guards {
+            self.deferred_shared_guards.truncate(guard_mark);
+        }
         Ok(())
     }
 
@@ -3433,9 +3687,27 @@ impl LowerCtx<'_, '_> {
                         self.var_tys.insert(binds[1].0.clone(), Type::Int);
                     } else {
                         self.lower_tuple_destructure(init, binds)?;
+                        for (local, _) in binds {
+                            if self
+                                .var_tys
+                                .get(local)
+                                .is_some_and(Self::is_shared_guard_ty)
+                            {
+                                self.deferred_shared_guards.push(local.clone());
+                            }
+                        }
                     }
                 } else {
                     self.lower_tuple_destructure(init, binds)?;
+                    for (local, _) in binds {
+                        if self
+                            .var_tys
+                            .get(local)
+                            .is_some_and(Self::is_shared_guard_ty)
+                        {
+                            self.deferred_shared_guards.push(local.clone());
+                        }
+                    }
                 }
             }
             TStmt::Assign {
@@ -3447,6 +3719,31 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 if let TPlace::Expr(place_expr) = place {
+                    if let TExprKind::SharedGuardValue { guard, .. } = &place_expr.kind {
+                        let guard_value = self.lower_expr(guard)?;
+                        let field_ty = place_expr.ty.clone();
+                        let rhs = self.lower_expr(value)?;
+                        let assigned = if let Some(op) = op {
+                            let current =
+                                self.lower_shared_guard_value_handle(guard_value, &field_ty)?;
+                            self.apply_binop_to_var(
+                                current,
+                                *op,
+                                rhs,
+                                &field_ty,
+                                *assign_line,
+                            )?
+                        } else {
+                            rhs
+                        };
+                        self.lower_shared_guard_set_value_handle(
+                            guard_value,
+                            &field_ty,
+                            assigned,
+                        )?;
+                        self.emit_trap_check()?;
+                        return Ok(());
+                    }
                     if let TExprKind::PoolSlot {
                         pool,
                         id,
@@ -3842,6 +4139,8 @@ impl LowerCtx<'_, '_> {
                 self.adopt_compute_resource(value, handle);
             }
             TStmt::Return(Some(expr)) => {
+                let mut returned_shared_guards = Vec::new();
+                Self::collect_returned_shared_guard_locals(expr, &mut returned_shared_guards);
                 let range_values = if self.ret_range {
                     Some(self.lower_range_expr(expr)?)
                 } else {
@@ -3856,7 +4155,7 @@ impl LowerCtx<'_, '_> {
                 // not pop frames needed by the fallthrough / sibling path.
                 self.emit_txn_rollbacks_keep()?;
                 if let Some(values) = range_values {
-                    self.emit_lexical_values_exit(&values, false, self.shield_depth)?;
+                    self.emit_lexical_values_exit(&values, false, self.shield_depth, &[])?;
                     self.dead = true;
                     return Ok(());
                 }
@@ -3873,7 +4172,12 @@ impl LowerCtx<'_, '_> {
                     }
                     _ => val,
                 };
-                self.emit_lexical_exit(Some(ret_val), false, self.shield_depth)?;
+                self.emit_lexical_exit_preserving(
+                    Some(ret_val),
+                    false,
+                    self.shield_depth,
+                    &returned_shared_guards,
+                )?;
                 self.dead = true;
             }
             TStmt::Return(None) => {
@@ -5064,6 +5368,15 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::StructDestructure { init, binds, .. } => {
                 self.lower_struct_destructure(init, binds)?;
+                for (local, _) in binds {
+                    if self
+                        .var_tys
+                        .get(local)
+                        .is_some_and(Self::is_shared_guard_ty)
+                    {
+                        self.deferred_shared_guards.push(local.clone());
+                    }
+                }
             }
             TStmt::ListDestructure {
                 init,
@@ -5313,7 +5626,7 @@ impl LowerCtx<'_, '_> {
             TStmt::ScopeMember { .. } => return Err("jit scope member unsupported".to_string()),
             TStmt::Transact {
                 snapshots,
-                uses_stm,
+                stm,
                 body,
                 ..
             } => {
@@ -5381,7 +5694,7 @@ impl LowerCtx<'_, '_> {
                     on_commit: Vec::new(),
                     on_rollback: Vec::new(),
                 });
-                if *uses_stm {
+                if stm.is_some() {
                     let begin = self.module.declare_func_in_func(
                         self.host.memory.shared_txn_begin,
                         self.b.func,
@@ -5390,8 +5703,9 @@ impl LowerCtx<'_, '_> {
                     self.in_shared_transaction = true;
                     self.shared_transaction_depth += 1;
                 }
-                self.lower_stmts_scoped(body)?;
-                if *uses_stm {
+                let guard_mark = self.deferred_shared_guards.len();
+                self.lower_stmts_scoped_defer_guards(body)?;
+                if stm.is_some() {
                     self.shared_transaction_depth -= 1;
                     self.in_shared_transaction = self.shared_transaction_depth != 0;
                     if !self.dead {
@@ -5406,7 +5720,9 @@ impl LowerCtx<'_, '_> {
                 if !self.dead {
                     self.emit_txn_commit_hooks()?;
                     let _ = self.txn_stack.pop();
+                    self.emit_shared_guard_scope_ends(guard_mark);
                 }
+                self.deferred_shared_guards.truncate(guard_mark);
             }
             TStmt::LineMarker(_) | TStmt::SourceSpan(_) => {}
         }
@@ -6927,6 +7243,7 @@ impl LowerCtx<'_, '_> {
                     self.b.func,
                 );
                 let call = self.b.ins().call(begin, &[handle, editable]);
+                self.emit_trap_check()?;
                 Ok(self.b.inst_results(call)[0])
             }
             THostCall::Method { recv, method, args }
@@ -8314,10 +8631,10 @@ impl LowerCtx<'_, '_> {
             (BinOp::BitXor, Type::Int) => self.b.ins().bxor(current, rhs),
             (BinOp::Shl, Type::Int) => self.b.ins().ishl(current, rhs),
             (BinOp::Shr, Type::Int) => self.b.ins().sshr(current, rhs),
-            (BinOp::Add, Type::Float) => self.b.ins().fadd(current, rhs),
-            (BinOp::Sub, Type::Float) => self.b.ins().fsub(current, rhs),
-            (BinOp::Mul, Type::Float) => self.b.ins().fmul(current, rhs),
-            (BinOp::Div, Type::Float) => self.b.ins().fdiv(current, rhs),
+            (BinOp::Add, Type::Float | Type::Float32) => self.b.ins().fadd(current, rhs),
+            (BinOp::Sub, Type::Float | Type::Float32) => self.b.ins().fsub(current, rhs),
+            (BinOp::Mul, Type::Float | Type::Float32) => self.b.ins().fmul(current, rhs),
+            (BinOp::Div, Type::Float | Type::Float32) => self.b.ins().fdiv(current, rhs),
             _ => return Err("jit compound assign unsupported".to_string()),
         })
     }
@@ -9663,7 +9980,7 @@ impl LowerCtx<'_, '_> {
             let host_id = match &abi_ty {
                 ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
                 Type::Int => self.host.struct_set_i64,
-                Type::Float => self.host.struct_set_f64,
+                Type::Float | Type::Float32 => self.host.struct_set_f64,
                 Type::Bool => self.host.struct_set_bool,
                 Type::Char => self.host.struct_set_char,
                 other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
@@ -9755,7 +10072,7 @@ impl LowerCtx<'_, '_> {
         let host_id = match &abi_ty {
             ty if Self::is_string_abi_ty(ty) => self.host.struct_get_str,
             Type::Int => self.host.struct_get_i64,
-            Type::Float => self.host.struct_get_f64,
+            Type::Float | Type::Float32 => self.host.struct_get_f64,
             Type::Bool => self.host.struct_get_bool,
             Type::Char => self.host.struct_get_char,
             other if clif_ty(other) == Some(types::I64) => self.host.struct_get_i64,
@@ -15277,6 +15594,7 @@ impl LowerCtx<'_, '_> {
                     );
                 if is_shared_new {
                     let value = self.lower_call_arg(&args[0])?;
+                    let value = self.pack_shared_value(value, &args[0].value.ty)?;
                     return Ok(self.call_host(self.host.memory.shared_new, &[value]));
                 }
                 // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
@@ -15563,20 +15881,36 @@ impl LowerCtx<'_, '_> {
             TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
             TExprKind::SharedGuardValue { guard, .. } => {
                 let g = self.lower_expr(guard)?;
-                let host = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_value,
-                    self.b.func,
-                );
-                let call = self.b.ins().call(host, &[g]);
-                Ok(self.b.inst_results(call)[0])
+                self.lower_shared_guard_value_handle(g, &expr.ty)
             }
-            TExprKind::SharedGuardMap { guard, .. } => {
-                // Projection path is compile-time; JIT keeps the same lease handle.
-                self.lower_expr(guard)
-            }
-            TExprKind::SharedGuardSplit { guard, .. } => {
+            TExprKind::SharedGuardMap {
+                guard,
+                path,
+                editable,
+            } => {
                 let g = self.lower_expr(guard)?;
-                // Two aliases of the same lease — match eval's split shape lightly.
+                self.lower_shared_guard_projection_value(g, &guard.ty, path, *editable)
+            }
+            TExprKind::SharedGuardSplit {
+                guard,
+                first,
+                second,
+                editable,
+                ..
+            } => {
+                let g = self.lower_expr(guard)?;
+                let editable_value = self.b.ins().iconst(types::I64, i64::from(*editable));
+                let second_guard =
+                    self.call_host(self.host.memory.shared_guard_clone, &[g, editable_value]);
+                self.emit_trap_check()?;
+                let first_guard =
+                    self.lower_shared_guard_projection_value(g, &guard.ty, first, *editable)?;
+                let second_guard = self.lower_shared_guard_projection_value(
+                    second_guard,
+                    &guard.ty,
+                    second,
+                    *editable,
+                )?;
                 let n = self.b.ins().iconst(types::I64, 2);
                 let tuple = self.call_host(self.host.struct_new, &[n]);
                 let set = self
@@ -15584,8 +15918,8 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.struct_set_i64, self.b.func);
                 let z = self.b.ins().iconst(types::I64, 0);
                 let one = self.b.ins().iconst(types::I64, 1);
-                self.b.ins().call(set, &[tuple, z, g]);
-                self.b.ins().call(set, &[tuple, one, g]);
+                self.b.ins().call(set, &[tuple, z, first_guard]);
+                self.b.ins().call(set, &[tuple, one, second_guard]);
                 Ok(tuple)
             }
             TExprKind::SharedGuardWait {
@@ -15598,37 +15932,39 @@ impl LowerCtx<'_, '_> {
                 let header = self.b.create_block();
                 let body = self.b.create_block();
                 let done = self.b.create_block();
+                self.b.append_block_param(done, types::I64);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 // Seal after body re-enters (wait loop).
-                let value_host = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_value,
-                    self.b.func,
-                );
-                let vcall = self.b.ins().call(value_host, &[g]);
-                let payload = self.b.inst_results(vcall)[0];
+                let predicate_ty = predicate
+                    .param_types
+                    .first()
+                    .ok_or("jit SharedGuard wait predicate missing parameter type")?;
+                let payload = self.lower_shared_guard_value_handle(g, predicate_ty)?;
                 let (ready, _) = self.lower_inline_lambda(predicate, payload)?;
                 let ready_i8 = if self.b.func.dfg.value_type(ready) == types::I8 {
                     ready
                 } else {
                     self.b.ins().ireduce(types::I8, ready)
                 };
-                self.b.ins().brif(ready_i8, done, &[], body, &[]);
+                let tag = self.b.ins().iconst(types::I8, 1);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let ok = self.call_host(self.host.result_new_i64, &[tag, zero]);
+                self.b.ins().brif(ready_i8, done, &[ok], body, &[]);
                 self.b.switch_to_block(body);
                 self.b.seal_block(body);
-                let wait = self.module.declare_func_in_func(
-                    self.host.memory.shared_guard_wait_once,
-                    self.b.func,
-                );
-                self.b.ins().call(wait, &[g, cond]);
+                let wait = self.call_host(self.host.memory.shared_guard_wait_once, &[g, cond]);
+                self.emit_trap_check()?;
+                let wait_ok = self.call_host(self.host.result_is_ok, &[wait]);
+                let retry = self.b.create_block();
+                self.b.ins().brif(wait_ok, retry, &[], done, &[wait]);
+                self.b.switch_to_block(retry);
+                self.b.seal_block(retry);
                 self.b.ins().jump(header, &[]);
                 self.b.seal_block(header);
                 self.b.switch_to_block(done);
                 self.b.seal_block(done);
-                // Result<(), String> Ok — empty ok payload.
-                let tag = self.b.ins().iconst(types::I8, 1);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                Ok(self.call_host(self.host.result_new_i64, &[tag, zero]))
+                Ok(self.b.block_params(done)[0])
             }
             TExprKind::ConditionNotify { condition, all } => {
                 let c = self.lower_expr(condition)?;

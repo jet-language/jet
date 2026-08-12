@@ -12,6 +12,7 @@ use crate::Codegen::TIR::tir_range_guard;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::AST::BinOp;
@@ -1704,7 +1705,7 @@ fn emit_tir_stmt(
         TStmt::Transact {
             handle,
             snapshots,
-            uses_stm,
+            stm,
             body,
         } => {
             let inner = indent + 1;
@@ -1715,19 +1716,17 @@ fn emit_tir_stmt(
             // (emitted after the body, before any `<handle>.commit()`) applies every
             // deferred edit atomically under all the handles' locks at once. A `?`/early
             // return skips the commit, so the guard's Drop discards the deferred edits.
-            if *uses_stm {
-                // `edit_txn(&mut __jet_stm, …)` (emit/expressions.rs) always
-                // takes the STM handle by `&mut` — this compiler-internal
-                // local's mut requirement isn't derived from any user-visible
-                // type, so it must be forced here directly (same rustc-reject
-                // family as card #1859's Mailer fix, a different mechanism:
-                // that one is TIR::Let's `is_file_handle` allowlist, this one
-                // is a hand-emitted `let` with no TIR::Let node at all).
+            if let Some(stm) = stm {
+                let keyword = if stm.mutable { "let mut" } else { "let" };
                 out.push_str(&format!(
-                    "{}let mut __jet_stm = {}jet_stm::begin();\n",
-                    inner_pad, cx.root_prefix
+                    "{}{} {} = {}jet_stm::begin();\n",
+                    inner_pad,
+                    keyword,
+                    stm.rust_place(),
+                    cx.root_prefix,
                 ));
             }
+            let stm_place = stm.as_ref().map(TLocal::rust_place);
             // A named handle uses its mangled name; a bare block with auto-snapshots
             // needs a synthesized handle to register the snapshot restores on. A bare
             // block with neither handle nor snapshots erases to a plain block (its only
@@ -1763,15 +1762,15 @@ fn emit_tir_stmt(
                         }
                     }
                     emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
-                    if *uses_stm {
-                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    if let Some(stm) = &stm_place {
+                        out.push_str(&format!("{}{}.commit();\n", inner_pad, stm));
                     }
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
                 }
                 None => {
                     emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
-                    if *uses_stm {
-                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    if let Some(stm) = &stm_place {
+                        out.push_str(&format!("{}{}.commit();\n", inner_pad, stm));
                     }
                 }
             }

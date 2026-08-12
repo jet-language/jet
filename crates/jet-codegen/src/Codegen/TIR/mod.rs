@@ -477,6 +477,9 @@ pub struct TLocal {
     /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
     /// The metadata travels with the slot until TIR lowers `.origin()`.
     pub origin: Option<TBindingOrigin>,
+    /// The Rust binding is mutable. This is a TIR ownership fact, not an
+    /// emitter-side repair for a generated spelling.
+    pub mutable: bool,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -491,6 +494,7 @@ impl TLocal {
             generated: false,
             deref: false,
             origin: None,
+            mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -503,6 +507,7 @@ impl TLocal {
             generated: true,
             deref: false,
             origin: None,
+            mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -511,6 +516,16 @@ impl TLocal {
     /// Preserve the source identity when a lowering path rebinds this slot.
     pub fn with_origin(mut self, origin: TBindingOrigin) -> TLocal {
         self.origin = Some(origin);
+        self
+    }
+
+    /// The compiler-owned STM handle used by `#Transact` Shared edits.
+    pub fn stm() -> TLocal {
+        TLocal::generated("__jet_stm").as_mutable()
+    }
+
+    pub fn as_mutable(mut self) -> TLocal {
+        self.mutable = true;
         self
     }
 
@@ -2852,11 +2867,11 @@ pub enum TStmt {
         /// `jet_txn::snapshot_custom` and `<ty>::restore`, so the custom cheap diff
         /// runs instead of a full clone.
         snapshots: Vec<(TLocal, Option<Type>)>,
-        /// D-STM1=A (card #506): true when the block touches the `Shared<T>` plane
-        /// (some `.edit` inside routed to `edit_txn`), so emission wraps the body in
-        /// `jet_stm::begin()` … `.commit()` — the atomic multi-handle commit. False
-        /// for a plain local-only `#Transact` (byte-identical to the pre-STM output).
-        uses_stm: bool,
+        /// D-STM1=A (card #506): the compiler-owned mutable STM handle when the
+        /// block touches the `Shared<T>` plane. Its presence means emission wraps
+        /// the body in `jet_stm::begin()` … `.commit()` — the atomic multi-handle
+        /// commit. `None` preserves the plain local-only transaction shape.
+        stm: Option<TLocal>,
         body: Vec<TStmt>,
     },
     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,

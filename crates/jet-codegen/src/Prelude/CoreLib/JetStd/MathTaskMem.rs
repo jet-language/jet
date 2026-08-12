@@ -711,10 +711,7 @@
         where
             F: FnOnce(&T) -> R,
         {
-            let _permit = self
-                .0
-                .protocol
-                .acquire(false, || false)
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, false, || false)
                 .expect("uncancelled Shared read acquires");
             // jet:shared-guard-internal-begin
             // SAFETY: the read permit is held through the callback.
@@ -725,10 +722,7 @@
         where
             F: FnOnce(&mut T) -> R,
         {
-            let _permit = self
-                .0
-                .protocol
-                .acquire(true, || false)
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
                 .expect("uncancelled Shared edit acquires");
             // jet:shared-guard-internal-begin
             // SAFETY: the exclusive permit is held through the callback.
@@ -743,16 +737,13 @@
         }
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
         // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
-        // `edit_txn` — the mutation is DEFERRED, not applied now. Every deferred
-        // edit across every touched handle is buffered on the explicit guard,
-        // then applied together at the block's commit under all the
-        // handles' write locks held at once, in a canonical (pointer) order that
-        // cannot deadlock. Either every handle's change lands or none does, and no
-        // task ever observes an intermediate state. `f` runs against a fresh
-        // `&mut T` at commit time (not a snapshot), so a delta like `b.balance -=
-        // 100` composes correctly with a concurrent transfer. The result is void
-        // by construction — the write hasn't happened yet — which sema enforces
-        // (E0750). Codegen is dumb (I3): the whole strategy is this runtime.
+        // `edit_txn` — the mutation is deferred onto the Shared Prelude
+        // transaction. That protocol owns participant identity, canonical lock
+        // ordering, commit, and rollback; this adapter supplies only the
+        // type-erased payload closure. `f` runs against a fresh `&mut T` while
+        // the Prelude holds the participant permit. The result is void by
+        // construction — the write has not happened yet — which sema enforces
+        // (E0750).
         pub fn edit_txn<F>(&self, stm: &mut super::jet_stm::Guard, f: F)
         where
             F: FnOnce(&mut T) + 'static,
@@ -827,25 +818,21 @@
     }
 
     trait JetSharedLease {
-        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit>;
-        fn editable(&self) -> bool;
+        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState>;
         fn root_ptr(&self) -> *mut ();
     }
 
     struct JetSharedRootLease<T: 'static> {
-        permit: std::sync::Arc<crate::JetSharedPermit>,
+        state: std::sync::Arc<crate::JetSharedGuardState>,
         cell: std::sync::Arc<JetSharedCell<T>>,
     }
 
     impl<T: 'static> JetSharedLease for JetSharedRootLease<T> {
-        fn permit(&self) -> std::sync::Arc<crate::JetSharedPermit> {
-            self.permit.clone()
-        }
-        fn editable(&self) -> bool {
-            self.permit.editable()
+        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState> {
+            self.state.clone()
         }
         fn root_ptr(&self) -> *mut () {
-            assert!(self.permit.held(), "SharedGuard lease is released");
+            assert!(self.state.held(), "SharedGuard lease is released");
             self.cell.value.get().cast::<()>()
         }
     }
@@ -860,13 +847,11 @@
 
     impl<T: 'static> JetSharedGuard<T> {
         fn read(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
-            let permit = cell
-                .protocol
-                .acquire(false, || false)
+            let state = crate::jet_shared_guard_acquire(&cell.protocol, false, || false)
                 .expect("uncancelled Shared guard acquires");
             Self {
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    permit,
+                    state,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -875,13 +860,11 @@
         }
 
         fn edit(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
-            let permit = cell
-                .protocol
-                .acquire(true, || false)
+            let state = crate::jet_shared_guard_acquire(&cell.protocol, true, || false)
                 .expect("uncancelled Shared guard acquires");
             Self {
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    permit,
+                    state,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -987,26 +970,27 @@
         where
             F: Fn(&T) -> bool,
         {
-            if !self.editable {
-                return Err("a condition wait needs an edit guard".to_string());
+            let state = self.lease.state();
+            if !state.held() {
+                return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
             }
-            let permit = self.lease.permit();
-            match crate::jet_shared_condition_wait(
-                &permit,
-                &condition.inner,
-                || Ok::<bool, ()>(ready(self)),
-                || {
+            crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
+                .map_err(|message| message.to_string())?;
+            loop {
+                if ready(self) {
+                    return Ok(());
+                }
+                let waiter: std::sync::Arc<dyn crate::JetConditionWaiter> =
                     std::sync::Arc::new(JetSchedulerConditionWaiter {
                         slot: super::ParkSlot::new(),
-                    })
-                },
-            ) {
-                Ok(()) => Ok(()),
-                Err(crate::JetConditionWaitError::Cancelled) => {
-                    Err("condition wait cancelled".to_string())
-                }
-                Err(crate::JetConditionWaitError::Predicate(())) => {
-                    unreachable!("native predicate is infallible")
+                    });
+                match crate::jet_shared_guard_wait_once(
+                    Some(state.as_ref()),
+                    Some(&condition.inner),
+                    waiter,
+                ) {
+                    Ok(()) => {}
+                    Err(error) => return Err(error.message().to_string()),
                 }
             }
         }
@@ -1048,6 +1032,10 @@
         fn wake(&self) {
             super::jet_scheduler_wake(&self.slot);
         }
+
+        fn interrupted(&self) -> bool {
+            super::jet_scheduler_wait_point_interrupted()
+        }
     }
 
     #[derive(Clone)]
@@ -1063,11 +1051,11 @@
         }
 
         pub fn notify_one(&self) {
-            self.inner.notify_one();
+            crate::jet_shared_condition_notify_one(&self.inner);
         }
 
         pub fn notify_all(&self) {
-            self.inner.notify_all();
+            crate::jet_shared_condition_notify_all(&self.inner);
         }
     }
 
