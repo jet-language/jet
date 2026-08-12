@@ -716,6 +716,15 @@ impl<'a> Checker<'a> {
                     return true;
                 }
             }
+            // A qualified constructor carries the owning module in its nominal
+            // spelling, while a value from an imported signature may still carry
+            // the source leaf. Treat those spellings as one struct type before
+            // the ordinary mismatch diagnostics run. The helper is deliberately
+            // limited to registered structs and their type arguments; enum,
+            // trait, and tagged nominal identity remain distinct mechanisms.
+            if self.same_struct_type_identity(want, got) {
+                return true;
+            }
             if Type::compute_tensor_compatible(want, got) {
                 // The erased `Tensor` spelling is the storage boundary. A
                 // shaped alias remains exact when both sides carry shape.
@@ -813,6 +822,150 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
             false
+        }
+
+        fn same_struct_type_identity(&self, want: &Type, got: &Type) -> bool {
+            if want == got {
+                return true;
+            }
+            match (want, got) {
+                (Type::Named(want_name), Type::Named(got_name)) => {
+                    self.same_struct_name_identity(want_name, got_name)
+                }
+                (
+                    Type::Apply {
+                        name: want_name,
+                        args: want_args,
+                    },
+                    Type::Apply {
+                        name: got_name,
+                        args: got_args,
+                    },
+                ) => {
+                    want_args.len() == got_args.len()
+                        && self.same_struct_name_identity(want_name, got_name)
+                        && want_args
+                            .iter()
+                            .zip(got_args)
+                            .all(|(want, got)| self.same_struct_type_identity(want, got))
+                }
+                (Type::List(want), Type::List(got))
+                | (Type::Shared(want), Type::Shared(got))
+                | (Type::Option(want), Type::Option(got)) => {
+                    self.same_struct_type_identity(want, got)
+                }
+                (
+                    Type::Result {
+                        ok: want_ok,
+                        err: want_err,
+                    },
+                    Type::Result {
+                        ok: got_ok,
+                        err: got_err,
+                    },
+                ) => {
+                    self.same_struct_type_identity(want_ok, got_ok)
+                        && self.same_struct_type_identity(want_err, got_err)
+                }
+                (
+                    Type::Map {
+                        key: want_key,
+                        value: want_value,
+                        ..
+                    },
+                    Type::Map {
+                        key: got_key,
+                        value: got_value,
+                        ..
+                    },
+                ) => {
+                    self.same_struct_type_identity(want_key, got_key)
+                        && self.same_struct_type_identity(want_value, got_value)
+                }
+                (
+                    Type::FixedList {
+                        elem: want_elem,
+                        len: want_len,
+                        len_symbol: want_symbol,
+                    },
+                    Type::FixedList {
+                        elem: got_elem,
+                        len: got_len,
+                        len_symbol: got_symbol,
+                    },
+                ) => {
+                    want_len == got_len
+                        && want_symbol == got_symbol
+                        && self.same_struct_type_identity(want_elem, got_elem)
+                }
+                (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
+                    want_fields.len() == got_fields.len()
+                        && want_fields.iter().zip(got_fields).all(
+                            |((want_name, want), (got_name, got))| {
+                                want_name == got_name
+                                && self.same_struct_type_identity(want, got)
+                            },
+                        )
+                }
+                (Type::Union(want_members), Type::Union(got_members)) => {
+                    if want_members.len() != got_members.len() {
+                        return false;
+                    }
+                    let mut matched = vec![false; got_members.len()];
+                    want_members.iter().all(|want_member| {
+                        let Some(index) = got_members.iter().enumerate().position(
+                            |(index, got_member)| {
+                                !matched[index]
+                                    && self.same_struct_type_identity(want_member, got_member)
+                            },
+                        ) else {
+                            return false;
+                        };
+                        matched[index] = true;
+                        true
+                    })
+                }
+                (
+                    Type::Tagged {
+                        marker: want_marker,
+                        inner: want_inner,
+                    },
+                    Type::Tagged {
+                        marker: got_marker,
+                        inner: got_inner,
+                    },
+                ) if want_marker == got_marker => {
+                    self.same_struct_type_identity(want_inner, got_inner)
+                }
+                (
+                    Type::Quantity {
+                        base: want_base,
+                        dimension: want_dimension,
+                    },
+                    Type::Quantity {
+                        base: got_base,
+                        dimension: got_dimension,
+                    },
+                ) if want_dimension == got_dimension => {
+                    self.same_struct_type_identity(want_base, got_base)
+                }
+                _ => false,
+            }
+        }
+
+        fn same_struct_name_identity(&self, want: &str, got: &str) -> bool {
+            let identity = |name: &str| {
+                let (import_ns, type_name) = Self::split_type_name(name);
+                let owner = self.struct_owner_module(type_name, import_ns)?;
+                self.struct_fields_of(owner, type_name)
+                    .map(|_| (owner, type_name))
+            };
+            match (identity(want), identity(got)) {
+                (Some((want_owner, want_name)), Some((got_owner, got_name))) => {
+                    want_owner == got_owner && want_name == got_name
+                }
+                _ => false,
+            }
         }
 
         pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {

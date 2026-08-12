@@ -318,20 +318,20 @@ pub(crate) fn concurrency_elem_covered(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 19: a GENERIC struct application `Pair<T>` / `Stack<Int>` (a `Type::Apply`)
 /// usable as a param/return/local value type. The base name must be a covered user struct
-/// (`struct_is_covered` — which now admits type-var fields, Phase 19), and every type
-/// argument must itself be a covered value type OR a bare type variable. The Rust head is
-/// `user_<Name>::<args>` (the turbofish from `user_type_apply_rust`), resolved at lowering.
-/// `cx.rust_type` already renders `Type::Apply` to that head, so param/return/local typing
-/// is byte-identical to the AST path. (A non-generic `Type::Apply` would be malformed;
-/// sema only produces `Apply` for a generic struct/enum instantiation.)
+/// (`struct_is_covered` — which admits type-var fields, Phase 19), and every type argument
+/// must itself be a covered value type OR a bare type variable. Imported struct shapes use
+/// their canonical qualified names in the same tables, so `owner::Stack<Int>` follows the
+/// identical TIR path. The Rust head is `user_<Name>::<args>` (the turbofish from
+/// `user_type_apply_rust`), resolved at lowering. `cx.rust_type` already renders
+/// `Type::Apply` to that head, so param/return/local typing is byte-identical to the AST
+/// path. (A non-generic `Type::Apply` would be malformed; sema only produces `Apply` for a
+/// generic struct/enum instantiation.)
 pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    if foreign_type_module(name, cx).is_some() {
-        return false;
-    }
-    // The base must be a known user struct (not an enum/trait/foreign/prelude type).
+    // The base must be a known struct (not an enum/trait/core/prelude type). Local
+    // and imported user structs are both registered in `cx.struct_fields`.
     if !cx.struct_fields.contains_key(name) {
         return false;
     }
