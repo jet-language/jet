@@ -79,7 +79,6 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FLOORDIV1=A: `/%`. Shared the same way, so every tier rounds down
     // identically.
     include_str!("../Prelude/Core/Division.rs"),
-    include_str!("../../../jet-foundation/src/TypedHeads.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/ByteBuffer.rs"),
@@ -2237,8 +2236,6 @@ mod tests {
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
             std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
-        let typed_heads =
-            std::fs::read_to_string(root.join("../jet-foundation/src/TypedHeads.rs")).unwrap();
         let typed_text =
             std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
         let progress =
@@ -2279,7 +2276,6 @@ mod tests {
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
-            ("../jet-foundation/src/TypedHeads.rs", typed_heads.as_str()),
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
             ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
@@ -2409,7 +2405,6 @@ mod tests {
                 core.as_str(),
                 power.as_str(),
                 division.as_str(),
-                typed_heads.as_str(),
                 typed_text.as_str(),
                 progress.as_str(),
                 byte_buffer.as_str(),
@@ -2442,7 +2437,6 @@ mod tests {
             core.as_str(),
             power.as_str(),
             division.as_str(),
-            typed_heads.as_str(),
             typed_text.as_str(),
             progress.as_str(),
             byte_buffer.as_str(),
@@ -2460,10 +2454,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 362_479, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
+            "d6ee3b3065a4c482bc1740388aa8506b84665a53c794f66a80ff2c4d2ed23ed7",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

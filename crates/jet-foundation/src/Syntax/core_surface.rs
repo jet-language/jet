@@ -444,6 +444,68 @@ pub const TYPE_URL: &str = "URL";
 pub const TYPE_PATH: &str = "Path";
 pub const TYPE_DATETIME: &str = "DateTime";
 
+/// D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: one descriptor for every typed literal
+/// constructor. Parser, sema, TIR, and engine adapters carry this value
+/// instead of maintaining independent source-name lists.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TypedHeadKind {
+    SQL,
+    HTML,
+    Sh,
+    URL,
+    Path,
+    DateTime,
+}
+
+impl TypedHeadKind {
+    pub const fn source_name(self) -> &'static str {
+        match self {
+            Self::SQL => DSL_BLOCK_SQL,
+            Self::HTML => MARKER_HTML,
+            Self::Sh => TYPE_SH,
+            Self::URL => TYPE_URL,
+            Self::Path => TYPE_PATH,
+            Self::DateTime => TYPE_DATETIME,
+        }
+    }
+
+    /// `URL` is the canonical source spelling for the existing `Url` nominal.
+    pub const fn internal_type_name(self) -> &'static str {
+        match self {
+            Self::URL => "Url",
+            _ => self.source_name(),
+        }
+    }
+
+    pub const fn is_typed_text(self) -> bool {
+        matches!(self, Self::SQL | Self::HTML | Self::Sh)
+    }
+
+    pub const fn is_boundary(self) -> bool {
+        matches!(self, Self::URL | Self::Path | Self::DateTime)
+    }
+
+    pub const fn is_interpolated_template(self) -> bool {
+        self.is_typed_text() || self.is_boundary()
+    }
+
+    pub const fn forbids_holes(self) -> bool {
+        matches!(self, Self::DateTime)
+    }
+}
+
+pub const fn typed_head_kind(name: &str) -> Option<TypedHeadKind> {
+    match name {
+        DSL_BLOCK_SQL => Some(TypedHeadKind::SQL),
+        MARKER_HTML => Some(TypedHeadKind::HTML),
+        TYPE_SH => Some(TypedHeadKind::Sh),
+        TYPE_URL => Some(TypedHeadKind::URL),
+        TYPE_PATH => Some(TypedHeadKind::Path),
+        TYPE_DATETIME => Some(TypedHeadKind::DateTime),
+        _ => None,
+    }
+}
+
 
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family

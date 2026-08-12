@@ -1661,6 +1661,11 @@ fn path_string_from_record(rec: i64) -> String {
     })
 }
 
+pub(crate) fn show_path(rt: &crate::JitRuntime, rec: i64) -> String {
+    let sid = rt.heap.record_get_string(rec, 0).unwrap_or(0);
+    rt.heap.clone_string(sid).unwrap_or_default()
+}
+
 fn option_string_bits(s: Option<String>) -> i64 {
     match s {
         None => 0,

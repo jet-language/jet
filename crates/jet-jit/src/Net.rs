@@ -12,10 +12,8 @@ use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 mod runtime {
     use crate::JetShow;
 
-    include!("../../jet-foundation/src/TypedHeads.rs");
-
     pub mod jet_std {
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug)]
         pub struct JetURL {
             pub scheme: String,
             pub username: Option<String>,
@@ -25,6 +23,8 @@ mod runtime {
             pub path: String,
             pub query: Vec<(String, String)>,
             pub fragment: Option<String>,
+            pub typed_host: Option<Vec<(String, bool)>>,
+            pub typed_path: Option<Vec<(String, bool)>>,
         }
 
         #[derive(Clone, Debug, PartialEq)]
@@ -134,6 +134,13 @@ mod runtime {
     pub fn url_parse(s: &String) -> Result<JetURL, String> {
         JetURL::parse(s)
     }
+    pub fn url_typed_literal(
+        literals: &Vec<String>,
+        holes: &Vec<String>,
+    ) -> JetURL {
+        let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+        jet_std::jet_typed_url_literal(&literal_refs, holes.clone())
+    }
     pub fn url_file(path: &String) -> JetURL {
         JetURL::file(path)
     }
@@ -217,6 +224,19 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
             .and_then(|slot| slot.as_ref())
             .and_then(f)
     })
+}
+
+pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
+    let index = handle.saturating_sub(1) as usize;
+    rt.net_values
+        .get(index)
+        .and_then(|slot| slot.as_ref())
+        .map(|value| match value {
+            NetValue::Url(url) => url.to_string_value(),
+            NetValue::Mime(mime) => mime.to_string_value(),
+            _ => String::new(),
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn mime_parts(
@@ -314,6 +334,12 @@ extern "C" fn jet_jit_url_parse(s: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
+    let literals = list_strings(literals);
+    let holes = list_strings(holes);
+    push(NetValue::Url(runtime::url_typed_literal(&literals, &holes)))
+}
+
 extern "C" fn jet_jit_url_file(path: i64) -> i64 {
     let path = clone_string(path);
     push(NetValue::Url(runtime::url_file(&path)))
@@ -377,6 +403,16 @@ extern "C" fn jet_jit_url_to_string(recv: i64) -> i64 {
     alloc_string(text)
 }
 
+extern "C" fn jet_jit_url_scheme(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.scheme()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
 extern "C" fn jet_jit_url_host(recv: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.host()),
@@ -387,6 +423,16 @@ extern "C" fn jet_jit_url_host(recv: i64) -> i64 {
 extern "C" fn jet_jit_url_path(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.path()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
+extern "C" fn jet_jit_url_query_value(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.query()),
         _ => None,
     }) else {
         return alloc_string(String::new());
@@ -473,6 +519,28 @@ extern "C" fn jet_jit_url_default_port(recv: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_url_port(recv: i64) -> i64 {
+    match with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.port()),
+        _ => None,
+    })
+    .and_then(|r| r.ok())
+    {
+        Some(v) => v.wrapping_add(1),
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_url_normalize(recv: i64) -> i64 {
+    let Some(url) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.normalize()),
+        _ => None,
+    }) else {
+        return 0;
+    };
+    push(NetValue::Url(url))
+}
+
 extern "C" fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
     let rel = clone_string(rel);
     let Some(url) = with_net(recv, |v| match v {
@@ -485,6 +553,30 @@ extern "C" fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
         Ok(joined) => result_ok(push(NetValue::Url(joined)) as u64),
         Err(e) => result_err(e),
     }
+}
+
+extern "C" fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
+    let key = clone_string(key);
+    let value = clone_string(value);
+    let Some(url) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.set_query(&key, &value)),
+        _ => None,
+    }) else {
+        return 0;
+    };
+    push(NetValue::Url(url))
+}
+
+extern "C" fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
+    let key = clone_string(key);
+    let value = clone_string(value);
+    let Some(url) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.add_query(&key, &value)),
+        _ => None,
+    }) else {
+        return 0;
+    };
+    push(NetValue::Url(url))
 }
 
 extern "C" fn jet_jit_mime_essence(recv: i64) -> i64 {
@@ -903,17 +995,20 @@ host_fns! {
     listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr" => jet_jit_net_listener_local_socket_addr: sig1;
     socket_port: "jet_jit_net_socket_port" => jet_jit_net_socket_port: sig1;
     url_parse: "jet_jit_url_parse" => jet_jit_url_parse: sig1;
+    url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;
     url_file: "jet_jit_url_file" => jet_jit_url_file: sig1;
     url_data: "jet_jit_url_data" => jet_jit_url_data: sig2;
-    url_query: "jet_jit_url_query" => jet_jit_url_query: sig1;
+    url_query_value: "jet_jit_url_query_value" => jet_jit_url_query_value: sig1;
     url_percent_encode: "jet_jit_url_percent_encode" => jet_jit_url_percent_encode: sig1;
     url_percent_decode: "jet_jit_url_percent_decode" => jet_jit_url_percent_decode: sig1;
     mime_parse: "jet_jit_mime_parse" => jet_jit_mime_parse: sig1;
     mime_from_extension: "jet_jit_mime_from_extension" => jet_jit_mime_from_extension: sig1;
     mime_extension: "jet_jit_mime_extension" => jet_jit_mime_extension: sig1;
     url_to_string: "jet_jit_url_to_string" => jet_jit_url_to_string: sig1;
+    url_scheme: "jet_jit_url_scheme" => jet_jit_url_scheme: sig1;
     url_host: "jet_jit_url_host" => jet_jit_url_host: sig1;
     url_path: "jet_jit_url_path" => jet_jit_url_path: sig1;
+    url_query: "jet_jit_url_query" => jet_jit_url_query: sig1;
     url_query_pairs: "jet_jit_url_query_pairs" => jet_jit_url_query_pairs: sig1;
     url_path_segments: "jet_jit_url_path_segments" => jet_jit_url_path_segments: sig1;
     url_fragment: "jet_jit_url_fragment" => jet_jit_url_fragment: sig1;
@@ -921,8 +1016,12 @@ host_fns! {
     url_password: "jet_jit_url_password" => jet_jit_url_password: sig1;
     url_userinfo: "jet_jit_url_userinfo" => jet_jit_url_userinfo: sig1;
     url_authority: "jet_jit_url_authority" => jet_jit_url_authority: sig1;
+    url_port: "jet_jit_url_port" => jet_jit_url_port: sig1;
     url_default_port: "jet_jit_url_default_port" => jet_jit_url_default_port: sig1;
+    url_normalize: "jet_jit_url_normalize" => jet_jit_url_normalize: sig1;
     url_join: "jet_jit_url_join" => jet_jit_url_join: sig2;
+    url_set_query: "jet_jit_url_set_query" => jet_jit_url_set_query: sig3;
+    url_add_query: "jet_jit_url_add_query" => jet_jit_url_add_query: sig3;
     mime_essence: "jet_jit_mime_essence" => jet_jit_mime_essence: sig1;
     mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
     browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
@@ -933,6 +1032,3 @@ host_fns! {
     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
 }
-
-
-

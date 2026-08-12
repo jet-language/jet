@@ -263,6 +263,10 @@ impl JetInstant {
     pub(crate) fn elapsed_nanos(&self) -> i64 {
         self.start.elapsed().as_nanos().min(i64::MAX as u128) as i64
     }
+
+    pub(crate) fn to_string_fmt(&self) -> String {
+        "Instant".to_string()
+    }
 }
 impl PartialEq for JetInstant {
     fn eq(&self, other: &Self) -> bool {
@@ -541,6 +545,10 @@ pub(crate) struct JetZone {
     infos: Vec<JetTtInfo>,
 }
 impl JetZone {
+    pub(crate) fn to_string_fmt(&self) -> String {
+        self.name.clone()
+    }
+
     pub(crate) fn utc() -> Self {
         JetZone {
             name: "UTC".to_string(),

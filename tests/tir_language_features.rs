@@ -19,9 +19,11 @@ fn run() {
     name :: "ada lovelace"
     path_part :: "ada/../etc"
     endpoint :: URL.{"https://api.example.com/v2/{name}"}
+    opaque_endpoint :: URL.{"https://api.example.com/v2/opaque/{path_part}"}
     log_path :: Path.{"/var/log/{path_part}.log"}
     stamp :: DateTime.{"2026-08-07T12:00:00Z"}
     print(endpoint.to_string())
+    print(opaque_endpoint.to_string())
     print(log_path.to_string())
     print(stamp.to_string())
 }
@@ -29,7 +31,7 @@ fn run() {
     tir_support::assert_tiers_agree(
         "boundary_typed_heads",
         src,
-        "https://api.example.com/v2/ada%20lovelace\n/var/log/ada%2F..%2Fetc.log\n2026-08-07 12:00:00 UTC\n",
+        "https://api.example.com/v2/ada%20lovelace\nhttps://api.example.com/v2/opaque/ada%2F..%2Fetc\n/var/log/ada%2F..%2Fetc.log\n2026-08-07 12:00:00 UTC\n",
     );
 }
 

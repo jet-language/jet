@@ -2199,15 +2199,9 @@ pub enum TTypedTextForm {
     HTMLText,
 }
 
-#[derive(Clone, Copy)]
-pub enum TTypedTextInterpKind {
-    SQL,
-    HTML,
-    Sh,
-    URL,
-    Path,
-    DateTime,
-}
+/// D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: TIR carries the same descriptor as the
+/// source surface. There is no second kind table in an execution tier.
+pub type TTypedTextInterpKind = crate::Syntax::TypedHeadKind;
 
 /// Let binding type annotation. Emit spells the `: …` clause (I3: no Rust text here).
 #[derive(Clone)]

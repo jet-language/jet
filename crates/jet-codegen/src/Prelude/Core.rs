@@ -18,7 +18,7 @@ impl JetShow for JetPeriod {
 
 impl JetShow for JetInstant {
     fn jet_show(&self) -> String {
-        "Instant".to_string()
+        self.to_string_fmt()
     }
 }
 
@@ -30,12 +30,96 @@ impl JetShow for JetDateTime {
 
 impl JetShow for JetZone {
     fn jet_show(&self) -> String {
-        self.name.clone()
+        self.to_string_fmt()
     }
 }
 
 impl JetShow for JetZonedDateTime {
     fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetDate {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetDate {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetLocalTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetLocalTime {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetPeriod {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetPeriod {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetInstant {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetInstant {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetDateTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetDateTime {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetZone {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetZone {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetZonedDateTime {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetZonedDateTime {
+    fn jet_debug(&self) -> String {
         self.to_string_fmt()
     }
 }

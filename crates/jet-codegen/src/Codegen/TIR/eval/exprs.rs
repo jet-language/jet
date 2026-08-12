@@ -816,30 +816,31 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
         (CtValue::Present(value), Type::Option(inner)) => {
-            Some(show_typed_value(value, inner, debug).unwrap_or_else(|| {
+            Some(show_typed_value(value, inner, debug).or_else(|| {
                 if debug {
-                    value.debug_rust()
+                    Some(value.debug_rust())
                 } else {
-                    value.jet_show()
+                    crate::Comptime::render_typed_hole(value)
                 }
-            }))
+            })?)
         }
         (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => Some("null".to_string()),
         (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
             let parts = values
                 .iter()
                 .map(|value| {
-                    show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                    show_typed_value(value, inner, debug).or_else(|| {
                         if debug {
-                            value.debug_rust()
+                            Some(value.debug_rust())
                         } else {
-                            value.jet_show()
+                            crate::Comptime::render_typed_hole(value)
                         }
                     })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Option<Vec<_>>>()?;
             Some(format!("[{}]", parts.join(", ")))
         }
+        _ if !debug => crate::Comptime::display_core_pure_value(value),
         _ => None,
     }
 }
@@ -4324,9 +4325,10 @@ impl<'a> EvalCtx<'a> {
                     match kind {
                         TTypedTextInterpKind::SQL => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             let (template, params) = crate::typed_text::jet_typed_sql_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             );
                             Ok(typed_sql_value(
                                 template,
@@ -4335,29 +4337,30 @@ impl<'a> EvalCtx<'a> {
                         }
                         TTypedTextInterpKind::Sh => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             let argv = crate::typed_text::jet_typed_sh_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             );
                             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
                         }
                         TTypedTextInterpKind::HTML => {
                             let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             Ok(CtValue::Str(crate::typed_text::jet_typed_html_interpolate(
                                 &literal_refs,
-                                values.into_iter().map(|value| value.jet_show()).collect(),
+                                shown,
                             )))
                         }
                         TTypedTextInterpKind::URL
                         | TTypedTextInterpKind::Path
                         | TTypedTextInterpKind::DateTime => {
-                            let name = match kind {
-                                TTypedTextInterpKind::URL => crate::Syntax::TYPE_URL,
-                                TTypedTextInterpKind::Path => crate::Syntax::TYPE_PATH,
-                                TTypedTextInterpKind::DateTime => crate::Syntax::TYPE_DATETIME,
-                                _ => unreachable!("typed boundary kind was matched above"),
-                            };
-                            crate::Comptime::evaluate_typed_head(name, literals, &values, self.span())
+                            crate::Comptime::evaluate_typed_head(
+                                kind,
+                                literals,
+                                &values,
+                                self.span(),
+                            )
                         }
                     }
                 }
@@ -6102,7 +6105,10 @@ impl<'a> EvalCtx<'a> {
         if name == "print" {
             let text = argv
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| {
+                    crate::Comptime::display_core_pure_value(v)
+                        .unwrap_or_else(|| v.jet_show())
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             self.write_print(&text, false)?;
@@ -6111,7 +6117,10 @@ impl<'a> EvalCtx<'a> {
         if name == "eprint" {
             let text = argv
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| {
+                    crate::Comptime::display_core_pure_value(v)
+                        .unwrap_or_else(|| v.jet_show())
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             self.write_print(&text, true)?;

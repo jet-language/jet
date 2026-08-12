@@ -134,6 +134,34 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| fallback.to_string())
     }
 
+    /// D-BOUND-HEAD1: every typed-literal hole is sent through the same
+    /// `JetShow` capability gate. A typed head is not ordinary Display
+    /// interpolation; AOT, JIT, and the evaluator all marshal its value to
+    /// the shared show path.
+    fn validate_typed_hole_printable(&mut self, inner: &mut Expr) -> bool {
+        let was_borrow_ctx = self.borrow_ctx;
+        self.borrow_ctx = true;
+        let was_view_read = self.allow_string_view_read;
+        self.allow_string_view_read = true;
+        let ty = self.infer(inner);
+        self.borrow_ctx = was_borrow_ctx;
+        self.allow_string_view_read = was_view_read;
+        let Some(ty) = ty else {
+            return false;
+        };
+        if is_printable(&ty, self.registry, self.trait_reg) {
+            return true;
+        }
+        self.diags.push(Diagnostic::error(
+            "E0112",
+            format!("{} can't be used in a typed literal hole", ty.show()),
+            "typed literal holes use the shared JetShow rendering contract".to_string(),
+            "use a printable value, or convert it to String before the hole".to_string(),
+            Some(inner.span()),
+        ));
+        false
+    }
+
     pub(crate) fn rewrite_typed_text_literal(
         &mut self,
         e: &mut Expr,
@@ -154,6 +182,16 @@ impl<'a> Checker<'a> {
             ));
             return None;
         };
+        let mut holes_printable = true;
+        for part in parts.iter_mut() {
+            if let StrPart::Interp(inner, _) = part {
+                holes_printable &= self.validate_typed_hole_printable(inner);
+            }
+        }
+        if !holes_printable {
+            *e = Expr::Str(parts, span);
+            return None;
+        }
         let mk_lit = |s: String, span: Span| CallArg {
             convention: AccessConvention::Read,
             expr: Expr::Str(vec![StrPart::Lit(s)], span),
@@ -167,13 +205,8 @@ impl<'a> Checker<'a> {
         for p in parts {
             match p {
                 StrPart::Lit(s) => cur_lit.push_str(&s),
-                StrPart::Interp(mut inner, _fmt) => {
+                StrPart::Interp(inner, _fmt) => {
                     args.push(mk_lit(std::mem::take(&mut cur_lit), span));
-                    self.borrow_ctx = true;
-                    let was_view_read = self.allow_string_view_read;
-                    self.allow_string_view_read = true;
-                    self.infer(&mut inner);
-                    self.allow_string_view_read = was_view_read;
                     args.push(CallArg {
                         convention: AccessConvention::Read,
                         span: inner.span(),
@@ -208,18 +241,17 @@ impl<'a> Checker<'a> {
         type_name: String,
         span: Span,
     ) -> Option<Type> {
+        let Some(kind) = Syntax::typed_head_kind(&type_name).filter(|kind| kind.is_boundary())
+        else {
+            return None;
+        };
         let Expr::Str(parts, literal_span) = e else {
-            let internal_type = if type_name == Syntax::TYPE_URL {
-                "Url".to_string()
-            } else {
-                type_name.clone()
-            };
             return self
-                .rewrite_typed_text_literal(e, type_name, span)
-                .map(|_| Type::Named(internal_type));
+                .rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+                .map(|_| Type::Named(kind.internal_type_name().to_string()));
         };
         let has_holes = parts.iter().any(|part| matches!(part, StrPart::Interp(..)));
-        if type_name == Syntax::TYPE_DATETIME && has_holes {
+        if kind.forbids_holes() && has_holes {
             self.diags.push(Diagnostic::error(
                 "E0155",
                 "a `DateTime` literal cannot contain interpolation".to_string(),
@@ -229,27 +261,14 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        let mut validation_text = String::new();
+        let mut literals = vec![String::new()];
         for part in parts.iter() {
             match part {
-                StrPart::Lit(text) => validation_text.push_str(text),
-                StrPart::Interp(..) => {
-                    validation_text.push_str(jet_foundation::TypedHeads::HOLE_PLACEHOLDER)
-                }
+                StrPart::Lit(text) => literals.last_mut().unwrap().push_str(text),
+                StrPart::Interp(..) => literals.push(String::new()),
             }
         }
-        let validation = match type_name.as_str() {
-            Syntax::TYPE_URL => crate::Comptime::validate_url_literal(&validation_text),
-            Syntax::TYPE_PATH => {
-                if validation_text.contains('\0') {
-                    Err("a Path cannot contain a NUL character".to_string())
-                } else {
-                    Ok(())
-                }
-            }
-            Syntax::TYPE_DATETIME => crate::Comptime::validate_datetime_literal(&validation_text),
-            _ => unreachable!("typed boundary helper called for another type"),
-        };
+        let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
         if let Err(reason) = validation {
             self.diags.push(Diagnostic::error(
                 "E0155",
@@ -262,12 +281,8 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        self.rewrite_typed_text_literal(e, type_name.clone(), span)
-            .map(|_| Type::Named(if type_name == Syntax::TYPE_URL {
-                "Url".to_string()
-            } else {
-                type_name
-            }))
+        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
+            .map(|_| Type::Named(kind.internal_type_name().to_string()))
     }
 
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
@@ -2504,7 +2519,8 @@ impl<'a> Checker<'a> {
             (
                 Type::Named(ref type_name),
                 TypedLitBody::Value(inner),
-            ) if Syntax::is_typed_text_type(type_name) =>
+            ) if Syntax::typed_head_kind(type_name)
+                .is_some_and(|kind| kind.is_typed_text()) =>
             {
                 *e = *inner;
                 return self.rewrite_typed_text_literal(e, type_name.clone(), span);
@@ -2520,10 +2536,9 @@ impl<'a> Checker<'a> {
             (
                 Type::Named(ref type_name),
                 TypedLitBody::Value(inner),
-            ) if matches!(
-                type_name.as_str(),
-                Syntax::TYPE_URL | Syntax::TYPE_PATH | Syntax::TYPE_DATETIME
-            ) => {
+            ) if Syntax::typed_head_kind(type_name)
+                .is_some_and(|kind| kind.is_boundary()) =>
+            {
                 *e = *inner;
                 return self.rewrite_typed_boundary_literal(e, type_name.clone(), span);
             }

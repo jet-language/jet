@@ -82,7 +82,8 @@ pub fn jit_run_with_env_args(
 ) -> (i32, String, String) {
     let dir = unique_tmp("jet_jit_run");
     fs::create_dir_all(&dir).unwrap();
-    let jet_path = dir.join(format!("{name}.jet"));
+    let jet_name = format!("{name}.jet");
+    let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
@@ -110,6 +111,26 @@ pub fn jit_run_with_env_args(
     )
 }
 
+fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
+    let dir = unique_tmp("jet_interpreter_run");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{name}.jet"));
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+    let _ = fs::remove_dir_all(&dir);
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran {
+            exit_code,
+            stdout,
+            stderr,
+        } => (exit_code, stdout, stderr),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("interpreter rejected the tier-comparison source: {diagnostics:?}")
+        }
+    }
+}
+
 /// The same snippet on both tiers, asserting they agree. This is the shape I9
 /// actually asks for: not "AOT prints X", but "every tier prints the same X".
 pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
@@ -119,12 +140,41 @@ pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
         jit_out, expected_stdout,
         "`jet run` (Cranelift/interpreter) disagreed:\n{jit_err}"
     );
+    let (interpreter_code, interpreter_out, interpreter_err) = interpreter_run(name, src);
+    assert_eq!(
+        interpreter_code, jit_code,
+        "forced interpreter and default JIT exit codes disagree:\ninterpreter stderr: {interpreter_err}\nJIT stderr: {jit_err}"
+    );
+    assert_eq!(
+        interpreter_out, jit_out,
+        "forced interpreter and default JIT stdout disagree:\ninterpreter stderr: {interpreter_err}\nJIT stderr: {jit_err}"
+    );
+    assert_eq!(
+        interpreter_err, jit_err,
+        "forced interpreter and default JIT stderr disagree"
+    );
     if have_rustc() {
-        let (aot_code, aot_out) = build_and_run(name, src);
-        assert_eq!(aot_code, 0, "AOT run failed:\n{aot_out}");
+        let (aot_code, aot_out, aot_err) = build_and_run_full("jet_tir_test", name, src);
+        assert_eq!(aot_code, jit_code, "AOT and `jet run` exit codes disagree:\n{aot_err}");
         assert_eq!(
             aot_out, jit_out,
             "AOT and `jet run` disagree — one tier re-encoded the rule (I9)"
+        );
+        assert_eq!(
+            aot_err, jit_err,
+            "AOT and `jet run` stderr disagree — one tier re-encoded the rule (I9)"
+        );
+        assert_eq!(
+            aot_code, interpreter_code,
+            "AOT and forced interpreter exit codes disagree"
+        );
+        assert_eq!(
+            aot_out, interpreter_out,
+            "AOT and forced interpreter stdout disagree"
+        );
+        assert_eq!(
+            aot_err, interpreter_err,
+            "AOT and forced interpreter stderr disagree"
         );
     }
 }

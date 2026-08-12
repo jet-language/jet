@@ -6684,12 +6684,6 @@ impl LowerCtx<'_, '_> {
                 literals,
                 holes,
             } => {
-                let boundary_kind = match kind {
-                    TTypedTextInterpKind::URL => 0,
-                    TTypedTextInterpKind::Path => 1,
-                    TTypedTextInterpKind::DateTime => 2,
-                    _ => return Err("jit typed-text kind is not a boundary head".to_string()),
-                };
                 let list_new = self
                     .module
                     .declare_func_in_func(self.host.coll.list_new, self.b.func);
@@ -6709,22 +6703,27 @@ impl LowerCtx<'_, '_> {
                     let shown = self.lower_jet_show(hole)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
-                let kind = self.b.ins().iconst(types::I64, boundary_kind);
-                let text = self.call_host(
-                    self.host.math.typed_head_interp,
-                    &[literal_values, hole_values, kind],
-                );
-                match boundary_kind {
-                    0 => {
-                        let parsed = self.call_host(self.host.net.url_parse, &[text]);
-                        self.result_payload(parsed, &Type::Named("Url".to_string()))
+                match kind {
+                    TTypedTextInterpKind::URL => Ok(self.call_host(
+                        self.host.net.url_typed_literal,
+                        &[literal_values, hole_values],
+                    )),
+                    TTypedTextInterpKind::Path => {
+                        let text = self.call_host(
+                            self.host.math.typed_path_interp,
+                            &[literal_values, hole_values],
+                        );
+                        Ok(self.call_host(self.host.core.path_from, &[text]))
                     }
-                    1 => Ok(self.call_host(self.host.core.path_from, &[text])),
-                    2 => {
+                    TTypedTextInterpKind::DateTime => {
+                        let text = self.call_host(
+                            self.host.math.typed_datetime_interp,
+                            &[literal_values, hole_values],
+                        );
                         let parsed = self.call_host(self.host.time.parse_rfc3339, &[text]);
                         self.result_payload(parsed, &Type::Named("DateTime".to_string()))
                     }
-                    _ => unreachable!(),
+                    _ => Err("jit typed-text kind is not a boundary head".to_string()),
                 }
             }
             THostCall::Helper { helper, .. } => {
@@ -6769,32 +6768,544 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// `jet_show` for SQL hole params — Int/String/Bool/Float cover checked SQL.
+    /// `jet_show` marshalling for typed holes. Sema admits a recursive
+    /// JetShow capability, so the JIT must recurse through the same resident
+    /// value shape instead of selecting a closed scalar-kind table.
     fn lower_jet_show(&mut self, expr: &TExpr) -> Result<Value, String> {
-        match &expr.ty {
-            Type::String => self.lower_expr(expr),
-            Type::Int | Type::IntN { .. } => {
-                let v = self.lower_expr(expr)?;
+        let ty = self.erase_distinct_ty(&expr.ty);
+        let uses_result = matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }))
+            || Self::uses_result_option_abi(expr);
+        let value = self.lower_expr(expr)?;
+        self.lower_jet_show_value(value, &ty, uses_result)
+    }
+
+    fn lower_jet_show_value(
+        &mut self,
+        value: Value,
+        ty: &Type,
+        uses_result: bool,
+    ) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        match &ty {
+            Type::Tagged { inner, .. } => self.lower_jet_show_value(value, inner, uses_result),
+            Type::Quantity { base, .. } => self.lower_jet_show_value(value, base, uses_result),
+            Type::String => Ok(value),
+            Type::Int => {
                 let signed = self.b.ins().iconst(types::I64, 1);
-                Ok(self.call_host(self.host.intn_to_string, &[v, signed]))
+                Ok(self.call_host(self.host.intn_to_string, &[value, signed]))
+            }
+            Type::IntN { signed, .. } => {
+                let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
+                Ok(self.call_host(self.host.intn_to_string, &[value, signed]))
             }
             Type::Bool => {
-                let v = self.lower_expr(expr)?;
-                let is_true = if self.b.func.dfg.value_type(v) == types::I8 {
+                let is_true = if self.b.func.dfg.value_type(value) == types::I8 {
                     let zero = self.b.ins().iconst(types::I8, 0);
-                    self.b.ins().icmp(IntCC::NotEqual, v, zero)
+                    self.b.ins().icmp(IntCC::NotEqual, value, zero)
                 } else {
                     let zero = self.b.ins().iconst(types::I64, 0);
-                    self.b.ins().icmp(IntCC::NotEqual, v, zero)
+                    self.b.ins().icmp(IntCC::NotEqual, value, zero)
                 };
                 let t_id = self.runtime.heap.alloc_string("true".to_string());
                 let f_id = self.runtime.heap.alloc_string("false".to_string());
-                let t_v = self.b.ins().iconst(types::I64, t_id);
-                let f_v = self.b.ins().iconst(types::I64, f_id);
-                Ok(self.b.ins().select(is_true, t_v, f_v))
+                let t_value = self.b.ins().iconst(types::I64, t_id);
+                let f_value = self.b.ins().iconst(types::I64, f_id);
+                Ok(self.b.ins().select(is_true, t_value, f_value))
             }
-            other => Err(format!("jit SQL hole show unsupported: {other:?}")),
+            Type::Float | Type::Float32 => {
+                let buf = self.call_host(self.host.str_begin, &[]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                self.b.ins().call(push, &[buf, value]);
+                Ok(buf)
+            }
+            Type::Char => {
+                let buf = self.call_host(self.host.str_begin, &[]);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_char, self.b.func);
+                self.b.ins().call(push, &[buf, value]);
+                Ok(buf)
+            }
+            Type::Named(name) if matches!(name.as_str(), "Url" | "Mime") => {
+                Ok(self.call_host(self.host.net.url_to_string, &[value]))
+            }
+            Type::Named(name) if name == "Path" => {
+                Ok(self.call_host(self.host.core.path_to_string, &[value]))
+            }
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "Date" | "DateTime" | "Instant" | "LocalTime" | "Period" | "Zone"
+                        | "ZonedDateTime"
+                ) => Ok(self.lower_civil_show_value(value)),
+            Type::Option(inner) => {
+                self.lower_jet_show_option_value(value, inner, uses_result)
+            }
+            Type::Result { ok, err } => self.lower_jet_show_result_value(value, ok, err),
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                self.lower_jet_show_list_value(value, inner)
+            }
+            Type::Map { key, value: item, .. } => {
+                self.lower_jet_show_map_value(value, key, item)
+            }
+            Type::Apply { name, args }
+                if name == "View"
+                    && args.len() == 1
+                    && matches!(&args[0], Type::Named(inner) if inner == "str") => Ok(value),
+            Type::Apply { name, .. } if name == "KeyRef" => {
+                Ok(self.call_host(self.host.crypto.vault_key_ref_show, &[value]))
+            }
+            Type::Named(name) => self.lower_jet_show_named_value(value, &ty, name),
+            Type::Apply { name, .. } => self.lower_jet_show_named_value(value, &ty, name),
+            Type::Tuple(_) => {
+                let name = record_type_key(&ty)
+                    .ok_or_else(|| format!("jit JetShow tuple unsupported: {ty:?}"))?;
+                self.lower_jet_show_named_value(value, &ty, &name)
+            }
+            Type::Union(members) => self.lower_jet_show_union_value(value, members),
+            other => Err(format!("jit JetShow type unsupported: {other:?}")),
         }
+    }
+
+    fn lower_civil_show_value(&mut self, value: Value) -> Value {
+        let method_id = self.runtime.heap.alloc_string("to_string".to_string());
+        let method = self.b.ins().iconst(types::I64, method_id);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.call_host(
+            self.host.time.civil_method,
+            &[value, method, zero, zero, zero, zero, zero, zero],
+        )
+    }
+
+    fn lower_jet_show_option_value(
+        &mut self,
+        value: Value,
+        inner: &Type,
+        uses_result: bool,
+    ) -> Result<Value, String> {
+        let is_none = if uses_result {
+            let ok = self.call_host(self.host.result_is_ok, &[value]);
+            let ok_wide = self.b.ins().uextend(types::I64, ok);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.bool_from_icmp(IntCC::Equal, ok_wide, zero)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.bool_from_icmp(IntCC::Equal, value, zero)
+        };
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I64);
+        self.b
+            .ins()
+            .brif(is_none, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        let buf = self.call_host(self.host.str_begin, &[]);
+        let null = self.runtime.heap.alloc_string("null".to_string());
+        let null = self.b.ins().iconst(types::I64, null);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.str_push_lit, self.b.func);
+        self.b.ins().call(push, &[buf, null]);
+        self.b.ins().jump(done, &[buf]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let payload = if uses_result {
+            self.result_payload(value, inner)?
+        } else {
+            self.unpack_option_payload(value, inner)?
+        };
+        let buf = self.call_host(self.host.str_begin, &[]);
+        let text = self.lower_jet_show_value(payload, inner, false)?;
+        let push = self
+            .module
+            .declare_func_in_func(self.host.str_push_str, self.b.func);
+        self.b.ins().call(push, &[buf, text]);
+        self.b.ins().jump(done, &[buf]);
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
+    }
+
+    fn lower_jet_show_result_value(
+        &mut self,
+        value: Value,
+        ok: &Type,
+        err: &Type,
+    ) -> Result<Value, String> {
+        let is_ok = self.call_host(self.host.result_is_ok, &[value]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(value, ok)?;
+        let text = self.lower_jet_show_value(payload, ok, false)?;
+        let buf = self.call_host(self.host.str_begin, &[]);
+        self.push_str_lit(buf, "Ok(")?;
+        self.push_str_value(buf, text);
+        self.push_str_lit(buf, ")")?;
+        self.b.ins().jump(done, &[buf]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        let payload = self.result_payload(value, err)?;
+        let text = self.lower_jet_show_value(payload, err, false)?;
+        let buf = self.call_host(self.host.str_begin, &[]);
+        self.push_str_lit(buf, "Err(")?;
+        self.push_str_value(buf, text);
+        self.push_str_lit(buf, ")")?;
+        self.b.ins().jump(done, &[buf]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
+    }
+
+    fn lower_jet_show_list_value(
+        &mut self,
+        list: Value,
+        inner: &Type,
+    ) -> Result<Value, String> {
+        let list_var = self.fresh_var(types::I64);
+        self.b.def_var(list_var, list);
+        let index_var = self.fresh_var(types::I64);
+        let zero_index = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(index_var, zero_index);
+        let buf_var = self.fresh_var(types::I64);
+        let buf = self.call_host(self.host.str_begin, &[]);
+        self.b.def_var(buf_var, buf);
+        self.push_str_lit(buf, "[")?;
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let index = self.b.use_var(index_var);
+        let list = self.b.use_var(list_var);
+        let len = self.call_host(self.host.coll.list_len, &[list]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, index, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let buf = self.b.use_var(buf_var);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let first = self.b.ins().icmp(IntCC::Equal, index, zero);
+        let comma = self.b.create_block();
+        let element = self.b.create_block();
+        self.b.ins().brif(first, element, &[], comma, &[]);
+        self.b.switch_to_block(comma);
+        self.b.seal_block(comma);
+        self.push_str_lit(buf, ", ")?;
+        self.b.ins().jump(element, &[]);
+        self.b.switch_to_block(element);
+        self.b.seal_block(element);
+
+        let line = self.b.ins().iconst(types::I32, 0);
+        let raw = if self
+            .meta
+            .clif_ty(inner)
+            .or_else(|| clif_ty(inner))
+            == Some(types::F64)
+        {
+            self.call_host(self.host.coll.list_get_f64, &[list, index, line])
+        } else {
+            self.call_host(self.host.coll.list_get, &[list, index, line])
+        };
+        self.emit_trap_check()?;
+        let element_value = self.coerce_jet_show_value(raw, inner)?;
+        let element_text = self.lower_jet_show_value(element_value, inner, false)?;
+        let buf = self.b.use_var(buf_var);
+        self.push_str_value(buf, element_text);
+        self.b.def_var(buf_var, buf);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let index = self.b.use_var(index_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next_index = self.b.ins().iadd(index, one);
+        self.b.def_var(index_var, next_index);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let buf = self.b.use_var(buf_var);
+        self.push_str_lit(buf, "]")?;
+        Ok(buf)
+    }
+
+    fn lower_jet_show_map_value(
+        &mut self,
+        map: Value,
+        key_ty: &Type,
+        value_ty: &Type,
+    ) -> Result<Value, String> {
+        let map_var = self.fresh_var(types::I64);
+        self.b.def_var(map_var, map);
+        let index_var = self.fresh_var(types::I64);
+        let zero_index = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(index_var, zero_index);
+        let buf_var = self.fresh_var(types::I64);
+        let buf = self.call_host(self.host.str_begin, &[]);
+        self.b.def_var(buf_var, buf);
+        self.push_str_lit(buf, "[:")?;
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let index = self.b.use_var(index_var);
+        let map = self.b.use_var(map_var);
+        let len = self.call_host(self.host.coll.map_len, &[map]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, index, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let buf = self.b.use_var(buf_var);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let first = self.b.ins().icmp(IntCC::Equal, index, zero);
+        let comma = self.b.create_block();
+        let entry = self.b.create_block();
+        self.b.ins().brif(first, entry, &[], comma, &[]);
+        self.b.switch_to_block(comma);
+        self.b.seal_block(comma);
+        self.push_str_lit(buf, ", ")?;
+        self.b.ins().jump(entry, &[]);
+        self.b.switch_to_block(entry);
+        self.b.seal_block(entry);
+
+        let key_raw = self.call_host(self.host.coll.map_key_at, &[map, index]);
+        let value_raw = self.call_host(self.host.coll.map_value_at, &[map, index]);
+        let key = self.coerce_jet_show_value(key_raw, key_ty)?;
+        let item = self.coerce_jet_show_value(value_raw, value_ty)?;
+        let key_text = self.lower_jet_show_value(key, key_ty, false)?;
+        let item_text = self.lower_jet_show_value(item, value_ty, false)?;
+        let buf = self.b.use_var(buf_var);
+        self.push_str_value(buf, key_text);
+        self.push_str_lit(buf, ": ")?;
+        self.push_str_value(buf, item_text);
+        self.b.def_var(buf_var, buf);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let index = self.b.use_var(index_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next_index = self.b.ins().iadd(index, one);
+        self.b.def_var(index_var, next_index);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let buf = self.b.use_var(buf_var);
+        self.push_str_lit(buf, "]")?;
+        Ok(buf)
+    }
+
+    fn coerce_jet_show_value(&mut self, raw: Value, ty: &Type) -> Result<Value, String> {
+        let want = self
+            .meta
+            .clif_ty(ty)
+            .or_else(|| clif_ty(ty))
+            .ok_or_else(|| format!("jit JetShow value ABI unsupported: {ty:?}"))?;
+        let got = self.b.func.dfg.value_type(raw);
+        Ok(match (want, got) {
+            (types::F64, types::I64) => {
+                self.b
+                    .ins()
+                    .bitcast(types::F64, Self::scalar_bitcast_memflags(), raw)
+            }
+            (types::F64, types::F64) => raw,
+            (types::I8, types::I64) => self.b.ins().ireduce(types::I8, raw),
+            (types::I8, types::I8) => raw,
+            (types::I32, types::I64) => self.b.ins().ireduce(types::I32, raw),
+            (types::I32, types::I32) => raw,
+            (types::I64, types::I64) => raw,
+            (want, got) => {
+                return Err(format!(
+                    "jit JetShow value ABI mismatch for {ty:?}: expected {want}, got {got}"
+                ))
+            }
+        })
+    }
+
+    fn lower_jet_show_named_value(
+        &mut self,
+        value: Value,
+        ty: &Type,
+        type_name: &str,
+    ) -> Result<Value, String> {
+        let type_name = type_name
+            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(type_name);
+        if type_name == "Unit" {
+            return Ok(self.call_host(self.host.str_begin, &[]));
+        }
+        if self.meta.is_enum(type_name) {
+            // Packed enum JetShow is the same source-shaped projection used by
+            // direct print. Keep the enum table path for enum payloads; record
+            // fields below are rendered recursively through this function.
+            let buf = self.call_host(self.host.str_begin, &[]);
+            let local = TLocal::generated(format!("__jet_show_{}", self.next_var));
+            let place = local.rust_name();
+            let expr = TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Local(local),
+            };
+            return self
+                .with_bound_local(&place, ty.clone(), value, |this| {
+                    this.lower_named_str_interp(buf, &expr, type_name, StrFormat::Debug)
+                })
+                .map(|_| buf);
+        }
+        let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
+            format!("jit JetShow type has no registered record layout: {type_name}")
+        })?;
+        let generic = self
+            .meta
+            .struct_type_params(type_name)
+            .is_some_and(|params| !params.is_empty());
+        let buf = self.call_host(self.host.str_begin, &[]);
+        self.push_str_lit(
+            buf,
+            if generic {
+                &format!("{type_name}(")
+            } else {
+                &format!("{type_name} {{ ")
+            },
+        )?;
+        for (index, (field_name, declared_ty)) in
+            field_names.iter().zip(field_tys.iter()).enumerate()
+        {
+            if index > 0 {
+                self.push_str_lit(buf, ", ")?;
+            }
+            let label = field_name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(field_name.as_str());
+            self.push_str_lit(buf, &format!("{label}: "))?;
+            if super::types_meta::struct_field_redacted(type_name, index) == Some(true) {
+                self.push_str_lit(buf, "[redacted]")?;
+                continue;
+            }
+            let field_ty = self.jet_show_field_type(ty, type_name, declared_ty);
+            let field = self.lower_record_field(value, type_name, field_name, &field_ty)?;
+            let field = self.coerce_jet_show_value(field, &field_ty)?;
+            let text = self.lower_jet_show_value(field, &field_ty, false)?;
+            self.push_str_value(buf, text);
+        }
+        self.push_str_lit(buf, if generic { ")" } else { " }" })?;
+        Ok(buf)
+    }
+
+    fn jet_show_field_type(
+        &self,
+        owner_ty: &Type,
+        type_name: &str,
+        declared_ty: &Type,
+    ) -> Type {
+        let Type::Apply { name, args } = owner_ty else {
+            return declared_ty.clone();
+        };
+        if name != type_name {
+            return declared_ty.clone();
+        }
+        let Some(params) = self.meta.struct_type_params(type_name) else {
+            return declared_ty.clone();
+        };
+        let subst = params
+            .iter()
+            .zip(args.iter())
+            .map(|(param, arg)| (param.clone(), arg.clone()))
+            .collect::<HashMap<_, _>>();
+        jet_foundation::Generics::substitute_type(declared_ty, &subst)
+    }
+
+    fn lower_jet_show_union_value(
+        &mut self,
+        value: Value,
+        members: &[Type],
+    ) -> Result<Value, String> {
+        let enum_name = jet_codegen::AST::union_enum_name(members);
+        let heap_payload = members
+            .iter()
+            .any(|member| self.meta.clif_ty(member) == Some(types::F64));
+        let disc = if heap_payload {
+            self.enum_discriminant(value, true)
+        } else {
+            self.enum_discriminant(value, false)
+        };
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I64);
+        for (index, member) in members.iter().enumerate() {
+            let variant = jet_codegen::AST::union_member_tag(member);
+            let expected = self
+                .meta
+                .enum_variant_index(&enum_name, &variant)
+                .ok_or_else(|| format!("jit union show variant `{enum_name}::{variant}`"))?;
+            let arm = self.b.create_block();
+            let next = if index + 1 == members.len() {
+                self.b.ins().jump(arm, &[]);
+                None
+            } else {
+                let next = self.b.create_block();
+                let tag = self.b.ins().iconst(types::I64, expected);
+                let matches = self.b.ins().icmp(IntCC::Equal, disc, tag);
+                self.b.ins().brif(matches, arm, &[], next, &[]);
+                Some(next)
+            };
+
+            self.b.switch_to_block(arm);
+            self.b.seal_block(arm);
+            let payload = if heap_payload {
+                self.unpack_enum_scalar(value, member)?
+            } else {
+                self.b.ins().sshr_imm(value, 8)
+            };
+            let payload = self.coerce_jet_show_value(payload, member)?;
+            let text = self.lower_jet_show_value(payload, member, false)?;
+            self.b.ins().jump(done, &[text]);
+
+            if let Some(next) = next {
+                self.b.switch_to_block(next);
+                self.b.seal_block(next);
+            }
+        }
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
+    }
+
+    fn push_str_value(&mut self, buf: Value, text: Value) {
+        let push = self
+            .module
+            .declare_func_in_func(self.host.str_push_str, self.b.func);
+        self.b.ins().call(push, &[buf, text]);
     }
 
     fn lower_inline_lambda(
@@ -7225,6 +7736,18 @@ impl LowerCtx<'_, '_> {
                         push_ty
                     };
                     if let Type::Named(type_name) = &push_ty {
+                        if matches!(
+                            type_name.as_str(),
+                            "Url" | "Mime" | "Path" | "Date" | "DateTime" | "Instant"
+                                | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
+                        ) {
+                            let text = self.lower_jet_show(e)?;
+                            let push_ref = self
+                                .module
+                                .declare_func_in_func(self.host.str_push_str, self.b.func);
+                            self.b.ins().call(push_ref, &[buf_id, text]);
+                            continue;
+                        }
                         self.lower_named_str_interp(buf_id, e, type_name, *fmt)?;
                         continue;
                     }
@@ -7281,62 +7804,8 @@ impl LowerCtx<'_, '_> {
                         } else {
                             self.unpack_option_payload(val, inner)?
                         };
-                        match inner.as_ref() {
-                            Type::Int | Type::IntN { .. } => {
-                                let push = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_i64, self.b.func);
-                                self.b.ins().call(push, &[buf_id, payload]);
-                            }
-                            Type::Float => {
-                                let push = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_f64, self.b.func);
-                                self.b.ins().call(push, &[buf_id, payload]);
-                            }
-                            Type::Bool => {
-                                let push = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_bool, self.b.func);
-                                self.b.ins().call(push, &[buf_id, payload]);
-                            }
-                            Type::Char => {
-                                let push = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_char, self.b.func);
-                                self.b.ins().call(push, &[buf_id, payload]);
-                            }
-                            Type::String => {
-                                let push = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                                self.b.ins().call(push, &[buf_id, payload]);
-                            }
-                            Type::List(elem) => {
-                                let kind = match elem.as_ref() {
-                                    Type::String => 1,
-                                    Type::IntN { signed: true, .. } => 2,
-                                    Type::IntN { signed: false, .. } => 3,
-                                    _ => 0,
-                                };
-                                let flag = self.b.ins().iconst(types::I64, kind);
-                                let show_ref = self.module.declare_func_in_func(
-                                    self.host.coll.list_show,
-                                    self.b.func,
-                                );
-                                let show_call = self.b.ins().call(show_ref, &[payload, flag]);
-                                let text = self.b.inst_results(show_call)[0];
-                                let push_ref = self
-                                    .module
-                                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                                self.b.ins().call(push_ref, &[buf_id, text]);
-                            }
-                            other => {
-                                return Err(format!(
-                                    "jit string interp type unsupported: Option({other:?})"
-                                ));
-                            }
-                        }
+                        let text = self.lower_jet_show_value(payload, inner, false)?;
+                        self.push_str_value(buf_id, text);
                         self.b.ins().jump(done, &[]);
                         self.b.switch_to_block(done);
                         self.b.seal_block(done);
@@ -7344,29 +7813,13 @@ impl LowerCtx<'_, '_> {
                     }
                     if let Some(elem) = jit_list_iter_elem_type(&push_ty).or_else(|| {
                         match &push_ty {
-                            Type::List(inner)
-                                if matches!(inner.as_ref(), Type::Int | Type::String) =>
-                            {
-                                Some(inner.as_ref().clone())
-                            }
+                            Type::List(inner) => Some(inner.as_ref().clone()),
+                            Type::FixedList { elem, .. } => Some(elem.as_ref().clone()),
                             _ => None,
                         }
                     }) {
-                        let kind = match elem {
-                            Type::String => 1,
-                            Type::IntN { signed: true, .. } => 2,
-                            Type::IntN { signed: false, .. } => 3,
-                            _ => 0,
-                        };
-                        let flag = self
-                            .b
-                            .ins()
-                            .iconst(types::I64, kind);
-                        let text = self.call_host(self.host.coll.list_show, &[val, flag]);
-                        let push_ref = self
-                            .module
-                            .declare_func_in_func(self.host.str_push_str, self.b.func);
-                        self.b.ins().call(push_ref, &[buf_id, text]);
+                        let text = self.lower_jet_show_list_value(val, &elem)?;
+                        self.push_str_value(buf_id, text);
                         continue;
                     }
                     if let Type::IntN { signed, .. } = &push_ty {
@@ -18063,8 +18516,12 @@ impl LowerCtx<'_, '_> {
                     "to_string" if args.is_empty() => {
                         (self.host.net.url_to_string, vec![recv_val])
                     }
+                    "scheme" if args.is_empty() => {
+                        (self.host.net.url_scheme, vec![recv_val])
+                    }
                     "host" if args.is_empty() => (self.host.net.url_host, vec![recv_val]),
                     "path" if args.is_empty() => (self.host.net.url_path, vec![recv_val]),
+                    "query" if args.is_empty() => (self.host.net.url_query_value, vec![recv_val]),
                     "query_pairs" if args.is_empty() => {
                         (self.host.net.url_query_pairs, vec![recv_val])
                     }
@@ -18086,12 +18543,34 @@ impl LowerCtx<'_, '_> {
                     "authority" if args.is_empty() => {
                         (self.host.net.url_authority, vec![recv_val])
                     }
+                    "port" if args.is_empty() => {
+                        (self.host.net.url_port, vec![recv_val])
+                    }
                     "default_port" if args.is_empty() => {
                         (self.host.net.url_default_port, vec![recv_val])
+                    }
+                    "normalize" if args.is_empty() => {
+                        (self.host.net.url_normalize, vec![recv_val])
                     }
                     "join" if args.len() == 1 => (
                         self.host.net.url_join,
                         vec![recv_val, self.lower_expr(&args[0])?],
+                    ),
+                    "set_query" if args.len() == 2 => (
+                        self.host.net.url_set_query,
+                        vec![
+                            recv_val,
+                            self.lower_expr(&args[0])?,
+                            self.lower_expr(&args[1])?,
+                        ],
+                    ),
+                    "add_query" if args.len() == 2 => (
+                        self.host.net.url_add_query,
+                        vec![
+                            recv_val,
+                            self.lower_expr(&args[0])?,
+                            self.lower_expr(&args[1])?,
+                        ],
                     ),
                     "essence" if args.is_empty() => {
                         (self.host.net.mime_essence, vec![recv_val])
@@ -19693,6 +20172,22 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(print, &[text]);
             return Ok(());
         }
+        if matches!(
+            &inner.ty,
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "Url" | "Mime" | "Path" | "Date" | "DateTime" | "Instant"
+                        | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
+                )
+        ) {
+            let text = self.lower_jet_show(inner)?;
+            let print = self
+                .module
+                .declare_func_in_func(self.host.print_str, self.b.func);
+            self.b.ins().call(print, &[text]);
+            return Ok(());
+        }
         if http_nominal_show_type(&inner.ty) {
             let value = self.lower_expr(inner)?;
             let shown = self.call_host(self.host.net_http.http_nominal_show, &[value]);
@@ -19762,43 +20257,31 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(print_ref, &[shown]);
                     return Ok(());
                 }
-                // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
-                if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
-                    let kind = match elem {
-                        Type::String => 1,
-                        Type::IntN { signed: true, .. } => 2,
-                        Type::IntN { signed: false, .. } => 3,
-                        Type::Float | Type::Float32 => 4,
-                        _ => 0,
-                    };
-                    let flag = self
-                        .b
-                        .ins()
-                        .iconst(types::I64, kind);
-                    let host_ref = self
+                if matches!(
+                    &print_ty,
+                    Type::List(_)
+                        | Type::FixedList { .. }
+                        | Type::Map { .. }
+                        | Type::Option(_)
+                        | Type::Result { .. }
+                ) {
+                    let uses_result = matches!(&print_ty, Type::Option(inner_ty) if matches!(inner_ty.as_ref(), Type::IntN { .. }))
+                        || Self::uses_result_option_abi(inner);
+                    let text = self.lower_jet_show_value(val, &print_ty, uses_result)?;
+                    let print = self
                         .module
-                        .declare_func_in_func(self.host.coll.print_list, self.b.func);
-                    self.b.ins().call(host_ref, &[val, flag]);
+                        .declare_func_in_func(self.host.print_str, self.b.func);
+                    self.b.ins().call(print, &[text]);
                     return Ok(());
                 }
-                // `T?` — IntN uses the result arena; legacy payloads use `value + 1`.
-                if let Type::Option(inner_ty) = &print_ty {
-                    let mut kind = match inner_ty.as_ref() {
-                        Type::Int => 0i64,
-                        Type::String => 1,
-                        Type::Float => 2,
-                        Type::IntN { signed: true, .. } => 3,
-                        Type::IntN { signed: false, .. } => 4,
-                        _ => return Err(format!("jit print type unsupported: Option<{inner_ty:?}>")),
-                    };
-                    if Self::uses_result_option_abi(inner) {
-                        kind += 10;
-                    }
-                    let flag = self.b.ins().iconst(types::I64, kind);
-                    let host_ref = self
+                // Lists produced by a materialized iterator have the same
+                // resident list ABI; render their element type recursively.
+                if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
+                    let text = self.lower_jet_show_list_value(val, &elem)?;
+                    let print = self
                         .module
-                        .declare_func_in_func(self.host.coll.print_opt, self.b.func);
-                    self.b.ins().call(host_ref, &[val, flag]);
+                        .declare_func_in_func(self.host.print_str, self.b.func);
+                    self.b.ins().call(print, &[text]);
                     return Ok(());
                 }
                 if matches!(

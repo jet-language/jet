@@ -1569,7 +1569,9 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 }
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
-/// `kind`: 0 = raw i64, 1 = string, 2 = signed IntN, 3 = unsigned IntN.
+/// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
+/// 4 = Float, 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
@@ -1597,6 +1599,30 @@ fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
         for id in xs {
             parts.push(rt.heap.clone_string(id).unwrap_or_default());
         }
+    } else if kind == 5 {
+        for handle in xs {
+            parts.push(crate::Net::show_value(rt, handle));
+        }
+    } else if kind == 6 {
+        for value in xs {
+            parts.push((value != 0).to_string());
+        }
+    } else if kind == 7 {
+        for value in xs {
+            parts.push(
+                char::from_u32(value as u32)
+                    .map(|character| character.to_string())
+                    .unwrap_or_default(),
+            );
+        }
+    } else if kind == 8 {
+        for handle in xs {
+            parts.push(crate::CoreHost::show_path(rt, handle));
+        }
+    } else if kind == 9 {
+        for handle in xs {
+            parts.push(crate::Time::show_value(rt, handle));
+        }
     } else {
         for v in xs {
             parts.push(match kind {
@@ -1618,7 +1644,9 @@ extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
 
 /// Print `T?` using its JIT Option carrier.
 /// `kind`: 0 = packed i64, 1 = packed string, 2 = packed f64 bits,
-/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN.
+/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN,
+/// 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle.
 extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let result_abi = kind >= 10;
@@ -1630,7 +1658,7 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
             return;
         }
         let kind = if result_abi { kind - 10 } else { kind };
-        let payload = if result_abi || kind >= 3 {
+        let payload = if result_abi || matches!(kind, 3 | 4) {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
             packed - 1
@@ -1649,6 +1677,16 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
                     &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
                 );
             }
+            5 => rt.stdout.push_str(&crate::Net::show_value(rt, payload)),
+            6 => rt.stdout.push_str(&(payload != 0).to_string()),
+            7 => {
+                let text = char::from_u32(payload as u32)
+                    .map(|character| character.to_string())
+                    .unwrap_or_default();
+                rt.stdout.push_str(&text);
+            }
+            8 => rt.stdout.push_str(&crate::CoreHost::show_path(rt, payload)),
+            9 => rt.stdout.push_str(&crate::Time::show_value(rt, payload)),
             _ => {
                 rt.stdout.push_str(&payload.to_string());
             }
