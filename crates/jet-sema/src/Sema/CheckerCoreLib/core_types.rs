@@ -470,6 +470,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
+            "not_before" => Some(Type::Option(Box::new(Type::Int))),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
@@ -2134,5 +2135,6 @@ pub(crate) fn core_auth_variants(
             ]),
         ),
     );
+    variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
     Some(variants)
 }

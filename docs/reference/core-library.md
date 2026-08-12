@@ -856,18 +856,22 @@ oauth_finish(state, subject, now_ms, ttl_ms) => Session ? String
 key, and verifies the PAE input including the supplied footer and implicit
 assertion. Unknown algorithms, versions, and purposes fail closed.
 
-Both formats require integer `exp` and matching `aud` claims. An optional
-expected issuer must match `iss`. Expiry is compared in milliseconds, equality
-is expired, subsecond skew is preserved, and arithmetic overflow is rejected.
-Token JSON rejects duplicate object keys after escape decoding, including
-duplicates in headers and claims. Base64url input must be unpadded and
-canonical.
+Both formats require exact signed-integer `exp` and matching `aud` claims. An
+optional `nbf` claim uses the same exact NumericDate representation. An
+optional expected issuer must match `iss`. `iat` and `nbf` are preserved in
+`Claims`; expiry and not-before comparisons use nanoseconds, equality at the
+expiry boundary is expired, skew is applied with exact signed arithmetic, and
+arithmetic overflow is rejected. Token JSON rejects duplicate object keys
+after escape decoding, including duplicates in headers and claims. Base64url
+input must be unpadded and canonical.
 
 `Claims` exposes `subject: String?`, the validated `audience: String`,
-`issuer: String?`, `expires_at: Int`, and `issued_at: Int?`. `AuthError` is an
-inspectable enum with `MalformedToken`, `UnsupportedToken`, `InvalidSignature`,
-`WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`, `TokenExpired`, and
-`DecodeError` variants. Sessions use httponly/secure/samesite cookie defaults.
+`issuer: String?`, `expires_at: Int`, `not_before: Int?`, and `issued_at:
+Int?`. `AuthError` is an inspectable enum with `MalformedToken`,
+`UnsupportedToken`, `InvalidSignature`, `WeakKey`, `MissingClaim`,
+`WrongAudience`, `WrongIssuer`, `TokenExpired`, `DecodeError`, and
+`TokenNotYetValid` variants. Sessions use httponly/secure/samesite cookie
+defaults.
 The implementation is compiler-embedded, reuses Jet's JSON and crypto
 mechanisms, and adds no external dependency.
 

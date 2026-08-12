@@ -1,4 +1,4 @@
-//! Whole-program interpreter hosts for `core.db` / `core.crypto` (#1254).
+//! Whole-program interpreter hosts for `core.auth` / `core.db` / `core.crypto` (#1254).
 //!
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
@@ -440,19 +440,23 @@ fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
     }
 }
 
-fn service_duration_ms(value: &CtValue) -> Option<i64> {
+fn service_duration_ns(value: &CtValue) -> Option<i64> {
     match value {
         // The `Duration` carrier's one field is `ns` (see eval/handles.rs
-        // `duration_new`); this host wants milliseconds, so convert.
+        // `duration_new`); adapters pass the exact signed value onward.
         CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
             .iter()
             .find_map(|(name, value)| (name == "ns").then_some(value))
             .and_then(|value| match value {
-                CtValue::Int(ns) => Some(ns / 1_000_000),
+                CtValue::Int(ns) => Some(*ns),
                 _ => None,
             }),
         _ => None,
     }
+}
+
+fn service_duration_ms(value: &CtValue) -> Option<i64> {
+    service_duration_ns(value).map(|ns| ns / 1_000_000)
 }
 
 fn ct_db_value(v: &CtValue) -> Option<wire::DBValue> {
@@ -830,6 +834,405 @@ fn ambient_time_call(
     Some(result)
 }
 
+fn auth_claims_value(claims: Crypto::runtime::JetAuthClaims) -> CtValue {
+    let Crypto::runtime::JetAuthClaims {
+        subject,
+        audience,
+        issuer,
+        expires_at,
+        not_before,
+        issued_at,
+    } = claims;
+    CtValue::Struct {
+        type_name: "Claims".to_string(),
+        fields: vec![
+            (
+                "subject".to_string(),
+                subject
+                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+                    .unwrap_or_else(|| CtValue::absent(Type::String)),
+            ),
+            ("audience".to_string(), CtValue::Str(audience)),
+            (
+                "issuer".to_string(),
+                issuer
+                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+                    .unwrap_or_else(|| CtValue::absent(Type::String)),
+            ),
+            ("expires_at".to_string(), CtValue::Int(expires_at)),
+            (
+                "not_before".to_string(),
+                not_before
+                    .map(CtValue::Int)
+                    .map(|value| CtValue::Present(Box::new(value)))
+                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+            ),
+            (
+                "issued_at".to_string(),
+                issued_at
+                    .map(CtValue::Int)
+                    .map(|value| CtValue::Present(Box::new(value)))
+                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+            ),
+        ],
+    }
+}
+
+fn auth_error_value(error: Crypto::runtime::JetAuthError) -> CtValue {
+    let variant = |name: &str, args: Vec<(Option<String>, CtValue)>| CtValue::Enum {
+        type_name: "AuthError".to_string(),
+        variant: name.to_string(),
+        args,
+    };
+    let text = |value: String| vec![(None, CtValue::Str(value))];
+    match error {
+        Crypto::runtime::JetAuthError::MalformedToken(value) => variant("MalformedToken", text(value)),
+        Crypto::runtime::JetAuthError::UnsupportedToken(value) => variant("UnsupportedToken", text(value)),
+        Crypto::runtime::JetAuthError::InvalidSignature => variant("InvalidSignature", Vec::new()),
+        Crypto::runtime::JetAuthError::WeakKey => variant("WeakKey", Vec::new()),
+        Crypto::runtime::JetAuthError::MissingClaim(value) => variant("MissingClaim", text(value)),
+        Crypto::runtime::JetAuthError::WrongAudience { expected, actual } => variant(
+            "WrongAudience",
+            vec![
+                (Some("expected".to_string()), CtValue::Str(expected)),
+                (Some("actual".to_string()), CtValue::Str(actual)),
+            ],
+        ),
+        Crypto::runtime::JetAuthError::WrongIssuer { expected, actual } => variant(
+            "WrongIssuer",
+            vec![
+                (Some("expected".to_string()), CtValue::Str(expected)),
+                (
+                    Some("actual".to_string()),
+                    actual
+                        .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+                        .unwrap_or_else(|| CtValue::absent(Type::String)),
+                ),
+            ],
+        ),
+        Crypto::runtime::JetAuthError::TokenExpired => variant("TokenExpired", Vec::new()),
+        Crypto::runtime::JetAuthError::DecodeError(value) => variant("DecodeError", text(value)),
+        Crypto::runtime::JetAuthError::TokenNotYetValid => {
+            variant("TokenNotYetValid", Vec::new())
+        }
+    }
+}
+
+fn auth_struct_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    (type_name == "Session" || type_name == "Auth")
+        .then(|| fields.iter().find_map(|(name, value)| (name == wanted).then_some(value)))
+        .flatten()
+}
+
+fn auth_text_arg(args: &[CtValue], index: usize, what: &str, span: Span) -> Result<String, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn auth_int_arg(args: &[CtValue], index: usize, what: &str, span: Span) -> Result<i64, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn auth_session_value(session: Crypto::runtime::JetAuthSession) -> CtValue {
+    CtValue::Struct {
+        type_name: "Session".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(session.id)),
+            ("user_id".to_string(), CtValue::Str(session.user_id)),
+            ("expires_at".to_string(), CtValue::Int(session.expires_at)),
+            ("cookie".to_string(), CtValue::Str(session.cookie)),
+        ],
+    }
+}
+
+fn auth_session_arg(
+    args: &[CtValue],
+    index: usize,
+    span: Span,
+) -> Result<Crypto::runtime::JetAuthSession, Diagnostic> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| unsupported("core.auth Session argument", span))?;
+    let id = match auth_struct_field(value, "id") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("core.auth Session.id", span)),
+    };
+    let user_id = match auth_struct_field(value, "user_id") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("core.auth Session.user_id", span)),
+    };
+    let expires_at = match auth_struct_field(value, "expires_at") {
+        Some(CtValue::Int(value)) => *value,
+        _ => return Err(unsupported("core.auth Session.expires_at", span)),
+    };
+    let cookie = match auth_struct_field(value, "cookie") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("core.auth Session.cookie", span)),
+    };
+    Ok(Crypto::runtime::JetAuthSession {
+        id,
+        user_id,
+        expires_at,
+        cookie,
+    })
+}
+
+fn auth_app_value(app: Crypto::runtime::JetAuthApp) -> CtValue {
+    CtValue::Struct {
+        type_name: "Auth".to_string(),
+        fields: vec![
+            ("users_table".to_string(), CtValue::Str(app.users_table)),
+            (
+                // Internal carrier field; the public Auth surface exposes only
+                // users_table, but providers must survive app.auth_oauth.
+                "providers".to_string(),
+                CtValue::List(app.providers.into_iter().map(CtValue::Str).collect()),
+            ),
+        ],
+    }
+}
+
+fn auth_app_arg(
+    args: &[CtValue],
+    index: usize,
+    span: Span,
+) -> Result<Crypto::runtime::JetAuthApp, Diagnostic> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| unsupported("app Auth argument", span))?;
+    let users_table = match auth_struct_field(value, "users_table") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("app Auth.users_table", span)),
+    };
+    let providers = match auth_struct_field(value, "providers") {
+        Some(CtValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Str(value) => Ok(value.clone()),
+                _ => Err(unsupported("app Auth.providers", span)),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(unsupported("app Auth.providers", span)),
+    };
+    Ok(Crypto::runtime::JetAuthApp {
+        users_table,
+        providers,
+    })
+}
+
+fn ambient_auth_session_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        method,
+        "register_user"
+            | "password_login"
+            | "session_validate"
+            | "magic_link_issue"
+            | "magic_link_consume"
+            | "oauth_begin"
+            | "oauth_finish"
+            | "session_show"
+            | "session_user"
+            | "session_cookie"
+            | "session_id"
+    ) {
+        return None;
+    }
+    let result = (|| {
+        let value = match method {
+            "register_user" => match Crypto::runtime::auth_register_user(
+                auth_text_arg(args, 0, "core.auth user id", span)?,
+                auth_text_arg(args, 1, "core.auth password hash", span)?,
+            ) {
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "password_login" => match Crypto::runtime::auth_password_login(
+                auth_text_arg(args, 0, "core.auth user id", span)?,
+                auth_text_arg(args, 1, "core.auth password hash", span)?,
+                auth_int_arg(args, 2, "core.auth now_ms", span)?,
+                auth_int_arg(args, 3, "core.auth ttl_ms", span)?,
+            ) {
+                Ok(session) => CtValue::Present(Box::new(auth_session_value(session))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "session_validate" => match Crypto::runtime::auth_session_validate(
+                &auth_text_arg(args, 0, "core.auth session id", span)?,
+                auth_int_arg(args, 1, "core.auth now_ms", span)?,
+            ) {
+                Ok(session) => CtValue::Present(Box::new(auth_session_value(session))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "magic_link_issue" => match Crypto::runtime::auth_magic_link_issue(
+                auth_text_arg(args, 0, "core.auth user id", span)?,
+                auth_int_arg(args, 1, "core.auth now_ms", span)?,
+                auth_int_arg(args, 2, "core.auth ttl_ms", span)?,
+            ) {
+                Ok(token) => CtValue::Present(Box::new(CtValue::Str(token))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "magic_link_consume" => match Crypto::runtime::auth_magic_link_consume(
+                auth_text_arg(args, 0, "core.auth magic token", span)?,
+                auth_int_arg(args, 1, "core.auth now_ms", span)?,
+                auth_int_arg(args, 2, "core.auth ttl_ms", span)?,
+            ) {
+                Ok(session) => CtValue::Present(Box::new(auth_session_value(session))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "oauth_begin" => match Crypto::runtime::auth_oauth_begin(auth_text_arg(
+                args,
+                0,
+                "core.auth provider",
+                span,
+            )?) {
+                Ok(state) => CtValue::Present(Box::new(CtValue::Str(state))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "oauth_finish" => match Crypto::runtime::auth_oauth_finish(
+                auth_text_arg(args, 0, "core.auth OAuth state", span)?,
+                auth_text_arg(args, 1, "core.auth OAuth subject", span)?,
+                auth_int_arg(args, 2, "core.auth now_ms", span)?,
+                auth_int_arg(args, 3, "core.auth ttl_ms", span)?,
+            ) {
+                Ok(session) => CtValue::Present(Box::new(auth_session_value(session))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            },
+            "session_show" => CtValue::Str(Crypto::runtime::auth_session_show(&auth_session_arg(
+                args, 0, span,
+            )?)),
+            "session_user" => CtValue::Str(Crypto::runtime::auth_session_user(&auth_session_arg(
+                args, 0, span,
+            )?)),
+            "session_cookie" => CtValue::Str(Crypto::runtime::auth_session_cookie(&auth_session_arg(
+                args, 0, span,
+            )?)),
+            "session_id" => CtValue::Str(Crypto::runtime::auth_session_id(&auth_session_arg(
+                args, 0, span,
+            )?)),
+            _ => unreachable!("auth session method was checked above"),
+        };
+        Ok(value)
+    })();
+    Some(result)
+}
+
+fn ambient_app_auth_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(method, "auth" | "auth_oauth" | "auth_routes" | "auth_show") {
+        return None;
+    }
+    let result = (|| {
+        let value = match method {
+            "auth" => auth_app_value(Crypto::runtime::app_auth(auth_text_arg(
+                args,
+                0,
+                "app auth users table",
+                span,
+            )?)),
+            "auth_oauth" => {
+                let auth = auth_app_arg(args, 0, span)?;
+                auth_app_value(Crypto::runtime::app_auth_oauth(
+                    auth,
+                    auth_text_arg(args, 1, "app auth providers", span)?,
+                ))
+            }
+            "auth_routes" => {
+                let auth = auth_app_arg(args, 0, span)?;
+                CtValue::Str(Crypto::runtime::app_auth_routes(&auth))
+            }
+            "auth_show" => {
+                let auth = auth_app_arg(args, 0, span)?;
+                CtValue::Str(Crypto::runtime::app_auth_show(&auth))
+            }
+            _ => unreachable!("app auth method was checked above"),
+        };
+        Ok(value)
+    })();
+    Some(result)
+}
+
+fn ambient_auth_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(method, "verify_jwt" | "verify_paseto") {
+        return ambient_auth_session_call(method, args, span);
+    }
+    Some((|| {
+        let token = match args.first() {
+            Some(CtValue::Str(value)) => value.clone(),
+            _ => return Err(unsupported("core.auth token", span)),
+        };
+        let key = as_bytes(
+            args.get(1)
+                .ok_or_else(|| unsupported("core.auth key", span))?,
+            span,
+        )?;
+        let audience = match args.get(2) {
+            Some(CtValue::Str(value)) => value.clone(),
+            _ => return Err(unsupported("core.auth audience", span)),
+        };
+        let issuer = match args.get(3) {
+            None => None,
+            Some(CtValue::Str(value)) => Some(value.clone()),
+            _ => return Err(unsupported("core.auth issuer", span)),
+        };
+        let clock_skew_ns = args
+            .get(4)
+            .map(|value| {
+                service_duration_ns(value)
+                    .ok_or_else(|| unsupported("core.auth clock_skew", span))
+            })
+            .transpose()?;
+        let result = if method == "verify_jwt" {
+            Crypto::runtime::auth_verify_jwt_defaulted(
+                &token,
+                &key,
+                &audience,
+                issuer.as_ref(),
+                clock_skew_ns,
+            )
+        } else {
+            let footer = args
+                .get(5)
+                .map(|value| as_bytes(value, span))
+                .transpose()?;
+            let implicit = args
+                .get(6)
+                .map(|value| as_bytes(value, span))
+                .transpose()?;
+            Crypto::runtime::auth_verify_paseto_defaulted(
+                &token,
+                &key,
+                &audience,
+                issuer.as_ref(),
+                clock_skew_ns,
+                footer.as_ref(),
+                implicit.as_ref(),
+            )
+        };
+        Ok(match result {
+            Ok(claims) => CtValue::Present(Box::new(auth_claims_value(claims))),
+            Err(error) => CtValue::failed(Box::new(auth_error_value(error))),
+        })
+    })())
+}
+
 pub fn ambient_core_call(
     module: &str,
     method: &str,
@@ -895,6 +1298,18 @@ pub fn ambient_core_call(
             _ => Err(unsupported("core.http.client.request arguments", span)),
         };
         return Some(result);
+    }
+    // I9: token verification uses the same Auth Prelude adapters as AOT/JIT;
+    // this branch only marshals their typed result into CtValue.
+    if module == "core.auth" {
+        if let Some(result) = ambient_auth_call(method, &args, span) {
+            return Some(result);
+        }
+    }
+    if module == "app" || module == "core.web" {
+        if let Some(result) = ambient_app_auth_call(method, &args, span) {
+            return Some(result);
+        }
     }
     match (module, method) {
         ("core.process", "cmd") => {

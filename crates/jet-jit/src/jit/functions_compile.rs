@@ -281,6 +281,7 @@ fn lower_spawn_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             real_address_values: HashSet::new(),
             func_ids,
@@ -622,6 +623,7 @@ fn lower_callable_lambda_with_env(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             real_address_values: HashSet::new(),
             func_ids,
@@ -946,6 +948,7 @@ fn lower_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             real_address_values: HashSet::new(),
             func_ids,
@@ -994,7 +997,7 @@ fn lower_function(
             }
             param_idx = 1;
         }
-        for (name, ty, convention) in &tir.params {
+        for (param_index, (name, ty, convention)) in tir.params.iter().enumerate() {
             if matches!(ty, Type::Named(range) if range == jet_foundation::Syntax::TYPE_RANGE) {
                 let values = [
                     param_vals[param_idx],
@@ -1035,6 +1038,9 @@ fn lower_function(
                 ty.clone()
             };
             lctx.var_tys.insert(name.clone(), stored_ty);
+            if meta.result_option_param(&tir.name, param_index) {
+                lctx.result_option_vars.insert(name.clone());
+            }
         }
 
         lctx.lower_stmts(&tir.body)?;
@@ -1139,6 +1145,7 @@ fn lower_generator_body(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             real_address_values: HashSet::new(),
             func_ids,

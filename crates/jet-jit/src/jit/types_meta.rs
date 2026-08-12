@@ -2,12 +2,13 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use jet_codegen::Codegen::TIR::{
-    JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TNumericOp,
+    JitProgram, SerdeCodec, TExpr, TExprKind, TFnValueKind, TFunc, TFuncKind, THandleOp,
+    TMethodRef, TNumericOp, TPlace, TStmt,
 };
 use jet_foundation::AST::{Item, ProgramBundle, Type};
 use jet_foundation::Names::{mangle, mangle_path};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
@@ -44,6 +45,12 @@ static IO_ERROR_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 static IO_OPERATION_NAME: LazyLock<String> = LazyLock::new(|| "IOOperation".to_string());
 static IO_ERROR_NAME: LazyLock<String> = LazyLock::new(|| "IOError".to_string());
+// D-AUTH-TOKENPOLICY1=A: every AuthError variant uses one tagged heap record
+// with typed fields in declaration order, matching the JIT auth bridge carrier.
+static AUTH_ERROR_WRONG_AUDIENCE_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::String, Type::String]);
+static AUTH_ERROR_WRONG_ISSUER_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::String, Type::Option(Box::new(Type::String))]);
 
 /// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
 /// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
@@ -400,6 +407,258 @@ pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
     }
 }
 
+fn is_i64_option(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Option(inner) if matches!(inner.as_ref(), Type::Int)
+    )
+}
+
+fn nominal_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+        Type::Tagged { inner, .. } => nominal_type_name(inner),
+        _ => None,
+    }
+}
+
+fn method_target_key(recv_ty: &Type, method: &TMethodRef, type_args: &[Type]) -> Option<String> {
+    let base = nominal_type_name(recv_ty)?;
+    if matches!(recv_ty, Type::Apply { .. }) || !type_args.is_empty() {
+        Some(jet_codegen::Codegen::TIR::generic_method_instance_key(
+            recv_ty,
+            &method.name,
+            type_args,
+        ))
+    } else {
+        Some(format!("{base}::{}", method.name))
+    }
+}
+
+fn result_option_field(expr: &TExpr) -> bool {
+    let TExprKind::Field { recv, field, .. } = &expr.kind else {
+        return false;
+    };
+    nominal_type_name(&recv.ty).is_some_and(|name| {
+        core_struct_field_uses_result_option_abi(name, field)
+    })
+}
+
+fn named_fn_target(expr: &TExpr) -> Option<&str> {
+    let TExprKind::FnValue { kind } = &expr.kind else {
+        return None;
+    };
+    match kind {
+        TFnValueKind::NamedFn { name: Some(name), .. } => Some(name),
+        _ => None,
+    }
+}
+
+fn result_option_expr(
+    expr: &TExpr,
+    locals: &HashSet<String>,
+    targets: &HashSet<String>,
+) -> bool {
+    if !is_i64_option(&expr.ty) {
+        return false;
+    }
+    match &expr.kind {
+        TExprKind::Local(local) => locals.contains(&local.rust_name()),
+        TExprKind::Field { .. } => result_option_field(expr),
+        TExprKind::Borrow { place, .. }
+        | TExprKind::DistinctCtor { arg: place, .. }
+        | TExprKind::Clone(place) => result_option_expr(place, locals, targets),
+        TExprKind::Call { name, .. } => targets.contains(name),
+        TExprKind::MethodCall {
+            recv,
+            method,
+            type_args,
+            ..
+        } => method_target_key(&recv.ty, method, type_args)
+            .is_some_and(|key| targets.contains(&key)),
+        TExprKind::FnValue {
+            kind: TFnValueKind::Call { callee, .. },
+        } => named_fn_target(callee).is_some_and(|name| targets.contains(name)),
+        TExprKind::IfExpr {
+            then_value,
+            else_value,
+            ..
+        } => {
+            result_option_expr(then_value, locals, targets)
+                || result_option_expr(else_value, locals, targets)
+        }
+        _ => false,
+    }
+}
+
+fn collect_result_option_calls(
+    expr: &TExpr,
+    locals: &HashSet<String>,
+    targets: &HashSet<String>,
+    params: &mut HashSet<(String, usize)>,
+) {
+    match &expr.kind {
+        TExprKind::Call { name, args, .. } => {
+            for (index, arg) in args.iter().enumerate() {
+                if result_option_expr(&arg.value, locals, targets) {
+                    params.insert((name.clone(), index));
+                }
+                collect_result_option_calls(&arg.value, locals, targets, params);
+            }
+        }
+        TExprKind::MethodCall {
+            recv,
+            method,
+            type_args,
+            args,
+            ..
+        } => {
+            if let Some(key) = method_target_key(&recv.ty, method, type_args) {
+                for (index, arg) in args.iter().enumerate() {
+                    if result_option_expr(&arg.value, locals, targets) {
+                        params.insert((key.clone(), index));
+                    }
+                    collect_result_option_calls(&arg.value, locals, targets, params);
+                }
+            }
+            collect_result_option_calls(recv, locals, targets, params);
+        }
+        TExprKind::FnValue {
+            kind: TFnValueKind::Call { callee, args },
+        } => {
+            if let Some(name) = named_fn_target(callee) {
+                for (index, arg) in args.iter().enumerate() {
+                    if result_option_expr(&arg.value, locals, targets) {
+                        params.insert((name.to_string(), index));
+                    }
+                    collect_result_option_calls(&arg.value, locals, targets, params);
+                }
+            }
+            collect_result_option_calls(callee, locals, targets, params);
+        }
+        TExprKind::Field { recv, .. }
+        | TExprKind::Borrow { place: recv, .. }
+        | TExprKind::DistinctCtor { arg: recv, .. }
+        | TExprKind::Clone(recv) => collect_result_option_calls(recv, locals, targets, params),
+        TExprKind::IfExpr {
+            then_value,
+            else_value,
+            ..
+        } => {
+            collect_result_option_calls(then_value, locals, targets, params);
+            collect_result_option_calls(else_value, locals, targets, params);
+        }
+        _ => {}
+    }
+}
+
+fn analyze_result_option_stmts(
+    stmts: &[TStmt],
+    locals: &mut HashSet<String>,
+    targets: &HashSet<String>,
+    params: &mut HashSet<(String, usize)>,
+) -> bool {
+    let mut returns_result_option = false;
+    for stmt in stmts {
+        match stmt {
+            TStmt::Let { name, init, .. } => {
+                collect_result_option_calls(init, locals, targets, params);
+                let place = jet_codegen::Codegen::TIR::local_place(name);
+                if result_option_expr(init, locals, targets) {
+                    locals.insert(place);
+                } else {
+                    locals.remove(&place);
+                }
+            }
+            TStmt::Assign {
+                place: TPlace::Local(local),
+                op: None,
+                value,
+                ..
+            } => {
+                collect_result_option_calls(value, locals, targets, params);
+                let key = local.rust_name();
+                if result_option_expr(value, locals, targets) {
+                    locals.insert(key);
+                } else {
+                    locals.remove(&key);
+                }
+            }
+            TStmt::Return(Some(value)) => {
+                collect_result_option_calls(value, locals, targets, params);
+                returns_result_option |= result_option_expr(value, locals, targets);
+            }
+            TStmt::ExprStmt(value) => {
+                collect_result_option_calls(value, locals, targets, params);
+            }
+            TStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let mut then_locals = locals.clone();
+                let mut else_locals = locals.clone();
+                returns_result_option |= analyze_result_option_stmts(
+                    then_body,
+                    &mut then_locals,
+                    targets,
+                    params,
+                );
+                if let Some(else_body) = else_body {
+                    returns_result_option |= analyze_result_option_stmts(
+                        else_body,
+                        &mut else_locals,
+                        targets,
+                        params,
+                    );
+                }
+            }
+            TStmt::Inline(body)
+            | TStmt::DebugOnly(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Impure(body)
+            | TStmt::Region(body) => {
+                returns_result_option |=
+                    analyze_result_option_stmts(body, locals, targets, params);
+            }
+            _ => {}
+        }
+    }
+    returns_result_option
+}
+
+fn result_option_facts(
+    program: &JitProgram,
+) -> (HashSet<String>, HashSet<(String, usize)>) {
+    let mut targets = HashSet::new();
+    let mut params = HashSet::new();
+    loop {
+        let before_targets = targets.len();
+        let before_params = params.len();
+        for function in &program.funcs {
+            let mut locals = HashSet::new();
+            for (index, (name, ty, _)) in function.params.iter().enumerate() {
+                if is_i64_option(ty) && params.contains(&(function.name.clone(), index)) {
+                    locals.insert(name.clone());
+                }
+            }
+            let returns_result_option = analyze_result_option_stmts(
+                &function.body,
+                &mut locals,
+                &targets,
+                &mut params,
+            );
+            if function.ret.as_ref().is_some_and(is_i64_option) && returns_result_option {
+                targets.insert(function.name.clone());
+            }
+        }
+        if targets.len() == before_targets && params.len() == before_params {
+            break;
+        }
+    }
+    (targets, params)
+}
+
 pub(crate) fn jit_fn_name(name: &str) -> String {
     let suffix = jet_foundation::Syntax::generated_suffix(name);
     jet_foundation::Syntax::generated_name(&format!("jit_fn_{}", suffix.replace("::", "__")))
@@ -420,10 +679,13 @@ pub(crate) struct JitMeta<'a> {
     has_generic_instances: bool,
     distinct_bases: &'a HashMap<String, Type>,
     distinct_ranges: &'a HashMap<String, (i64, i64)>,
+    result_option_targets: HashSet<String>,
+    result_option_params: HashSet<(String, usize)>,
 }
 
 impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
+        let (result_option_targets, result_option_params) = result_option_facts(program);
         JitMeta {
             trait_method_owners: &program.trait_method_owners,
             iterable_item_types: &program.iterable_item_types,
@@ -437,7 +699,18 @@ impl<'a> JitMeta<'a> {
             has_generic_instances: !program.instance_provenance.is_empty(),
             distinct_bases: &program.distinct_bases,
             distinct_ranges: &program.distinct_ranges,
+            result_option_targets,
+            result_option_params,
         }
+    }
+
+    pub(crate) fn result_option_target(&self, name: &str) -> bool {
+        self.result_option_targets.contains(name)
+    }
+
+    pub(crate) fn result_option_param(&self, function: &str, index: usize) -> bool {
+        self.result_option_params
+            .contains(&(function.to_string(), index))
     }
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
@@ -476,6 +749,16 @@ impl<'a> JitMeta<'a> {
         }
         if enum_name == "DataEvent" {
             return Some(data_event_payload(variant));
+        }
+        if enum_name == "AuthError" {
+            return Some(match variant {
+                "MalformedToken" | "UnsupportedToken" | "MissingClaim" | "DecodeError" => {
+                    HOOK_STR_PAYLOAD.as_slice()
+                }
+                "WrongAudience" => AUTH_ERROR_WRONG_AUDIENCE_PAYLOAD.as_slice(),
+                "WrongIssuer" => AUTH_ERROR_WRONG_ISSUER_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
         }
         if enum_name == "ServiceReceipt" {
             return Some(match variant {
@@ -753,6 +1036,22 @@ impl<'a> JitMeta<'a> {
                 "Text" => Some(8),
                 "Bytes" => Some(9),
                 "Key" => Some(10),
+                _ => None,
+            };
+        }
+        // D-AUTH-TOKENPOLICY1=A: order mirrors codegen's AuthError surface.
+        if enum_name == "AuthError" {
+            return match variant {
+                "InvalidSignature" => Some(0),
+                "WeakKey" => Some(1),
+                "TokenExpired" => Some(2),
+                "MalformedToken" => Some(3),
+                "UnsupportedToken" => Some(4),
+                "MissingClaim" => Some(5),
+                "DecodeError" => Some(6),
+                "WrongAudience" => Some(7),
+                "WrongIssuer" => Some(8),
+                "TokenNotYetValid" => Some(9),
                 _ => None,
             };
         }
@@ -1141,7 +1440,14 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "DecodeResult" => &["value", "migration"],
         "TextWidth" => &["ambiguous", "controls"],
         // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
-        "Claims" => &["subject", "audience", "issuer", "expires_at", "issued_at"],
+        "Claims" => &[
+            "subject",
+            "audience",
+            "issuer",
+            "expires_at",
+            "not_before",
+            "issued_at",
+        ],
         "Rotation" => &["previous", "current"],
         "WatchEvent" => &["domain", "kind", "path", "detail", "pid", "port"],
         _ => return None,
@@ -1197,6 +1503,9 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
             "expires_at" => Some(Type::Int),
+            "not_before" => Some(Type::Option(Box::new(Type::Int))),
+            // The field's source type stays Option<Int>; its JIT carrier is
+            // the one-based tagged result arena, not bits+1.
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         },
@@ -1407,6 +1716,12 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         },
         _ => None,
     }
+}
+
+/// Core optional fields whose JIT carrier is a one-based `JitResultValue`
+/// handle: `ok` is presence and `bits` is the exact payload bits.
+pub(crate) fn core_struct_field_uses_result_option_abi(type_name: &str, field: &str) -> bool {
+    matches!((type_name, field), ("Claims", "not_before" | "issued_at"))
 }
 
 fn datatree_payload(variant: &str) -> &'static [Type] {

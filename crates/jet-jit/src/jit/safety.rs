@@ -980,6 +980,31 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return (3..=7).contains(&args.len())
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
+            if module == "core.auth" {
+                return match method.as_str() {
+                    "register_user" if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "oauth_begin" if args.len() == 1 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "password_login" | "oauth_finish" if args.len() == 4 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "session_validate" if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "magic_link_issue" | "magic_link_consume" if args.len() == 3 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "session_show" | "session_user" | "session_cookie" | "session_id"
+                        if args.len() == 1 =>
+                    {
+                        resident_safe_expr(&args[0], callees)
+                    }
+                    _ => false,
+                };
+            }
             if module == "core.vault" || module == "core.vault.expert" {
                 return !args.is_empty()
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
@@ -1115,6 +1140,20 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             if module == "core.services" {
                 // ServiceTree mutates through Prelude; deopt to ambient (I9).
                 return false;
+            }
+            if (module == "app" || module == "core.web")
+                && matches!(
+                    method.as_str(),
+                    "auth" | "auth_oauth" | "auth_routes" | "auth_show"
+                )
+            {
+                return match (method.as_str(), args.len()) {
+                    ("auth", 1) | ("auth_routes" | "auth_show", 1) => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    ("auth_oauth", 2) => args.iter().all(|arg| resident_safe_expr(arg, callees)),
+                    _ => false,
+                };
             }
             if module == "app"
                 || (module == "core.web"

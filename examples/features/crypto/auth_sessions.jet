@@ -5,11 +5,18 @@ use app
 fn run() {
     auth.register_user("alice", "argon2id:demo") ?? panic("register")
     sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
-    print(auth.session_show(sess))
+    show :: auth.session_show(sess)
+    print("show:{show.byte_count() > 0}")
     print("user:{auth.session_user(sess)}")
-    print("cookie:{auth.session_cookie(sess)}")
+    cookie :: auth.session_cookie(sess)
+    print("cookie:{cookie.byte_count() > 0}")
+    id :: auth.session_id(sess)
+    print("id:{id.byte_count() > 0}")
+    validated :: auth.session_validate(id, 1_700_000_000_001) ?? panic("validate")
+    print("validated:{auth.session_user(validated)}")
 
-    magic :: auth.magic_link_issue("bob", 1_700_000_000_000, 600_000) ?? panic("magic")
+    auth.register_user("bob@example.com", "argon2id:demo") ?? panic("register delivery")
+    magic :: auth.magic_link_issue("bob@example.com", 1_700_000_000_000, 600_000) ?? panic("magic")
     magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? panic("consume")
     print("magic_user:{auth.session_user(magic_sess)}")
 
