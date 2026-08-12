@@ -19,6 +19,8 @@ thread_local! {
 /// Run front-end work on Jet's canonical compiler worker.
 ///
 /// Nested compiler entry points reuse the active worker.
+const COMPILER_STACK_SIZE: usize = 32 * 1024 * 1024;
+
 pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     if ON_COMPILER_WORKER.with(std::cell::Cell::get) {
         return work();
@@ -26,6 +28,7 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-compiler".to_string())
+            .stack_size(COMPILER_STACK_SIZE)
             .spawn_scoped(scope, || {
                 ON_COMPILER_WORKER.with(|active| active.set(true));
                 boot_tir_eval();
