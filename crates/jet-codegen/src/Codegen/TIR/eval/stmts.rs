@@ -1,5 +1,5 @@
 //! Exhaustive TStmt evaluation (#777).
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
 use crate::Codegen::mangle;
@@ -209,24 +209,83 @@ impl<'a> EvalCtx<'a> {
         stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core(stmts, scope, None)
+    }
+
+    fn exec_stmts_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core_with_names(stmts, scope, None, scope_names)
+    }
+
+    fn exec_stmts_core(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        tail: Option<&'a TExpr>,
+    ) -> Result<Flow, Diagnostic> {
+        let scope_names = scope.keys().cloned().collect::<HashSet<_>>();
+        self.exec_stmts_core_with_names(stmts, scope, tail, &scope_names)
+    }
+
+    pub(super) fn exec_stmts_value_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        value: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core_with_names(stmts, scope, Some(value), scope_names)
+    }
+
+    fn exec_stmts_core_with_names(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+        tail: Option<&'a TExpr>,
+        scope_names: &HashSet<String>,
+    ) -> Result<Flow, Diagnostic> {
         let defer_mark = self.deferred_closes.len();
         let guard_mark = self.shared_guards.len();
         for stmt in stmts {
-            self.dispatch_pending_interrupts(scope)?;
+            if let Err(error) = self.dispatch_pending_interrupts(scope) {
+                let _ = self.finish_eval_scope_with_resources(
+                    defer_mark,
+                    guard_mark,
+                    scope,
+                    scope_names,
+                    &[],
+                    &[],
+                );
+                return Err(error);
+            }
             let flow = match self.exec_stmt(stmt, scope) {
                 Ok(flow) => flow,
                 Err(error) => {
-                    let _ = self.finish_eval_scope(defer_mark, guard_mark, scope);
+                    let _ = self.finish_eval_scope_with_resources(
+                        defer_mark,
+                        guard_mark,
+                        scope,
+                        scope_names,
+                        &[],
+                        &[],
+                    );
                     return Err(error);
                 }
             };
             if let Some(flow) = self.pending_flow.take() {
                 let preserved = returned_shared_guards(&flow);
-                self.finish_eval_scope_preserving(
+                let resource_values = returned_tensor_values(&flow);
+                self.finish_eval_scope_with_resources(
                     defer_mark,
                     guard_mark,
                     scope,
+                    scope_names,
                     &preserved,
+                    &resource_values,
                 )?;
                 return Ok(flow);
             }
@@ -234,39 +293,87 @@ impl<'a> EvalCtx<'a> {
                 Flow::Normal => {}
                 other => {
                     let preserved = returned_shared_guards(&other);
-                    self.finish_eval_scope_preserving(
+                    let resource_values = returned_tensor_values(&other);
+                    self.finish_eval_scope_with_resources(
                         defer_mark,
                         guard_mark,
                         scope,
+                        scope_names,
                         &preserved,
+                        &resource_values,
                     )?;
                     return Ok(other);
                 }
             }
         }
-        self.finish_eval_scope(defer_mark, guard_mark, scope)?;
+        if let Some(tail) = tail {
+            let result = self.eval_expr(tail, scope);
+            let preserve = result.as_ref().map_or_else(
+                |_| Vec::new(),
+                |value| {
+                    let mut resources = Vec::new();
+                    collect_tensor_resources(value, &mut resources);
+                    resources
+                },
+            );
+            let cleanup = self.finish_eval_scope_with_resources(
+                defer_mark,
+                guard_mark,
+                scope,
+                scope_names,
+                &[],
+                &preserve,
+            );
+            return match (result, cleanup) {
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+                (Ok(value), Ok(())) => Ok(Flow::Return(value)),
+            };
+        }
+        self.finish_eval_scope_with_resources(
+            defer_mark,
+            guard_mark,
+            scope,
+            scope_names,
+            &[],
+            &[],
+        )?;
         Ok(Flow::Normal)
     }
 
-    fn finish_eval_scope(
+    fn finish_eval_scope_with_resources(
         &mut self,
         defer_mark: usize,
         guard_mark: usize,
         scope: &mut HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        self.finish_eval_scope_preserving(defer_mark, guard_mark, scope, &[])
-    }
-
-    fn finish_eval_scope_preserving(
-        &mut self,
-        defer_mark: usize,
-        guard_mark: usize,
-        scope: &mut HashMap<String, CtValue>,
-        preserve: &[usize],
+        scope_names: &HashSet<String>,
+        preserve_guards: &[usize],
+        preserve: &[CtValue],
     ) -> Result<(), Diagnostic> {
         let deferred_result = self.run_deferred_closes(defer_mark, scope);
-        self.release_shared_guards_except(guard_mark, preserve);
-        deferred_result
+        self.release_shared_guards_except(guard_mark, preserve_guards);
+        let mut preserve_values = preserve.to_vec();
+        for name in scope_names {
+            if let Some(value) = scope.get(name) {
+                preserve_values.push(value.clone());
+                collect_tensor_resources(value, &mut preserve_values);
+            }
+        }
+        let owner_sources = preserve_values.clone();
+        for value in &owner_sources {
+            collect_preserved_tensor_owners(value, scope, &mut preserve_values, self.span());
+        }
+        let resource_result = drop_scope_tensor_resources(
+            scope,
+            scope_names,
+            &preserve_values,
+            self.span(),
+        );
+        match (deferred_result, resource_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     fn release_shared_guards_except(&mut self, mark: usize, preserve: &[usize]) {
@@ -363,7 +470,13 @@ impl<'a> EvalCtx<'a> {
                     return Ok(Flow::Return(ret));
                 }
                 if *clone_value {
-                    rhs = rhs.clone();
+                    rhs = if value.ty.is_compute_tensor_family()
+                        || self.clone_contains_compute_tensor(&value.ty)
+                    {
+                        self.clone_structural_value(rhs, &value.ty)?
+                    } else {
+                        rhs.clone()
+                    };
                 }
                 match place {
                     TPlace::Local(local) => {
@@ -571,12 +684,29 @@ impl<'a> EvalCtx<'a> {
                 else_body,
                 ..
             } => {
-                if self.eval_if_cond(cond, scope)? {
-                    self.exec_stmts(then_body, scope)
+                let branch_scope_names = scope.keys().cloned().collect();
+                let condition_defer_mark = self.deferred_closes.len();
+                let condition_guard_mark = self.shared_guards.len();
+                let condition = match self.eval_if_cond(cond, scope) {
+                    Ok(condition) => condition,
+                    Err(error) => {
+                        let _ = self.finish_eval_scope_with_resources(
+                            condition_defer_mark,
+                            condition_guard_mark,
+                            scope,
+                            &branch_scope_names,
+                            &[],
+                            &[],
+                        );
+                        return Err(error);
+                    }
+                };
+                if condition {
+                    self.exec_stmts_with_names(then_body, scope, &branch_scope_names)
                 } else if let Some(else_body) = else_body {
-                    self.exec_stmts(else_body, scope)
+                    self.exec_stmts_with_names(else_body, scope, &branch_scope_names)
                 } else {
-                    Ok(Flow::Normal)
+                    self.exec_stmts_with_names(&[], scope, &branch_scope_names)
                 }
             }
             TStmt::Loop { body, label } => self.exec_infinite(label.as_deref(), body, scope),
@@ -1339,7 +1469,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut rhs = self.eval_expr(&assign.value, scope)?;
                 if assign.clone_value {
-                    rhs = rhs.clone();
+                    rhs = self.clone_structural_value(rhs, &assign.value.ty)?;
                 }
                 let base_value = self.eval_expr(&assign.base, scope)?;
                 if let CtValue::Struct {
@@ -1805,6 +1935,183 @@ impl<'a> EvalCtx<'a> {
         }
         Ok(Flow::Normal)
     }
+}
+
+fn collect_tensor_resources(value: &CtValue, out: &mut Vec<CtValue>) {
+    match value {
+        CtValue::Struct { type_name, fields }
+            if type_name == "Tensor" || type_name == "JetTensor"
+                || type_name == "__JetViewMut" =>
+        {
+            out.push(value.clone());
+            if type_name == "__JetViewMut" {
+                for (_, field) in fields {
+                    collect_tensor_resources(field, out);
+                }
+            }
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                collect_tensor_resources(field, out);
+            }
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                collect_tensor_resources(arg, out);
+            }
+        }
+        CtValue::List(values) => {
+            for value in values {
+                collect_tensor_resources(value, out);
+            }
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                collect_tensor_resources(value, out);
+            }
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            collect_tensor_resources(value, out);
+        }
+        _ => {}
+    }
+}
+
+fn contains_tensor_resource(value: &CtValue) -> bool {
+    let mut resources = Vec::new();
+    collect_tensor_resources(value, &mut resources);
+    !resources.is_empty()
+}
+
+fn collect_preserved_tensor_owners(
+    value: &CtValue,
+    scope: &HashMap<String, CtValue>,
+    out: &mut Vec<CtValue>,
+    span: Span,
+) {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
+            if let Some((base, path, _, _)) = view_mut_parts(fields) {
+                if let Some(root) = scope.get(&base) {
+                    if let Ok(owner) = super::project_list_place(root, &path, span) {
+                        collect_tensor_resources(owner, out);
+                    }
+                }
+            }
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                collect_preserved_tensor_owners(field, scope, out, span);
+            }
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                collect_preserved_tensor_owners(arg, scope, out, span);
+            }
+        }
+        CtValue::List(values) => {
+            for value in values {
+                collect_preserved_tensor_owners(value, scope, out, span);
+            }
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                collect_preserved_tensor_owners(value, scope, out, span);
+            }
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            collect_preserved_tensor_owners(value, scope, out, span);
+        }
+        _ => {}
+    }
+}
+
+fn shares_preserved_resource(value: &CtValue, preserve: &[CtValue]) -> bool {
+    preserve.iter().any(|candidate| {
+        crate::Comptime::ComputeLite::tensor_values_share_handle(value, candidate)
+            || crate::Comptime::ComputeLite::tensor_window_values_share_handle(value, candidate)
+    })
+}
+
+fn drop_tensor_resources(
+    value: &CtValue,
+    preserve: &[CtValue],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if shares_preserved_resource(value, preserve) {
+        return Ok(());
+    }
+    match value {
+        CtValue::Struct {
+            type_name,
+            fields: _,
+        }
+            if type_name == "Tensor" || type_name == "JetTensor" => {
+                crate::Comptime::ComputeLite::tensor_drop_value(value, span)
+            }
+        CtValue::Struct { type_name, .. } if type_name == "__JetViewMut" => {
+            crate::Comptime::ComputeLite::tensor_window_drop_value(value, span)
+        }
+        CtValue::Struct { fields, .. } => {
+            for (_, field) in fields {
+                drop_tensor_resources(field, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Enum { args, .. } => {
+            for (_, arg) in args {
+                drop_tensor_resources(arg, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::List(values) => {
+            for value in values {
+                drop_tensor_resources(value, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Map(values) => {
+            for value in values.values() {
+                drop_tensor_resources(value, preserve, span)?;
+            }
+            Ok(())
+        }
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
+            drop_tensor_resources(value, preserve, span)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn drop_scope_tensor_resources(
+    scope: &mut HashMap<String, CtValue>,
+    scope_names: &HashSet<String>,
+    preserve: &[CtValue],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let names = scope
+        .iter()
+        .filter(|(name, value)| {
+            !scope_names.contains(*name) && contains_tensor_resource(value)
+        })
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        if let Some(value) = scope.remove(&name) {
+            drop_tensor_resources(&value, preserve, span)?;
+        }
+    }
+    Ok(())
+}
+
+fn returned_tensor_values(flow: &Flow) -> Vec<CtValue> {
+    let value = match flow {
+        Flow::BreakValue(_, value) | Flow::Return(value) => value,
+        _ => return Vec::new(),
+    };
+    let mut resources = Vec::new();
+    collect_tensor_resources(value, &mut resources);
+    resources
 }
 
 fn returned_shared_guards(flow: &Flow) -> Vec<usize> {

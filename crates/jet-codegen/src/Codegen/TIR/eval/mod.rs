@@ -670,6 +670,9 @@ pub(super) fn replace_list_place(
 }
 
 pub(super) fn view_mut_window_args(fields: &[(String, CtValue)]) -> Option<&[CtValue]> {
+    if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
+        return None;
+    }
     fields.iter().find_map(|(name, value)| {
         (name == "window").then(|| match value {
             CtValue::List(args) => Some(args.as_slice()),
@@ -683,6 +686,9 @@ pub(super) fn view_mut_owner_value(
     scope: &HashMap<String, CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
+        return Err(unsupported("Tensor view window", span));
+    }
     let (base, path, _, _) =
         view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
     let root = scope

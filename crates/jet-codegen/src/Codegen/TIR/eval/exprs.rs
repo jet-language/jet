@@ -1,5 +1,5 @@
 //! Exhaustive TExprKind evaluation (#777).
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
@@ -854,6 +854,195 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
+        fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if ty.is_compute_tensor_family() {
+                return true;
+            }
+            match ty {
+                Type::Tagged { inner, .. }
+                | Type::List(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Option(inner) => visit(ctx, inner, seen),
+                Type::Map { value, .. } => visit(ctx, value, seen),
+                Type::Result { ok, err } => visit(ctx, ok, seen) || visit(ctx, err, seen),
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| visit(ctx, field, seen)),
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let result = ctx.struct_field_types.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, field)| visit(ctx, field, seen))
+                    });
+                    seen.remove(name);
+                    result
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
+
+    fn clone_structural_untyped(&self, value: CtValue) -> Result<CtValue, Diagnostic> {
+        match value {
+            CtValue::Struct {
+                type_name,
+                fields,
+            } if type_name == "Tensor" || type_name == "JetTensor" => {
+                crate::Comptime::ComputeLite::tensor_clone_value(
+                    &CtValue::Struct { type_name, fields },
+                    self.span(),
+                )
+            }
+            CtValue::Struct { type_name, fields } => Ok(CtValue::Struct {
+                type_name,
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => Ok(CtValue::Enum {
+                type_name,
+                variant,
+                args: args
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((name, self.clone_structural_untyped(value)?))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            }),
+            CtValue::List(values) => Ok(CtValue::List(
+                values
+                    .into_iter()
+                    .map(|value| self.clone_structural_untyped(value))
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            )),
+            CtValue::Map(values) => Ok(CtValue::Map(
+                values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, self.clone_structural_untyped(value)?)))
+                    .collect::<Result<_, Diagnostic>>()?,
+            )),
+            CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                self.clone_structural_untyped(*value)?,
+            ))),
+            CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                Box::new(self.clone_structural_untyped(*value)?),
+            ))),
+            other => Ok(other),
+        }
+    }
+
+    fn clone_structural_fields(
+        &self,
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+        field_types: Option<&[(String, Type)]>,
+    ) -> Result<CtValue, Diagnostic> {
+        let fields = fields
+            .into_iter()
+            .map(|(name, value)| {
+                let cloned = field_types
+                    .and_then(|types| types.iter().find(|(field, _)| field == &name))
+                    .map_or_else(
+                        || self.clone_structural_untyped(value),
+                        |(_, ty)| self.clone_structural_value(value, ty),
+                    )?;
+                Ok((name, cloned))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        Ok(CtValue::Struct { type_name, fields })
+    }
+
+    pub(super) fn clone_structural_value(
+        &self,
+        value: CtValue,
+        ty: &Type,
+    ) -> Result<CtValue, Diagnostic> {
+        if ty.is_compute_tensor_family() {
+            return crate::Comptime::ComputeLite::tensor_clone_value(&value, self.span());
+        }
+        match ty {
+            Type::Tagged { inner, .. } => self.clone_structural_value(value, inner),
+            Type::Shared(_) => Ok(value),
+            Type::Apply { name, .. }
+                if name == crate::Syntax::TYPE_SHARED_WEAK
+                    || name == crate::Syntax::TYPE_SHARED_GUARD => Ok(value),
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => match value {
+                CtValue::List(values) => Ok(CtValue::List(
+                    values
+                        .into_iter()
+                        .map(|value| self.clone_structural_value(value, inner))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Map { value: inner, .. } => match value {
+                CtValue::Map(values) => Ok(CtValue::Map(
+                    values
+                        .into_iter()
+                        .map(|(key, value)| {
+                            Ok((key, self.clone_structural_value(value, inner)?))
+                        })
+                        .collect::<Result<_, Diagnostic>>()?,
+                )),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Option(inner) => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, inner)?,
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Result { ok, err } => match value {
+                CtValue::Present(value) => Ok(CtValue::Present(Box::new(
+                    self.clone_structural_value(*value, ok)?,
+                ))),
+                CtValue::Failed(CtReport::Told(value)) => Ok(CtValue::Failed(CtReport::Told(
+                    Box::new(self.clone_structural_value(*value, err)?),
+                ))),
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Tuple(types) => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let fields = fields
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (name, value))| {
+                            let ty = types
+                                .iter()
+                                .find(|(field, _)| field == &name)
+                                .map(|(_, ty)| ty.as_ref())
+                                .or_else(|| types.get(index).map(|(_, ty)| ty.as_ref()));
+                            let cloned = match ty {
+                                Some(ty) => self.clone_structural_value(value, ty)?,
+                                None => self.clone_structural_untyped(value)?,
+                            };
+                            Ok((name, cloned))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    Ok(CtValue::Struct { type_name, fields })
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            Type::Named(_) | Type::Apply { .. } => match value {
+                CtValue::Struct { type_name, fields } => {
+                    let field_types = self.struct_field_types.get(&type_name).map(Vec::as_slice);
+                    self.clone_structural_fields(type_name, fields, field_types)
+                }
+                other => self.clone_structural_untyped(other),
+            },
+            _ => self.clone_structural_untyped(value),
+        }
+    }
+
     // #1799: these calls read or mutate runtime-owned clock/global state. A
     // build-time fold uses a throwaway evaluator, so materializing any of them
     // would freeze state that the running program cannot resync. Runtime and
@@ -1874,7 +2063,7 @@ impl<'a> EvalCtx<'a> {
         let mut expr = expr;
         let mut transparent_depth = 0;
         while let TExprKind::Clone(inner) = &expr.kind {
-            if expr.ty.is_compute_tensor_family() {
+            if expr.ty.is_compute_tensor_family() || self.clone_contains_compute_tensor(&expr.ty) {
                 break;
             }
             if let Err(diagnostic) = self.enter_source_nesting() {
@@ -2751,7 +2940,12 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) => {
-                let _ = self.eval_expr(inner, scope)?;
+                let value = self.eval_expr(inner, scope)?;
+                if inner.ty.is_compute_tensor_family() {
+                    crate::Comptime::ComputeLite::tensor_drop_value(&value, self.span())?;
+                } else if inner.ty.is_compute_view_mut() {
+                    crate::Comptime::ComputeLite::tensor_window_drop_value(&value, self.span())?;
+                }
                 Ok(CtValue::Unit)
             }
             TExprKind::Close(inner) => {
@@ -2893,26 +3087,33 @@ impl<'a> EvalCtx<'a> {
                 else_body,
                 else_value,
             } => {
+                let branch_scope_names = scope.keys().cloned().collect();
                 if self.eval_if_cond(cond, scope)? {
-                    match self.exec_stmts(then_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
+                    match self.exec_stmts_value_with_names(
+                        then_body,
+                        then_value,
+                        scope,
+                        &branch_scope_names,
+                    )? {
+                        Flow::Return(v) => Ok(v),
                         other => {
                             self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
+                            Err(unsupported("pending loop control", self.span()))
                         }
                     }
-                    self.eval_expr(then_value, scope)
                 } else {
-                    match self.exec_stmts(else_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
+                    match self.exec_stmts_value_with_names(
+                        else_body,
+                        else_value,
+                        scope,
+                        &branch_scope_names,
+                    )? {
+                        Flow::Return(v) => Ok(v),
                         other => {
                             self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
+                            Err(unsupported("pending loop control", self.span()))
                         }
                     }
-                    self.eval_expr(else_value, scope)
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
@@ -2952,13 +3153,20 @@ impl<'a> EvalCtx<'a> {
                         let end = i64::try_from(end_exclusive)
                             .map_err(|_| unsupported("view-mut end is too large", self.span()))?
                             .checked_sub(1)
-                            .ok_or_else(|| unsupported("view-mut end is too small", self.span()))?;
+                            .unwrap_or(-1);
                         return Ok(CtValue::Struct {
                             type_name: "__JetViewMut".into(),
                             fields: {
                                 fields.push(("start".into(), CtValue::Int(start)));
                                 fields.push(("end".into(), CtValue::Int(end)));
                                 fields.push(("window".into(), CtValue::List(evaluated_args)));
+                                fields.push((
+                                    "__jet_tensor_window_handle".into(),
+                                    crate::Comptime::ComputeLite::tensor_window_handle(
+                                        &base_value,
+                                        self.span(),
+                                    )?,
+                                ));
                                 fields
                             },
                         });
@@ -3677,11 +3885,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
             TExprKind::Clone(inner) => {
                 let value = self.eval_expr(inner, scope)?;
-                if expr.ty.is_compute_tensor_family() {
-                    crate::Comptime::ComputeLite::tensor_clone_value(&value, self.span())
-                } else {
-                    Ok(value)
-                }
+                self.clone_structural_value(value, &expr.ty)
             }
             TExprKind::ExplicitCopy(inner) => {
                 let value = self.eval_expr(inner, scope)?;
@@ -3907,7 +4111,7 @@ impl<'a> EvalCtx<'a> {
                     argv.push(self.eval_expr(&a.value, scope)?);
                 }
                 if method.name == "clone" {
-                    return Ok(r);
+                    return self.clone_structural_value(r, &recv.ty);
                 }
                 if method.name == "apply" {
                     if let (

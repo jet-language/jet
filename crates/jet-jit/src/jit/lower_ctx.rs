@@ -43,6 +43,20 @@ pub(crate) struct LoopTargets {
     break_value_ty: Option<Type>,
     shield_depth: u32,
     shared_transaction_depth: u32,
+    compute_resource_depth: usize,
+    compute_preserve_names: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ComputeResource {
+    Tensor {
+        handle: Value,
+        owner: Option<Value>,
+    },
+    Window {
+        handle: Value,
+        owner: Option<Value>,
+    },
 }
 
 /// One JIT-lowering pass over a single function's `TStmt`/`TExpr` tree into
@@ -116,6 +130,14 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) in_lexical_exit: bool,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
+    /// Compute handles created in the current lexical lowering path. The
+    /// runtime drop adapters are idempotent, so explicit and lexical cleanup
+    /// can share one ownership path.
+    pub(crate) compute_resources: Vec<ComputeResource>,
+    /// Outer locals whose branch/loop values must be re-read at the next
+    /// dominance point. This avoids carrying a child block's raw SSA handle
+    /// across a merge.
+    pub(crate) compute_retrack_names: HashSet<String>,
 }
 
 fn mixed_switch_int_literal(cond: &TExpr) -> Option<i64> {
@@ -2073,7 +2095,9 @@ impl LowerCtx<'_, '_> {
             .map(|(ok, _)| ok.clone())
             .or_else(|| Self::result_ok_ty_recover(inner))
             .ok_or("jit try operand is not Result")?;
-        self.result_payload(handle, &ok_ty)
+        let value = self.result_payload(handle, &ok_ty)?;
+        self.track_compute_value(value, &ok_ty)?;
+        Ok(value)
     }
 
     fn strip_rust_str_lit(s: &str) -> String {
@@ -2156,6 +2180,175 @@ impl LowerCtx<'_, '_> {
         status
     }
 
+    fn track_compute_tensor(&mut self, value: Value) {
+        self.track_compute_tensor_owned(value, None);
+    }
+
+    fn track_compute_tensor_owned(&mut self, value: Value, owner: Option<Value>) {
+        if self.compute_resources.iter().any(|resource| {
+            matches!(resource, ComputeResource::Tensor { handle, .. } if *handle == value)
+        }) {
+            return;
+        }
+        self.compute_resources.push(ComputeResource::Tensor {
+            handle: value,
+            owner,
+        });
+    }
+
+    fn track_compute_window_owned(&mut self, list: Value, owner: Option<Value>) {
+        if self.compute_resources.iter().any(|resource| {
+            matches!(resource, ComputeResource::Window { handle, .. } if *handle == list)
+        }) {
+            return;
+        }
+        self.compute_resources.push(ComputeResource::Window {
+            handle: list,
+            owner,
+        });
+    }
+
+    fn track_compute_value(&mut self, value: Value, ty: &Type) -> Result<(), String> {
+        if ty.is_compute_tensor_family() {
+            self.track_compute_tensor(value);
+        } else if ty.is_compute_view_mut() {
+            let (list, _, _) = self.unpack_view_mut(value)?;
+            self.track_compute_window_owned(list, Some(value));
+        }
+        Ok(())
+    }
+
+    fn track_compute_locals(&mut self) -> Result<(), String> {
+        let names = std::mem::take(&mut self.compute_retrack_names);
+        let locals = names
+            .into_iter()
+            .filter_map(|name| {
+                let var = self.vars.get(&name).copied()?;
+                let ty = self
+                    .var_tys
+                    .get(&name)
+                    .filter(|ty| ty.is_compute_tensor_family() || ty.is_compute_view_mut())
+                    .cloned()?;
+                Some((name, var, ty))
+            })
+            .collect::<Vec<_>>();
+        for (name, var, ty) in locals {
+            let value = if let Some(slot) = self.raw_slots.get(&name).copied() {
+                let clif = self
+                    .meta
+                    .clif_ty(&ty)
+                    .ok_or_else(|| format!("jit compute local type unsupported: {ty:?}"))?;
+                self.b.ins().stack_load(clif, slot, 0)
+            } else {
+                self.b.use_var(var)
+            };
+            self.track_compute_value(value, &ty)?;
+        }
+        Ok(())
+    }
+
+    fn track_compute_scope_locals(
+        &mut self,
+        outer_names: &HashSet<String>,
+    ) -> Result<(), String> {
+        let locals = self
+            .vars
+            .iter()
+            .filter(|(name, _)| !outer_names.contains(*name))
+            .filter_map(|(name, var)| {
+                let ty = self
+                    .var_tys
+                    .get(name)
+                    .filter(|ty| ty.is_compute_tensor_family() || ty.is_compute_view_mut())
+                    .cloned()?;
+                Some((name.clone(), *var, ty))
+            })
+            .collect::<Vec<_>>();
+        for (name, var, ty) in locals {
+            let value = if let Some(slot) = self.raw_slots.get(&name).copied() {
+                let clif = self
+                    .meta
+                    .clif_ty(&ty)
+                    .ok_or_else(|| format!("jit compute local type unsupported: {ty:?}"))?;
+                self.b.ins().stack_load(clif, slot, 0)
+            } else {
+                self.b.use_var(var)
+            };
+            self.track_compute_value(value, &ty)?;
+        }
+        Ok(())
+    }
+
+    fn restore_scope_vars(&mut self, outer_names: &HashSet<String>) {
+        self.vars.retain(|name, _| outer_names.contains(name));
+        self.var_tys.retain(|name, _| outer_names.contains(name));
+    }
+
+    fn adopt_compute_resource(&mut self, value: Value, owner: Value) {
+        for resource in &mut self.compute_resources {
+            let (handle, resource_owner) = match resource {
+                ComputeResource::Tensor { handle, owner }
+                | ComputeResource::Window { handle, owner } => (handle, owner),
+            };
+            if *handle == value || *resource_owner == Some(value) {
+                *resource_owner = Some(owner);
+            }
+        }
+    }
+
+    fn compute_resource_preserved(resource: &ComputeResource, preserve: &[Value]) -> bool {
+        let (handle, owner) = match resource {
+            ComputeResource::Tensor { handle, owner }
+            | ComputeResource::Window { handle, owner } => (handle, owner),
+        };
+        preserve.contains(handle) || owner.is_some_and(|owner| preserve.contains(&owner))
+    }
+
+    fn discard_compute_resources(&mut self, mark: usize) {
+        // Values produced in a branch or loop body are block-local SSA values.
+        // Runtime cleanup has already handled the preserved/non-preserved split;
+        // the merged carrier or current local is tracked again at its dominance
+        // point so a raw child value never escapes into a sibling block.
+        self.compute_resources.truncate(mark);
+    }
+
+    fn emit_compute_resource_closes(&mut self, mark: usize, preserve: &[Value]) {
+        let resources = self.compute_resources[mark..].to_vec();
+        for resource in resources.into_iter().rev() {
+            if Self::compute_resource_preserved(&resource, preserve) {
+                continue;
+            }
+            let (handle, host) = match resource {
+                ComputeResource::Tensor { handle, .. } => (handle, self.host.compute.drop_tensor),
+                ComputeResource::Window { handle, .. } => (handle, self.host.compute.drop_window),
+            };
+            let _ = self.call_host(host, &[handle]);
+        }
+    }
+
+    fn current_values(&mut self, names: Option<&HashSet<String>>) -> Vec<Value> {
+        let vars = self
+            .vars
+            .iter()
+            .filter(|(name, _)| names.is_none_or(|names| names.contains(*name)))
+            .map(|(name, var)| (name.clone(), *var))
+            .collect::<Vec<_>>();
+        vars.into_iter()
+            .map(|(name, var)| {
+                self.raw_slots
+                    .get(&name)
+                    .copied()
+                    .and_then(|slot| {
+                        self.var_tys
+                            .get(&name)
+                            .and_then(|ty| self.meta.clif_ty(ty))
+                            .map(|ty| self.b.ins().stack_load(ty, slot, 0))
+                    })
+                    .unwrap_or_else(|| self.b.use_var(var))
+            })
+            .collect()
+    }
+
     /// One function-exit path for every native control transfer. Close every
     /// lexical group before returning to the caller, and replace the requested
     /// return value with the ABI dummy when a close or wait recorded an exit.
@@ -2179,6 +2372,8 @@ impl LowerCtx<'_, '_> {
         force_dummy: bool,
         active_shield_depth: u32,
     ) -> Result<(), String> {
+        self.track_compute_locals()?;
+        self.emit_compute_resource_closes(0, values);
         self.emit_shared_transaction_aborts_to(0);
 
         let saved_shield_depth = self.shield_depth;
@@ -2345,6 +2540,11 @@ impl LowerCtx<'_, '_> {
         } else {
             targets.break_block
         };
+        let preserve = self.current_values(Some(&targets.compute_preserve_names));
+        self.emit_compute_resource_closes(targets.compute_resource_depth, &preserve);
+        self.compute_retrack_names
+            .extend(targets.compute_preserve_names.iter().cloned());
+        self.discard_compute_resources(targets.compute_resource_depth);
         if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
             let zero = self.b.ins().iconst(types::I64, 0);
             let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -2419,6 +2619,25 @@ impl LowerCtx<'_, '_> {
     /// `dead` because a `break`/`return` in a PRIOR sibling branch must not
     /// suppress this branch's own statements.
     fn lower_stmts_scoped(&mut self, stmts: &[TStmt]) -> Result<(), String> {
+        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        self.lower_stmts_scoped_with_names(stmts, &outer_names)
+    }
+
+    fn lower_stmts_scoped_with_names(
+        &mut self,
+        stmts: &[TStmt],
+        outer_names: &HashSet<String>,
+    ) -> Result<(), String> {
+        let resource_mark = self.compute_resources.len();
+        self.lower_stmts_scoped_with_names_from(stmts, outer_names, resource_mark)
+    }
+
+    fn lower_stmts_scoped_with_names_from(
+        &mut self,
+        stmts: &[TStmt],
+        outer_names: &HashSet<String>,
+        resource_mark: usize,
+    ) -> Result<(), String> {
         self.dead = false;
         let push = self
             .module
@@ -2426,12 +2645,74 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(push, &[]);
         self.lower_stmts(stmts)?;
         if !self.dead {
+            self.track_compute_scope_locals(outer_names)?;
+            let preserve = self.current_values(Some(&outer_names));
+            self.emit_compute_resource_closes(resource_mark, &preserve);
+            self.compute_retrack_names.extend(outer_names.iter().cloned());
+            self.discard_compute_resources(resource_mark);
             let pop = self
                 .module
                 .declare_func_in_func(self.host.watcher.event_scope_frame_pop, self.b.func);
             self.b.ins().call(pop, &[]);
         }
+        self.discard_compute_resources(resource_mark);
+        self.restore_scope_vars(outer_names);
         Ok(())
+    }
+
+    fn lower_stmts_scoped_value(
+        &mut self,
+        stmts: &[TStmt],
+        value: &TExpr,
+    ) -> Result<Option<Value>, String> {
+        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        self.lower_stmts_scoped_value_with_names(stmts, value, &outer_names)
+    }
+
+    fn lower_stmts_scoped_value_with_names(
+        &mut self,
+        stmts: &[TStmt],
+        value: &TExpr,
+        outer_names: &HashSet<String>,
+    ) -> Result<Option<Value>, String> {
+        let resource_mark = self.compute_resources.len();
+        self.lower_stmts_scoped_value_with_names_from(stmts, value, outer_names, resource_mark)
+    }
+
+    fn lower_stmts_scoped_value_with_names_from(
+        &mut self,
+        stmts: &[TStmt],
+        value: &TExpr,
+        outer_names: &HashSet<String>,
+        resource_mark: usize,
+    ) -> Result<Option<Value>, String> {
+        self.dead = false;
+        let push = self
+            .module
+            .declare_func_in_func(self.host.watcher.event_scope_frame_push, self.b.func);
+        self.b.ins().call(push, &[]);
+        self.lower_stmts(stmts)?;
+        if self.dead {
+            self.discard_compute_resources(resource_mark);
+            self.restore_scope_vars(outer_names);
+            return Ok(None);
+        }
+        let value = self.lower_expr(value)?;
+        if !self.dead {
+            self.track_compute_scope_locals(outer_names)?;
+            let mut preserve = self.current_values(Some(&outer_names));
+            preserve.push(value);
+            self.emit_compute_resource_closes(resource_mark, &preserve);
+            self.compute_retrack_names.extend(outer_names.iter().cloned());
+            self.discard_compute_resources(resource_mark);
+            let pop = self
+                .module
+                .declare_func_in_func(self.host.watcher.event_scope_frame_pop, self.b.func);
+            self.b.ins().call(pop, &[]);
+        }
+        self.discard_compute_resources(resource_mark);
+        self.restore_scope_vars(outer_names);
+        Ok((!self.dead).then_some(value))
     }
 
     fn lower_watch_method(
@@ -2582,6 +2863,8 @@ impl LowerCtx<'_, '_> {
             break_value_ty: Some(ty.clone()),
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: self.compute_resources.len(),
+            compute_preserve_names: self.vars.keys().cloned().collect(),
         });
         self.b.switch_to_block(body_block);
         self.b.seal_block(body_block);
@@ -2595,7 +2878,9 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(exit);
         self.b.seal_block(exit);
         self.dead = false;
-        Ok(self.b.block_params(exit)[0])
+        let value = self.b.block_params(exit)[0];
+        self.track_compute_value(value, ty)?;
+        Ok(value)
     }
 
     fn lower_mixed_switch(
@@ -2606,6 +2891,7 @@ impl LowerCtx<'_, '_> {
         else_body: Option<&[TStmt]>,
     ) -> Result<(), String> {
         let subject_value = self.lower_expr(subject)?;
+        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
         let saved_subject = self
             .switch_subject
             .replace((subject_value, subject.ty.clone()));
@@ -2632,7 +2918,7 @@ impl LowerCtx<'_, '_> {
                 for (block, body) in [(true_block, true_body), (false_block, false_body)] {
                     self.b.switch_to_block(block);
                     self.b.seal_block(block);
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
                         any_reaches_merge = true;
@@ -2654,7 +2940,7 @@ impl LowerCtx<'_, '_> {
                 for (block, body) in blocks {
                     self.b.switch_to_block(block);
                     self.b.seal_block(block);
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
                         any_reaches_merge = true;
@@ -2664,7 +2950,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(fallback);
                 self.dead = false;
                 if let Some(body) = else_body {
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                 }
                 if !self.dead {
                     self.b.ins().jump(merge, &[]);
@@ -2685,7 +2971,7 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().brif(cond_val, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
                         any_reaches_merge = true;
@@ -2696,7 +2982,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(tail);
                 self.dead = false;
                 if let Some(body) = else_body {
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                 }
                 if !self.dead {
                     self.b.ins().jump(merge, &[]);
@@ -2797,6 +3083,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     init.ty.clone()
                 };
+                self.track_compute_value(val, &stored_ty)?;
                 self.var_tys.insert(TIR::local_place(name), stored_ty);
                 if Self::is_shared_guard_ty(&init.ty) {
                     self.deferred_shared_guards.push(name.clone());
@@ -2910,6 +3197,7 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, bound);
                 self.vars.insert(place.clone(), var);
+                self.track_compute_value(bound, &bound_ty)?;
                 self.var_tys.insert(place, bound_ty);
             }
             // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` / `tasks.channel<T>(n)`.
@@ -2947,7 +3235,12 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TStmt::Assign {
-                place, op, value, line: assign_line, ..
+                place,
+                op,
+                value,
+                clone_value,
+                line: assign_line,
+                ..
             } => {
                 if let TPlace::Expr(place_expr) = place {
                     if let TExprKind::PoolSlot {
@@ -2972,7 +3265,7 @@ impl LowerCtx<'_, '_> {
                             .struct_field_index(&type_name, field)
                             .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
                         let field_ty = place_expr.ty.clone();
-                        let rhs = self.lower_expr(value)?;
+                        let rhs = self.lower_assignment_value(value, *clone_value)?;
                         let assigned = if let Some(op) = op {
                             let current =
                                 self.lower_record_field(record, &type_name, field, &field_ty)?;
@@ -2998,6 +3291,7 @@ impl LowerCtx<'_, '_> {
                         let field_index = self.b.ins().iconst(types::I64, field_index as i64);
                         let setter = self.module.declare_func_in_func(setter_id, self.b.func);
                         self.b.ins().call(setter, &[record, field_index, assigned]);
+                        self.adopt_compute_resource(assigned, record);
                         return Ok(());
                     }
                 }
@@ -3028,7 +3322,7 @@ impl LowerCtx<'_, '_> {
                             .struct_field_index(&type_name, field)
                             .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
                         let field_ty = value.ty.clone();
-                        let rhs = self.lower_expr(value)?;
+                        let rhs = self.lower_assignment_value(value, *clone_value)?;
                         let assigned = if let Some(op) = op {
                             let current =
                                 self.lower_record_field(handle, &type_name, field, &field_ty)?;
@@ -3054,6 +3348,7 @@ impl LowerCtx<'_, '_> {
                         let index = self.b.ins().iconst(types::I64, index as i64);
                         let setter = self.module.declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(setter, &[handle, index, assigned]);
+                        self.adopt_compute_resource(assigned, handle);
                         return Ok(());
                     }
                 }
@@ -3068,7 +3363,7 @@ impl LowerCtx<'_, '_> {
                                 .struct_field_index(&type_name, field)
                                 .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
                             let field_ty = value.ty.clone();
-                            let rhs = self.lower_expr(value)?;
+                            let rhs = self.lower_assignment_value(value, *clone_value)?;
                             let assigned = if let Some(op) = op {
                                 let current = self.lower_record_field(
                                     handle,
@@ -3099,6 +3394,7 @@ impl LowerCtx<'_, '_> {
                             let setter =
                                 self.module.declare_func_in_func(host_id, self.b.func);
                             self.b.ins().call(setter, &[handle, index, assigned]);
+                            self.adopt_compute_resource(assigned, handle);
                             return Ok(());
                         }
                     }
@@ -3139,7 +3435,7 @@ impl LowerCtx<'_, '_> {
                                 "jit raw pointer store address unsupported".to_string()
                             );
                         }
-                        let rhs = self.lower_expr(value)?;
+                        let rhs = self.lower_assignment_value(value, *clone_value)?;
                         self.b.ins().store(MemFlags::trusted(), rhs, dst, 0);
                         return Ok(());
                     }
@@ -3154,7 +3450,7 @@ impl LowerCtx<'_, '_> {
                     };
                     if let Some(elem_ty) = view_elem_ty {
                         let direct_value = if op.is_none() {
-                            Some(self.lower_expr(value)?)
+                            Some(self.lower_assignment_value(value, *clone_value)?)
                         } else {
                             None
                         };
@@ -3167,7 +3463,7 @@ impl LowerCtx<'_, '_> {
                             };
                             let current = self.call_host(get_id, &[list, start, line]);
                             self.emit_trap_check()?;
-                            let rhs = self.lower_expr(value)?;
+                            let rhs = self.lower_assignment_value(value, *clone_value)?;
                             self.apply_binop_to_var(current, *op, rhs, &elem_ty, *assign_line)?
                         } else {
                             direct_value
@@ -3195,7 +3491,7 @@ impl LowerCtx<'_, '_> {
                                 dst,
                                 0,
                             );
-                            let rhs = self.lower_expr(value)?;
+                            let rhs = self.lower_assignment_value(value, *clone_value)?;
                             let assigned = if let Some(op) = op {
                                 self.apply_binop_to_var(current, *op, rhs, &scalar_ty, *assign_line)?
                             } else {
@@ -3206,19 +3502,21 @@ impl LowerCtx<'_, '_> {
                         }
                     }
                     if op.is_none() {
-                        let src = self.lower_expr(value)?;
+                        let src = self.lower_assignment_value(value, *clone_value)?;
                         if self.var_tys.get(&key).is_some_and(Self::is_field_mut_ty) {
                             let (structure, idx) = self.unpack_field_mut(dst)?;
                             let set = self
                                 .module
                                 .declare_func_in_func(self.host.struct_set_i64, self.b.func);
                             self.b.ins().call(set, &[structure, idx, src]);
+                            self.adopt_compute_resource(src, structure);
                             return Ok(());
                         }
                         let assign = self
                             .module
                             .declare_func_in_func(self.host.struct_assign, self.b.func);
                         self.b.ins().call(assign, &[dst, src]);
+                        self.adopt_compute_resource(src, dst);
                         return Ok(());
                     }
                 }
@@ -3232,7 +3530,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.b.use_var(var)
                     };
-                    let rhs = self.lower_expr(value)?;
+                    let rhs = self.lower_assignment_value(value, *clone_value)?;
                     let arithmetic_ty = self
                         .var_tys
                         .get(&key)
@@ -3240,12 +3538,15 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or_else(|| value.ty.clone());
                     self.apply_binop_to_var(current, *op, rhs, &arithmetic_ty, *assign_line)?
                 } else {
-                    self.lower_expr(value)?
+                    self.lower_assignment_value(value, *clone_value)?
                 };
                 if let Some(slot) = self.raw_slots.get(&key).copied() {
                     self.b.ins().stack_store(val, slot, 0);
                 } else {
                     self.b.def_var(var, val);
+                }
+                if let Some(ty) = self.var_tys.get(&key).cloned() {
+                    self.track_compute_value(val, &ty)?;
                 }
             }
             TStmt::IndexFieldAssign(assign) => {
@@ -3254,7 +3555,7 @@ impl LowerCtx<'_, '_> {
                 }
                 // Match AOT evaluation order: the assignment value is evaluated
                 // before the collection place is acquired.
-                let rhs = self.lower_expr(&assign.value)?;
+                let rhs = self.lower_assignment_value(&assign.value, assign.clone_value)?;
                 let base = self.lower_expr(&assign.base)?;
                 let index = self.lower_expr(&assign.index)?;
                 // ViewMut write-through: absolute index = window.start + idx.
@@ -3321,6 +3622,7 @@ impl LowerCtx<'_, '_> {
                 let field_index = self.b.ins().iconst(types::I64, field_index as i64);
                 let setter = self.module.declare_func_in_func(setter, self.b.func);
                 self.b.ins().call(setter, &[handle, field_index, value]);
+                self.adopt_compute_resource(value, handle);
             }
             TStmt::Return(Some(expr)) => {
                 let range_values = if self.ret_range {
@@ -3427,11 +3729,19 @@ impl LowerCtx<'_, '_> {
                             self.lower_enum_if_let_with_then(
                                 pattern,
                                 subj,
-                                |this| {
+                                |this, outer_names, resource_mark| {
                                     this.lower_plain_if_with_then(
                                         guard,
-                                        |this| this.lower_stmts_scoped(then_body),
+                                        |this, outer_names| {
+                                            this.lower_stmts_scoped_with_names_from(
+                                                then_body,
+                                                outer_names,
+                                                resource_mark,
+                                            )
+                                        },
                                         else_body.as_deref(),
+                                        outer_names,
+                                        resource_mark,
                                     )
                                 },
                                 else_body.as_deref(),
@@ -3452,9 +3762,10 @@ impl LowerCtx<'_, '_> {
                         self.b
                             .ins()
                             .brif(is_none, then_block, &[], else_block, &[]);
+                        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
                         self.b.switch_to_block(then_block);
                         self.b.seal_block(then_block);
-                        self.lower_stmts_scoped(then_body)?;
+                        self.lower_stmts_scoped_with_names(then_body, &outer_names)?;
                         let then_reaches_merge = !self.dead;
                         if then_reaches_merge {
                             self.b.ins().jump(merge_block, &[]);
@@ -3463,7 +3774,7 @@ impl LowerCtx<'_, '_> {
                         self.b.seal_block(else_block);
                         self.dead = false;
                         if let Some(body) = else_body {
-                            self.lower_stmts(body)?;
+                            self.lower_stmts_scoped_with_names(body, &outer_names)?;
                         }
                         let else_reaches_merge = !self.dead;
                         if else_reaches_merge {
@@ -3498,10 +3809,11 @@ impl LowerCtx<'_, '_> {
                 self.b
                     .ins()
                     .brif(cond_val, then_block, &[], else_block, &[]);
+                let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
 
                 self.b.switch_to_block(then_block);
                 self.b.seal_block(then_block);
-                self.lower_stmts_scoped(then_body)?;
+                self.lower_stmts_scoped_with_names(then_body, &outer_names)?;
                 let then_reaches_merge = !self.dead;
                 if then_reaches_merge {
                     self.b.ins().jump(merge_block, &[]);
@@ -3513,7 +3825,7 @@ impl LowerCtx<'_, '_> {
                 // is a live fallthrough even when the then branch returned.
                 self.dead = false;
                 if let Some(body) = else_body {
-                    self.lower_stmts(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                 }
                 let else_reaches_merge = !self.dead;
                 if else_reaches_merge {
@@ -3547,6 +3859,8 @@ impl LowerCtx<'_, '_> {
                     break_value_ty: None,
                     shield_depth: self.shield_depth,
                     shared_transaction_depth: self.shared_transaction_depth,
+                    compute_resource_depth: self.compute_resources.len(),
+                    compute_preserve_names: self.vars.keys().cloned().collect(),
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -3581,6 +3895,8 @@ impl LowerCtx<'_, '_> {
                     break_value_ty: None,
                     shield_depth: self.shield_depth,
                     shared_transaction_depth: self.shared_transaction_depth,
+                    compute_resource_depth: self.compute_resources.len(),
+                    compute_preserve_names: self.vars.keys().cloned().collect(),
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -3622,6 +3938,8 @@ impl LowerCtx<'_, '_> {
                     break_value_ty: None,
                     shield_depth: self.shield_depth,
                     shared_transaction_depth: self.shared_transaction_depth,
+                    compute_resource_depth: self.compute_resources.len(),
+                    compute_preserve_names: self.vars.keys().cloned().collect(),
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -3697,6 +4015,8 @@ impl LowerCtx<'_, '_> {
                     break_value_ty: None,
                     shield_depth: self.shield_depth,
                     shared_transaction_depth: self.shared_transaction_depth,
+                    compute_resource_depth: self.compute_resources.len(),
+                    compute_preserve_names: self.vars.keys().cloned().collect(),
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -3725,6 +4045,11 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Break(label) => {
                 let targets = self.loop_targets(label.as_deref(), "break")?;
+                let preserve = self.current_values(Some(&targets.compute_preserve_names));
+                self.emit_compute_resource_closes(targets.compute_resource_depth, &preserve);
+                self.compute_retrack_names
+                    .extend(targets.compute_preserve_names.iter().cloned());
+                self.discard_compute_resources(targets.compute_resource_depth);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -3757,6 +4082,12 @@ impl LowerCtx<'_, '_> {
                     ));
                 }
                 let value = self.lower_expr(value)?;
+                let mut preserve = self.current_values(Some(&targets.compute_preserve_names));
+                preserve.push(value);
+                self.emit_compute_resource_closes(targets.compute_resource_depth, &preserve);
+                self.compute_retrack_names
+                    .extend(targets.compute_preserve_names.iter().cloned());
+                self.discard_compute_resources(targets.compute_resource_depth);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -3778,6 +4109,11 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Continue(label) => {
                 let targets = self.loop_targets(label.as_deref(), "continue")?;
+                let preserve = self.current_values(Some(&targets.compute_preserve_names));
+                self.emit_compute_resource_closes(targets.compute_resource_depth, &preserve);
+                self.compute_retrack_names
+                    .extend(targets.compute_preserve_names.iter().cloned());
+                self.discard_compute_resources(targets.compute_resource_depth);
                 if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
                     let zero = self.b.ins().iconst(types::I64, 0);
                     let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -3822,6 +4158,7 @@ impl LowerCtx<'_, '_> {
                         .module
                         .declare_func_in_func(self.host.coll.map_insert, self.b.func);
                     self.b.ins().call(host_ref, &[map, key, val]);
+                    self.adopt_compute_resource(val, map);
                 } else {
                     // ViewMut write-through: absolute index = window.start + idx.
                     if Self::is_view_mut_ty(&base.ty) {
@@ -3837,6 +4174,7 @@ impl LowerCtx<'_, '_> {
                         };
                         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(host_ref, &[list, abs, val, line]);
+                        self.adopt_compute_resource(val, list);
                         self.emit_trap_check()?;
                         return Ok(());
                     }
@@ -3855,6 +4193,7 @@ impl LowerCtx<'_, '_> {
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     self.b.ins().call(host_ref, &[list, idx, val, line]);
+                    self.adopt_compute_resource(val, list);
                     self.emit_trap_check()?;
                 }
             }
@@ -3967,6 +4306,8 @@ impl LowerCtx<'_, '_> {
                         return Err("jit for-in map pairs unsupported".to_string());
                     }
                     let coll_val = self.lower_expr(source)?;
+                    let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+                    let loop_resource_mark = self.compute_resources.len();
                     let coll_var = self.fresh_var(types::I64);
                     self.b.def_var(coll_var, coll_val);
                     let header = self.b.create_block();
@@ -4006,6 +4347,8 @@ impl LowerCtx<'_, '_> {
                         break_value_ty: None,
                         shield_depth: self.shield_depth,
                         shared_transaction_depth: self.shared_transaction_depth,
+                        compute_resource_depth: loop_resource_mark,
+                        compute_preserve_names: loop_outer_names.iter().cloned().collect(),
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
@@ -4042,6 +4385,7 @@ impl LowerCtx<'_, '_> {
                         };
                         let val_var = self.fresh_var(val_clif);
                         self.b.def_var(val_var, val_coerced);
+                        self.track_compute_value(val_coerced, &value_ty)?;
                         self.vars.insert(TIR::local_place(value_name), val_var);
                         self.var_tys
                             .insert(TIR::local_place(value_name), value_ty);
@@ -4073,11 +4417,16 @@ impl LowerCtx<'_, '_> {
                         };
                         let item_var = self.fresh_var(elem_clif);
                         self.b.def_var(item_var, elem);
+                        self.track_compute_value(elem, elem_ty)?;
                         self.vars.insert(TIR::local_place(value_name), item_var);
                         self.var_tys
                             .insert(TIR::local_place(value_name), elem_ty);
                     }
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names_from(
+                        body,
+                        &loop_outer_names,
+                        loop_resource_mark,
+                    )?;
                     self.loop_stack.pop();
                     if !self.dead {
                         self.b.ins().jump(step_block, &[]);
@@ -4167,6 +4516,8 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.lower_expr(source)?
                     };
+                    let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+                    let loop_resource_mark = self.compute_resources.len();
                     let header = self.b.create_block();
                     let body_block = self.b.create_block();
                     let step_block = self.b.create_block();
@@ -4198,6 +4549,8 @@ impl LowerCtx<'_, '_> {
                         break_value_ty: None,
                         shield_depth: self.shield_depth,
                         shared_transaction_depth: self.shared_transaction_depth,
+                        compute_resource_depth: loop_resource_mark,
+                        compute_preserve_names: loop_outer_names.iter().cloned().collect(),
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
@@ -4229,9 +4582,14 @@ impl LowerCtx<'_, '_> {
                     };
                     let loop_var = self.fresh_var(elem_clif);
                     self.b.def_var(loop_var, elem);
+                    self.track_compute_value(elem, &elem_ty)?;
                     self.vars.insert(TIR::local_place(var), loop_var);
                     self.var_tys.insert(TIR::local_place(var), elem_ty);
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names_from(
+                        body,
+                        &loop_outer_names,
+                        loop_resource_mark,
+                    )?;
                     self.loop_stack.pop();
                     if !self.dead {
                         self.b.ins().jump(step_block, &[]);
@@ -4300,6 +4658,7 @@ impl LowerCtx<'_, '_> {
                 // terminate (return/break/…); track that like `TStmt::If` does,
                 // rather than assuming the construct is always live afterward.
                 let mut any_reaches_merge = false;
+                let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
                 for arm in arms {
                     self.b.switch_to_block(tail);
                     self.b.seal_block(tail);
@@ -4319,6 +4678,7 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
+                    let arm_resource_mark = self.compute_resources.len();
                     let bound = if let Some((variant, name)) =
                         Self::pattern_binding(&arm.pattern.pattern)
                     {
@@ -4340,12 +4700,17 @@ impl LowerCtx<'_, '_> {
                                 self.b.def_var(var, payload);
                                 let key = TIR::local_place(name);
                                 let old_var = self.vars.insert(key.clone(), var);
+                                self.track_compute_value(payload, &payload_ty)?;
                                 let old_ty = self.var_tys.insert(key.clone(), payload_ty);
                                 Some((key, old_var, old_ty))
                     } else {
                         None
                     };
-                    self.lower_stmts_scoped(&arm.body)?;
+                    self.lower_stmts_scoped_with_names_from(
+                        &arm.body,
+                        &outer_names,
+                        arm_resource_mark,
+                    )?;
                     if let Some((key, old_var, old_ty)) = bound {
                         match old_var {
                             Some(var) => {
@@ -4373,7 +4738,7 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(tail);
                 self.b.seal_block(tail);
                 if let Some(body) = else_body {
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
                         any_reaches_merge = true;
@@ -4498,9 +4863,10 @@ impl LowerCtx<'_, '_> {
                     TStmt::Assign {
                         op: None,
                         value,
+                        clone_value,
                         ..
                     } => {
-                        let val = self.lower_expr(value)?;
+                        let val = self.lower_assignment_value(value, *clone_value)?;
                         let root_var = self.vars.get(root).copied().ok_or_else(|| {
                             format!("jit GcEdit unknown root `{root}`")
                         })?;
@@ -4564,6 +4930,7 @@ impl LowerCtx<'_, '_> {
                 else_body,
             } => {
                 let value = self.lower_expr(subject)?;
+                let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -4583,7 +4950,7 @@ impl LowerCtx<'_, '_> {
                         .brif(condition, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts_scoped_with_names(body, &outer_names)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
                         reaches_merge = true;
@@ -4592,7 +4959,7 @@ impl LowerCtx<'_, '_> {
                 }
                 self.b.switch_to_block(tail);
                 self.b.seal_block(tail);
-                self.lower_stmts_scoped(else_body)?;
+                self.lower_stmts_scoped_with_names(else_body, &outer_names)?;
                 if !self.dead {
                     self.b.ins().jump(merge, &[]);
                     reaches_merge = true;
@@ -4868,6 +5235,8 @@ impl LowerCtx<'_, '_> {
         self.b
             .ins()
             .brif(deliver, body_block, &[], skip_block, &[]);
+        let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let loop_resource_mark = self.compute_resources.len();
 
         self.b.switch_to_block(skip_block);
         self.b.seal_block(skip_block);
@@ -4903,8 +5272,11 @@ impl LowerCtx<'_, '_> {
             break_value_ty: None,
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: loop_resource_mark,
+            compute_preserve_names: loop_outer_names.iter().cloned().collect(),
         });
-        self.lower_stmts_scoped(body)?;
+        self.track_compute_value(value, &item_type)?;
+        self.lower_stmts_scoped_with_names_from(body, &loop_outer_names, loop_resource_mark)?;
         self.loop_stack.pop();
         if !self.dead {
             self.b.ins().jump(step_block, &[]);
@@ -4991,6 +5363,8 @@ impl LowerCtx<'_, '_> {
         self.b
             .ins()
             .brif(deliver, body_block, &[], skip_block, &[]);
+        let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let loop_resource_mark = self.compute_resources.len();
 
         self.b.switch_to_block(skip_block);
         self.b.seal_block(skip_block);
@@ -5008,6 +5382,7 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| format!("jit Iterable item unsupported: {item_type:?}"))?;
         let loop_var = self.fresh_var(value_type);
         self.b.def_var(loop_var, value);
+        self.track_compute_value(value, &item_type)?;
         self.vars.insert(TIR::local_place(var), loop_var);
         self.var_tys
             .insert(TIR::local_place(var), item_type);
@@ -5018,8 +5393,10 @@ impl LowerCtx<'_, '_> {
             break_value_ty: None,
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: loop_resource_mark,
+            compute_preserve_names: loop_outer_names.iter().cloned().collect(),
         });
-        self.lower_stmts_scoped(body)?;
+        self.lower_stmts_scoped_with_names_from(body, &loop_outer_names, loop_resource_mark)?;
         self.loop_stack.pop();
         if !self.dead {
             self.b.ins().jump(step_block, &[]);
@@ -5081,6 +5458,8 @@ impl LowerCtx<'_, '_> {
         self.b
             .ins()
             .brif(closed, exit, &[], body_block, &[]);
+        let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let loop_resource_mark = self.compute_resources.len();
 
         self.b.switch_to_block(body_block);
         self.b.seal_block(body_block);
@@ -5091,6 +5470,7 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| format!("jit Stream item unsupported: {item_type:?}"))?;
         let loop_var = self.fresh_var(clif);
         self.b.def_var(loop_var, value);
+        self.track_compute_value(value, &item_type)?;
         self.vars.insert(TIR::local_place(var), loop_var);
         self.var_tys
             .insert(TIR::local_place(var), item_type);
@@ -5101,9 +5481,11 @@ impl LowerCtx<'_, '_> {
             break_value_ty: None,
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: loop_resource_mark,
+            compute_preserve_names: loop_outer_names.iter().cloned().collect(),
         });
         self.stream_consumers.push(channel);
-        self.lower_stmts_scoped(body)?;
+        self.lower_stmts_scoped_with_names_from(body, &loop_outer_names, loop_resource_mark)?;
         self.stream_consumers.pop();
         self.loop_stack.pop();
         if !self.dead {
@@ -5133,6 +5515,7 @@ impl LowerCtx<'_, '_> {
                 place,
                 op: None,
                 value,
+                clone_value,
                 ..
             } => {
                 let local = place.as_local().ok_or("jit GcEdit assign to non-local")?;
@@ -5142,7 +5525,7 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit GcEdit assign unknown `{key}`"))?;
-                let val = self.lower_expr(value)?;
+                let val = self.lower_assignment_value(value, *clone_value)?;
                 self.b.def_var(var, val);
                 Ok(())
             }
@@ -8252,6 +8635,7 @@ impl LowerCtx<'_, '_> {
         };
         let host = self.module.declare_func_in_func(host, self.b.func);
         self.b.ins().call(host, &[handle, index, value]);
+        self.adopt_compute_resource(value, handle);
         Ok(())
     }
 
@@ -8424,6 +8808,7 @@ impl LowerCtx<'_, '_> {
                 .iconst(types::I64, storage_index as i64);
             let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
             self.b.ins().call(set_ref, &[handle, idx, raw]);
+            self.adopt_compute_resource(raw, handle);
         }
         Ok(handle)
     }
@@ -8625,6 +9010,7 @@ impl LowerCtx<'_, '_> {
             };
             let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
             self.b.ins().call(push_ref, &[handle, v]);
+            self.adopt_compute_resource(v, handle);
         }
         Ok(handle)
     }
@@ -8839,6 +9225,7 @@ impl LowerCtx<'_, '_> {
             let idx = self.b.ins().iconst(types::I64, i as i64);
             let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
             self.b.ins().call(set_ref, &[handle, idx, raw]);
+            self.adopt_compute_resource(raw, handle);
         }
         Ok(handle)
     }
@@ -8907,6 +9294,7 @@ impl LowerCtx<'_, '_> {
                 ListSpreadPart::Elem(elem) => {
                     let value = self.lower_expr(elem)?;
                     self.b.ins().call(push_ref, &[out, value]);
+                    self.adopt_compute_resource(value, out);
                 }
                 ListSpreadPart::Spread(list) => {
                     let input = self.lower_expr(list)?;
@@ -8934,6 +9322,7 @@ impl LowerCtx<'_, '_> {
                     let value = self.call_host(get_id, &[input, idx, line]);
                     self.emit_trap_check()?;
                     self.b.ins().call(push_ref, &[out, value]);
+                    self.adopt_compute_resource(value, out);
                     let one = self.b.ins().iconst(types::I64, 1);
                     let next = self.b.ins().iadd(idx, one);
                     self.b.def_var(idx_var, next);
@@ -8984,6 +9373,7 @@ impl LowerCtx<'_, '_> {
                 .module
                 .declare_func_in_func(self.host.coll.map_insert, self.b.func);
             self.b.ins().call(insert_ref, &[handle, key, val]);
+            self.adopt_compute_resource(val, handle);
         }
         Ok(handle)
     }
@@ -9564,30 +9954,27 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(then_block);
                 self.b.seal_block(then_block);
-                self.lower_stmts_scoped(then_body)?;
-                if !self.dead {
-                    let then_val = self.lower_expr(then_value)?;
-                    if !self.dead {
-                        self.b.ins().jump(merge_block, &[then_val]);
-                    }
+                let then_val = self.lower_stmts_scoped_value(then_body, then_value)?;
+                let then_reaches_merge = then_val.is_some();
+                if let Some(then_val) = then_val {
+                    self.b.ins().jump(merge_block, &[then_val]);
                 }
-                let then_reaches_merge = !self.dead;
 
                 self.b.switch_to_block(else_block);
                 self.b.seal_block(else_block);
-                self.lower_stmts_scoped(else_body)?;
-                if !self.dead {
-                    let else_val = self.lower_expr(else_value)?;
-                    if !self.dead {
-                        self.b.ins().jump(merge_block, &[else_val]);
-                    }
+                let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
+                let else_reaches_merge = else_val.is_some();
+                if let Some(else_val) = else_val {
+                    self.b.ins().jump(merge_block, &[else_val]);
                 }
-                let else_reaches_merge = !self.dead;
 
                 self.b.switch_to_block(merge_block);
                 self.b.seal_block(merge_block);
                 self.dead = !(then_reaches_merge || else_reaches_merge);
                 let phi = self.b.block_params(merge_block)[0];
+                if !self.dead {
+                    self.track_compute_value(phi, &expr.ty)?;
+                }
                 Ok(phi)
             }
             TExprKind::Clone(inner) => self.lower_clone(inner),
@@ -9608,6 +9995,9 @@ impl LowerCtx<'_, '_> {
                         ));
                     }
                     if let Some(value) = self.lower_recorded_core_call(row, args, &expr.ty)? {
+                        if module == "core.compute" && expr.ty.is_compute_tensor_family() {
+                            self.track_compute_tensor(value);
+                        }
                         return Ok(value);
                     }
                 }
@@ -13097,7 +13487,9 @@ impl LowerCtx<'_, '_> {
                     }
                     self.b.switch_to_block(merge);
                     self.b.seal_block(merge);
-                    return Ok(self.b.block_params(merge)[0]);
+                    let value = self.b.block_params(merge)[0];
+                    self.track_compute_value(value, &expr.ty)?;
+                    return Ok(value);
                 }
                 // Channel receive-status encoding stays on lower_result_receive_status;
                 // Result ?? uses the Result handle + result_is_ok / result_payload.
@@ -13146,7 +13538,9 @@ impl LowerCtx<'_, '_> {
                     }
                     self.b.switch_to_block(merge);
                     self.b.seal_block(merge);
-                    return Ok(self.b.block_params(merge)[0]);
+                    let value = self.b.block_params(merge)[0];
+                    self.track_compute_value(value, &expr.ty)?;
+                    return Ok(value);
                 }
                 let handle = self.lower_expr(value)?;
                 let ok_ty = value
@@ -13222,7 +13616,9 @@ impl LowerCtx<'_, '_> {
                 }
                 self.b.switch_to_block(merge);
                 self.b.seal_block(merge);
-                Ok(self.b.block_params(merge)[0])
+                let value = self.b.block_params(merge)[0];
+                self.track_compute_value(value, &expr.ty)?;
+                Ok(value)
             }
             TExprKind::ListLit(elems) => self.lower_list_lit(&expr.ty, elems),
             TExprKind::MapLit(entries) => self.lower_map_lit(entries),
@@ -15034,6 +15430,7 @@ impl LowerCtx<'_, '_> {
         };
         let inner_ty = inner.as_ref().clone();
         let packed = self.lower_expr(scrutinee)?;
+        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
         let zero = self.b.ins().iconst(types::I64, 0);
         let is_some = self.b.ins().icmp(IntCC::NotEqual, packed, zero);
         let merge = self.b.create_block();
@@ -15062,18 +15459,24 @@ impl LowerCtx<'_, '_> {
             self.b.ins().brif(condition, then_block, &[], next, &[]);
             self.b.switch_to_block(then_block);
             self.b.seal_block(then_block);
+            let arm_resource_mark = self.compute_resources.len();
             let mut bound = None;
             if let Some(name) = binding.filter(|name| *name != "_") {
                 let value = self.unpack_option_payload(packed, &inner_ty)?;
                 let clif = self.meta.clif_ty(&inner_ty).unwrap_or(types::I64);
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, value);
+                self.track_compute_value(value, &inner_ty)?;
                 let place = TIR::local_place(name);
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place.clone(), inner_ty.clone());
                 bound = Some(place);
             }
-            self.lower_stmts_scoped(&arm.body)?;
+            self.lower_stmts_scoped_with_names_from(
+                &arm.body,
+                &outer_names,
+                arm_resource_mark,
+            )?;
             if let Some(place) = bound {
                 self.vars.remove(&place);
                 self.var_tys.remove(&place);
@@ -15088,7 +15491,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(remaining);
         self.b.seal_block(remaining);
         if let Some(body) = else_body {
-            self.lower_stmts_scoped(body)?;
+            self.lower_stmts_scoped_with_names(body, &outer_names)?;
             if !self.dead {
                 self.b.ins().jump(merge, &[]);
                 any_reaches_merge = true;
@@ -15126,6 +15529,7 @@ impl LowerCtx<'_, '_> {
             }
         };
         let handle = self.lower_expr(scrutinee)?;
+        let outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
         let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let ok_cond = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b);
@@ -15153,6 +15557,7 @@ impl LowerCtx<'_, '_> {
             self.b.ins().brif(cond, then_block, &[], next, &[]);
             self.b.switch_to_block(then_block);
             self.b.seal_block(then_block);
+            let arm_resource_mark = self.compute_resources.len();
             let mut bound_place = None;
             if binding != "_" {
                 let payload = self.result_payload(handle, &payload_ty)?;
@@ -15160,11 +15565,16 @@ impl LowerCtx<'_, '_> {
                 let clif = clif_ty(&payload_ty).unwrap_or(types::I64);
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, payload);
+                self.track_compute_value(payload, &payload_ty)?;
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place.clone(), payload_ty);
                 bound_place = Some(place);
             }
-            self.lower_stmts_scoped(&arm.body)?;
+            self.lower_stmts_scoped_with_names_from(
+                &arm.body,
+                &outer_names,
+                arm_resource_mark,
+            )?;
             if let Some(place) = bound_place {
                 self.vars.remove(&place);
                 self.var_tys.remove(&place);
@@ -15180,7 +15590,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(remaining);
         self.b.seal_block(remaining);
         if let Some(body) = else_body {
-            self.lower_stmts_scoped(body)?;
+            self.lower_stmts_scoped_with_names(body, &outer_names)?;
             if !self.dead {
                 self.b.ins().jump(merge, &[]);
                 any_reaches_merge = true;
@@ -16572,6 +16982,11 @@ impl LowerCtx<'_, '_> {
                 };
                 let result = self.call_host(host, &[recv_val, start, end, exclusive]);
                 self.emit_trap_check()?;
+                if matches!(op, TBuiltinOp::ViewMutNew { .. } | TBuiltinOp::ComputeViewMutNew { .. }) {
+                    let (list, _, _) = self.unpack_view_mut(result)?;
+                    self.track_compute_window_owned(list, Some(result));
+                    self.adopt_compute_resource(recv_val, result);
+                }
                 Ok(result)
             }
             TBuiltinOp::ViewNew { line } => {
@@ -16774,9 +17189,22 @@ impl LowerCtx<'_, '_> {
             let value = self.lower_expr(inner)?;
             let copied = self.call_host(self.host.compute.copy, &[value]);
             self.emit_trap_check()?;
+            self.track_compute_tensor(copied);
             Ok(copied)
         } else {
             self.lower_clone(inner)
+        }
+    }
+
+    fn lower_assignment_value(
+        &mut self,
+        value: &TExpr,
+        clone_value: bool,
+    ) -> Result<Value, String> {
+        if clone_value {
+            self.lower_clone(value)
+        } else {
+            self.lower_expr(value)
         }
     }
 
@@ -16804,6 +17232,7 @@ impl LowerCtx<'_, '_> {
             let value = self.lower_expr(inner)?;
             let cloned = self.call_host(self.host.compute.clone, &[value]);
             self.emit_trap_check()?;
+            self.track_compute_tensor(cloned);
             return Ok(cloned);
         }
         if inner.ty == Type::String
@@ -16816,6 +17245,34 @@ impl LowerCtx<'_, '_> {
         // is a bitwise copy of the handle (values are immutable Copy).
         if Self::is_math_value_ty(&inner.ty) {
             return self.lower_expr(inner);
+        }
+        if self.clone_contains_compute_tensor(&inner.ty) {
+            match &inner.ty {
+                Type::Tagged { inner: elem, .. } => {
+                    let value = self.lower_expr(inner)?;
+                    return self.lower_clone_raw_value(value, elem, None);
+                }
+                Type::List(elem) | Type::FixedList { elem, .. } => {
+                    let value = self.lower_expr(inner)?;
+                    return self.lower_clone_list_value(value, elem, None);
+                }
+                Type::Map { value: elem, .. } => {
+                    let value = self.lower_expr(inner)?;
+                    return self.lower_clone_map_value(value, elem, None);
+                }
+                Type::Option(elem) => {
+                    let value = self.lower_expr(inner)?;
+                    return self.lower_clone_option_value(value, elem, None);
+                }
+                Type::Result { ok, err } => {
+                    let value = self.lower_expr(inner)?;
+                    return self.lower_clone_result_value(value, ok, err, None);
+                }
+                Type::Tuple(_) => {
+                    return self.lower_clone_tuple(inner);
+                }
+                _ => {}
+            }
         }
         if jit_list_native_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
@@ -16904,7 +17361,8 @@ impl LowerCtx<'_, '_> {
         if jit_tuple_type(&inner.ty) {
             return self.lower_clone_tuple(inner);
         }
-        // Option packed ABI is a plain i64 — clone is a bitwise copy.
+        // Option packed ABI is a plain i64 — clone is a bitwise copy unless it
+        // carries a Tensor, handled by the recursive branch above.
         if matches!(&inner.ty, Type::Option(_)) {
             return self.lower_expr(inner);
         }
@@ -16923,22 +17381,334 @@ impl LowerCtx<'_, '_> {
         Err(format!("jit clone unsupported type: {:?}, {source}", inner.ty))
     }
 
+    fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
+        fn visit(ctx: &LowerCtx<'_, '_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if ty.is_compute_tensor_family() {
+                return true;
+            }
+            match ty {
+                Type::Tagged { inner, .. }
+                | Type::List(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Option(inner) => visit(ctx, inner, seen),
+                Type::Map { value, .. } => visit(ctx, value, seen),
+                Type::Result { ok, err } => visit(ctx, ok, seen) || visit(ctx, err, seen),
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| visit(ctx, field, seen)),
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let result = ctx
+                        .meta
+                        .struct_layout(name)
+                        .is_some_and(|(_, fields)| fields.iter().any(|field| visit(ctx, field, seen)));
+                    seen.remove(name);
+                    result
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
+
     fn lower_clone_struct(&mut self, inner: &TExpr) -> Result<Value, String> {
         let type_name = user_type_name(&inner.ty)
             .ok_or_else(|| format!("jit clone unsupported type: {:?}", inner.ty))?;
-        let n_fields = self
+        let src = self.lower_expr(inner)?;
+        self.lower_clone_record_value(src, type_name, None)
+    }
+
+    fn lower_clone_record_value(
+        &mut self,
+        src: Value,
+        type_name: &str,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let field_types = self
             .meta
             .struct_layout(type_name)
-            .map(|(names, _)| names.len())
-            .ok_or_else(|| format!("jit clone unsupported type: {:?}", inner.ty))?;
-        let src = self.lower_expr(inner)?;
-        let n = self.b.ins().iconst(types::I64, n_fields as i64);
+            .map(|(_, types)| types.to_vec())
+            .ok_or_else(|| format!("jit clone unsupported type: {type_name}"))?;
+        let n = self.b.ins().iconst(types::I64, field_types.len() as i64);
         let dst = self.call_host(self.host.struct_new, &[n]);
-        let assign_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_assign, self.b.func);
-        self.b.ins().call(assign_ref, &[dst, src]);
+        let owner = owner.unwrap_or(dst);
+        for (index, field_ty) in field_types.iter().enumerate() {
+            let raw = self.record_slot(src, index, field_ty)?;
+            let cloned = self.lower_clone_raw_value(raw, field_ty, Some(owner))?;
+            self.set_record_slot(dst, index, cloned, field_ty)?;
+        }
         Ok(dst)
+    }
+
+    fn lower_clone_list_value(
+        &mut self,
+        input: Value,
+        elem_ty: &Type,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let output = self.call_host(self.host.coll.list_new, &[]);
+        let owner = owner.unwrap_or(output);
+        let input_var = self.fresh_var(types::I64);
+        let output_var = self.fresh_var(types::I64);
+        self.b.def_var(input_var, input);
+        self.b.def_var(output_var, output);
+        let index_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(index_var, zero);
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let index = self.b.use_var(index_var);
+        let input = self.b.use_var(input_var);
+        let length = self.call_host(self.host.coll.list_len, &[input]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, index, length);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get = if matches!(elem_ty, Type::Float | Type::Float32) {
+            self.host.coll.list_get_f64
+        } else {
+            self.host.coll.list_get
+        };
+        let element = self.call_host(get, &[input, index, line]);
+        self.emit_trap_check()?;
+        let cloned = self.lower_clone_raw_value(element, elem_ty, Some(owner))?;
+        let output_now = self.b.use_var(output_var);
+        let push = if matches!(elem_ty, Type::Float | Type::Float32) {
+            self.host.coll.list_push_f64
+        } else {
+            self.host.coll.list_push
+        };
+        let push = self.module.declare_func_in_func(push, self.b.func);
+        self.b.ins().call(push, &[output_now, cloned]);
+        self.adopt_compute_resource(cloned, owner);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let index = self.b.use_var(index_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(index, one);
+        self.b.def_var(index_var, next);
+        self.b.ins().jump(header, &[]);
+        self.b.seal_block(header);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(output_var))
+    }
+
+    fn lower_clone_map_value(
+        &mut self,
+        input: Value,
+        value_ty: &Type,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let keys = self.call_host(self.host.coll.map_keys, &[input]);
+        let values = self.call_host(self.host.coll.map_values, &[input]);
+        let output = self.call_host(self.host.coll.map_new, &[]);
+        let owner = owner.unwrap_or(output);
+        let index_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(index_var, zero);
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let index = self.b.use_var(index_var);
+        let length = self.call_host(self.host.coll.map_len, &[input]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, index, length);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let key = self.call_host(self.host.coll.list_get, &[keys, index, line]);
+        self.emit_trap_check()?;
+        let raw = self.call_host(self.host.coll.list_get, &[values, index, line]);
+        self.emit_trap_check()?;
+        let cloned = self.lower_clone_raw_value(raw, value_ty, Some(owner))?;
+        let insert = self
+            .module
+            .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+        self.b.ins().call(insert, &[output, key, cloned]);
+        self.adopt_compute_resource(cloned, owner);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let index = self.b.use_var(index_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(index, one);
+        self.b.def_var(index_var, next);
+        self.b.ins().jump(header, &[]);
+        self.b.seal_block(header);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(exit);
+        Ok(output)
+    }
+
+    fn lower_clone_option_value(
+        &mut self,
+        value: Value,
+        inner: &Type,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let is_none = self.b.ins().icmp(IntCC::Equal, value, zero);
+        let none = self.b.create_block();
+        let some = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_none, none, &[], some, &[]);
+
+        self.b.switch_to_block(none);
+        self.b.seal_block(none);
+        self.b.ins().jump(merge, &[zero]);
+
+        self.b.switch_to_block(some);
+        self.b.seal_block(some);
+        let payload = self.unpack_option_payload(value, inner)?;
+        let cloned = self.lower_clone_raw_value(payload, inner, owner)?;
+        let packed = self.pack_option_payload(cloned, inner)?;
+        if owner.is_none() {
+            self.adopt_compute_resource(cloned, packed);
+        }
+        self.b.ins().jump(merge, &[packed]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_clone_result_value(
+        &mut self,
+        value: Value,
+        ok_ty: &Type,
+        err_ty: &Type,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let is_ok = self.call_host(self.host.result_is_ok, &[value]);
+        let zero = self.b.ins().iconst(types::I8, 0);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let ok = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero);
+        self.b.ins().brif(ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(value, ok_ty)?;
+        let cloned = self.lower_clone_raw_value(payload, ok_ty, owner)?;
+        let result = self.lower_clone_result_new(true, cloned, ok_ty)?;
+        if owner.is_none() {
+            self.adopt_compute_resource(cloned, result);
+        }
+        self.b.ins().jump(merge, &[result]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        let payload = self.result_payload(value, err_ty)?;
+        let cloned = self.lower_clone_raw_value(payload, err_ty, owner)?;
+        let result = self.lower_clone_result_new(false, cloned, err_ty)?;
+        if owner.is_none() {
+            self.adopt_compute_resource(cloned, result);
+        }
+        self.b.ins().jump(merge, &[result]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_clone_result_new(
+        &mut self,
+        ok: bool,
+        value: Value,
+        ty: &Type,
+    ) -> Result<Value, String> {
+        let tag = self.b.ins().iconst(types::I8, i64::from(ok));
+        let erased = match ty {
+            Type::Named(name) => self.meta.distinct_base(name).unwrap_or(ty),
+            _ => ty,
+        };
+        let (host, value) = match self.meta.clif_ty(erased).or_else(|| clif_ty(erased)) {
+            Some(kind) if kind == types::F64 => (self.host.result_new_f64, value),
+            Some(kind) if kind == types::I8 => {
+                (self.host.result_new_i8, value)
+            }
+            Some(kind) if kind == types::I32 => (self.host.result_new_i32, value),
+            Some(kind) if kind == types::I64 => (self.host.result_new_i64, value),
+            _ if matches!(ty, Type::Named(name) if name == "Unit")
+                || matches!(ty, Type::Tuple(fields) if fields.is_empty()) => {
+                let value = self.b.ins().uextend(types::I64, value);
+                (self.host.result_new_i64, value)
+            }
+            _ => return Err(format!("jit Result payload unsupported: {ty:?}")),
+        };
+        Ok(self.call_host(host, &[tag, value]))
+    }
+
+    fn lower_clone_raw_value(
+        &mut self,
+        value: Value,
+        ty: &Type,
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        if ty.is_compute_tensor_family() {
+            let cloned = self.call_host(self.host.compute.clone, &[value]);
+            self.emit_trap_check()?;
+            self.track_compute_tensor_owned(cloned, owner);
+            return Ok(cloned);
+        }
+        match ty {
+            Type::Tagged { inner, .. } => self.lower_clone_raw_value(value, inner, owner),
+            Type::List(inner) | Type::FixedList { elem: inner, .. }
+                if self.clone_contains_compute_tensor(ty) => {
+                self.lower_clone_list_value(value, inner, owner)
+            }
+            Type::Map { value: inner, .. } if self.clone_contains_compute_tensor(ty) => {
+                self.lower_clone_map_value(value, inner, owner)
+            }
+            Type::Option(inner) if self.clone_contains_compute_tensor(ty) => {
+                self.lower_clone_option_value(value, inner, owner)
+            }
+            Type::Result { ok, err } if self.clone_contains_compute_tensor(ty) => {
+                self.lower_clone_result_value(value, ok, err, owner)
+            }
+            Type::Tuple(fields) if self.clone_contains_compute_tensor(ty) => {
+                self.lower_clone_tuple_value(value, fields, owner)
+            }
+            Type::Tuple(_) => Ok(value),
+            Type::Named(name) | Type::Apply { name, .. } => {
+                if self.clone_contains_compute_tensor(ty)
+                    && self.meta.struct_layout(name).is_some()
+                {
+                    self.lower_clone_record_value(value, name, owner)
+                } else {
+                    Ok(value)
+                }
+            }
+            _ => Ok(value),
+        }
     }
 
     /// Pack a Present payload into the JIT Option i64 ABI.
@@ -17180,36 +17950,29 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(merge)[0])
     }
 
+    fn lower_clone_tuple_value(
+        &mut self,
+        src: Value,
+        fields: &[(String, Box<Type>)],
+        owner: Option<Value>,
+    ) -> Result<Value, String> {
+        let n = self.b.ins().iconst(types::I64, fields.len() as i64);
+        let dst = self.call_host(self.host.struct_new, &[n]);
+        let owner = owner.unwrap_or(dst);
+        for (i, (_, field_ty)) in fields.iter().enumerate() {
+            let raw = self.record_slot(src, i, field_ty)?;
+            let cloned = self.lower_clone_raw_value(raw, field_ty, Some(owner))?;
+            self.set_record_slot(dst, i, cloned, field_ty)?;
+        }
+        Ok(dst)
+    }
+
     fn lower_clone_tuple(&mut self, inner: &TExpr) -> Result<Value, String> {
         let Type::Tuple(fields) = &inner.ty else {
             return Err("jit tuple clone needs tuple type".to_string());
         };
         let src = self.lower_expr(inner)?;
-        let n = self.b.ins().iconst(types::I64, fields.len() as i64);
-        let dst = self.call_host(self.host.struct_new, &[n]);
-        for (i, (_, field_ty)) in fields.iter().enumerate() {
-            let idx = self.b.ins().iconst(types::I64, i as i64);
-            match field_ty.as_ref() {
-                Type::Int => {
-                    let val = self.call_host(self.host.struct_get_i64, &[src, idx]);
-                    let set = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                    self.b.ins().call(set, &[dst, idx, val]);
-                }
-                Type::Float => {
-                    let val = self.call_host(self.host.struct_get_f64, &[src, idx]);
-                    let set = self
-                        .module
-                        .declare_func_in_func(self.host.struct_set_f64, self.b.func);
-                    self.b.ins().call(set, &[dst, idx, val]);
-                }
-                other => {
-                    return Err(format!("jit tuple clone field unsupported: {other:?}"));
-                }
-            }
-        }
-        Ok(dst)
+        self.lower_clone_tuple_value(src, fields, None)
     }
 
     fn lower_spawn(&mut self) -> Result<Value, String> {
@@ -21708,6 +22471,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
         let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
             let payload_ty = self
                 .meta
@@ -21725,20 +22490,21 @@ impl LowerCtx<'_, '_> {
             self.b.def_var(var, payload);
             let key = TIR::local_place(name);
             let old_var = self.vars.insert(key.clone(), var);
+            self.track_compute_value(payload, &payload_ty)?;
             let old_ty = self.var_tys.insert(key.clone(), payload_ty);
             Some((key, old_var, old_ty))
         } else {
             None
         };
-        self.lower_stmts_scoped(then_body)?;
-        let mut then_reaches_merge = !self.dead;
-        if then_reaches_merge {
-            let then_val = self.lower_expr(then_value)?;
-            if !self.dead {
-                self.b.ins().jump(merge_block, &[then_val]);
-            } else {
-                then_reaches_merge = false;
-            }
+        let then_val = self.lower_stmts_scoped_value_with_names_from(
+            then_body,
+            then_value,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
+        let then_reaches_merge = then_val.is_some();
+        if let Some(then_val) = then_val {
+            self.b.ins().jump(merge_block, &[then_val]);
         }
         if let Some((key, old_var, old_ty)) = bound {
             match old_var {
@@ -21761,22 +22527,20 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(else_block);
         self.b.seal_block(else_block);
-        self.dead = false;
-        self.lower_stmts_scoped(else_body)?;
-        let mut else_reaches_merge = !self.dead;
-        if else_reaches_merge {
-            let else_val = self.lower_expr(else_value)?;
-            if !self.dead {
-                self.b.ins().jump(merge_block, &[else_val]);
-            } else {
-                else_reaches_merge = false;
-            }
+        let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
+        let else_reaches_merge = else_val.is_some();
+        if let Some(else_val) = else_val {
+            self.b.ins().jump(merge_block, &[else_val]);
         }
 
         self.b.switch_to_block(merge_block);
         self.b.seal_block(merge_block);
         self.dead = !(then_reaches_merge || else_reaches_merge);
-        Ok(self.b.block_params(merge_block)[0])
+        let value = self.b.block_params(merge_block)[0];
+        if !self.dead {
+            self.track_compute_value(value, result_ty)?;
+        }
+        Ok(value)
     }
 
     fn lower_enum_if_let(
@@ -21789,7 +22553,9 @@ impl LowerCtx<'_, '_> {
         self.lower_enum_if_let_with_then(
             pattern,
             subj,
-            |this| this.lower_stmts_scoped(then_body),
+            |this, outer_names, resource_mark| {
+                this.lower_stmts_scoped_with_names_from(then_body, outer_names, resource_mark)
+            },
             else_body,
         )
     }
@@ -21802,7 +22568,7 @@ impl LowerCtx<'_, '_> {
         else_body: Option<&[TStmt]>,
     ) -> Result<(), String>
     where
-        F: FnOnce(&mut Self) -> Result<(), String>,
+        F: FnOnce(&mut Self, &HashSet<String>, usize) -> Result<(), String>,
     {
         let Pattern::Variant {
             variant, bindings, ..
@@ -21836,6 +22602,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
         let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
             let payload_ty = self
                 .meta
@@ -21853,12 +22621,13 @@ impl LowerCtx<'_, '_> {
             self.b.def_var(var, payload);
             let key = TIR::local_place(name);
             let old_var = self.vars.insert(key.clone(), var);
+            self.track_compute_value(payload, &payload_ty)?;
             let old_ty = self.var_tys.insert(key.clone(), payload_ty);
             Some((key, old_var, old_ty))
         } else {
             None
         };
-        then_action(self)?;
+        then_action(self, &then_outer_names, then_resource_mark)?;
         if let Some((key, old_var, old_ty)) = bound {
             match old_var {
                 Some(var) => {
@@ -21886,7 +22655,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(else_block);
         self.dead = false;
         if let Some(body) = else_body {
-            self.lower_stmts_scoped(body)?;
+            self.lower_stmts_scoped_with_names_from(body, &then_outer_names, then_resource_mark)?;
         }
         let else_dead = self.dead;
         if !else_dead {
@@ -21908,9 +22677,11 @@ impl LowerCtx<'_, '_> {
         cond: &TExpr,
         then_action: F,
         else_body: Option<&[TStmt]>,
+        outer_names: &HashSet<String>,
+        resource_mark: usize,
     ) -> Result<(), String>
     where
-        F: FnOnce(&mut Self) -> Result<(), String>,
+        F: FnOnce(&mut Self, &HashSet<String>) -> Result<(), String>,
     {
         let cond_val = self.lower_expr(cond)?;
         let then_block = self.b.create_block();
@@ -21922,7 +22693,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        then_action(self)?;
+        then_action(self, &outer_names)?;
         let then_reaches_merge = !self.dead;
         if then_reaches_merge {
             self.b.ins().jump(merge_block, &[]);
@@ -21932,7 +22703,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(else_block);
         self.dead = false;
         if let Some(body) = else_body {
-            self.lower_stmts(body)?;
+            self.lower_stmts_scoped_with_names_from(body, &outer_names, resource_mark)?;
         }
         let else_reaches_merge = !self.dead;
         if else_reaches_merge {
@@ -21993,6 +22764,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
         let payload = self.result_payload(handle, &payload_ty)?;
         let place = TIR::local_place(&binding);
         let clif = self.b.func.dfg.value_type(payload);
@@ -22000,9 +22773,14 @@ impl LowerCtx<'_, '_> {
         let old_ty = self.var_tys.remove(&place);
         let var = self.fresh_var(clif);
         self.b.def_var(var, payload);
+        self.track_compute_value(payload, &payload_ty)?;
         self.vars.insert(place.clone(), var);
         self.var_tys.insert(place.clone(), payload_ty);
-        self.lower_stmts_scoped(then_body)?;
+        self.lower_stmts_scoped_with_names_from(
+            then_body,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
         self.vars.remove(&place);
         self.var_tys.remove(&place);
         if let Some(v) = old_var {
@@ -22020,7 +22798,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(else_block);
         self.dead = false;
         if let Some(body) = else_body {
-            self.lower_stmts(body)?;
+            self.lower_stmts_scoped(body)?;
         }
         let else_reaches = !self.dead;
         if else_reaches {
@@ -22065,6 +22843,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
         let payload = self.unpack_option_payload(packed, &inner_ty)?;
         let place = TIR::local_place(binding);
         let clif = clif_ty(&inner_ty).unwrap_or(types::I64);
@@ -22072,9 +22852,14 @@ impl LowerCtx<'_, '_> {
         let old_ty = self.var_tys.remove(&place);
         let var = self.fresh_var(clif);
         self.b.def_var(var, payload);
+        self.track_compute_value(payload, &inner_ty)?;
         self.vars.insert(place.clone(), var);
         self.var_tys.insert(place.clone(), inner_ty);
-        self.lower_stmts_scoped(then_body)?;
+        self.lower_stmts_scoped_with_names_from(
+            then_body,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
         self.vars.remove(&place);
         self.var_tys.remove(&place);
         if let Some(v) = old_var {
@@ -22092,7 +22877,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(else_block);
         self.dead = false;
         if let Some(body) = else_body {
-            self.lower_stmts(body)?;
+            self.lower_stmts_scoped(body)?;
         }
         let else_reaches = !self.dead;
         if else_reaches {
@@ -22146,6 +22931,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
+        let then_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let then_resource_mark = self.compute_resources.len();
 
         let mut bound_place: Option<String> = None;
         let mut old_var = None;
@@ -22163,6 +22950,7 @@ impl LowerCtx<'_, '_> {
                 old_ty = self.var_tys.remove(&place);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, payload);
+                self.track_compute_value(payload, &entries_ty)?;
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place.clone(), entries_ty);
                 bound_place = Some(place);
@@ -22178,6 +22966,7 @@ impl LowerCtx<'_, '_> {
                         let clif = self.meta.clif_ty(&pty).unwrap_or(types::I64);
                         let var = self.fresh_var(clif);
                         self.b.def_var(var, payload);
+                        self.track_compute_value(payload, &pty)?;
                         self.vars.insert(place.clone(), var);
                         self.var_tys.insert(place.clone(), pty);
                         bound_place = Some(place);
@@ -22186,7 +22975,11 @@ impl LowerCtx<'_, '_> {
             }
         }
 
-        self.lower_stmts_scoped(then_body)?;
+        self.lower_stmts_scoped_with_names_from(
+            then_body,
+            &then_outer_names,
+            then_resource_mark,
+        )?;
         if let Some(place) = bound_place {
             self.vars.remove(&place);
             self.var_tys.remove(&place);
@@ -22206,7 +22999,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(else_block);
         self.dead = false;
         if let Some(body) = else_body {
-            self.lower_stmts(body)?;
+            self.lower_stmts_scoped(body)?;
         }
         let else_reaches_merge = !self.dead;
         if else_reaches_merge {
