@@ -34,11 +34,11 @@ struct Commands {
             .unwrap();
             assert!(completion.status.success(), "{shell} global CLI completion failed: {}", String::from_utf8_lossy(&completion.stderr));
         let script = String::from_utf8(completion.stdout).unwrap();
-        let expected = match shell {
-            "bash" => ["--help --config serve import", "--config", "--port", "--file"],
-            "zsh" => ["serve", "import", "--config", "{-p,--port}", ":file:file to import"],
-            "fish" => ["-l config", "serve", "import", "-l port", "-l file"],
-            "powershell" => ["'--help','--config','serve','import'", "'--config'", "'--port'", "'file','--file'"],
+        let expected: &[&str] = match shell {
+            "bash" => &["--help --config serve import", "--config", "--port", "--file"],
+            "zsh" => &["serve", "import", "--config", "{-p,--port}", ":file:file to import"],
+            "fish" => &["-l config", "serve", "import", "-l port", "-l file"],
+            "powershell" => &["'--help','--config','serve','import'", "'--config'", "'--port'", "'file','--file'"],
             _ => unreachable!(),
         };
         for fragment in expected {

@@ -77,12 +77,13 @@ fn check_snapshot(name: &str, actual: &str) {
     assert_eq!(actual, expected, "snapshot mismatch for {}", name);
 }
 
-/// Write a tiny source file with a known error and return its path. Each test
-/// passes a unique `tag` so concurrent tests never share a path — `fs::write`
-/// truncates-then-writes, so a shared path would let one test's write race a
-/// sibling's `jet check` read (seeing a momentarily-empty file).
+/// Write a tiny source file with a known error and return its path. Keep each
+/// file in its own authority root: concurrent tests creating sibling files
+/// directly under the shared temp directory would change that root while
+/// `jet` is checking its authority snapshot.
 fn bad_file(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("jet_cli_bad_{tag}.jet"));
+    let dir = isolated_cwd(&format!("bad_{tag}"));
+    let p = dir.join("bad.jet");
     fs::write(&p, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
     p
 }

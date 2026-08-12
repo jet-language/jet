@@ -2795,7 +2795,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             Err(error) => Some(Err(error.workspace_diagnostic())),
         }
     });
-    if workspace_source.is_none() {
+    if matches!(workspace_source.as_ref(), None | Some(Ok(None))) {
         let stale_workspace_lock = match workspace_resolver.as_ref() {
             Some(resolver) => match resolver.checked_file(Path::new(jet::Syntax::UNIFIED_LOCK_FILE)) {
                 Ok(lock_file) => {
