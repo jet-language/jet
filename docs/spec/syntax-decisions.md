@@ -6611,8 +6611,6 @@ refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
-**2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
-
 **2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
 D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
 `loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
@@ -6694,11 +6692,16 @@ Owner-commissioned first-principles memory audit; proposal at `docs/proposals/me
 
 Owner rulings recorded without ballots: the strategy-attachment unification was withdrawn on the owner's pushback (allocator, container, type, and scope-attribute are different things on purpose; `#Policy(gc)` keeps its one-line shape). The 2026-08-12 probed defect set stays ordinary repair cards under I9, outside this slate.
 
-**2026-08-07 — the one-tree name slate: D-NAME-TREE1=A,
+**2026-08-07 — the one-tree name slate: D-NAME-TREE1=A, D-NAME-FILES1=C,
 D-NAME-ALIAS1=A, D-NAME-FENCE1=A, D-NAME-WALK1=A, D-NAME-ROLEMOD1=A,
 D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625, proposal
-`docs/proposals/names-one-tree.md`)*. D-NAME-FILES1=C already records manual
-named imports above. This section records the other outcomes.
+`docs/proposals/names-one-tree.md`)*.
+
+- **D-NAME-FILES1=C** — manual named imports stay: every cross-file name keeps
+  an explicit import line, and no invisible auto-import of project files
+  ships. Owner's words: "Let's just stick with manual named imports like we
+  used to have rather than the magic auto imports that are invisible."
+  D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot.
 
 - **D-NAME-TREE1=A** — a name is a member at one point in one tree. A
   declaration attaches it, and an alias only points at it. Sema writes one name
