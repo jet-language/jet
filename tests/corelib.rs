@@ -3271,24 +3271,214 @@ fn standalone_tls_probe_source(mut rust: String) -> String {
 #[test]
 fn invariant_refinement_proves_fixed_array_index() {
     let src = r#"
+tag Checked { deny: [Net] }
 #Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
-fn pick(xs: [String#4], i: Index4) => String {
-    return ~xs[i]
+fn pick(xs: [Int#4], i: Index4) => Int {
+    return xs[i]
 }
 
 fn run() {
-    words :: [String#4].{ "zero", "one", "two", "three" }
-    print(pick(words, Index4.from_int(2)))
+    values :: [Int#4].{ 0, 1, 2, 3 }
+    print(pick(values, Index4.from_int(2)))
+    print(pick(values, #Checked Index4.from_int(0)))
 }
 "#;
-    let out = compile_temp("refinement_index.jet", src);
-    assert!(
-        !out.rust.contains("jet_index_vec(&"),
-        "proof-carrying fixed-array index should not emit runtime list bounds helper:\n{}",
-        out.rust
-    );
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_refinement_index_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "refinement_index", src, &[], None);
+    assert_eq!(code, 0, "fixed-list AOT failed: {stderr}");
+    assert_eq!(aot_stdout, "2\n0\n");
+
+    let path = dir.join("refinement_index.jet");
+    for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+        if !force_interpreter {
+            jet_jit::reset_jit_trace_for_test();
+        }
+        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "{tier} fixed-list run failed: {stderr}");
+                assert_eq!(stderr, "");
+                assert_eq!(stdout, aot_stdout, "{tier} fixed-list output drifted");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                panic!("{tier} fixed-list run failed: {diagnostics:?}");
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "fixed-list fixture must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "fixed-list fixture must not deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "fixed-list fixture must not fall back"
+            );
+        }
+    }
+
+    let web_src = r#"
+#Target(Web)
+tag Checked { deny: [Net] }
+#Invariant("value >= 0 && value < 4")
+Index4 :: distinct Int
+
+#Target(JS)
+fn pick(xs: [Int#4], i: Index4) => Int {
+    return xs[i]
+}
+
+#Target(JS)
+fn run() {
+    values :: [Int#4].{ 0, 1, 2, 3 }
+    print(pick(values, Index4.from_int(2)))
+    print(pick(values, #Checked Index4.from_int(0)))
+}
+"#;
+    if let Some(web_stdout) = run_web_js_source(&dir, "refinement_index_web", web_src) {
+        assert_eq!(web_stdout, "2\n0\n");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn parenthesized_view_place_return_keeps_parameter_provenance() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping parenthesized View return test (need rustc)");
+        return;
+    }
+    let src = r#"
+fn first(values: [Int]) => View<Int> {
+    return (values[0..1])
+}
+
+fn run() {
+    values :: [7, 8]
+    selected :: first(values)
+    print(selected[0])
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_parenthesized_view_return_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "parenthesized_view_return", src, &[], None);
+    assert_eq!(code, 0, "parenthesized View return AOT failed: {stderr}");
+    assert_eq!(aot_stdout, "7\n");
+
+    let path = dir.join("parenthesized_view_return.jet");
+    fs::write(&path, src).unwrap();
+    for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+        if !force_interpreter {
+            jet_jit::reset_jit_trace_for_test();
+        }
+        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "{tier} View return failed: {stderr}");
+                assert_eq!(stderr, "");
+                assert_eq!(stdout, aot_stdout, "{tier} View return output drifted");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                panic!("{tier} rejected parenthesized View return: {diagnostics:?}");
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "parenthesized View return must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "parenthesized View return must not deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "parenthesized View return must not fall back"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fnmut_collection_callback_preserves_capture_storage() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping FnMut collection callback test (need rustc)");
+        return;
+    }
+    let src = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    total := 0
+    values.each((n: Int) => { total = total + n })
+    print(total)
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_fnmut_collection_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "fnmut_collection", src, &[], None);
+    assert_eq!(code, 0, "FnMut collection AOT failed: {stderr}");
+    assert_eq!(aot_stdout, "10\n");
+
+    let path = dir.join("fnmut_collection.jet");
+    fs::write(&path, src).unwrap();
+    for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
+        if !force_interpreter {
+            jet_jit::reset_jit_trace_for_test();
+        }
+        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "{tier} FnMut run failed: {stderr}");
+                assert_eq!(stderr, "");
+                assert_eq!(stdout, aot_stdout, "{tier} FnMut capture update was lost");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                panic!("{tier} rejected FnMut collection fixture: {diagnostics:?}");
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "FnMut collection fixture must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "FnMut collection fixture must not deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "FnMut collection fixture must not fall back"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -3896,6 +4086,40 @@ fn build_and_run(
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+fn run_web_js_source(dir: &PathBuf, name: &str, src: &str) -> Option<String> {
+    if Command::new("node").arg("--version").output().is_err() {
+        return None;
+    }
+    let web_dir = dir.join(format!("{name}_web"));
+    let _ = fs::remove_dir_all(&web_dir);
+    fs::create_dir_all(&web_dir).unwrap();
+    let source_path = web_dir.join(format!("{name}.jet"));
+    fs::write(&source_path, src).unwrap();
+    let shown = source_path.to_string_lossy();
+    let out = jet::compile_web_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected Web fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    let web = out.web.expect("Web fixture must produce Web artifacts");
+    fs::write(web_dir.join("app.js"), web.js_app).unwrap();
+    fs::write(web_dir.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
+    fs::write(web_dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let node = Command::new("node")
+        .current_dir(&web_dir)
+        .arg("app.js")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "Web JS fixture failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    Some(String::from_utf8_lossy(&node.stdout).into_owned())
 }
 
 fn build_and_run_multi(
@@ -11501,36 +11725,117 @@ fn option_zip_and_lift2_combinators() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_option_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "option_combinators",
-        r#"
+    let source = r#"
 fn missing_float() => Float? = None
+fn multiply_options(x: Float, y: Float) => Float {
+    return x * y
+}
+fn choose_multiplier() => fn(Float, Float) => Float {
+    print("choose")
+    return multiply_options
+}
 fn run() {
     both_a :: Val(2.0)
     both_b :: Val(5.0)
     print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_a, both_b))
+    print(Option.lift2(multiply_options, both_a, both_b))
+    multiplier :: multiply_options
+    print(Option.lift2(multiplier, both_a, both_b))
+    print(Option.lift2(choose_multiplier(), both_a, both_b))
 
     a_only :: Val(2.0)
     b_missing :: missing_float()
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
+    print(Option.lift2(choose_multiplier(), a_only, b_missing))
 
     both_missing_a :: missing_float()
     both_missing_b :: missing_float()
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }
-"#,
+"#;
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "option_combinators",
+        source,
         &[],
         None,
     );
     assert_eq!(code, 0, "option combinator fixture failed: {stderr}");
     assert_eq!(
-        stdout, "10.0\n10.0\nnull\nnull\nnull\nnull\n",
+        stdout,
+        "10.0\n10.0\n10.0\n10.0\nchoose\n10.0\nnull\nnull\nnull\nnull\nnull\n",
         "unexpected option combinator output: {stdout}"
     );
+    let dev_path = dir.join("option_combinators.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: interpreted_stdout,
+            stderr: interpreted_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "forced interpreter failed: {interpreted_stderr}");
+            assert_eq!(interpreted_stderr, "");
+            assert_eq!(interpreted_stdout, stdout, "forced interpreter output drifted");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected option combinator fixture: {diagnostics:?}");
+        }
+    }
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: resident_stdout,
+            stderr: resident_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "resident JIT failed: {resident_stderr}");
+            assert_eq!(resident_stderr, "");
+            assert_eq!(resident_stdout, stdout, "resident JIT output drifted");
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "option combinator fixture must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "option combinator fixture must not deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "option combinator fixture must not fall back"
+            );
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("resident JIT rejected option combinator fixture: {diagnostics:?}");
+        }
+    }
+
+    let web_source = r#"
+#Target(Web)
+#Target(JS)
+fn add(x: Int, y: Int) => Int { return x + y }
+
+#Target(JS)
+fn choose() => fn(Int, Int) => Int {
+    print("choose")
+    return add
+}
+
+#Target(JS)
+fn run() {
+    if Option.lift2(add, Val(2), Val(3)) == .Val(value) { print(value) }
+    local :: add
+    if Option.lift2(local, Val(2), Val(3)) == .Val(value) { print(value) }
+    if Option.lift2(choose(), Val(2), Val(3)) == .Val(value) { print(value) }
+    if Option.lift2(choose(), Val(2), None) == .None { print("none") }
+}
+"#;
+    if let Some(web_stdout) = run_web_js_source(&dir, "option_combinators_web", web_source) {
+        assert_eq!(web_stdout, "5\n5\nchoose\n5\nnone\n");
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -12491,5 +12796,88 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
             source_path.display()
         )
     );
+
+    fs::write(&source_path, src).unwrap();
+    match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: interpreted_stdout,
+            stderr: interpreted_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "forced interpreter failed: {interpreted_stderr}");
+            assert_eq!(interpreted_stderr, "");
+            assert_eq!(interpreted_stdout, stdout, "forced interpreter output drifted");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected tracked-float fixture: {diagnostics:?}");
+        }
+    }
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: resident_stdout,
+            stderr: resident_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "resident JIT failed: {resident_stderr}");
+            assert_eq!(resident_stderr, "");
+            assert_eq!(resident_stdout, stdout, "resident JIT output drifted");
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "tracked-float fixture must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "tracked-float fixture must not deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "tracked-float fixture must not fall back"
+            );
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("resident JIT rejected tracked-float fixture: {diagnostics:?}");
+        }
+    }
+
+    let web_source = r#"
+#Target(Web)
+#Target(JS)
+fn run() {
+    #Track speed :: 3.5
+    plain :: 3.5
+    copied :: speed
+    print(speed.origin())
+    print(plain.origin())
+    print(copied.origin())
+    print(next().origin())
+}
+#Target(JS)
+fn next() => Float {
+    print("evaluated")
+    return 3.5
+}
+"#;
+    if let Some(web_stdout) = run_web_js_source(&dir, "float_binding_origin_web", web_source) {
+        let mut lines = web_stdout.lines();
+        assert!(
+            lines
+                .next()
+                .is_some_and(|line| line.starts_with("tracked `speed` at ")),
+            "Web lost tracked origin: {web_stdout:?}"
+        );
+        assert_eq!(lines.next(), Some("untracked"), "Web plain origin drifted");
+        assert_eq!(lines.next(), Some("untracked"), "Web copied origin drifted");
+        assert_eq!(
+            lines.next(),
+            Some("evaluated"),
+            "Web origin receiver evaluated wrong"
+        );
+        assert_eq!(lines.next(), Some("untracked"), "Web call origin drifted");
+        assert!(
+            lines.next().is_none(),
+            "Web origin emitted extra output: {web_stdout:?}"
+        );
+    }
     let _ = fs::remove_dir_all(&dir);
 }

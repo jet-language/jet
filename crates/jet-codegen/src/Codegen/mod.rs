@@ -61,6 +61,9 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FAIL-CARRIER1=A: the one carrier under `T?` and `T ? E`. First, because
     // every other part builds outcomes on top of it.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
+    include_str!("../Prelude/Core/Option.rs"),
+    include_str!("../Prelude/Core/FixedList.rs"),
+    include_str!("../Prelude/Core/FloatProvenance.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
@@ -2230,8 +2233,17 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let outcome =
             std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
+        let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
+        let fixed_list =
+            std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
+        let float_provenance = std::fs::read_to_string(
+            root.join("src/Prelude/Core/FloatProvenance.rs"),
+        )
+        .unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
+        let loadable =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
         let range_bounds =
             std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
@@ -2277,7 +2289,14 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
+            ("src/Prelude/Core/Option.rs", option.as_str()),
+            ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
+            (
+                "src/Prelude/Core/FloatProvenance.rs",
+                float_provenance.as_str(),
+            ),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
+            ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
             ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
@@ -2333,8 +2352,20 @@ mod tests {
         let outcome_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
             .unwrap();
+        let option_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Option.rs\")")
+            .unwrap();
+        let fixed_list_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/FixedList.rs\")")
+            .unwrap();
+        let float_provenance_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/FloatProvenance.rs\")")
+            .unwrap();
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
+            .unwrap();
+        let loadable_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Loadable.rs\")")
             .unwrap();
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
@@ -2386,7 +2417,12 @@ mod tests {
             .unwrap();
         assert!(
             outcome_pos < unicode_pos
-                && unicode_pos < values_pos
+                && outcome_pos < option_pos
+                && option_pos < fixed_list_pos
+                && fixed_list_pos < float_provenance_pos
+                && float_provenance_pos < unicode_pos
+                && unicode_pos < loadable_pos
+                && loadable_pos < values_pos
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
@@ -2410,7 +2446,11 @@ mod tests {
             PRELUDE_PARTS,
             [
                 outcome.as_str(),
+                option.as_str(),
+                fixed_list.as_str(),
+                float_provenance.as_str(),
                 unicode.as_str(),
+                loadable.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
                 disjoint.as_str(),
@@ -2443,7 +2483,11 @@ mod tests {
         push_prelude(&mut emitted);
         let expected = [
             outcome.as_str(),
+            option.as_str(),
+            fixed_list.as_str(),
+            float_provenance.as_str(),
             unicode.as_str(),
+            loadable.as_str(),
             values.as_str(),
             range_bounds.as_str(),
             disjoint.as_str(),
@@ -2474,11 +2518,11 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 364_621, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
-            "split changed historical prelude bytes, order, or boundary newline"
+            "7416384a2f14ae1cabcad65d9a5f489c8f04bd5a33971c70d4711d8df6dcb00f",
+            "split changed prelude bytes, order, or boundary newline"
         );
     }
 

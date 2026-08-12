@@ -1330,11 +1330,14 @@ impl<'a> Checker<'a> {
                             // window. At a named `View<T>` return boundary, make
                             // that local acquisition explicit in the AST before
                             // inference; E2305 then checks today's provenance gate.
-                            if matches!(&rt, Type::Apply { name, .. } if name == "View")
-                                && !string_view_return
-                                && !matches!(e, Expr::Copy(..) | Expr::Place(..))
-                                && self.place_from_expr(e).is_some()
-                            {
+                            let bare_place_return = {
+                                let transparent = e.without_parens();
+                                matches!(&rt, Type::Apply { name, .. } if name == "View")
+                                    && !string_view_return
+                                    && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
+                                    && self.place_from_expr(transparent).is_some()
+                            };
+                            if bare_place_return {
                                 let span = e.span();
                                 let inner = std::mem::replace(e, Expr::Absent(span));
                                 *e = Expr::Place(
@@ -3078,7 +3081,7 @@ fn prefer_compound_assign(
     if matches!(target, LValue::Index { .. }) {
         return None;
     }
-    let Expr::Binary(op, left, _right, _) = peel_parens(value) else {
+    let Expr::Binary(op, left, _right, _) = value.without_parens() else {
         return None;
     };
     let compound = op.compound_spell()?;
@@ -3088,15 +3091,8 @@ fn prefer_compound_assign(
     Some((lvalue_spell(target)?, *op, compound))
 }
 
-fn peel_parens(expr: &Expr) -> &Expr {
-    match expr {
-        Expr::Paren(inner, _) => peel_parens(inner),
-        other => other,
-    }
-}
-
 fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
-    match (lv, peel_parens(expr)) {
+    match (lv, expr.without_parens()) {
         (LValue::Local { name, .. }, Expr::Ident(n, _)) => name == n,
         (LValue::Field { base, field, .. }, Expr::Field(b, f, _)) => {
             field == f && expr_same_place(base, b)
@@ -3106,7 +3102,7 @@ fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
 }
 
 fn expr_same_place(a: &Expr, b: &Expr) -> bool {
-    match (peel_parens(a), peel_parens(b)) {
+    match (a.without_parens(), b.without_parens()) {
         (Expr::Ident(n1, _), Expr::Ident(n2, _)) => n1 == n2,
         (Expr::Field(b1, f1, _), Expr::Field(b2, f2, _)) => f1 == f2 && expr_same_place(b1, b2),
         (
@@ -3134,7 +3130,7 @@ fn lvalue_spell(lv: &LValue) -> Option<String> {
 }
 
 fn expr_place_spell(expr: &Expr) -> Option<String> {
-    match peel_parens(expr) {
+    match expr.without_parens() {
         Expr::Ident(name, _) => Some(name.clone()),
         Expr::Field(base, field, _) => Some(format!("{}.{}", expr_place_spell(base)?, field)),
         Expr::Index { base, index, .. } => Some(format!(

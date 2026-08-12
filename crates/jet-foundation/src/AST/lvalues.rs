@@ -46,8 +46,9 @@ pub enum IndexKind {
     /// D-RANGE-VALUE1=A: `xs[range]` is a copy slice using one Range value.
     Range,
     /// D-OOBPROOF1 / D-REFINE1: fixed-size list index proven in-bounds by a
-    /// range-refined distinct `Int`. Codegen may emit direct indexing because
-    /// sema carried the proof here.
+    /// range-refined distinct `Int`. Codegen lowers this fact to the shared
+    /// checked fixed-list operation; sema still owns the proof that the path is
+    /// valid.
     FixedListProof,
     Map,
     /// D-SIMD2: `v[i]` lane access on a SIMD lane type (`F32x4`/`F64x2`). Lowers to a

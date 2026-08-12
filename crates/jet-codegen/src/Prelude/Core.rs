@@ -630,18 +630,8 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
-    }
-    xs[i as usize].clone()
+    jet_fixed_list_index(xs.len(), i, |index| xs[index].clone())
+        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
 }
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
@@ -649,18 +639,8 @@ fn jet_index_vec_mut<'a, T>(
     file: &str,
     line: u32,
 ) -> &'a mut T {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
-    }
-    &mut xs[i as usize]
+    jet_fixed_list_index(xs.len(), i, |index| &mut xs[index])
+        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
 }
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {

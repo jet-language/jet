@@ -262,11 +262,14 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 _ => unreachable!("Cell guard projection has one or two sema paths"),
             }
         }
-        THostCall::FixedListIndex { base, index } => format!(
-            "(({b})[({i}).0 as usize].clone())",
-            b = emit_tir_expr(base, cx),
-            i = emit_tir_expr(index, cx),
-        ),
+        THostCall::FixedListIndex { base, index, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            format!(
+                "{{ let __jet_fixed = ({b}); jet_fixed_list_index(__jet_fixed.len(), ({i}).0, |__jet_i| __jet_fixed[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_panic({:?}, {line}, &__jet_error.message())) }}",
+                cx.file
+            )
+        }
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
@@ -630,7 +633,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
         TNumericOp::Origin { origin } => format!(
-            "{{ let _ = ({recv}); {:?}.to_string() }}",
+            "{{ let _ = ({recv}); jet_float_origin(Some({:?})) }}",
             origin
         ),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
@@ -2969,15 +2972,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("move |{declarations}| ({callable})({arguments})")
         }
-        // D-HOLE1: `Option.lift2(f, a, b)` — `a.zip(b).map(|(x, y)| f(x, y))`. `f` is
-        // any lowered function value (lambda or fn ident), called via Rust's
-        // call-operator syntax on the (possibly boxed) closure.
+        // D-HOLE1: the shared Prelude owns presence, lazy callable creation,
+        // and the one canonical call. The factory keeps `f` unevaluated when
+        // either option is absent.
         TExprKind::OptionLift2 { f, a, b } => {
             let f = emit_tir_expr(f, cx);
             let a = emit_tir_expr(a, cx);
             let b = emit_tir_expr(b, cx);
             format!(
-                "({}).clone().zip(({}).clone()).map(|(x, y)| ({})(x, y))",
+                "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |__jet_value| Ok(__jet_value), || ({}))",
                 a, b, f
             )
         }

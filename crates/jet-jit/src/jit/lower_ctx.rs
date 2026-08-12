@@ -6545,14 +6545,37 @@ impl LowerCtx<'_, '_> {
                     .call(host, &[value, duration, clock, secret]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THostCall::FixedListIndex { base, index } => {
+            THostCall::FixedListIndex { base, index, line } => {
                 let list = self.lower_expr(base)?;
                 let idx = self.lower_expr(index)?;
-                let line = self.b.ins().iconst(types::I32, 1);
+                let idx = match self.meta.clif_ty(&index.ty).or_else(|| clif_ty(&index.ty)) {
+                    Some(clif) if clif == types::I64 => idx,
+                    Some(clif) if clif == types::I8 => self.b.ins().uextend(types::I64, idx),
+                    Some(clif) if clif == types::I32 => {
+                        if matches!(&index.ty, Type::IntN { signed: true, .. }) {
+                            self.b.ins().sextend(types::I64, idx)
+                        } else {
+                            self.b.ins().uextend(types::I64, idx)
+                        }
+                    }
+                    Some(clif) => {
+                        return Err(format!(
+                            "jit fixed-list index ABI unsupported: {:?} ({clif:?})",
+                            index.ty
+                        ));
+                    }
+                    None => {
+                        return Err(format!(
+                            "jit fixed-list index ABI unsupported: {:?}",
+                            index.ty
+                        ));
+                    }
+                };
+                let line = self.b.ins().iconst(types::I32, i64::from(*line));
                 let host_id = if self.meta.clif_ty(ty) == Some(types::F64) {
-                    self.host.coll.list_get_f64
+                    self.host.coll.fixed_list_get_f64
                 } else {
-                    self.host.coll.list_get
+                    self.host.coll.fixed_list_get
                 };
                 let value = self.call_host(host_id, &[list, idx, line]);
                 self.emit_trap_check()?;
@@ -7166,19 +7189,73 @@ impl LowerCtx<'_, '_> {
         fn_ty: &Type,
         args: &[TCallArg],
     ) -> Result<Value, String> {
-        let signature = fn_value_signature(self.module, fn_ty, self.meta)?;
-        let sig_ref = self.b.import_signature(signature);
         let values: Result<Vec<_>, _> =
             args.iter().map(|arg| self.lower_call_arg(arg)).collect();
-        let call = self.b.ins().call_indirect(sig_ref, callee, &values?);
-        let result = match fn_ty {
-            Type::Fn { ret: Some(ret), .. } if self.meta.clif_ty(ret).is_some() => {
-                Some(self.b.inst_results(call)[0])
-            }
-            _ => None,
-        };
+        self.lower_fn_call_values(callee, fn_ty, &values?)
+    }
+
+    fn lower_fn_call_values(
+        &mut self,
+        callee: Value,
+        fn_ty: &Type,
+        values: &[Value],
+    ) -> Result<Value, String> {
+        let signature = fn_value_signature(self.module, fn_ty, self.meta)?;
+        let callee = self.call_host(self.host.callable_normalize, &[callee]);
+        let fn_ptr = self.call_host(self.host.callable_fn, &[callee]);
+        let env = self.call_host(self.host.callable_env, &[callee]);
+        let has_env = self.call_host(self.host.callable_has_env, &[callee]);
         self.emit_trap_check()?;
-        Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+        let result_ty = signature.returns.first().map(|param| param.value_type);
+        let plain = self.b.create_block();
+        let captured = self.b.create_block();
+        let merge = self.b.create_block();
+        if let Some(result_ty) = result_ty {
+            self.b.append_block_param(merge, result_ty);
+        }
+        let zero = self.b.ins().iconst(types::I8, 0);
+        let is_captured = self.b.ins().icmp(IntCC::NotEqual, has_env, zero);
+        self.b
+            .ins()
+            .brif(is_captured, captured, &[], plain, &[]);
+
+        self.b.switch_to_block(plain);
+        self.b.seal_block(plain);
+        let plain_sig = self.b.import_signature(signature.clone());
+        let call = self.b.ins().call_indirect(plain_sig, fn_ptr, values);
+        if result_ty.is_some() {
+            let result = self.b.inst_results(call)[0];
+            self.b.ins().jump(merge, &[result]);
+        } else {
+            self.b.ins().jump(merge, &[]);
+        }
+
+        self.b.switch_to_block(captured);
+        self.b.seal_block(captured);
+        let mut captured_signature = signature.clone();
+        captured_signature
+            .params
+            .insert(0, cranelift_codegen::ir::AbiParam::new(types::I64));
+        let captured_sig = self.b.import_signature(captured_signature);
+        let mut captured_values = Vec::with_capacity(values.len() + 1);
+        captured_values.push(env);
+        captured_values.extend_from_slice(values);
+        let call = self
+            .b
+            .ins()
+            .call_indirect(captured_sig, fn_ptr, &captured_values);
+        if result_ty.is_some() {
+            let result = self.b.inst_results(call)[0];
+            self.b.ins().jump(merge, &[result]);
+        } else {
+            self.b.ins().jump(merge, &[]);
+        }
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(result_ty
+            .map(|_| self.b.block_params(merge)[0])
+            .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
     }
 
     /// `TStrPart` (`TIR/mod.rs`) is exhaustive here inline (`Lit`/`Interp`), not
@@ -12903,7 +12980,14 @@ impl LowerCtx<'_, '_> {
                                 (callback_ptr, env)
                             }
                         }
-                        _ => (self.lower_expr(callback)?, zero),
+                        _ => {
+                            let callable = self.lower_expr(callback)?;
+                            let callable =
+                                self.call_host(self.host.callable_normalize, &[callable]);
+                            let callback_ptr = self.call_host(self.host.callable_fn, &[callable]);
+                            let env = self.call_host(self.host.callable_env, &[callable]);
+                            (callback_ptr, env)
+                        }
                     };
                     let host = self
                         .module
@@ -14707,7 +14791,10 @@ impl LowerCtx<'_, '_> {
                 let func_ref = self.module.declare_func_in_func(id, self.b.func);
                 let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
                 if lam.captures.is_empty() {
-                    return Ok(fn_addr);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let no_env = self.b.ins().iconst(types::I8, 0);
+                    return Ok(self
+                        .call_host(self.host.callable_bind, &[fn_addr, zero, no_env]));
                 }
                 if lam.arc
                     || matches!(
@@ -14756,7 +14843,40 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.inst_results(call)[0])
                     }
                 } else {
-                    Err("jit callable captures unsupported".to_string())
+                    let env = self.call_host(self.host.coll.list_new, &[]);
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                    for (outer, _place, ty) in &lam.captures {
+                        let key = TIR::local_place(outer);
+                        let var = self
+                            .vars
+                            .get(&key)
+                            .copied()
+                            .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+                        let value = self.b.use_var(var);
+                        let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                            Some(clif) if clif == types::F64 => self.b.ins().bitcast(
+                                types::I64,
+                                Self::scalar_bitcast_memflags(),
+                                value,
+                            ),
+                            Some(clif) if clif == types::I8 || clif == types::I32 => {
+                                self.b.ins().uextend(types::I64, value)
+                            }
+                            Some(clif) if clif == types::I64 => value,
+                            Some(clif) => {
+                                return Err(format!(
+                                    "jit lambda capture unsupported: {ty:?} ({clif:?})"
+                                ));
+                            }
+                            None => return Err(format!("jit lambda capture unsupported: {ty:?}")),
+                        };
+                        self.b.ins().call(push, &[env, raw]);
+                    }
+                    let has_env = self.b.ins().iconst(types::I8, 1);
+                    Ok(self
+                        .call_host(self.host.callable_bind, &[fn_addr, env, has_env]))
                 }
             }
             TExprKind::HostBorrowCallback { .. } => {
@@ -14892,9 +15012,80 @@ impl LowerCtx<'_, '_> {
                         .copied()
                         .ok_or_else(|| format!("jit fn value unknown function `{name}`"))?;
                     let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                    Ok(self.b.ins().func_addr(types::I64, func_ref))
+                    let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let no_env = self.b.ins().iconst(types::I8, 0);
+                    Ok(self
+                        .call_host(self.host.callable_bind, &[fn_addr, zero, no_env]))
                 }
-                TFnValueKind::NamedFn { name: None, .. } => {
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: Some(lambda),
+                    ..
+                } => {
+                    let id = super::functions_compile::lower_callable_lambda(
+                        self.module,
+                        self.host,
+                        self.meta,
+                        lambda,
+                        self.func_ids,
+                        self.spawn_func_ids,
+                        self.spawn_lambdas,
+                        self.spawn_site,
+                        self.runtime,
+                    )?;
+                    let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                    let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
+                    let env = if lambda.captures.is_empty() {
+                        self.b.ins().iconst(types::I64, 0)
+                    } else {
+                        let env = self.call_host(self.host.coll.list_new, &[]);
+                        let push = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                        for (outer, _place, ty) in &lambda.captures {
+                            let key = TIR::local_place(outer);
+                            let var = self.vars.get(&key).copied().ok_or_else(|| {
+                                format!("jit fn-value capture unknown `{outer}`")
+                            })?;
+                            let value = self.b.use_var(var);
+                            let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                                Some(clif) if clif == types::F64 => self.b.ins().bitcast(
+                                    types::I64,
+                                    Self::scalar_bitcast_memflags(),
+                                    value,
+                                ),
+                                Some(clif) if clif == types::I8 || clif == types::I32 => {
+                                    self.b.ins().uextend(types::I64, value)
+                                }
+                                Some(clif) if clif == types::I64 => value,
+                                Some(clif) => {
+                                    return Err(format!(
+                                        "jit fn-value capture unsupported: {ty:?} ({clif:?})"
+                                    ));
+                                }
+                                None => {
+                                    return Err(format!(
+                                        "jit fn-value capture unsupported: {ty:?}"
+                                    ));
+                                }
+                            };
+                            self.b.ins().call(push, &[env, raw]);
+                        }
+                        env
+                    };
+                    let has_env = self
+                        .b
+                        .ins()
+                        .iconst(types::I8, i64::from(!lambda.captures.is_empty()));
+                    Ok(self
+                        .call_host(self.host.callable_bind, &[fn_addr, env, has_env]))
+                }
+                TFnValueKind::NamedFn {
+                    name: None,
+                    lambda: None,
+                    ..
+                } => {
                     Err("jit rendered fn coercion unsupported".to_string())
                 }
                 TFnValueKind::Call { callee, args } => {
@@ -16703,10 +16894,9 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.numeric_float_narrow, &[value]))
             }
             TNumericOp::Origin { origin } => {
-                // TIR already materialized the payload; evaluate the receiver
-                // for side effects, matching AOT's `let _ = recv`.
-                let _ = value;
-                let h = self.runtime.heap.alloc_string(origin.clone());
+                let _ = value; // preserve receiver evaluation before the adapter call
+                let text = jet_codegen::float_provenance::jet_float_origin(Some(origin.as_str()));
+                let h = self.runtime.heap.alloc_string(text);
                 Ok(self.b.ins().iconst(types::I64, h))
             },
         }
@@ -16881,7 +17071,11 @@ impl LowerCtx<'_, '_> {
             Some(ty) if ty == types::I64 => payload,
             _ if matches!(
                 inner,
-                Type::Named(_) | Type::Tuple(_) | Type::String | Type::Shared(_)
+                Type::Named(_)
+                    | Type::Tuple(_)
+                    | Type::String
+                    | Type::FixedList { .. }
+                    | Type::Shared(_)
             ) || matches!(
                 inner,
                 Type::Apply { name, .. }
@@ -16913,7 +17107,14 @@ impl LowerCtx<'_, '_> {
             Some(ty) if ty == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
             Some(ty) if ty == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
             Some(ty) if ty == types::I64 => Ok(bits),
-            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String | Type::Shared(_))
+            _ if matches!(
+                inner,
+                Type::Named(_)
+                    | Type::Tuple(_)
+                    | Type::String
+                    | Type::FixedList { .. }
+                    | Type::Shared(_)
+            )
                 || matches!(
                     inner,
                     Type::Apply { name, .. }
@@ -17004,6 +17205,103 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(merge)[0])
     }
 
+    /// Lower the lazy function-value factory consumed by the shared
+    /// OptionLift2 Prelude operation. Captures are only ABI-marshalled here;
+    /// the factory itself is invoked by the Prelude after its presence gate.
+    fn lower_option_lift2_factory(&mut self, f: &TExpr) -> Result<(Value, Option<Value>), String> {
+        let mut captures: Vec<(String, Type, Variable)> = self
+            .vars
+            .iter()
+            .filter_map(|(place, var)| {
+                let ty = self.var_tys.get(place)?.clone();
+                self.meta.clif_ty(&ty)?;
+                Some((place.clone(), ty, *var))
+            })
+            .collect();
+        captures.sort_by(|left, right| left.0.cmp(&right.0));
+        let capture_facts: Vec<(String, String, Type)> = captures
+            .iter()
+            .map(|(place, ty, _)| (place.clone(), place.clone(), ty.clone()))
+            .collect();
+        let sequence = self.runtime.next_option_lift2_thunk;
+        self.runtime.next_option_lift2_thunk = sequence.saturating_add(1);
+        let id = super::functions_compile::lower_option_lift2_factory(
+            self.module,
+            self.host,
+            self.meta,
+            f,
+            &capture_facts,
+            jet_foundation::Syntax::generated_name(&format!(
+                "jit_option_lift2_factory_{sequence}"
+            )),
+            self.func_ids,
+            self.spawn_func_ids,
+            self.spawn_lambdas,
+            self.spawn_site,
+            self.runtime,
+        )?;
+        let factory_ref = self.module.declare_func_in_func(id, self.b.func);
+        let factory_ptr = self.b.ins().func_addr(types::I64, factory_ref);
+        if captures.is_empty() {
+            return Ok((factory_ptr, None));
+        }
+        let env = self.call_host(self.host.coll.list_new, &[]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        for (_, ty, var) in captures {
+            let value = self.b.use_var(var);
+            let raw = match self.meta.clif_ty(&ty) {
+                Some(clif) if clif == types::F64 => self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                ),
+                Some(clif) if clif == types::I8 || clif == types::I32 => {
+                    self.b.ins().uextend(types::I64, value)
+                }
+                Some(clif) if clif == types::I64 => value,
+                Some(clif) => {
+                    return Err(format!(
+                        "jit OptionLift2 capture unsupported: {ty:?} ({clif:?})"
+                    ));
+                }
+                None => return Err(format!("jit OptionLift2 capture unsupported: {ty:?}")),
+            };
+            self.b.ins().call(push, &[env, raw]);
+        }
+        Ok((factory_ptr, Some(env)))
+    }
+
+    fn unpack_option_lift2_payload(
+        &mut self,
+        packed: Value,
+        inner: &Type,
+    ) -> Result<Value, String> {
+        let one = self.b.ins().iconst(types::I64, 1);
+        let raw = self.b.ins().isub(packed, one);
+        match self.meta.clif_ty(inner).or_else(|| clif_ty(inner)) {
+            // The shared operation's Present adapter tags the callable's raw
+            // result with the same one-based word used by every packed
+            // payload. `IntN` uses a result-arena handle only at the resident
+            // Option boundary; the shared operation and its adapter exchange
+            // the raw i64 value.
+            Some(clif) if clif == types::I64 && matches!(inner, Type::IntN { .. }) => Ok(raw),
+            Some(clif) if clif == types::F64 => Ok(self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                raw,
+            )),
+            Some(clif) if clif == types::I8 => Ok(self.b.ins().ireduce(types::I8, raw)),
+            Some(clif) if clif == types::I32 => Ok(self.b.ins().ireduce(types::I32, raw)),
+            Some(clif) if clif == types::I64 => Ok(raw),
+            Some(clif) => Err(format!(
+                "jit OptionLift2 result unsupported: {inner:?} ({clif:?})"
+            )),
+            None => Err(format!("jit OptionLift2 result unsupported: {inner:?}")),
+        }
+    }
+
     fn lower_option_lift2(
         &mut self,
         f: &TExpr,
@@ -17020,42 +17318,103 @@ impl LowerCtx<'_, '_> {
         let Type::Option(inner_b) = &b.ty else {
             return Err("jit Option.lift2 arg b must be Option".to_string());
         };
-        let TExprKind::Lambda(lam) = &f.kind else {
-            return Err("jit Option.lift2 needs a lambda".to_string());
+        let Type::Fn {
+            params,
+            ret: Some(_),
+            ..
+        } = &f.ty
+        else {
+            return Err("jit Option.lift2 callable type unsupported".to_string());
         };
-        if !lam.prep.is_empty() || lam.source_params.len() != 2 {
-            return Err("jit Option.lift2 lambda shape unsupported".to_string());
+        if params.len() != 2 {
+            return Err("jit Option.lift2 callable arity unsupported".to_string());
         }
-        let TLambdaBody::Expr(body) = &lam.executable else {
-            return Err("jit Option.lift2 lambda body unsupported".to_string());
-        };
-        let p0 = TIR::local_place(&lam.source_params[0]);
-        let p1 = TIR::local_place(&lam.source_params[1]);
         let a_val = self.lower_expr(a)?;
         let b_val = self.lower_expr(b)?;
-        let none_block = self.b.create_block();
-        let check_b = self.b.create_block();
-        let some_block = self.b.create_block();
-        let merge = self.b.create_block();
-        self.b.append_block_param(merge, types::I64);
         let zero = self.b.ins().iconst(types::I64, 0);
-        let a_none = self.b.ins().icmp(IntCC::Equal, a_val, zero);
-        self.b.ins().brif(a_none, none_block, &[], check_b, &[]);
+        // The packed Option ABI carries presence separately from payload bits.
+        // These comparisons only marshal that representation; the shared
+        // Prelude operation owns the actual lift2 policy and short circuit.
+        let a_present = self.bool_from_icmp(IntCC::NotEqual, a_val, zero);
+        let b_present = self.bool_from_icmp(IntCC::NotEqual, b_val, zero);
+
+        let none_args = self.b.create_block();
+        let check_b = self.b.create_block();
+        let present_args = self.b.create_block();
+        let args_merge = self.b.create_block();
+        self.b.append_block_param(args_merge, types::I8);
+        self.b.append_block_param(args_merge, types::I64);
+        self.b.append_block_param(args_merge, types::I8);
+        self.b.append_block_param(args_merge, types::I64);
+        self.b.append_block_param(args_merge, types::I64);
+        self.b.append_block_param(args_merge, types::I64);
+        self.b.append_block_param(args_merge, types::I64);
+        // Evaluate both operands in source order. Only the present branch
+        // unwraps payloads, evaluates/captures the callable, and declares the
+        // callback adapter's runtime environment.
+        self.b
+            .ins()
+            .brif(a_present, check_b, &[], none_args, &[]);
 
         self.b.switch_to_block(check_b);
         self.b.seal_block(check_b);
-        let b_none = self.b.ins().icmp(IntCC::Equal, b_val, zero);
-        self.b.ins().brif(b_none, none_block, &[], some_block, &[]);
+        self.b
+            .ins()
+            .brif(b_present, present_args, &[], none_args, &[]);
+
+        self.b.switch_to_block(present_args);
+        self.b.seal_block(present_args);
+        let pa = self.unpack_option_payload(a_val, inner_a)?;
+        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        let (factory, env) = self.lower_option_lift2_factory(f)?;
+        let adapter_id = super::functions_compile::lower_option_lift2_adapter(
+            self.module,
+            self.host,
+            self.meta,
+            &f.ty,
+            &mut self.runtime.next_option_lift2_thunk,
+        )?;
+        let adapter_ref = self.module.declare_func_in_func(adapter_id, self.b.func);
+        let adapter = self.b.ins().func_addr(types::I64, adapter_ref);
+        let env = env.unwrap_or_else(|| self.b.ins().iconst(types::I64, 0));
+        self.b.ins().jump(
+            args_merge,
+            &[a_present, pa, b_present, pb, factory, env, adapter],
+        );
+
+        self.b.switch_to_block(none_args);
+        self.b.seal_block(none_args);
+        self.b.ins().jump(
+            args_merge,
+            &[
+                a_present,
+                zero,
+                b_present,
+                zero,
+                zero,
+                zero,
+                zero,
+            ],
+        );
+
+        self.b.switch_to_block(args_merge);
+        self.b.seal_block(args_merge);
+        let args = self.b.block_params(args_merge).to_vec();
+        let packed = self.call_host(self.host.option_lift2, &args);
+        self.emit_trap_check()?;
+
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        // The shared operation returned its packed result. This branch only
+        // restores the resident Option ABI before the value rejoins TIR.
+        let absent = self.b.ins().icmp(IntCC::Equal, packed, zero);
+        self.b.ins().brif(absent, none_block, &[], some_block, &[]);
 
         self.b.switch_to_block(some_block);
         self.b.seal_block(some_block);
-        let pa = self.unpack_option_payload(a_val, inner_a)?;
-        let pb = self.unpack_option_payload(b_val, inner_b)?;
-        let mapped = self.with_bound_local(&p0, inner_a.as_ref().clone(), pa, |this| {
-            this.with_bound_local(&p1, inner_b.as_ref().clone(), pb, |this| {
-                this.lower_expr(body)
-            })
-        })?;
+        let mapped = self.unpack_option_lift2_payload(packed, inner_ret)?;
         let present = self.pack_option_payload(mapped, inner_ret)?;
         self.b.ins().jump(merge, &[present]);
 

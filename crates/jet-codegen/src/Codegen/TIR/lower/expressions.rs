@@ -262,20 +262,53 @@ fn lower_or_fallback(
 }
 
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    let mut e = e;
-    while let Expr::Paren(inner, _) = e {
-        e = inner;
+    let e = e.without_parens();
+    thread_local! {
+        static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+    let too_deep = DEPTH.with(|d| {
+        // Keep well under Linux default stack for large lower frames (ws/http).
+        if d.get() > 256 {
+            true
+        } else {
+            d.set(d.get() + 1);
+            false
+        }
+    });
+    if too_deep {
+        return TExpr {
+            ty: Type::Int,
+            kind: crate::Codegen::TIR::TExprKind::Todo {
+                line: 0,
+                expected_type: "lower depth".into(),
+            },
+        };
     }
     // Keep the recursive aggregate/fallback paths out of the exhaustive matcher.
     // Their child lowering must not retain one large matcher frame per node.
-    match e {
+    let out = match e {
         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
         Expr::OrFallback {
             value, fallback, ..
         } => lower_or_fallback(value, fallback, cx, env),
         _ => lower_expr_inner(e, cx, env),
-    }
+    };
+    DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    canonicalize_pre_tier_expr(out)
+}
+
+/// D-QUAL4/I9: user tags are compile-time facts. Remove them at the shared TIR
+/// boundary, but retain compiler-owned tags except for `Range`, whose adapters
+/// all require the exact nominal carrier.
+fn canonicalize_pre_tier_expr(mut expr: TExpr) -> TExpr {
+    let ty = expr.ty.without_user_tags().clone();
+    expr.ty = if matches!(ty.erased_carrier(), Type::Named(name) if name == Syntax::TYPE_RANGE) {
+        Type::Named(Syntax::TYPE_RANGE.to_string())
+    } else {
+        ty
+    };
+    expr
 }
 
 /// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
@@ -625,6 +658,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TFnValueKind::NamedFn {
                                 wrapper: emit_named_fn_value(cx, name, ft),
                                 name: Some(name.clone()),
+                                lambda: None,
                             },
                         },
                     };
@@ -2642,6 +2676,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
             let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
+            let base_ty = base_t.ty.without_user_tags();
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             if matches!(kind, IndexKind::Range) {
                 let zero = || TExpr {
@@ -2694,7 +2729,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // new `TExprKind` needed for a single free-function call, same as the
             // `SQL.raw`/`.context` escapes in `lower_method_call` below.
             if matches!(kind, IndexKind::Pool) {
-                let elem_ty = match &base_t.ty {
+                let elem_ty = match base_ty {
                     Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
                         args[0].clone()
                     }
@@ -2712,7 +2747,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             if matches!(kind, IndexKind::FixedListProof) {
-                let elem_ty = match &base_t.ty {
+                let elem_ty = match base_ty {
                     Type::FixedList { elem, .. } => (**elem).clone(),
                     _ => Type::Int,
                 };
@@ -2721,10 +2756,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FixedListIndex {
                         base: Box::new(base_t),
                         index: Box::new(index_t),
+                        line: line as u32,
                     })),
                 };
             }
-            let result_ty = match &base_t.ty {
+            let result_ty = match base_ty {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),
                 Type::FixedList { elem, .. } => (**elem).clone(),
@@ -2739,7 +2775,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
             // columns. (A fused `xs[i].field` is handled in the `Field` arm before
             // this point — that path reads a single column directly.)
-            if let Type::List(elem) = &base_t.ty {
+            if let Type::List(elem) = base_ty {
                 if cx.columnar_list_type(elem).is_some() {
                     return TExpr {
                         ty: result_ty,

@@ -311,7 +311,11 @@ pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
             if jit_scalar_type(inner)
                 || matches!(
                     inner.as_ref(),
-                    Type::Named(_) | Type::String | Type::Tuple(_) | Type::List(_)
+                    Type::Named(_)
+                        | Type::String
+                        | Type::Tuple(_)
+                        | Type::List(_)
+                        | Type::FixedList { .. }
                 )
     )
 }
@@ -1596,6 +1600,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::Lambda(lam) => {
             lam.param_types.iter().all(jit_value_type)
                 && lam.ret.as_ref().is_none_or(jit_value_type)
+                && lam
+                    .captures
+                    .iter()
+                    .all(|(_, _, ty)| jit_value_type(ty))
                 && match &lam.executable {
                     TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
                     TIR::TLambdaBody::Block(stmts) => {
@@ -1607,7 +1615,29 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             TIR::TFnValueKind::NamedFn {
                 name: Some(name), ..
             } => callees.contains(name),
-            TIR::TFnValueKind::NamedFn { name: None, .. } => false,
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: Some(lambda),
+                ..
+            } => {
+                lambda.param_types.iter().all(jit_value_type)
+                    && lambda.ret.as_ref().is_none_or(jit_value_type)
+                    && lambda
+                        .captures
+                        .iter()
+                        .all(|(_, _, ty)| jit_value_type(ty))
+                    && match &lambda.executable {
+                        TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
+                        TIR::TLambdaBody::Block(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
+                    }
+            }
+            TIR::TFnValueKind::NamedFn {
+                name: None,
+                lambda: None,
+                ..
+            } => false,
             TIR::TFnValueKind::Call { callee, args } => {
                 resident_safe_expr(callee, callees)
                     && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
@@ -1615,16 +1645,29 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         },
         TExprKind::PatternMatches { subj, .. } => resident_safe_expr(subj, callees),
         TExprKind::OptionLift2 { f, a, b } => {
-            matches!(
-                &f.kind,
-                TExprKind::Lambda(lam)
-                    if lam.prep.is_empty()
-                        && lam.source_params.len() == 2
+            let f_safe = match &f.kind {
+                TExprKind::Lambda(lam) => {
+                    lam.source_params.len() == 2
+                        && lam.captures.iter().all(|(_, _, ty)| jit_value_type(ty))
                         && matches!(
                             &lam.executable,
                             TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
                         )
-            ) && resident_safe_expr(a, callees)
+                }
+                _ => {
+                    matches!(
+                        &f.ty,
+                        Type::Fn {
+                            params,
+                            ret: Some(ret),
+                            ..
+                        } if params.len() == 2
+                            && params.iter().all(jit_value_type)
+                            && jit_value_type(ret)
+                    ) && resident_safe_expr(f, callees)
+                }
+            };
+            f_safe && resident_safe_expr(a, callees)
                 && resident_safe_expr(b, callees)
                 && matches!(&expr.ty, Type::Option(inner) if jit_scalar_type(inner) || matches!(inner.as_ref(), Type::Named(_)|Type::Tuple(_)))
         }
@@ -1716,7 +1759,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     || (matches!(ty, Type::Float)
                         && matches!(member.as_str(), "INFINITY" | "NAN" | "EPSILON"))
             }
-            THostCall::FixedListIndex { base, index } => {
+            THostCall::FixedListIndex { base, index, .. } => {
                 resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
                     && matches!(&index.ty, Type::Int | Type::IntN { .. } | Type::Named(_))

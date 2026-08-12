@@ -2363,6 +2363,54 @@ impl<'a> EvalCtx<'a> {
             } => self.eval_compute_grads(output, anchor, args, targets, &gradient_ty),
         }
     }
+
+    /// Call the canonical callable slot and publish mutable captures back to
+    /// the active lexical scope. The runtime slot remains authoritative for
+    /// returned/escaped closures; the scope write-back is the local-variable
+    /// half of the same FnMut storage contract.
+    pub(super) fn call_callable_in_scope(
+        &mut self,
+        value: &CtValue,
+        args: Vec<CtValue>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let result = self.call_callable(value, args);
+        self.sync_callable_captures(value, scope);
+        result
+    }
+
+    pub(super) fn sync_callable_captures(
+        &self,
+        value: &CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) {
+        let Some(index) = Self::callable_index(value) else {
+            return;
+        };
+        let updates = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            let Some(EvalCallable::Lambda { lambda, captured }) = runtime.callables.get(index)
+            else {
+                return;
+            };
+            lambda
+                .captures
+                .iter()
+                .filter_map(|(source, runtime_name, _)| {
+                    let updated = captured
+                        .get(runtime_name)
+                        .or_else(|| captured.get(source))?
+                        .clone();
+                    Some((source.clone(), updated))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (source, updated) in updates {
+            if scope.contains_key(&source) {
+                scope.insert(source, updated);
+            }
+        }
+    }
 }
 
 fn empty_cx() -> Cx {

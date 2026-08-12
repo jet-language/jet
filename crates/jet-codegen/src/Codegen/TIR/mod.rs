@@ -2089,10 +2089,11 @@ pub enum THostCall {
         editable: bool,
         edit_paths_disjoint: bool,
     },
-    /// `(({base})[({index}).0 as usize].clone())` FixedList index.
+    /// Checked fixed-list index through `jet_fixed_list_index`.
     FixedListIndex {
         base: Box<TExpr>,
         index: Box<TExpr>,
+        line: u32,
     },
     /// Typed-text audited escapes / projections.
     TypedText {
@@ -3707,8 +3708,10 @@ pub enum TFnValueKind {
     NamedFn {
         wrapper: String,
         /// Jet function key for native backends. `None` is a rendered closure
-        /// coercion used only by the Rust emitter.
+        /// coercion. `lambda` carries that closure's target-neutral executable
+        /// body so Web and the TIR evaluator do not depend on the Rust wrapper.
         name: Option<String>,
+        lambda: Option<Box<TLambda>>,
     },
     /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.

@@ -246,7 +246,7 @@ pub(crate) fn clif_ty_with_distinct(
         return Some(types::I64);
     }
     // List/FixedList/Iter/View and structural-union values share the I64 arena
-    // ABI. Noncapturing function values use an I64 code-pointer ABI.
+    // ABI. Function values use an opaque I64 callable-handle ABI.
     // Nested lists (`[[String]]` CSV rows, etc.) are also arena handles.
     if jit_list_native_type(&ty)
         || jit_list_of_int_list_type(&ty)
@@ -284,7 +284,10 @@ pub(crate) fn clif_ty_with_distinct(
             if matches!(
                 inner.as_ref(),
                 Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
-            ) || matches!(inner.as_ref(), Type::List(_) | Type::Named(_))
+            ) || matches!(
+                inner.as_ref(),
+                Type::List(_) | Type::FixedList { .. } | Type::Named(_)
+            )
     ) {
         return Some(types::I64);
     }

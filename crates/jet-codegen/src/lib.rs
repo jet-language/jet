@@ -42,6 +42,20 @@ pub mod local_cell {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
 }
+/// D-HOLE1: one option-lift operation shared by AOT, TIR, JIT, and wasm.
+pub mod option_lift2 {
+    include!("Prelude/Core/Option.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
+}
+/// D-FIXARR1: checked fixed-list indexing shared by all execution adapters.
+pub mod fixed_list {
+    include!("Prelude/Core/FixedList.rs");
+}
+/// D-FLOAT-ORIGIN: tracked-float provenance rendering shared by all tiers.
+pub mod float_provenance {
+    include!("Prelude/Core/FloatProvenance.rs");
+}
 /// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
 /// by AOT emission, TIR evaluation, and the resident JIT adapter.
 pub mod numeric_widen {

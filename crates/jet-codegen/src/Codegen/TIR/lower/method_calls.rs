@@ -5370,20 +5370,29 @@ fn lower_method_call_impl(
                 Some(Type::Option(inner)) => (*inner).clone(),
                 _ => Type::Int,
             };
-            // c142: a bare `f` lambda is called immediately here (inside the
-            // `.zip().map(...)` emit below), not stored — but rustc still needs its
-            // param types written out whenever the body resolves a trait method on a
-            // param (e.g. interpolation's `.jet_display()`), the same reason
+            // c142: a bare `f` callable is invoked only by the shared Prelude's
+            // present branch, not stored — but rustc
+            // still needs its param types written out whenever the body resolves a
+            // trait method on a param (e.g. interpolation's `.jet_display()`), the same reason
             // `lower_one_call_arg` annotates a lambda flowing into a fn-typed
             // parameter. Reuse that mechanism with `a`/`b`'s payload types as the
             // expected params.
+            let ret_ty = match resolved_ret {
+                Some(Type::Option(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
             let f_t = match &args[0].expr {
                 Expr::Lambda(lam) => {
-                    let tl = lower_lambda_expecting(lam, cx, env, Some(&[a_ty, b_ty]));
+                    let tl = lower_lambda_expecting(
+                        lam,
+                        cx,
+                        env,
+                        Some(&[a_ty.clone(), b_ty.clone()]),
+                    );
                     TExpr {
                         ty: Type::Fn {
-                            params: Vec::new(),
-                            ret: None,
+                            params: vec![a_ty.clone(), b_ty.clone()],
+                            ret: Some(Box::new(ret_ty.clone())),
                             effect_bound: None, return_view_provenance: None,
                             param_contract: None,
                         },
@@ -5394,10 +5403,6 @@ fn lower_method_call_impl(
             };
             let a_t = lower_expr(&args[1].expr, cx, env);
             let b_t = lower_expr(&args[2].expr, cx, env);
-            let ret_ty = match resolved_ret {
-                Some(Type::Option(inner)) => (**inner).clone(),
-                _ => Type::Int,
-            };
             return TExpr {
                 ty: Type::Option(Box::new(ret_ty)),
                 kind: TExprKind::OptionLift2 {

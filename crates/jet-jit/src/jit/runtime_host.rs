@@ -80,6 +80,17 @@ pub(crate) struct ReflectSlot {
     pub fields: Vec<(String, String)>,
 }
 
+/// Canonical resident representation for a runtime function value.
+/// `fn_ptr` points at a Cranelift function whose ABI is either the plain
+/// function signature or that signature with `env` prepended. The handle is
+/// deliberately opaque to Prelude code; only the callable adapters inspect it.
+#[derive(Clone, Copy)]
+pub(crate) struct JitCallableSlot {
+    pub fn_ptr: i64,
+    pub env: i64,
+    pub has_env: bool,
+}
+
 pub(crate) struct JitRuntime {
     pub(crate) source_file: String,
     pub(crate) stdout: String,
@@ -101,6 +112,13 @@ pub(crate) struct JitRuntime {
         std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
     pub(crate) next_stream_channel: i64,
     pub(crate) next_stream_sender: i64,
+    /// Unique names for JIT-local OptionLift2 factory/adapter functions.
+    /// These functions are only ABI thunks; the operation they serve lives in
+    /// the shared Option Prelude.
+    pub(crate) next_option_lift2_thunk: u64,
+    /// Runtime function values. Negative words are explicit callable handles;
+    /// raw Cranelift addresses are normalized at the boundary before a call.
+    pub(crate) jit_callables: Vec<JitCallableSlot>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     pub(crate) task_groups: Vec<Option<super::Concurrency::JitTaskGroup>>,
@@ -1529,6 +1547,106 @@ extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
 
+fn jit_callable_index(handle: i64) -> Option<usize> {
+    handle
+        .checked_neg()?
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+}
+
+fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
+    jit_callable_index(handle).and_then(|index| rt.jit_callables.get(index).copied())
+}
+
+fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) -> i64 {
+    let index = rt.jit_callables.len();
+    if index >= i64::MAX as usize - 1 {
+        rt.set_trap("too many resident callable values");
+        return 0;
+    }
+    rt.jit_callables.push(JitCallableSlot {
+        fn_ptr,
+        env,
+        has_env,
+    });
+    -(index as i64) - 1
+}
+
+extern "C" fn jet_jit_callable_bind(fn_ptr: i64, env: i64, has_env: i8) -> i64 {
+    with_runtime_result(0, |rt| bind_jit_callable(rt, fn_ptr, env, has_env != 0))
+}
+
+extern "C" fn jet_jit_callable_normalize(value: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        if jit_callable_slot(rt, value).is_some() {
+            value
+        } else {
+            bind_jit_callable(rt, value, 0, false)
+        }
+    })
+}
+
+fn jit_callable_or_trap(rt: &mut JitRuntime, handle: i64) -> Option<JitCallableSlot> {
+    let slot = jit_callable_slot(rt, handle);
+    if slot.is_none() {
+        rt.set_trap("invalid resident callable value");
+    }
+    slot
+}
+
+extern "C" fn jet_jit_callable_fn(handle: i64) -> i64 {
+    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.fn_ptr))
+}
+
+extern "C" fn jet_jit_callable_env(handle: i64) -> i64 {
+    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.env))
+}
+
+extern "C" fn jet_jit_callable_has_env(handle: i64) -> i8 {
+    with_runtime_result(0, |rt| {
+        jit_callable_or_trap(rt, handle).map_or(0, |slot| i8::from(slot.has_env))
+    })
+}
+
+/// The JIT-side callable ABI is deliberately opaque to the Prelude. The
+/// factory evaluates the function-value expression, and the adapter invokes
+/// that callable with two packed payload words. The `JetOptionPacked` values
+/// are only the JIT ABI carrier; the shared `jet_option_lift2` operation owns
+/// presence, lazy factory creation, invocation, and result selection.
+type OptionLift2Factory = unsafe extern "C" fn(i64) -> i64;
+type OptionLift2Adapter = unsafe extern "C" fn(i64, i64, i64) -> i64;
+
+extern "C" fn jet_jit_option_lift2(
+    a_present: i8,
+    a_value: i64,
+    b_present: i8,
+    b_value: i64,
+    factory: i64,
+    env: i64,
+    adapter: i64,
+) -> i64 {
+    jet_codegen::option_lift2::jet_option_lift2(
+        jet_codegen::option_lift2::JetOptionPacked {
+            present: a_present != 0,
+            value: a_value,
+        },
+        jet_codegen::option_lift2::JetOptionPacked {
+            present: b_present != 0,
+            value: b_value,
+        },
+        || jet_codegen::option_lift2::jet_option_pack_i64(false, 0),
+        |value| jet_codegen::option_lift2::jet_option_pack_i64(true, value),
+        || {
+            let factory: OptionLift2Factory =
+                unsafe { std::mem::transmute(factory as usize) };
+            let adapter: OptionLift2Adapter =
+                unsafe { std::mem::transmute(adapter as usize) };
+            let callable = unsafe { factory(env) };
+            move |left, right| unsafe { adapter(callable, left, right) }
+        },
+    )
+}
+
 extern "C" fn jet_jit_unit_convert_exact(
     value: f64,
     scale_num: i64,
@@ -2103,6 +2221,26 @@ host_fns! {
         sig_result_new_f64.params.push(AbiParam::new(types::I8));
         sig_result_new_f64.params.push(AbiParam::new(types::F64));
         sig_result_new_f64.returns.push(AbiParam::new(types::I64));
+        let mut sig_option_lift2 = Signature::new(cc);
+        sig_option_lift2.params.push(AbiParam::new(types::I8));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I8));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.params.push(AbiParam::new(types::I64));
+        sig_option_lift2.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_bind = Signature::new(cc);
+        sig_callable_bind.params.push(AbiParam::new(types::I64));
+        sig_callable_bind.params.push(AbiParam::new(types::I64));
+        sig_callable_bind.params.push(AbiParam::new(types::I8));
+        sig_callable_bind.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_word = Signature::new(cc);
+        sig_callable_word.params.push(AbiParam::new(types::I64));
+        sig_callable_word.returns.push(AbiParam::new(types::I64));
+        let mut sig_callable_flag = Signature::new(cc);
+        sig_callable_flag.params.push(AbiParam::new(types::I64));
+        sig_callable_flag.returns.push(AbiParam::new(types::I8));
         let mut sig_result_new_i8 = Signature::new(cc);
         sig_result_new_i8.params.push(AbiParam::new(types::I8));
         sig_result_new_i8.params.push(AbiParam::new(types::I8));
@@ -2281,6 +2419,12 @@ host_fns! {
     result_new_f64: "jet_jit_result_new_f64" => jet_jit_result_new_f64: sig_result_new_f64;
     result_new_i8: "jet_jit_result_new_i8" => jet_jit_result_new_i8: sig_result_new_i8;
     result_new_i32: "jet_jit_result_new_i32" => jet_jit_result_new_i32: sig_result_new_i32;
+    option_lift2: "jet_jit_option_lift2" => jet_jit_option_lift2: sig_option_lift2;
+    callable_bind: "jet_jit_callable_bind" => jet_jit_callable_bind: sig_callable_bind;
+    callable_normalize: "jet_jit_callable_normalize" => jet_jit_callable_normalize: sig_callable_word;
+    callable_fn: "jet_jit_callable_fn" => jet_jit_callable_fn: sig_callable_word;
+    callable_env: "jet_jit_callable_env" => jet_jit_callable_env: sig_callable_word;
+    callable_has_env: "jet_jit_callable_has_env" => jet_jit_callable_has_env: sig_callable_flag;
     unit_convert_exact: "jet_jit_unit_convert_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
     unit_convert_rounded: "jet_jit_unit_convert_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
