@@ -820,6 +820,20 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
                         }
                     }
                 }
+                jet_codegen::Codegen::TIR::TJitSpawnBody::SharedBlock { body, tail } => {
+                    for (si, s) in body.iter().enumerate() {
+                        if !resident_safe_stmt(s, &names) {
+                            why.push(format!("stmt{si} unsafe"));
+                        }
+                    }
+                    if *tail {
+                        if let Some(TStmt::ExprStmt(expr) | TStmt::Return(Some(expr))) = body.last() {
+                            if !resident_safe_expr(expr, &names) {
+                                why.push("tail unsafe".into());
+                            }
+                        }
+                    }
+                }
             }
             return format!("spawn lambda {i} not resident-safe: {}", why.join("; "));
         }

@@ -339,7 +339,84 @@ impl<'a> Parser<'a> {
     
         pub(in crate::Parser) fn expr(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
-            self.with_nesting(span, |p| p.expr_or_fallback(true))
+            self.with_nesting(span, |p| {
+                if let Some(result) = p.try_primary_expr() {
+                    return result;
+                }
+                p.expr_or_fallback(true)
+            })
+        }
+
+        /// Most expression values are one primary plus an optional postfix
+        /// chain. Sending those values through every precedence layer creates
+        /// a large stack frame at each nesting level, even when no operator is
+        /// present. Probe that common shape first; an infix token restores the
+        /// parser and uses the canonical precedence path below.
+        fn try_primary_expr(&mut self) -> Option<Result<Expr, Diagnostic>> {
+            if !self.can_start_primary_expr() {
+                return None;
+            }
+
+            let state = ExprProbeState::save(self);
+            match self.expr_postfix(true) {
+                Ok(expr) if !self.has_expr_infix_continuation() => Some(Ok(expr)),
+                Ok(_) | Err(_) => {
+                    state.restore(self);
+                    None
+                }
+            }
+        }
+
+        fn can_start_primary_expr(&self) -> bool {
+            matches!(
+                self.peek().kind,
+                TokKind::KwLoop
+                    | TokKind::KwIt
+                    | TokKind::KwNull
+                    | TokKind::Hash
+                    | TokKind::Str(_)
+                    | TokKind::Int(_, _)
+                    | TokKind::Float(_)
+                    | TokKind::UnitNumber { .. }
+                    | TokKind::Char(_)
+                    | TokKind::LBracket
+                    | TokKind::KwTrue
+                    | TokKind::KwFalse
+                    | TokKind::KwSelf
+                    | TokKind::KwIf
+                    | TokKind::KwMove
+                    | TokKind::LParen
+                    | TokKind::Ident(_)
+            )
+        }
+
+        fn has_expr_infix_continuation(&self) -> bool {
+            match self.peek().kind {
+                TokKind::QuestionQuestion
+                | TokKind::DotDot
+                | TokKind::DotDotLt
+                | TokKind::OrOr
+                | TokKind::AndAnd
+                | TokKind::EqEq
+                | TokKind::NotEq
+                | TokKind::Lt
+                | TokKind::Le
+                | TokKind::Ge
+                | TokKind::TildePipe
+                | TokKind::Amp
+                | TokKind::Shl
+                | TokKind::Shr
+                | TokKind::Plus
+                | TokKind::Minus
+                | TokKind::Star
+                | TokKind::Slash
+                | TokKind::SlashPercent
+                | TokKind::Percent
+                | TokKind::PercentPercent
+                | TokKind::Caret => true,
+                TokKind::Gt => self.module_arg_expr_depth != Some(self.depth),
+                _ => false,
+            }
         }
 
         pub(in crate::Parser) fn module_arg_expr(&mut self) -> Result<Expr, Diagnostic> {
@@ -366,4 +443,71 @@ impl<'a> Parser<'a> {
             self.with_nesting(span, |p| p.expr_bitxor(false))
         }
     
+}
+
+#[derive(Clone, Copy)]
+struct ExprProbeState {
+    pos: usize,
+    diags_len: usize,
+    pending_type_gt: bool,
+    depth: usize,
+    type_generic_depth: usize,
+    type_generic_chain_len: usize,
+    type_generic_truncated: bool,
+    in_layout_body: usize,
+    adjacent_if_body_depth: usize,
+    block_depth: usize,
+    callable_tail_block_depth: Option<usize>,
+    module_arg_expr_depth: Option<usize>,
+    allow_lowercase_leading_dot: bool,
+    policy_declarations_len: usize,
+    applied_rules_len: usize,
+    rule_facts_len: usize,
+    block_spans_len: usize,
+}
+
+impl ExprProbeState {
+    fn save(parser: &Parser<'_>) -> Self {
+        Self {
+            pos: parser.pos,
+            diags_len: parser.diags.len(),
+            pending_type_gt: parser.pending_type_gt,
+            depth: parser.depth,
+            type_generic_depth: parser.type_generic_depth,
+            type_generic_chain_len: parser.type_generic_chain.len(),
+            type_generic_truncated: parser.type_generic_truncated,
+            in_layout_body: parser.in_layout_body,
+            adjacent_if_body_depth: parser.adjacent_if_body_depth,
+            block_depth: parser.block_depth,
+            callable_tail_block_depth: parser.callable_tail_block_depth,
+            module_arg_expr_depth: parser.module_arg_expr_depth,
+            allow_lowercase_leading_dot: parser.allow_lowercase_leading_dot,
+            policy_declarations_len: parser.policy_declarations.len(),
+            applied_rules_len: parser.applied_rules.len(),
+            rule_facts_len: parser.rule_facts.len(),
+            block_spans_len: parser.block_spans.len(),
+        }
+    }
+
+    fn restore(self, parser: &mut Parser<'_>) {
+        parser.pos = self.pos;
+        parser.diags.truncate(self.diags_len);
+        parser.pending_type_gt = self.pending_type_gt;
+        parser.depth = self.depth;
+        parser.type_generic_depth = self.type_generic_depth;
+        parser.type_generic_chain.truncate(self.type_generic_chain_len);
+        parser.type_generic_truncated = self.type_generic_truncated;
+        parser.in_layout_body = self.in_layout_body;
+        parser.adjacent_if_body_depth = self.adjacent_if_body_depth;
+        parser.block_depth = self.block_depth;
+        parser.callable_tail_block_depth = self.callable_tail_block_depth;
+        parser.module_arg_expr_depth = self.module_arg_expr_depth;
+        parser.allow_lowercase_leading_dot = self.allow_lowercase_leading_dot;
+        parser
+            .policy_declarations
+            .truncate(self.policy_declarations_len);
+        parser.applied_rules.truncate(self.applied_rules_len);
+        parser.rule_facts.truncate(self.rule_facts_len);
+        parser.block_spans.truncate(self.block_spans_len);
+    }
 }

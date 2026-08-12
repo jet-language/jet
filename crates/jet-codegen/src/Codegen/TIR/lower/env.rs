@@ -180,94 +180,114 @@ impl LowerEnv {
 }
 
 fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
-    match expr {
-        Expr::Ident(candidate, _) => candidate == name,
-        Expr::Call(call) => call
-            .args
-            .iter()
-            .any(|arg| gc_expr_references_ident(&arg.expr, name)),
-        Expr::MethodCall { receiver, args, .. }
-        | Expr::CallValue {
-            callee: receiver,
-            args,
-            ..
-        } => {
-            gc_expr_references_ident(receiver, name)
-                || args
-                    .iter()
-                    .any(|arg| gc_expr_references_ident(&arg.expr, name))
-        }
-        Expr::Binary(_, left, right, _) => {
-            gc_expr_references_ident(left, name) || gc_expr_references_ident(right, name)
-        }
-        Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
-        | Expr::Field(inner, _, _)
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Place(inner, _, _)
-        | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _)
-        | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => gc_expr_references_ident(inner, name),
-        Expr::OptField { base, .. } => gc_expr_references_ident(base, name),
-        Expr::Index { base, index, .. } => {
-            gc_expr_references_ident(base, name) || gc_expr_references_ident(index, name)
-        }
-        Expr::Slice {
-            base,
-            start,
-            end,
-            range,
-            ..
-        } => {
-            gc_expr_references_ident(base, name)
-                || range.as_deref().map_or_else(
-                    || {
-                        gc_expr_references_ident(start, name)
-                            || gc_expr_references_ident(end, name)
-                    },
-                    |range| gc_expr_references_ident(range, name),
-                )
-        }
-        Expr::Range { start, end, .. } => {
-            gc_expr_references_ident(start, name) || gc_expr_references_ident(end, name)
-        }
-        Expr::ListLit(items, _) => items
-            .iter()
-            .any(|item| gc_expr_references_ident(item, name)),
-        Expr::MapLit(pairs, _) => pairs.iter().any(|(key, value)| {
-            gc_expr_references_ident(key, name) || gc_expr_references_ident(value, name)
-        }),
-        Expr::StructLit { fields, .. } => fields
-            .iter()
-            .any(|(_, _, value)| gc_expr_references_ident(value, name)),
-        Expr::TypedLit { body, .. } => {
-            let mut hit = false;
-            body.for_each_expr(|value| {
-                if gc_expr_references_ident(value, name) {
-                    hit = true;
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            Expr::Ident(candidate, _) if candidate == name => return true,
+            Expr::Call(call) => {
+                for arg in call.args.iter().rev() {
+                    pending.push(&arg.expr);
                 }
-            });
-            hit
-        }
-        Expr::TupleLit(fields, _, _) => fields
-            .iter()
-            .any(|(_, value)| gc_expr_references_ident(value, name)),
-        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-            crate::AST::EnumLitArg::Positional(value)
-            | crate::AST::EnumLitArg::Named { expr: value, .. } => {
-                gc_expr_references_ident(value, name)
             }
-        }),
-        Expr::Str(parts, _) => parts.iter().any(|part| match part {
-            crate::AST::StrPart::Interp(value, _) => gc_expr_references_ident(value, name),
-            crate::AST::StrPart::Lit(_) => false,
-        }),
-        _ => false,
+            Expr::MethodCall { receiver, args, .. }
+            | Expr::CallValue {
+                callee: receiver,
+                args,
+                ..
+            } => {
+                for arg in args.iter().rev() {
+                    pending.push(&arg.expr);
+                }
+                pending.push(receiver);
+            }
+            Expr::Binary(_, left, right, _) => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::IncDec { operand: inner, .. }
+            | Expr::Field(inner, _, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _) => pending.push(inner),
+            Expr::OptField { base, .. } => pending.push(base),
+            Expr::Index { base, index, .. } => {
+                pending.push(index);
+                pending.push(base);
+            }
+            Expr::Slice {
+                base,
+                start,
+                end,
+                range,
+                ..
+            } => {
+                if let Some(range) = range {
+                    pending.push(range);
+                } else {
+                    pending.push(end);
+                    pending.push(start);
+                }
+                pending.push(base);
+            }
+            Expr::Range { start, end, .. } => {
+                pending.push(end);
+                pending.push(start);
+            }
+            Expr::ListLit(items, _) => {
+                for item in items.iter().rev() {
+                    pending.push(item);
+                }
+            }
+            Expr::MapLit(pairs, _) => {
+                for (key, value) in pairs.iter().rev() {
+                    pending.push(value);
+                    pending.push(key);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields.iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                let mut values = Vec::new();
+                body.for_each_expr(|value| values.push(value));
+                for value in values.into_iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields.iter().rev() {
+                    pending.push(value);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args.iter().rev() {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    pending.push(value);
+                }
+            }
+            Expr::Str(parts, _) => {
+                for part in parts.iter().rev() {
+                    if let crate::AST::StrPart::Interp(value, _) = part {
+                        pending.push(value);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
+    false
 }
 
 /// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
@@ -293,8 +313,8 @@ pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
 /// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
-/// auto-snapshotted at block entry and restored on a `?`-failure. Recurses through
-/// nested control flow (if/while/for/switch/loop/region/etc.) but stops at:
+/// auto-snapshotted at block entry and restored on a `?`-failure. Walks nested
+/// control flow (if/while/for/switch/loop/region/etc.) but stops at:
 ///   • nested `#Transact` blocks — they establish their own rollback scope; and
 ///   • lambda bodies — a deferred execution context (the same reason `on_commit`
 ///     lambdas escape the enclosing transaction's effect check).
@@ -317,14 +337,17 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
         }
     }
     fn expr_root(e: &Expr) -> Option<&str> {
-        match e {
-            Expr::Ident(name, _) => Some(name),
-            Expr::Field(base, _, _) => expr_root(base),
-            Expr::Index { base, .. } => expr_root(base),
-            _ => None,
+        let mut e = e;
+        loop {
+            match e {
+                Expr::Ident(name, _) => return Some(name),
+                Expr::Field(base, _, _) | Expr::Index { base, .. } => e = base,
+                _ => return None,
+            }
         }
     }
-    for s in body {
+    let mut pending = body.iter().rev().collect::<Vec<_>>();
+    while let Some(s) = pending.pop() {
         match s {
             Stmt::Assign { target, .. } => {
                 if let Some(root) = lvalue_root(target) {
@@ -349,15 +372,17 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. } => collect_txn_mut_roots(body, out),
+            | Stmt::AssumeDet { body, .. } => {
+                pending.extend(body.iter().rev());
+            }
             Stmt::Switch {
                 arms, else_body, ..
             } => {
-                for arm in arms {
-                    collect_txn_mut_roots(&arm.body, out);
-                }
                 if let Some(eb) = else_body {
-                    collect_txn_mut_roots(eb, out);
+                    pending.extend(eb.iter().rev());
+                }
+                for arm in arms.iter().rev() {
+                    pending.extend(arm.body.iter().rev());
                 }
             }
             // D-META-STAGE1=B (formerly D-CTMARKER1): build-time block erases; no runtime mutations.
@@ -367,10 +392,10 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                 else_body,
                 ..
             } => {
-                collect_txn_mut_roots(then_body, out);
                 if let Some(eb) = else_body {
-                    collect_txn_mut_roots(eb, out);
+                    pending.extend(eb.iter().rev());
                 }
+                pending.extend(then_body.iter().rev());
             }
             // A nested `#Transact` owns its own rollback scope — don't pull its
             // mutations up into the enclosing block.

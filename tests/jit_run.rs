@@ -156,23 +156,6 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
 
 #[test]
 fn bounded_workers_example_has_total_tir() {
-    // Sema and TIR lowering recurse per source-nesting level with large debug
-    // frames (#1319). Direct calls to jet_jit's lowering helpers bypass the
-    // 32 MiB compiler worker thread that public entry points like
-    // `jet::compile` route through, so they still run on libtest's default
-    // 2 MiB thread. bounded_workers's four sequential `task` closures
-    // plus channel/generic inference push that over the edge. Same fix as
-    // #1614/#1615: give this test the same 16 MiB thread jit_coverage_audit
-    // uses, instead of overflowing.
-    std::thread::Builder::new()
-        .stack_size(16 * 1024 * 1024)
-        .spawn(bounded_workers_example_has_total_tir_inner)
-        .expect("bounded_workers TIR check thread")
-        .join()
-        .expect("bounded_workers TIR check thread panicked");
-}
-
-fn bounded_workers_example_has_total_tir_inner() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/concurrency/bounded_workers.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();

@@ -1754,7 +1754,7 @@ fn run() {
         // full sema pass, hence `covers_after_sema`.
         let src = "\
 fn build() => [Int] {
-    xs := []
+    xs := [Int].{}
     loop i, 1..3 {
         xs.push(i * 10)
     }
@@ -1762,9 +1762,10 @@ fn build() => [Int] {
 }
 fn run() {
     $xs :: build()
-    print(\"{xs}\")
+    print(\"{$xs}\")
 }
 ";
+        install_comptime_bridge();
         assert!(covers_after_sema(src, "run"));
     }
 

@@ -1501,6 +1501,36 @@ impl<'a> EvalCtx<'a> {
                 )),
                 Err(error) => Err(error),
             },
+            TJitSpawnBody::SharedBlock { body, tail } => {
+                if *tail {
+                    let (last, prefix) = body[..].split_last().ok_or_else(|| {
+                        unsupported("empty shared spawn body", ctx.span())
+                    })?;
+                    match ctx.exec_stmts(prefix, &mut scope) {
+                        Ok(Flow::Return(value)) => Ok(value),
+                        Ok(Flow::Normal) => match last {
+                            TStmt::ExprStmt(expr) => ctx.eval_expr(expr, &mut scope),
+                            TStmt::Return(Some(expr)) => ctx.eval_expr(expr, &mut scope),
+                            _ => Ok(CtValue::Unit),
+                        },
+                        Ok(other) => Err(unsupported(
+                            &format!("control flow {other:?} escaping shared spawn"),
+                            ctx.span(),
+                        )),
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    match ctx.exec_stmts(&body[..], &mut scope) {
+                        Ok(Flow::Return(value)) => Ok(value),
+                        Ok(Flow::Normal) => Ok(CtValue::Unit),
+                        Ok(other) => Err(unsupported(
+                            &format!("control flow {other:?} escaping shared spawn"),
+                            ctx.span(),
+                        )),
+                        Err(error) => Err(error),
+                    }
+                }
+            },
         };
         crate::scheduler::jet_scheduler_set_task_control(None);
         let order = config
@@ -1538,9 +1568,9 @@ impl<'a> EvalCtx<'a> {
             child.insert(
                 capture.name.clone(),
                 scope
-                    .get(&capture.name)
+                    .get(&capture.source)
                     .cloned()
-                    .or_else(|| self.globals.get(&capture.name).cloned())
+                    .or_else(|| self.globals.get(&capture.source).cloned())
                     .unwrap_or(CtValue::Unit),
             );
         }

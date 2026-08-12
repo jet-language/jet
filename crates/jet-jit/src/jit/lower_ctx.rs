@@ -787,6 +787,10 @@ impl LowerCtx<'_, '_> {
                 [TStmt::Return(Some(e))] | [TStmt::ExprStmt(e)] => e,
                 _ => return None,
             },
+            TLambdaBody::SharedBlock(stmts) => match stmts.as_ref() {
+                [TStmt::Return(Some(e))] | [TStmt::ExprStmt(e)] => e,
+                _ => return None,
+            },
         };
         match &body_expr.kind {
             TExprKind::StrLit(parts) if parts.len() == 1 => match &parts[0] {
@@ -2777,7 +2781,7 @@ impl LowerCtx<'_, '_> {
                 for cap in &lam.captures {
                     let captured = TExpr {
                         ty: cap.ty.clone(),
-                        kind: TExprKind::Local(TLocal::user(&cap.name)),
+                        kind: TExprKind::Local(TLocal::user(&cap.source)),
                     };
                     let val = if cap.clone_at_spawn {
                         self.lower_clone(&captured)?
@@ -7308,6 +7312,13 @@ impl LowerCtx<'_, '_> {
                 }
                 self.b.ins().iconst(types::I64, 0)
             }
+            TLambdaBody::SharedBlock(body) => {
+                self.lower_stmts_scoped(&body[..])?;
+                if self.dead {
+                    return Err("jit inline callback cannot transfer control".to_string());
+                }
+                self.b.ins().iconst(types::I64, 0)
+            }
         };
         let updated = match scalar_slot {
             Some(slot) => self.b.ins().stack_load(expected, slot, 0),
@@ -7378,6 +7389,30 @@ impl LowerCtx<'_, '_> {
                 // callback result instead of leaving the enclosing function.
                 let mut produced: Option<Value> = None;
                 for stmt in body {
+                    if self.dead {
+                        break;
+                    }
+                    match stmt {
+                        TStmt::Return(Some(expr)) => {
+                            produced = Some(self.lower_expr(expr)?);
+                            break;
+                        }
+                        TStmt::Return(None) => {
+                            produced = Some(self.b.ins().iconst(types::I64, 0));
+                            break;
+                        }
+                        other => self.lower_stmt(other)?,
+                    }
+                }
+                self.dead = false;
+                match produced {
+                    Some(v) => Ok(v),
+                    None => Ok(self.b.ins().iconst(types::I64, 0)),
+                }
+            }
+            TLambdaBody::SharedBlock(body) => {
+                let mut produced: Option<Value> = None;
+                for stmt in &body[..] {
                     if self.dead {
                         break;
                     }
@@ -18364,7 +18399,7 @@ impl LowerCtx<'_, '_> {
         for cap in &lam.captures {
             let captured = TExpr {
                 ty: cap.ty.clone(),
-                kind: TExprKind::Local(TLocal::user(&cap.name)),
+                kind: TExprKind::Local(TLocal::user(&cap.source)),
             };
             let val = if cap.clone_at_spawn {
                 self.lower_clone(&captured)?
@@ -18448,7 +18483,7 @@ impl LowerCtx<'_, '_> {
         for cap in &lam.captures {
             let captured = TExpr {
                 ty: cap.ty.clone(),
-                kind: TExprKind::Local(TLocal::user(&cap.name)),
+                kind: TExprKind::Local(TLocal::user(&cap.source)),
             };
             let val = if cap.clone_at_spawn {
                 self.lower_clone(&captured)?
@@ -21689,6 +21724,7 @@ impl LowerCtx<'_, '_> {
                 match &lambda.executable {
                     TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
                     TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
+                    TLambdaBody::SharedBlock(stmts) => this.lower_stmts(&stmts[..]),
                 }
             })
         })?;
@@ -21958,6 +21994,7 @@ impl LowerCtx<'_, '_> {
         let body_expr = match &lam.executable {
             TLambdaBody::Expr(body) => Some(body),
             TLambdaBody::Block(_) => None,
+            TLambdaBody::SharedBlock(_) => None,
         };
         let map_val = self.lower_expr(recv)?;
         let map_var = self.fresh_var(types::I64);
@@ -21991,6 +22028,7 @@ impl LowerCtx<'_, '_> {
                         match &lam.executable {
                             TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
                             TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
+                            TLambdaBody::SharedBlock(stmts) => this.lower_stmts(&stmts[..]),
                         }
                     })
                 })?;
@@ -22724,6 +22762,7 @@ impl LowerCtx<'_, '_> {
             match &lam.executable {
                 TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
                 TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
+                TLambdaBody::SharedBlock(stmts) => this.lower_stmts(&stmts[..]),
             }
         })?;
         self.b.ins().jump(step, &[]);

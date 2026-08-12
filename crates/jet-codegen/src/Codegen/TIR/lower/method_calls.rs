@@ -797,6 +797,38 @@ pub(crate) fn lower_method_call(
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
 ) -> TExpr {
+    lower_method_call_with_sig(
+        receiver,
+        method,
+        method_span,
+        owner_type_args,
+        type_args,
+        args,
+        recv_type,
+        resolved_ret,
+        checked_widen,
+        cx,
+        env,
+        lowered_receiver,
+        None,
+    )
+}
+
+pub(crate) fn lower_method_call_with_sig(
+    receiver: &Expr,
+    method: &str,
+    method_span: Span,
+    owner_type_args: &[Type],
+    type_args: &[Type],
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    resolved_ret: Option<&Type>,
+    checked_widen: bool,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
+    instantiated_sig: Option<&[(AccessConvention, Type)]>,
+) -> TExpr {
     if let Some(lowered) =
         lower_core_crypto_alias_fast(receiver, method, method_span, args, cx, env)
     {
@@ -828,6 +860,7 @@ pub(crate) fn lower_method_call(
         cx,
         env,
         lowered_receiver,
+        instantiated_sig,
     )
 }
 
@@ -844,6 +877,7 @@ fn lower_method_call_impl(
     cx: &Cx,
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
+    instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
     // D-CALLDUAL1=E: sema has already selected one `#Root` function. Lower
     // the receiver as argument zero and keep the callee on the ordinary
@@ -5383,21 +5417,23 @@ fn lower_method_call_impl(
             };
             let f_t = match &args[0].expr {
                 Expr::Lambda(lam) => {
-                    let tl = lower_lambda_expecting(
-                        lam,
-                        cx,
-                        env,
-                        Some(&[a_ty.clone(), b_ty.clone()]),
-                    );
-                    TExpr {
-                        ty: Type::Fn {
-                            params: vec![a_ty.clone(), b_ty.clone()],
-                            ret: Some(Box::new(ret_ty.clone())),
-                            effect_bound: None, return_view_provenance: None,
-                            param_contract: None,
-                        },
-                        kind: TExprKind::Lambda(Box::new(tl)),
-                    }
+                    super::take_scheduled_expr(&args[0].expr).unwrap_or_else(|| {
+                        let tl = lower_lambda_expecting(
+                            lam,
+                            cx,
+                            env,
+                            Some(&[a_ty.clone(), b_ty.clone()]),
+                        );
+                        TExpr {
+                            ty: Type::Fn {
+                                params: vec![a_ty.clone(), b_ty.clone()],
+                                ret: Some(Box::new(ret_ty.clone())),
+                                effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(tl)),
+                        }
+                    })
                 }
                 _ => lower_expr(&args[0].expr, cx, env),
             };
@@ -5449,14 +5485,18 @@ fn lower_method_call_impl(
             .get(&(type_name.clone(), method.to_string()))
             .cloned()
             .unwrap_or_default();
-        let sig = instantiate_method_sig(
-            cx,
-            &type_name,
-            method,
-            &sig,
-            owner_type_args,
-            type_args,
-        );
+        let sig = instantiated_sig
+            .map(|sig| sig.to_vec())
+            .unwrap_or_else(|| {
+                instantiate_method_sig(
+                    cx,
+                    &type_name,
+                    method,
+                    &sig,
+                    owner_type_args,
+                    type_args,
+                )
+            });
         let targs = lower_method_args(args, &sig, env, cx);
         let resolved_type_args = resolved_method_type_args(
             cx,
@@ -5518,7 +5558,9 @@ fn lower_method_call_impl(
         if cx.trait_names.contains(ty) {
             let key = (ty.clone(), method.to_string());
             let sig = cx.method_sigs.get(&key).cloned().unwrap_or_default();
-            let sig = instantiate_method_sig(cx, ty, method, &sig, &[], type_args);
+            let sig = instantiated_sig
+                .map(|sig| sig.to_vec())
+                .unwrap_or_else(|| instantiate_method_sig(cx, ty, method, &sig, &[], type_args));
             let ret_ty = cx
                 .method_rets
                 .get(&key)
@@ -5655,7 +5697,11 @@ fn lower_method_call_impl(
         Type::Apply { name, args } if name == &ty_name => args.as_slice(),
         _ => &[][..],
     };
-    let sig = instantiate_method_sig(cx, &ty_name, method, &sig, owner_type_args, type_args);
+    let sig = instantiated_sig
+        .map(|sig| sig.to_vec())
+        .unwrap_or_else(|| {
+            instantiate_method_sig(cx, &ty_name, method, &sig, owner_type_args, type_args)
+        });
     if matches!(&recv.ty, Type::Named(name) if cx.trait_names.contains(name)) {
         let trait_name = recv.ty.name();
         let mut recv = recv;
@@ -5740,7 +5786,7 @@ fn lower_method_call_impl(
     }
 }
 
-fn instantiate_method_sig(
+pub(crate) fn instantiate_method_sig(
     cx: &Cx,
     type_name: &str,
     method: &str,

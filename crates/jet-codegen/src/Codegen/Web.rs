@@ -916,6 +916,7 @@ fn web_lambda_supported(lam: &TIR::TLambda) -> bool {
     match &lam.executable {
         TIR::TLambdaBody::Expr(expr) => web_expr_supported(expr),
         TIR::TLambdaBody::Block(body) => web_stmts_supported(body),
+        TIR::TLambdaBody::SharedBlock(body) => web_stmts_supported(&body[..]),
     }
 }
 
@@ -5330,6 +5331,14 @@ fn tir_js_lambda(
         TIR::TLambdaBody::Block(body) => {
             let mut rendered = String::new();
             emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?;
+            format!(
+                "{}({params}) => {{\n{rendered}}}",
+                async_kw(&rendered),
+            )
+        }
+        TIR::TLambdaBody::SharedBlock(body) => {
+            let mut rendered = String::new();
+            emit_tir_js_body(&body[..], &mut rendered, funcs, file_prefix, 1)?;
             format!(
                 "{}({params}) => {{\n{rendered}}}",
                 async_kw(&rendered),
