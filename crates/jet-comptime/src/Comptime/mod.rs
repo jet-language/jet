@@ -173,8 +173,9 @@ pub use Purity::{
     walk_purity_stmts_from, PurityStage,
 };
 pub use Reflect::{
-    build_distinct_type_info, build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
-    build_struct_type_info_with_states, ProgramSemanticFacts,
+    build_distinct_type_info, build_distinct_type_info_with_path, build_enum_layout_info,
+    build_program_info, build_struct_layout_info, build_struct_type_info,
+    build_struct_type_info_with_path, build_struct_type_info_with_states, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 

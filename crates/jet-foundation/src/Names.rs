@@ -1,7 +1,7 @@
 //! One semantic name ledger and one Rust-name projection.
 
 use crate::Diagnostics::Span;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 /// Visibility recorded for a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +136,150 @@ impl NameLedger {
         self.declaration(module, name).map(|declaration| declaration.path.as_str())
     }
 
+    /// Resolve a declaration without reconstructing its semantic key. Source
+    /// indexes already carry the declaration span, which is the unambiguous
+    /// bridge for inline-module names stored under generated keys.
+    pub fn canonical_path_at(
+        &self,
+        module: usize,
+        start: usize,
+        end: usize,
+    ) -> Option<String> {
+        self.declarations
+            .values()
+            .find(|declaration| {
+                declaration.module == module
+                    && declaration.span.start == start
+                    && declaration.span.end == end
+            })
+            .map(|declaration| declaration.path.clone())
+    }
+
+    /// Resolve one source-facing name to the canonical typeable path recorded
+    /// by sema. All reflection, diagnostics, and tooling projections use this
+    /// lookup; none rebuilds a path from a display string.
+    pub fn canonical_path(&self, module: usize, name: &str) -> Option<String> {
+        if let Some(path) = self.declaration_path(module, name) {
+            return Some(path.to_string());
+        }
+        let alias = self.effective_alias(module, name)?;
+        if let Some(target_module) = alias.target_module {
+            let target_name = alias
+                .target
+                .rsplit_once('.')
+                .map(|(_, leaf)| leaf)
+                .unwrap_or(alias.target.as_str());
+            if let Some(path) = self.declaration_path(target_module, target_name) {
+                return Some(path.to_string());
+            }
+        }
+        alias.target.contains('.').then(|| alias.target.clone())
+    }
+
+    /// Pick the one user-facing spelling for a resolved name. A leaf is safe
+    /// only when the visible declarations with that leaf collapse to one
+    /// canonical path; otherwise the resolved declaration keeps its full
+    /// path. The caller supplies the resolved module so an ambiguous lookup
+    /// never guesses from HashMap iteration order.
+    pub fn display_path(
+        &self,
+        from_module: usize,
+        name: &str,
+        resolved_module: Option<usize>,
+    ) -> Option<String> {
+        let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
+        let mut paths = BTreeSet::new();
+        for declaration in self.declarations.values() {
+            if declaration.name == leaf
+                && self.visible(from_module, declaration.module, leaf)
+            {
+                paths.insert(declaration.path.clone());
+            }
+        }
+        for alias in self.aliases.values() {
+            if alias.name != leaf || !self.visible(from_module, alias.module, leaf) {
+                continue;
+            }
+            let path = alias
+                .target_module
+                .and_then(|module| {
+                    let target_leaf = alias
+                        .target
+                        .rsplit_once('.')
+                        .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+                    self.declaration_path(module, target_leaf)
+                })
+                .map(str::to_string)
+                .or_else(|| alias.target.contains('.').then(|| alias.target.clone()));
+            if let Some(path) = path {
+                paths.insert(path);
+            }
+        }
+
+        let resolved_path = resolved_module
+            .and_then(|module| self.declaration_path(module, leaf))
+            .map(str::to_string)
+            .or_else(|| self.canonical_path(from_module, name));
+        let resolved_path = resolved_path.or_else(|| paths.iter().next().cloned())?;
+        if paths.len() <= 1
+            && !name.contains('.')
+            && !name.starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
+        {
+            Some(leaf.to_string())
+        } else {
+            Some(resolved_path)
+        }
+    }
+
+    /// Return every source-name key in one module with its canonical path.
+    /// This is the projection boundary for codegen and runtime tooling: the
+    /// consumers do not walk declarations or aliases themselves.
+    pub fn canonical_paths(&self, module: usize) -> Vec<(String, String)> {
+        let mut paths = BTreeSet::new();
+        for ((owner, name), declaration) in &self.declarations {
+            if *owner == module {
+                let path = declaration.path.clone();
+                paths.insert((name.clone(), path.clone()));
+                // A qualified type name is itself a source key. Keep it in
+                // the same projection so consumers never reconstruct it from
+                // declaration storage.
+                if path.as_str() != name.as_str() {
+                    paths.insert((path.clone(), path));
+                }
+            }
+        }
+        for ((owner, name), alias) in &self.aliases {
+            if *owner == module {
+                if let Some(path) = self.canonical_path(module, name) {
+                    paths.insert((name.clone(), path));
+                }
+                // A module import is also a source qualifier (`dep.Thing`).
+                // Publish those keys here so codegen can resolve qualified
+                // external types without rebuilding an import path.
+                if let Some(target_module) = alias.target_module {
+                    if !alias.target.contains('.') {
+                        if let Some(target_alias) = self.module_alias(target_module) {
+                            let prefix = format!("{target_alias}.");
+                            for declaration in self.declarations.values() {
+                                if declaration.module != target_module {
+                                    continue;
+                                }
+                                let Some(suffix) = declaration.path.strip_prefix(prefix.as_str()) else {
+                                    continue;
+                                };
+                                paths.insert((
+                                    format!("{}.{}", alias.name, suffix),
+                                    declaration.path.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        paths.into_iter().collect()
+    }
+
     pub fn semantic_identity(&self, module: usize, name: &str) -> Option<String> {
         self.module_alias(module)
             .map(|alias| format!("{alias}::{name}"))
@@ -262,14 +406,10 @@ pub fn mangle_path(path: &str) -> String {
 
 /// Rust identifier for an inline-module member identity.
 pub fn member_name(module: &str, name: &str) -> String {
-    format!("{module}__{name}")
-}
-
-pub use mangle_path as mangle_variant;
-pub use mangle_path as user_type_rust;
-
-pub fn user_trait_rust(name: &str) -> String {
-    mangle(name)
+    let module = module
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(module);
+    mangle_path(&format!("{module}.{name}"))
 }
 
 #[cfg(test)]
@@ -393,6 +533,86 @@ mod tests {
         assert_eq!(mangle("run"), "__jet_run");
         assert_eq!(mangle("$value"), "__jet_ct_value");
         assert_eq!(mangle_path("Fire.Burn"), "__jet_Fire__Burn");
-        assert_eq!(member_name("math", "double"), "math__double");
+        assert_eq!(member_name("math", "double"), "__jet_math__double");
+        assert_eq!(
+            member_name(&member_name("outer", "inner"), "helper"),
+            "__jet_outer__inner__helper"
+        );
+    }
+
+    #[test]
+    fn canonical_path_follows_declarations_and_aliases() {
+        let mut ledger = NameLedger::default();
+        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
+        ledger.declare(
+            1,
+            "Thing".to_string(),
+            "lib.Thing".to_string(),
+            "type".to_string(),
+            span(),
+            NameVisibility::Public,
+        );
+        ledger.record_alias(
+            0,
+            "Alias".to_string(),
+            "lib.Thing".to_string(),
+            Some(1),
+            span(),
+            NameVisibility::Public,
+        );
+        assert_eq!(ledger.canonical_path(1, "Thing"), Some("lib.Thing".to_string()));
+        assert_eq!(
+            ledger.canonical_path_at(1, 3, 7),
+            Some("lib.Thing".to_string())
+        );
+        ledger.declare(
+            0,
+            member_name("Inner", "helper"),
+            "app.Inner.helper".to_string(),
+            "function".to_string(),
+            span(),
+            NameVisibility::Private,
+        );
+        assert_eq!(
+            ledger.display_path(0, &member_name("Inner", "helper"), Some(0)),
+            Some("app.Inner.helper".to_string())
+        );
+        assert_eq!(ledger.canonical_path(0, "Alias"), Some("lib.Thing".to_string()));
+        assert_eq!(ledger.display_path(0, "Alias", Some(1)), Some("Alias".to_string()));
+
+        ledger.record_alias(
+            0,
+            "lib".to_string(),
+            "lib".to_string(),
+            Some(1),
+            span(),
+            NameVisibility::Public,
+        );
+        assert!(ledger
+            .canonical_paths(0)
+            .contains(&("lib.Thing".to_string(), "lib.Thing".to_string())));
+    }
+
+    #[test]
+    fn display_path_qualifies_ambiguous_visible_leaves() {
+        let mut ledger = NameLedger::default();
+        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.set_module(1, "one".to_string(), "one.jet".to_string(), "pkg".to_string());
+        ledger.set_module(2, "two".to_string(), "two.jet".to_string(), "pkg".to_string());
+        for (module, path) in [(1, "one.Thing"), (2, "two.Thing")] {
+            ledger.declare(
+                module,
+                "Thing".to_string(),
+                path.to_string(),
+                "type".to_string(),
+                span(),
+                NameVisibility::Public,
+            );
+        }
+        assert_eq!(
+            ledger.display_path(0, "Thing", Some(2)),
+            Some("two.Thing".to_string())
+        );
     }
 }

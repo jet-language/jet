@@ -5137,15 +5137,13 @@ impl LowerCtx<'_, '_> {
     /// named-unsupported (same gap string as before for CtLit/DefaultLit).
 
     fn lower_reflect_of(&mut self, arg: &TExpr) -> Result<Value, String> {
-        let type_name = match &arg.ty {
-            Type::Named(n) => n.clone(),
-            Type::Int => "Int".into(),
-            Type::Float => "Float".into(),
-            Type::Bool => "Bool".into(),
-            Type::String => "String".into(),
-            other => other.name(),
+        let type_name = arg.ty.leaf_name();
+        let path = self.meta.reflect_path(&arg.ty);
+        let named_type = match &arg.ty {
+            Type::Named(n) | Type::Apply { name: n, .. } => Some(n.as_str()),
+            _ => None,
         };
-        if let Type::Named(n) = &arg.ty {
+        if let Some(n) = named_type {
             if let Some((_names, tys)) = self.meta.struct_layout(n) {
                 // Reject before emitting any resident instructions. The
                 // ambient path owns nested/collection reflection semantics;
@@ -5170,11 +5168,13 @@ impl LowerCtx<'_, '_> {
         }
         let type_h = self.runtime.heap.alloc_string(type_name.clone());
         let type_v = self.b.ins().iconst(types::I64, type_h);
+        let path_h = self.runtime.heap.alloc_string(path);
+        let path_v = self.b.ins().iconst(types::I64, path_h);
 
         // display string — reuse Display path / scalar push
         let buf = self.call_host(self.host.str_begin, &[]);
         match &arg.ty {
-            Type::Named(n) => {
+            Type::Named(n) | Type::Apply { name: n, .. } => {
                 self.lower_named_str_interp(buf, arg, n, jet_foundation::AST::StrFormat::Display)?;
             }
             Type::Int => {
@@ -5207,7 +5207,7 @@ impl LowerCtx<'_, '_> {
 
         // fields
         let fields = self.call_host(self.host.coll.list_new, &[]);
-        if let Type::Named(n) = &arg.ty {
+        if let Some(n) = named_type {
             if let Some((names, tys)) = self.meta.struct_layout(n) {
                 let recv = self.lower_expr(arg)?;
                 let push = self.module.declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -5249,7 +5249,10 @@ impl LowerCtx<'_, '_> {
                 }
             }
         }
-        Ok(self.call_host(self.host.reflect_of_finish, &[type_v, display_v, fields]))
+        Ok(self.call_host(
+            self.host.reflect_of_finish,
+            &[type_v, path_v, display_v, fields],
+        ))
     }
 
     fn lower_testing_call(
@@ -17737,6 +17740,9 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::ReflectValueTypeName => {
                 Ok(self.call_host(self.host.reflect_type_name, &[recv_val]))
+            }
+            THandleOp::ReflectValuePath => {
+                Ok(self.call_host(self.host.reflect_path, &[recv_val]))
             }
             THandleOp::ReflectValueDisplay => {
                 Ok(self.call_host(self.host.reflect_display, &[recv_val]))

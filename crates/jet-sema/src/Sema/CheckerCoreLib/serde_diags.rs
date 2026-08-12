@@ -578,11 +578,9 @@ pub(super) fn literal_string_value(expr: &Expr) -> Option<String> {
 /// D-A11YGATE1=B (c134 Phase 6, E2930): an interactive-role `UiNode` with an
 /// empty accessible label.
 pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "E2930",
-        format!("this {role} has no accessible label"),
-        "screen readers announce a control by its accessible label — an empty label is invisible to assistive tech".to_string(),
-        "pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`".to_string(),
+        &[("role", role)],
         Some(span),
     )
 }
@@ -590,11 +588,9 @@ pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
 /// D-A11YGATE1=B (c134 Phase 6, E2931): two interactive nodes in the same
 /// inline focus group share an accessible label.
 pub(crate) fn a11y_duplicate_label(label: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "E2931",
-        format!("two interactive nodes both have the label \"{label}\""),
-        "assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3)".to_string(),
-        "give each interactive node a distinct, descriptive label".to_string(),
+        &[("label", label)],
         Some(span),
     )
 }

@@ -788,7 +788,7 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
 }
 
 fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Diagnostics::Span) {
-    let target = Syntax::generated_name(&format!("collect_{}", span.start));
+    let target = jet_foundation::Names::mangle(&format!("collect_{}", span.start));
     rewrite_collect_yields(stmts, &target);
     stmts.insert(
         0,

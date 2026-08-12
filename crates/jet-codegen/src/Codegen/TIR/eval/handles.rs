@@ -156,13 +156,25 @@ fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
 }
 
 fn reflect_type_name(value: &CtValue) -> String {
-    value.jet_type().name()
+    value.jet_type().leaf_name()
+}
+
+fn reflect_path(recv: &CtValue) -> Option<CtValue> {
+    match recv {
+        CtValue::Struct { type_name, fields } if type_name == "__Reflect" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "path").then_some(value.clone())),
+        _ => None,
+    }
 }
 
 fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
     match method {
         "type_name" => reflect_inner(recv)
             .map(|value| CtValue::Str(reflect_type_name(value)))
+            .ok_or_else(|| unsupported("reflect value", span)),
+        "path" => reflect_path(recv)
+            .or_else(|| reflect_inner(recv).map(|value| CtValue::Str(reflect_type_name(value))))
             .ok_or_else(|| unsupported("reflect value", span)),
         // `Value.display()` needs the evaluator's user-function table. The
         // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
@@ -798,6 +810,7 @@ pub(super) fn eval_handle(
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
         THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
+        THandleOp::ReflectValuePath => reflect_handle(recv, "path", span),
         // Handled before this context-free dispatch in `eval/exprs.rs`, where
         // the Display-aware evaluator is available.
         THandleOp::ReflectValueDisplay => Err(unsupported("reflect display evaluator", span)),

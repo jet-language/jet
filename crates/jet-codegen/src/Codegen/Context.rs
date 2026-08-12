@@ -119,6 +119,9 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// Canonical typeable paths for reflectable nominal types. This is a
+    /// projection cache seeded only from the sema name ledger.
+    pub(crate) reflect_paths: HashMap<String, String>,
     /// Generic parameters that occur in non-skipped serialized fields.
     pub(crate) serde_wire_params: HashMap<String, HashSet<String>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
@@ -1230,7 +1233,7 @@ impl Cx {
     pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
         if let Type::Named(name) = inner {
             if self.is_columnar_struct(name) {
-                let columns = crate::Syntax::generated_path(&format!("{name}_columns"));
+                let columns = jet_foundation::Names::mangle_path(&format!("{name}_columns"));
                 return Some(if self.foreign_types.contains_key(name.as_str()) {
                     let rust_mod = &self.foreign_types[name.as_str()];
                     format!("{}{}::{columns}", self.root_prefix, rust_mod)
@@ -1816,12 +1819,12 @@ impl Cx {
                 )
             }
             Type::Named(name) if self.trait_names.contains(name) => {
-                format!("Box<dyn {}>", Generics::user_trait_rust(name))
+                format!("Box<dyn {}>", crate::Codegen::mangle(name))
             }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
-                format!("{}{}::{}", self.root_prefix, rust_mod, user_type_rust(leaf))
+                format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
             }
             Type::Named(name) if name.contains('.') => {
                 let (alias, leaf) = name.split_once('.').unwrap();
@@ -1830,13 +1833,13 @@ impl Cx {
                         "{}{}::{}",
                         self.root_prefix,
                         rust_mod,
-                        user_type_rust(leaf)
+                        mangle_path(leaf)
                     ),
-                    None => user_type_rust(name),
+                    None => mangle_path(name),
                 }
             }
             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
-            Type::Named(name) => user_type_rust(name),
+            Type::Named(name) => mangle_path(name),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetTask<{}>",
@@ -2177,18 +2180,18 @@ impl Cx {
             Type::Apply { name, args } => {
                 let head = if let Some((alias, leaf)) = name.split_once('.') {
                     self.import_mods.get(alias).map_or_else(
-                        || user_type_rust(name),
+                        || mangle_path(name),
                         |rust_mod| {
                             format!(
                                 "{}{}::{}",
                                 self.root_prefix,
                                 rust_mod,
-                                user_type_rust(leaf)
+                                mangle_path(leaf)
                             )
                         },
                     )
                 } else {
-                    user_type_rust(name)
+                    mangle_path(name)
                 };
                 if args.is_empty() {
                     head
@@ -2210,7 +2213,7 @@ impl Cx {
             Type::TraitObject(t) => format!(
                 "Box<dyn {}>",
                 t.iter()
-                    .map(|n| Generics::user_trait_rust(n))
+                    .map(|n| crate::Codegen::mangle(n))
                     .collect::<Vec<_>>()
                     .join(" + ")
             ),
@@ -2233,7 +2236,7 @@ impl Cx {
             Type::Tagged { inner, .. } => self.rust_type(inner),
             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
             Type::Union(members) => {
-                crate::Syntax::generated_name(&crate::AST::union_enum_name(members))
+                jet_foundation::Names::mangle(&crate::AST::union_enum_name(members))
             }
             // Erased by the `quantity_parts()` guard above `rust_type` returns
             // through; a runtime quantity value IS its base numeric type.
@@ -2356,7 +2359,18 @@ impl Cx {
     }
 
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
-        user_type_rust(type_name)
+        mangle_path(type_name)
+    }
+
+    pub(crate) fn reflect_path(&self, ty: &Type) -> String {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => self
+                .reflect_paths
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
+            _ => ty.name(),
+        }
     }
 }
 
@@ -2486,7 +2500,7 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
 }
 
 pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
-    crate::Syntax::generated_path(&format!("foreign_method__{owner}__{method}"))
+    jet_foundation::Names::mangle_path(&format!("foreign_method__{owner}__{method}"))
 }
 
 /// Add local and imported unit-family facts under the names used by this module.
@@ -2589,6 +2603,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
+    register_bundle_reflect_paths(cx, bundle, module_idx);
     register_core_close_types(cx);
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
@@ -2607,6 +2622,12 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.inline_core_imports = inline_core;
     cx.inline_reexport_core = reexport_core;
     cx.package_edition = bundle.edition.clone();
+}
+
+fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    for (name, path) in bundle.name_ledger.canonical_paths(module_idx) {
+        cx.reflect_paths.insert(name, path);
+    }
 }
 
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
@@ -2903,6 +2924,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        reflect_paths: HashMap::new(),
         serde_wire_params: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),

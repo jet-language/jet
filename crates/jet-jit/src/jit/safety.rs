@@ -4328,6 +4328,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             args.is_empty()
         }
         THandleOp::ReflectValueTypeName
+        | THandleOp::ReflectValuePath
         | THandleOp::ReflectValueDisplay
         | THandleOp::ReflectValueFields
         | THandleOp::ReflectFieldName

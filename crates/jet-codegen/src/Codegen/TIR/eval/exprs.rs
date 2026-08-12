@@ -3090,8 +3090,16 @@ impl<'a> EvalCtx<'a> {
                     let value = argv
                         .pop()
                         .ok_or_else(|| unsupported("reflect value", *source_span))?;
+                    let path = match &args[0].ty {
+                        Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
+                            .reflect_paths
+                            .get(type_name)
+                            .cloned()
+                            .unwrap_or_else(|| type_name.clone()),
+                        ty => ty.name(),
+                    };
                     let field_names = match &args[0].ty {
-                        Type::Named(type_name) => self
+                        Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
                             .struct_fields
                             .get(type_name)
                             .or_else(|| {
@@ -3108,7 +3116,10 @@ impl<'a> EvalCtx<'a> {
                             }),
                         _ => None,
                     };
-                    let mut fields = vec![("value".to_string(), value)];
+                    let mut fields = vec![
+                        ("value".to_string(), value),
+                        ("path".to_string(), CtValue::Str(path)),
+                    ];
                     if let Some(field_names) = field_names {
                         fields.push(("field_names".to_string(), field_names));
                     }

@@ -77,6 +77,7 @@ pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
 pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Option<Type> {
     match (type_name, method, n_args) {
         ("Value", "type_name", 0) => Some(Type::String),
+        ("Value", "path", 0) => Some(Type::String),
         ("Value", "display", 0) => Some(Type::String),
         ("Value", "fields", 0) => Some(Type::List(Box::new(Type::Named("Field".to_string())))),
         ("Field", "name", 0) => Some(Type::String),

@@ -120,6 +120,7 @@ impl<'a> Checker<'a> {
         method_type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
+        let display_type_name = self.display_type_name(type_name, None);
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
             let bound = args.first().and_then(|arg| match &arg.expr {
                 Expr::Int(value, _, _, _) if *value >= 0 => Some(*value as u64),
@@ -182,9 +183,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0102",
                 if builtin {
-                    format!("`{type_name}` has no static method `{method}`")
+                    format!("`{display_type_name}` has no static method `{method}`")
                 } else {
-                    format!("`{type_name}` has no method `{method}`")
+                    format!("`{display_type_name}` has no method `{method}`")
                 },
                 if builtin {
                     "built-in types expose only their documented static methods".to_string()
@@ -193,10 +194,10 @@ impl<'a> Checker<'a> {
                 },
                 if builtin {
                     format!(
-                        "call a documented static method on `{type_name}`, or call `.{method}()` on a value that provides it"
+                        "call a documented static method on `{display_type_name}`, or call `.{method}()` on a value that provides it"
                     )
                 } else {
-                    format!("define it inside `struct {type_name}` or `impl {type_name}`")
+                    format!("define it inside `struct {display_type_name}` or `impl {display_type_name}`")
                 },
                 Some(span),
             ));
@@ -206,6 +207,7 @@ impl<'a> Checker<'a> {
             return None;
         };
         let method_name = format!("{type_name}.{method}");
+        let display_type_name = self.display_type_name(type_name, Some(owner_mod));
         if owner_mod != self.module_idx
             && !self
                 .name_ledger
@@ -329,9 +331,9 @@ impl<'a> Checker<'a> {
                             .join(", ");
                         self.diags.push(Diagnostic::error(
                             "E0904",
-                            format!("`{type_name}.new` needs its generic receiver type here"),
+                            format!("`{display_type_name}.new` needs its generic receiver type here"),
                             "constructor inputs and the surrounding expected type must determine one concrete receiver type".to_string(),
-                            format!("write the full receiver, such as `{type_name}<{params}>.new(...)`"),
+                            format!("write the full receiver, such as `{display_type_name}<{params}>.new(...)`"),
                             Some(span),
                         ));
                         return None;
@@ -362,9 +364,9 @@ impl<'a> Checker<'a> {
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
-                format!("`{}` is an instance method on `{}`", method, type_name),
+                format!("`{}` is an instance method on `{}`", method, display_type_name),
                 "instance methods need a value before the dot".to_string(),
-                format!("call it on a `{type_name}` value: `x.{method}(...)`"),
+                format!("call it on a `{display_type_name}` value: `x.{method}(...)`"),
                 Some(span),
             ));
         }
@@ -398,12 +400,13 @@ impl<'a> Checker<'a> {
     ) -> Option<Vec<Option<Type>>> {
         if sig.type_params.is_empty() {
             if !type_args.is_empty() {
+                let display_type_name = self.display_type_name(type_name, None);
                 self.diags.push(Diagnostic::error(
                     "E0119",
-                    format!("{type_name}.{method} is not generic"),
+                    format!("{display_type_name}.{method} is not generic"),
                     "only methods declared with type parameters accept call-site type arguments"
                         .to_string(),
-                    format!("call {type_name}.{method}(...) without type arguments"),
+                    format!("call {display_type_name}.{method}(...) without type arguments"),
                     Some(span),
                 ));
             }
@@ -411,18 +414,19 @@ impl<'a> Checker<'a> {
         }
 
         if !type_args.is_empty() {
+            let display_type_name = self.display_type_name(type_name, None);
             if type_args.len() != sig.type_params.len() {
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!(
-                        "{type_name}.{method} expects {} type argument{}, got {}",
+                        "{display_type_name}.{method} expects {} type argument{}, got {}",
                         sig.type_params.len(),
                         if sig.type_params.len() == 1 { "" } else { "s" },
                         type_args.len()
                     ),
                     "a generic method call must provide one type for every declared type parameter"
                         .to_string(),
-                    format!("write {type_name}.{method}<…>(...) with the declared types"),
+                    format!("write {display_type_name}.{method}<…>(...) with the declared types"),
                     Some(span),
                 ));
                 return None;
@@ -1321,6 +1325,7 @@ impl<'a> Checker<'a> {
         fields: &mut Vec<(String, Span, Expr)>,
         span: Span,
     ) -> Type {
+        let display_type_name = self.display_type_name(type_name, None);
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
         // single-use byte Body. The old public-field literals cannot preserve
         // those invariants and ended at this core API break.
@@ -1384,7 +1389,7 @@ impl<'a> Checker<'a> {
                     "E0303",
                     format!(
                         "struct literal for `{}` is missing fields: {}",
-                        type_name,
+                        display_type_name,
                         missing.join(", ")
                     ),
                     "every field must appear exactly once".to_string(),
@@ -1397,7 +1402,7 @@ impl<'a> Checker<'a> {
         let Some(owner_mod) = self.struct_owner_module(type_name, import_ns) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
-                format!("there's no type called `{}`", type_name),
+                format!("there's no type called `{}`", display_type_name),
                 "struct literals need a struct type name".to_string(),
                 "define the struct first, or check the spelling".to_string(),
                 Some(span),
@@ -1407,12 +1412,13 @@ impl<'a> Checker<'a> {
             }
             return Type::Named(type_name.to_string());
         };
+        let display_type_name = self.display_type_name(type_name, Some(owner_mod));
         if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
-            self.diags.push(private_item(type_name, span));
+            self.diags.push(private_item(&display_type_name, span));
         } else if owner_mod != self.module_idx
             && Syntax::classify_identifier(type_name) == Syntax::IdentifierClass::SoftPublic
         {
-            self.diags.push(soft_public_use(type_name, span));
+            self.diags.push(soft_public_use(&display_type_name, span));
         }
         let def_fields: Vec<(String, Span, Type)> = self
             .struct_fields_of(owner_mod, type_name)
@@ -1421,7 +1427,7 @@ impl<'a> Checker<'a> {
         if def_fields.is_empty() {
             self.diags.push(Diagnostic::error(
                 "E0119",
-                format!("there's no type called `{}`", type_name),
+                format!("there's no type called `{}`", display_type_name),
                 "struct literals need a struct type name".to_string(),
                 "define the struct first, or check the spelling".to_string(),
                 Some(span),
@@ -1556,7 +1562,7 @@ impl<'a> Checker<'a> {
                     "E0339",
                     format!(
                         "`{}` is a computed field on `{}` — it can't be set",
-                        name, type_name
+                        name, display_type_name
                     ),
                     format!(
                         "`{}` is declared `{} => …` — its value always comes from that formula, never from a struct literal",
@@ -1568,7 +1574,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.diags.push(Diagnostic::error(
                     "E0303",
-                    format!("struct literal for `{}` has no field `{}`", type_name, name),
+                    format!("struct literal for `{}` has no field `{}`", display_type_name, name),
                     "struct literals may only set fields that exist on the type".to_string(),
                     suggest_field(name, &field_names)
                         .map(|s| format!("did you mean `{}`?", s))
@@ -1624,7 +1630,7 @@ impl<'a> Checker<'a> {
                 "E0303",
                 format!(
                     "struct literal for `{}` is missing fields: {}",
-                    type_name,
+                    display_type_name,
                     still_missing.join(", ")
                 ),
                 "every field without an `=` default must appear exactly once".to_string(),
@@ -1739,10 +1745,11 @@ impl<'a> Checker<'a> {
             matches!(ty, Type::Apply { name, .. } if name == type_name)
         });
         let ty = contextual_ty.clone().unwrap_or_else(|| Type::Named(type_name.to_string()));
+        let display_type_name = self.display_type_name(type_name, None);
         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
-                format!("there's no enum called `{}`", type_name),
+                format!("there's no enum called `{}`", display_type_name),
                 "enum literals need an enum type name".to_string(),
                 "define the enum first, or check the spelling".to_string(),
                 Some(span),
@@ -1770,7 +1777,7 @@ impl<'a> Checker<'a> {
                         "pick a leaf: {}",
                         leaves
                             .iter()
-                            .map(|l| format!("`{type_name}.{l}`"))
+                            .map(|l| format!("`{display_type_name}.{l}`"))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
@@ -1791,7 +1798,7 @@ impl<'a> Checker<'a> {
             }
             self.diags.push(Diagnostic::error(
                 "E0304",
-                format!("`{}` has no variant `{}`", type_name, variant),
+                format!("`{}` has no variant `{}`", display_type_name, variant),
                 "enum literals must name a variant on the type".to_string(),
                 fix,
                 Some(span),
@@ -1812,7 +1819,7 @@ impl<'a> Checker<'a> {
                         "E0303",
                         format!("variant `{}` takes no payload", variant),
                         "unit variants are written without parentheses".to_string(),
-                        format!("write `{type_name}.{variant}` with no `(...)`"),
+                        format!("write `{display_type_name}.{variant}` with no `(...)`"),
                         Some(span),
                     ));
                 }
@@ -1829,7 +1836,7 @@ impl<'a> Checker<'a> {
                         "E0303",
                         format!("variant `{}` expects one value", variant),
                         "single-payload variants take one positional argument (S30)".to_string(),
-                        format!("write `{type_name}.{variant}(...)`"),
+                        format!("write `{display_type_name}.{variant}(...)`"),
                         Some(span),
                     ));
                 }
@@ -1839,7 +1846,7 @@ impl<'a> Checker<'a> {
                         if contextual_payload.is_some() && et != expected {
                             self.diags.push(Diagnostic::error(
                                 "E0108",
-                                format!("`{type_name}.{variant}` needs {}, not {}", expected.show(), et.show()),
+                                format!("`{display_type_name}.{variant}` needs {}, not {}", expected.show(), et.show()),
                                 "the decision payload must match the hook's declared payload or error type".to_string(),
                                 type_fix_hint(expected, et),
                                 Some(e.span()),
@@ -1862,7 +1869,7 @@ impl<'a> Checker<'a> {
                             variant, label
                         ),
                         "single-payload variants use positional args only (S30)".to_string(),
-                        format!("write `{type_name}.{variant}(value)`"),
+                        format!("write `{display_type_name}.{variant}(value)`"),
                         Some(span),
                     ));
                 }
@@ -1878,7 +1885,7 @@ impl<'a> Checker<'a> {
                                 "named-payload variants construct with the dot-brace form \
                                  (D-UITREE1/D-DOTCTOR1), matching struct construction"
                                     .to_string(),
-                                format!("write `{type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"),
+                                format!("write `{display_type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"),
                                 Some(span),
                             ));
                         }
@@ -2395,8 +2402,11 @@ impl<'a> Checker<'a> {
                 },
                 Pattern::Struct { fields, rest, .. },
             ) => {
-                let all_fields: Option<Vec<String>> = self
-                    .struct_owner_module(type_name, None)
+                let owner_mod = self.struct_owner_module(type_name, None);
+                let display_type_name = owner_mod
+                    .map(|owner| self.display_type_name(type_name, Some(owner)))
+                    .unwrap_or_else(|| self.display_type_name(type_name, None));
+                let all_fields: Option<Vec<String>> = owner_mod
                     .and_then(|m| self.struct_fields_of(m, type_name))
                     .map(|fs| fs.iter().map(|(name, ..)| name.clone()).collect());
                 let Some(all_fields) = all_fields else {
@@ -2457,7 +2467,7 @@ impl<'a> Checker<'a> {
                 if rest.is_none() && named.len() < all_fields.len() {
                     self.diags.push(Diagnostic::error(
                         "E0326",
-                        format!("this pattern leaves out fields of `{}`", type_name),
+                        format!("this pattern leaves out fields of `{}`", display_type_name),
                         "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
                         "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
                         Some(span),
@@ -2467,7 +2477,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0327",
                             "this `..` is redundant".to_string(),
-                            format!("the pattern already names every field of `{}`", type_name),
+                            format!("the pattern already names every field of `{}`", display_type_name),
                             "remove `..` or leave out at least one field".to_string(),
                             Some(*rest_span),
                         ));
@@ -2529,6 +2539,7 @@ impl<'a> Checker<'a> {
                     variant, bindings, ..
                 },
             ) => {
+                let display_enum_name = self.display_type_name(enum_name, None);
                 if is_json_type_name(enum_name) {
                     let Some(expected) = core_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
@@ -2651,7 +2662,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0305",
                         format!("pattern `{}` doesn't match this value's type", variant),
-                        format!("`{}` is a struct, not an enum", enum_name),
+                        format!("`{}` is a struct, not an enum", display_enum_name),
                         "use a struct field access instead of a variant pattern".to_string(),
                         Some(span),
                     ));
@@ -2681,7 +2692,7 @@ impl<'a> Checker<'a> {
                     }
                     self.diags.push(Diagnostic::error(
                         "E0305",
-                        format!("pattern `{}` doesn't belong to `{}`", variant, enum_name),
+                        format!("pattern `{}` doesn't belong to `{}`", variant, display_enum_name),
                         "pattern tests must name a variant on the value's enum type".to_string(),
                         "check the variant spelling".to_string(),
                         Some(span),

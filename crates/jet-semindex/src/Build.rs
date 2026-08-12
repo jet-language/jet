@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::JSON::{convert_defs, convert_effects, convert_refs};
 use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
-use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
+use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -171,7 +171,7 @@ impl SymbolDB {
                 }
             }
         }
-        let defs = convert_defs(&self.defs, &self.view_provenance);
+        let defs = convert_defs(&self.defs, &self.view_provenance, bundle);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
         let definition_facts = build_definition_facts(&defs, &self.nodes, bundle);
@@ -807,7 +807,13 @@ fn build_definition_facts(
             signature_id: format!("sig:{}", &jet_foundation::SHA256::sha256_hex(format!("{}|{}", definition_kind(&def.kind), definition_signature(def)).as_bytes())[..16]),
             content_id: format!("sha256:{}", jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())),
             human_identity: def.identity.clone(),
-            name: def.name.clone(),
+            name: canonical_symbol_name(
+                bundle,
+                &def.module_path,
+                &def.name,
+                None,
+                Some((def.def_span.start, def.def_span.end)),
+            ),
             kind: definition_kind(&def.kind).to_string(),
             module_path: def.module_path.clone(),
             span: node.span,

@@ -2360,8 +2360,10 @@ code+what/why/fix). No mutation, no AST injection, no macros
 grammar).
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
-`.name`, `.fields`; each field carries `.name`/`.ty`/`.markers`/
-`.has_marker("…")`.
+`.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
+the field list; each field carries `.name`/`.ty`/`.markers`/
+`.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
+is the leaf and `.path()` is the canonical path.
 
 **D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
 2026-08-03)*: `T.$layout` is exactly the focused projection of

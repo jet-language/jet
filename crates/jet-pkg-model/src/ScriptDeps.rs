@@ -215,19 +215,9 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
 /// L0203 (D-JPK-SCRIPTDEP1=A): an inline dep pinned to a loose selector
 /// (anything but an exact `major.minor.patch`).
 pub fn l0203_unpinned(dep: &InlineDep) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::from_row(
         "L0203",
-        format!(
-            "`use {}#{};` isn't pinned to an exact version",
-            dep.name, dep.selector
-        ),
-        "an inline script dependency has no lockfile until you run `jet fetch --lock`; a loose selector \
-         (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone."
-            .to_string(),
-        format!(
-            "write the exact version Jet resolved (`use {}#<major.minor.patch>;`), or run `jet fetch --lock` to pin it in `<script>.lock`.",
-            dep.name
-        ),
+        &[("name", dep.name.as_str()), ("selector", dep.selector.as_str())],
         Some(dep.span),
     )
 }

@@ -389,14 +389,9 @@ impl<'a> Checker<'a> {
             {
                 if let Some((place, bin_op, compound)) = prefer_compound_assign(target, value) {
                     if !self.compound_assign_rejected(target, bin_op) {
-                        self.diags.push(Diagnostic::lint(
+                        self.diags.push(Diagnostic::from_row(
                             "L0503",
-                            format!(
-                                "prefer `{place} {compound} …` instead of repeating the left side"
-                            ),
-                            "compound assignment updates a place in one step without restating it"
-                                .to_string(),
-                            format!("write `{place} {compound} …`"),
+                            &[("place", place.as_str()), ("op", compound)],
                             Some(*op_span),
                         ));
                     }

@@ -1,7 +1,7 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::any::Any;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Names::{mangle, mangle_path, user_type_rust};
+use crate::Names::{mangle, mangle_path};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -863,7 +863,7 @@ impl CtValue {
             },
             // The compiled program's Rust `#[derive(Debug)]` output for a user
             // enum: the variant's Rust identifier is `__jet_<Variant>` (S34,
-            // `Codegen::mangle_variant`), and a payload prints tuple-style with
+            // `Codegen::mangle_path`), and a payload prints tuple-style with
             // each arg in Rust `{:?}` form — matching that exactly here keeps
             // `jet dev` byte-identical to the compiled binary (I2).
             CtValue::Enum { variant, args, .. } => {
@@ -921,7 +921,7 @@ impl CtValue {
             CtValue::Failed(CtReport::Told(v)) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
                 let ty = crate::Syntax::generated_suffix(type_name);
-                let mangled = crate::Syntax::generated_path(ty);
+                let mangled = crate::Names::mangle_path(ty);
                 if fields.is_empty() {
                     mangled
                 } else {
@@ -1221,7 +1221,7 @@ impl CtValue {
                     .iter()
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
-                format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "))
+                format!("{} {{ {} }}", mangle_path(type_name), parts.join(", "))
             }
             CtValue::Enum {
                 type_name,
@@ -1258,7 +1258,7 @@ impl CtValue {
                 } else {
                     ct_mangle(variant)
                 };
-                let prefix = format!("{}::{}", user_type_rust(type_name), variant);
+                let prefix = format!("{}::{}", mangle_path(type_name), variant);
                 if args.is_empty() {
                     prefix
                 } else if args.iter().all(|(label, _)| label.is_none()) {

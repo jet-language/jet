@@ -1509,7 +1509,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
-                crate::Syntax::generated_name(&format!("resource_{}_{}", b.name, b.name_span.start))
+                jet_foundation::Names::mangle(&format!("resource_{}_{}", b.name, b.name_span.start))
             } else {
                 b.name.clone()
             };

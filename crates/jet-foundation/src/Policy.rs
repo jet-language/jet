@@ -715,7 +715,7 @@ pub fn marker_empty_arguments_error(
         format!("write `#{name}`"),
         Some(parens),
     );
-    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+    diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
         span: parens,
         new_text: String::new(),
     });

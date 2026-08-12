@@ -11,6 +11,7 @@
 #[derive(Clone)]
 struct JetReflectValue {
     type_name: String,
+    path: String,
     display: String,
     fields: Vec<JetReflectField>,
 }
@@ -24,6 +25,9 @@ struct JetReflectField {
 impl JetReflectValue {
     fn type_name(&self) -> String {
         self.type_name.clone()
+    }
+    fn path(&self) -> String {
+        self.path.clone()
     }
     fn display(&self) -> String {
         self.display.clone()

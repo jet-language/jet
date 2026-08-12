@@ -53,7 +53,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             if is_json_type_name(t) {
                 format!("{}jet_std::DataTree", cx.root_prefix)
             } else if t.starts_with("__JetUnion_") {
-                user_type_rust(t)
+                mangle_path(t)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
             } else if t == "DataEvent" {
@@ -78,9 +78,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if t == "HookOutcome" {
                 format!("{}jet_std::JetHookOutcome", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
+                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(t))
             } else {
-                user_type_rust(t)
+                mangle_path(t)
             }
         })
         .unwrap_or_else(|| {
@@ -98,7 +98,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
-            mangle_variant(v)
+            mangle_path(v)
         }
     };
     match pattern {

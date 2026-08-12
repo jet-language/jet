@@ -1,7 +1,7 @@
 // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): `reflect.of(x)` — the runtime
 // reflection floor. Legal wherever `"{x}"` interpolation is (the `Renderable`
 // gate a trait-bounded variadic's `...Renderable` bound also uses):
-// `.type_name()` and `.display()` always work — `.display()` shows exactly
+// `.type_name()` and `.path()` and `.display()` always work — `.display()` shows exactly
 // what `"{x}"` would; `.fields()` is populated for a struct receiver and
 // empty for anything else (primitives, enums, …).
 use core.reflect as reflect
@@ -19,6 +19,7 @@ fn run() {
     p :: Point.{x: 3, y: 4}
     v :: reflect.of(p)
     print(v.type_name())
+    print(v.path())
     print(v.display())
     loop f, v.fields() {
         print("{f.name()} = {f.value()}")

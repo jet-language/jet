@@ -6,6 +6,7 @@
 //! point; this module only renders wrappers and deterministic foreign text.
 
 use crate::AST::{Item, ProgramBundle};
+use jet_foundation::Names::mangle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryScalar {
@@ -122,9 +123,9 @@ pub fn emit_library(
         let args = (0..export.params)
             .map(|index| format!("p{index}"))
             .collect::<Vec<_>>();
-        let wrapper = crate::Syntax::generated_name(&format!("library_export_{}", export.name));
+        let wrapper = mangle(&format!("library_export_{}", export.name));
         let symbol = c_symbol(&export.name);
-        let callee = crate::Syntax::generated_name(&export.name);
+        let callee = mangle(&export.name);
         wrappers.push_str(&format!(
             "#[export_name = \"{symbol}\"]\npub extern \"C\" fn {wrapper}({params}) -> {ret} {{ {callee}({args}) }}\n",
             params = params.join(", "),

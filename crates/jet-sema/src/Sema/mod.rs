@@ -1219,7 +1219,7 @@ pub(crate) struct ModuleState {
     /// use their module identity; generic instances use `instance:<digest>`.
     code_module_identities: HashMap<String, String>,
     /// D-MOD3: unqualified items imported via `use alias.Item` (inline modules).
-    /// Maps unqualified name → mangled name (e.g. "clamp" → "math__clamp").
+    /// Maps unqualified name → mangled name (e.g. "clamp" → "__jet_math__clamp").
     unqualified: HashMap<String, String>,
     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
     /// Maps name → (function_name, module_idx).
@@ -1529,6 +1529,15 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// Project a resolved source name through the sema-owned name ledger.
+    /// Diagnostics keep a leaf while it is unique and use the canonical path
+    /// when another visible declaration makes the leaf ambiguous.
+    pub(crate) fn display_type_name(&self, name: &str, resolved_module: Option<usize>) -> String {
+        self.name_ledger
+            .display_path(self.module_idx, name, resolved_module)
+            .unwrap_or_else(|| name.to_string())
+    }
+
     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
         self.source_nesting += 1;
         if self.source_nesting <= crate::Diagnostics::MAX_SOURCE_NESTING {

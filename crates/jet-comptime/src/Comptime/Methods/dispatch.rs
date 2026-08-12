@@ -23,7 +23,7 @@ use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use crate::AST::{as_bytes, CtValue};
-use jet_foundation::Names::{mangle, user_type_rust};
+use jet_foundation::Names::{mangle, mangle_path};
 use super::core_calls::{
     apply_core_call, apply_data_line_call, apply_impure_core_call, as_float, display_core_pure_value,
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
@@ -1206,7 +1206,7 @@ impl<'a> Interp<'a> {
                             format!("{}: {}", mangle(&field.name), rendered)
                         })
                         .collect();
-                    return format!("{} {{ {} }}", user_type_rust(type_name), parts.join(", "));
+                    return format!("{} {{ {} }}", mangle_path(type_name), parts.join(", "));
                 }
                 let parts: Vec<String> = def
                     .fields

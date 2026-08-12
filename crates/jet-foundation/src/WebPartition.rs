@@ -175,14 +175,17 @@ mod tests {
     #[test]
     fn partition_key_qualified_identities() {
         assert_eq!(partition_key(None, None, "run"), "run");
-        assert_eq!(partition_key(Some("left"), None, "helper"), "left__helper");
+        assert_eq!(
+            partition_key(Some("left"), None, "helper"),
+            "__jet_left__helper"
+        );
         assert_eq!(
             partition_key(None, Some("math"), "double"),
-            "math__double"
+            "__jet_math__double"
         );
         assert_eq!(
             partition_key(Some("left"), Some("inner"), "helper"),
-            "inner__helper"
+            "__jet_inner__helper"
         );
     }
 }

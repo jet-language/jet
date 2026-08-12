@@ -46,6 +46,11 @@ coverage checks accept both.
    row owns the unique code, severity, moment, What/Why/Fix templates, named
    holes, and any structured fix. The registry and this reference are generated
    projections; never ship a generic fallback for a known case.
+   A hole is written as `{name}` and is supplied by the emitter through the
+   row renderer; an emitter does not replace prose by hand. A structured fix
+   is a source marker such as `replace:;=>,`, `remove:->`, or
+   `generated:missing_arms`, projected into typed fix metadata before a report
+   is built. Fix prose is never parsed to recover an edit.
 3. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text.

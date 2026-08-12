@@ -1858,7 +1858,7 @@ unreachable from outside its file or inline module: `math.helper()` where
 `helper` is private is **E0609** (inline) / **E0605** (cross-file). An unknown
 `pub(…)` qualifier is **E0411**. Inline-module function bodies are fully
 type-checked, and a sibling call (`area` → `square`) lowers to the
-module-mangled name (`geo__square`), so private siblings never leak into the
+module-mangled name (`__jet_geo__square`), so private siblings never leak into the
 file's namespace or to rustc.
 
 **Re-export (D-MOD4 — Rust-exact `pub use`).** A directory module's `module.jet`

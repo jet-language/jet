@@ -673,32 +673,36 @@ pub(crate) fn emit_tir_core_call(
         // tuples, lists) gets an empty list, never a guess.
         ("core.reflect", "of") => {
             let arg_ty = args.first().map(|a| &a.ty);
-            let type_name = arg_ty.map(|t| t.name()).unwrap_or_default();
+            let type_name = arg_ty.map(Type::leaf_name).unwrap_or_default();
+            let path = arg_ty.map(|t| cx.reflect_path(t)).unwrap_or_default();
             let fields_code = match arg_ty {
-                Some(Type::Named(struct_name)) => match cx.struct_fields.get(struct_name) {
-                    Some(fields) if !fields.is_empty() => {
-                        let items: Vec<String> = fields
-                            .iter()
-                            .map(|(fname, _)| {
-                                format!(
-                                    "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
-                                    root = cx.root_prefix,
-                                    fname = fname,
-                                    mangled = mangle(fname)
-                                )
-                            })
-                            .collect();
-                        format!("vec![{}]", items.join(", "))
+                Some(Type::Named(struct_name) | Type::Apply { name: struct_name, .. }) => {
+                    match cx.struct_fields.get(struct_name) {
+                        Some(fields) if !fields.is_empty() => {
+                            let items: Vec<String> = fields
+                                .iter()
+                                .map(|(fname, _)| {
+                                    format!(
+                                        "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
+                                        root = cx.root_prefix,
+                                        fname = fname,
+                                        mangled = mangle(fname)
+                                    )
+                                })
+                                .collect();
+                            format!("vec![{}]", items.join(", "))
+                        }
+                        _ => "Vec::new()".to_string(),
                     }
-                    _ => "Vec::new()".to_string(),
-                },
+                }
                 _ => "Vec::new()".to_string(),
             };
             format!(
-                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: \"{type_name}\".to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
+                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: \"{type_name}\".to_string(), path: \"{path}\".to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
                 arg0 = arg(0),
                 root = cx.root_prefix,
-                type_name = type_name,
+                type_name = escape_rust_str(&type_name),
+                path = escape_rust_str(&path),
                 fields_code = fields_code
             )
         }

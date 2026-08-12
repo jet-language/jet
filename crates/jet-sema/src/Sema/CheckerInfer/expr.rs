@@ -3391,6 +3391,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(type_name, type_span) = &**inner {
+            let display_type_name = self.display_type_name(type_name, None);
             // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
             if type_name == "Data" {
                 self.diags.push(data_renamed_to_datatree(*type_span));
@@ -3442,21 +3443,21 @@ impl<'a> Checker<'a> {
                     .is_some_and(|states| states.iter().any(|state| state == member));
                 let (what, why, fix) = if is_declared_state {
                     (
-                        format!("`{type_name}.{member}` is not a value"),
+                        format!("`{display_type_name}.{member}` is not a value"),
                         "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
                             .to_string(),
                         format!(
-                            "use a `{type_name}` value before a field, or call a static method on `{type_name}`"
+                            "use a `{display_type_name}` value before a field, or call a static method on `{display_type_name}`"
                         ),
                     )
                 } else {
                     (
-                        format!("`{type_name}` has no static member `{member}`"),
+                        format!("`{display_type_name}` has no static member `{member}`"),
                         format!(
-                            "`{type_name}` names a struct type; fields need a value before the dot"
+                            "`{display_type_name}` names a struct type; fields need a value before the dot"
                         ),
                         format!(
-                            "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`"
+                            "use a `{display_type_name}` value before an instance field, or call a static method that exists on `{display_type_name}`"
                         ),
                     )
                 };
@@ -3548,7 +3549,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0956",
                     format!(
-                        "`{type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
+                        "`{display_type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
                     ),
                     "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
                     "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
@@ -3571,12 +3572,12 @@ impl<'a> Checker<'a> {
                         };
                         self.diags.push(Diagnostic::error(
                             "E3110",
-                            format!("lane `{}` isn't valid on `{}`", lane, type_name),
+                            format!("lane `{}` isn't valid on `{}`", lane, display_type_name),
                             format!(
                                 "swizzle members name lanes with x/y/z/w — `{}` only has {}",
-                                type_name, valid
+                                display_type_name, valid
                             ),
-                            format!("use only the lanes defined for `{}`", type_name),
+                            format!("use only the lanes defined for `{}`", display_type_name),
                             Some(span),
                         ));
                         return None;
@@ -3594,6 +3595,7 @@ impl<'a> Checker<'a> {
             // values" (E0302) even though the value genuinely is a struct.
             let (owner_import_ns, lookup_name) = self.struct_type_name_parts(type_name);
             if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
+                let display_type_name = self.display_type_name(lookup_name, Some(owner_mod));
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
@@ -3621,13 +3623,13 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
-                    let mut fix = format!("check the field names on `{}`", type_name);
+                    let mut fix = format!("check the field names on `{}`", display_type_name);
                     if let Some(suggest) = suggest_field(member, &field_names) {
                         fix = format!("did you mean `{}`?", suggest);
                     }
                     self.diags.push(Diagnostic::error(
                         "E0302",
-                        format!("`{}` has no field `{}`", type_name, member),
+                        format!("`{}` has no field `{}`", display_type_name, member),
                         "field access only works on names declared in the struct".to_string(),
                         fix,
                         Some(span),

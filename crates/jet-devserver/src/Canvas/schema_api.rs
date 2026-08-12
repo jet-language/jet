@@ -343,7 +343,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         .map(|part| {
             format!(
                 "{{\"name\":{},\"path\":{},\"state\":{}}}",
-                json_str(&part.name),
+                json_str(&part.canonical_name()),
                 json_str(&rel_path(&ctx.project_root, &part.path)),
                 json_str(part.state.name())
             )
@@ -363,7 +363,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
                 .join(",");
             format!(
                 "{{\"name\":{},\"paths\":[{}]}}",
-                json_str(&conflict.name),
+                json_str(&conflict.canonical_name()),
                 paths
             )
         })

@@ -657,6 +657,14 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
 }
 
 pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> CtValue {
+    build_struct_type_info_with_path(s, states, &s.name)
+}
+
+pub fn build_struct_type_info_with_path(
+    s: &StructDef,
+    states: &[String],
+    path: &str,
+) -> CtValue {
     let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
     let dimensions = s
         .fields
@@ -701,6 +709,7 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
         "TypeInfo",
         &[
             ("name", ct_str(s.name.clone())),
+            ("path", ct_str(path)),
             ("layout", layout),
             (
                 "span",
@@ -739,6 +748,15 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
 /// remains visible in `.markers` while its lowered row is also available in
 /// `.expanded_markers`.
 pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
+    let path = format!("{module}.{}", d.name);
+    build_distinct_type_info_with_path(d, module, &path)
+}
+
+pub fn build_distinct_type_info_with_path(
+    d: &DistinctDef,
+    module: &str,
+    path: &str,
+) -> CtValue {
     let layout = layout_info("default", "physical layout unspecified", "distinct declaration", Vec::<(String, String)>::new());
     let dimensions = d
         .quantity
@@ -778,11 +796,23 @@ pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
         module,
         &d.name,
         "distinct",
+        path,
     )
 }
 
-fn qualify_info(mut info: CtValue, module: &str, identity: &str, kind: &str) -> CtValue {
+fn qualify_info(
+    mut info: CtValue,
+    module: &str,
+    identity: &str,
+    kind: &str,
+    path: &str,
+) -> CtValue {
     if let CtValue::Struct { fields, .. } = &mut info {
+        if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "path") {
+            *value = ct_str(path);
+        } else {
+            fields.push(("path".to_string(), ct_str(path)));
+        }
         fields.push(("module".to_string(), ct_str(module)));
         fields.push(("identity".to_string(), ct_str(identity)));
         fields.push(("kind".to_string(), ct_str(kind)));
@@ -802,7 +832,7 @@ fn qualified_method_info(method: &Func, module: &str, identity: &str) -> CtValue
     info
 }
 
-fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str) -> CtValue {
+fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str, path: &str) -> CtValue {
     let layout = build_enum_layout_info(def);
     let mut dimensions = Vec::new();
     let mut facts = Vec::new();
@@ -887,7 +917,18 @@ fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str) -> CtValue 
         ("facts", ct_list(facts)),
         ("dimensions", ct_list(dimensions)),
         ("implements", ct_list(def.trait_impls.iter().map(|implementation| ct_str(implementation.trait_name.clone())).collect())),
-    ]), module, identity, "enum")
+    ]), module, identity, "enum", path)
+}
+
+fn ledger_path(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    module_name: &str,
+    symbol: &str,
+) -> String {
+    ledger
+        .canonical_path(module, symbol)
+        .unwrap_or_else(|| format!("{module_name}.{symbol}"))
 }
 
 fn ledger_module_name(
@@ -986,6 +1027,7 @@ pub fn build_program_info(
                         &module_name,
                         &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
                         "struct",
+                        &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(methods))) = fields.iter_mut().find(|(name, _)| name == "methods") {
@@ -1040,6 +1082,7 @@ pub fn build_program_info(
                         def,
                         &module_name,
                         &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
+                        &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(values))) =
@@ -1061,7 +1104,11 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Distinct(def) => {
-                    let mut info = build_distinct_type_info(def, &module.alias);
+                    let mut info = build_distinct_type_info_with_path(
+                        def,
+                        &module_name,
+                        &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
+                    );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(values))) =
                             fields.iter_mut().find(|(name, _)| name == "facts")
@@ -1070,7 +1117,7 @@ pub fn build_program_info(
                         }
                     }
                     if let Some((traits, methods, transitions)) =
-                        external_impls.get(&(module.alias.clone(), def.name.clone()))
+                        external_impls.get(&(module_name.clone(), def.name.clone()))
                     {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) =
@@ -1296,6 +1343,16 @@ mod tests {
                 .unwrap()
         };
         assert!(matches!(get("name"), CtValue::Str(ref n) if n == "Point"));
+        assert!(matches!(get("path"), CtValue::Str(ref path) if path == "Point"));
+        let qualified = build_struct_type_info_with_path(&s, &[], "app.Point");
+        assert!(matches!(
+            struct_field(&qualified, "name"),
+            CtValue::Str(ref name) if name == "Point"
+        ));
+        assert!(matches!(
+            struct_field(&qualified, "path"),
+            CtValue::Str(ref path) if path == "app.Point"
+        ));
         let CtValue::List(fields) = get("fields") else {
             panic!("fields");
         };

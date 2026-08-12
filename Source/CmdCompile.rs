@@ -167,8 +167,7 @@ fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> Bui
             let defined = load_pkg_profiles(source_file)
                 .map(|profiles| profiles.into_iter().map(|p| p.name).collect::<Vec<_>>())
                 .unwrap_or_default();
-            let diag = jet::Manifest::e1219(name, &defined)
-                .at_moment(jet::Diagnostics::ReportMoment::Tool);
+            let diag = jet::Manifest::e1219(name, &defined);
             if mode.json {
                 eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
             } else {

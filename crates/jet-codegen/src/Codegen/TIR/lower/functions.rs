@@ -56,7 +56,7 @@ fn bind_resource_param(
         env.bind(source_name, ordinary_slot, Some(local_ty));
         return;
     }
-    let guard_name = Syntax::generated_name(&format!("resource_param_{source_name}"));
+    let guard_name = jet_foundation::Names::mangle(&format!("resource_param_{source_name}"));
     guards.push(TStmt::Let {
         name: guard_name.clone(),
         kw: "let mut",

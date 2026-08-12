@@ -348,7 +348,7 @@ fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
     assert_eq!(explicit.status.code(), Some(0));
     let stdout = String::from_utf8(explicit.stdout).unwrap();
     assert!(
-        stdout.contains("\"name\":\"_bench\"")
+        stdout.contains("\"name\":\"project._bench\"")
             && stdout.contains("\"state\":\"explicit\""),
         "{stdout}"
     );

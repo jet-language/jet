@@ -2,7 +2,7 @@
 
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, mangle_variant, user_type_rust, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, mangle_path, Cx, TIR,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -1405,7 +1405,7 @@ fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
 
 fn web_recon_rust_type(ty: &Type) -> String {
     match ty {
-        Type::Named(name) => user_type_rust(name),
+        Type::Named(name) => mangle_path(name),
         _ => mangle("AnonWebParam"),
     }
 }
@@ -1660,7 +1660,7 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                 if let Some(fields) = fields {
                     out.push_str(&format!(
                         "#[derive(Clone)]\nstruct {} {{\n{fields}}}\n\n",
-                        user_type_rust(&def.name)
+                        mangle_path(&def.name)
                     ));
                 }
             }
@@ -1669,7 +1669,7 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                     .variants
                     .iter()
                     .map(|variant| {
-                        let head = mangle_variant(&variant.name);
+                        let head = mangle_path(&variant.name);
                         Some(match &variant.payload {
                             crate::AST::VariantPayload::Unit => format!("    {head},\n"),
                             crate::AST::VariantPayload::Single(ty, _) => format!(
@@ -1695,7 +1695,7 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                 if let Some(variants) = variants {
                     out.push_str(&format!(
                         "#[derive(Clone)]\nenum {} {{\n{variants}}}\n\n",
-                        user_type_rust(&def.name)
+                        mangle_path(&def.name)
                     ));
                 }
             }
@@ -1703,7 +1703,7 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                 for definition in family.distinct_defs() {
                     out.push_str(&format!(
                         "#[derive(Clone, Copy)]\nstruct {}(f64);\n\n",
-                        user_type_rust(&definition.name)
+                        mangle_path(&definition.name)
                     ));
                 }
             }
@@ -1737,7 +1737,7 @@ fn emit_wasm_user_types(bundle: &ProgramBundle, out: &mut String) -> WebEmitResu
         if let Some(variants) = variants {
             out.push_str(&format!(
                 "#[derive(Clone)]\nenum {} {{\n{variants}}}\n\n",
-                user_type_rust(&name)
+                mangle_path(&name)
             ));
         }
     }
@@ -2319,8 +2319,8 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
             wasm_storage_ty(value)?
         ),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
-        Type::Named(name) => user_type_rust(name.rsplit('.').next().unwrap_or(name)),
-        Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
+        Type::Named(name) => mangle_path(name.rsplit('.').next().unwrap_or(name)),
+        Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         _ => return None,
     })
 }
@@ -2336,10 +2336,10 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
             wasm_internal_ty(ok, bundle)?,
             wasm_internal_ty(err, bundle)?
         ),
-        Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
+        Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
-            user_type_rust(name.rsplit('.').next().unwrap_or(name))
+            mangle_path(name.rsplit('.').next().unwrap_or(name))
         }
         _ => wasm_ty(ty)?.to_string(),
     })
@@ -2433,9 +2433,9 @@ fn wasm_enum_head(enum_type: &str, variant: &str) -> String {
     let variant = if enum_type.starts_with("__JetUnion_") {
         variant.to_string()
     } else {
-        mangle_variant(variant)
+        mangle_path(variant)
     };
-    format!("{}::{variant}", user_type_rust(enum_type))
+    format!("{}::{variant}", mangle_path(enum_type))
 }
 
 fn wasm_emit_enum_arg(
@@ -3263,7 +3263,7 @@ fn wasm_emit_expr(
             }
             format!(
                 "{} {{ {} }}",
-                user_type_rust(name),
+                mangle_path(name),
                 fields
                     .iter()
                     .map(|(field, value, boxed)| {

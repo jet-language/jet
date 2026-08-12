@@ -76,6 +76,7 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
 #[derive(Clone)]
 pub(crate) struct ReflectSlot {
     pub type_name: String,
+    pub path: String,
     pub display: String,
     pub fields: Vec<(String, String)>,
 }
@@ -1800,11 +1801,13 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
 
 extern "C" fn jet_jit_reflect_of_finish(
     type_name: i64,
+    path: i64,
     display: i64,
     fields: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let type_name = rt.heap.clone_string(type_name).unwrap_or_default();
+        let path = rt.heap.clone_string(path).unwrap_or_default();
         let display = rt.heap.clone_string(display).unwrap_or_default();
         let field_len = rt.heap.list_len(fields).unwrap_or(0);
         let mut out = Vec::new();
@@ -1819,6 +1822,7 @@ extern "C" fn jet_jit_reflect_of_finish(
         }
         rt.reflect_values.push(ReflectSlot {
             type_name,
+            path,
             display,
             fields: out,
         });
@@ -1832,6 +1836,7 @@ extern "C" fn jet_jit_reflect_field_new(name: i64, value: i64) -> i64 {
         let value = rt.heap.clone_string(value).unwrap_or_default();
         rt.reflect_values.push(ReflectSlot {
             type_name: name,
+            path: String::new(),
             display: value,
             fields: Vec::new(),
         });
@@ -1863,6 +1868,18 @@ extern "C" fn jet_jit_reflect_display(handle: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_reflect_path(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let text = rt
+            .reflect_values
+            .get(idx)
+            .map(|s| s.path.clone())
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
 extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (handle as usize).wrapping_sub(1);
@@ -1875,6 +1892,7 @@ extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
         for (name, value) in fields {
             rt.reflect_values.push(ReflectSlot {
                 type_name: name,
+                path: String::new(),
                 display: value,
                 fields: Vec::new(),
             });
@@ -1948,7 +1966,7 @@ host_fns! {
         let mut sig_i64 = Signature::new(cc);
         sig_i64.params.push(AbiParam::new(types::I64));
         let mut sig_reflect_finish = Signature::new(cc);
-        for _ in 0..3 {
+        for _ in 0..4 {
             sig_reflect_finish.params.push(AbiParam::new(types::I64));
         }
         sig_reflect_finish.returns.push(AbiParam::new(types::I64));
@@ -2297,6 +2315,7 @@ host_fns! {
     reflect_of_finish: "jet_jit_reflect_of_finish" => jet_jit_reflect_of_finish: sig_reflect_finish;
     reflect_field_new: "jet_jit_reflect_field_new" => jet_jit_reflect_field_new: sig_str_binary_i64;
     reflect_type_name: "jet_jit_reflect_type_name" => jet_jit_reflect_type_name: sig_str_unary_i64;
+    reflect_path: "jet_jit_reflect_path" => jet_jit_reflect_path: sig_str_unary_i64;
     reflect_display: "jet_jit_reflect_display" => jet_jit_reflect_display: sig_str_unary_i64;
     reflect_fields: "jet_jit_reflect_fields" => jet_jit_reflect_fields: sig_str_unary_i64;
     reflect_field_name: "jet_jit_reflect_field_name" => jet_jit_reflect_field_name: sig_str_unary_i64;

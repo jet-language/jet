@@ -350,6 +350,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ArgsSpec", "parse_or_exit", 1) => THandleOp::ArgsSpecParseOrExit,
         // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
         ("Value", "type_name", 0) => THandleOp::ReflectValueTypeName,
+        ("Value", "path", 0) => THandleOp::ReflectValuePath,
         ("Value", "display", 0) => THandleOp::ReflectValueDisplay,
         ("Value", "fields", 0) => THandleOp::ReflectValueFields,
         ("Field", "name", 0) => THandleOp::ReflectFieldName,

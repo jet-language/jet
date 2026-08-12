@@ -943,6 +943,7 @@ impl<'a> Checker<'a> {
                     rest,
                     span: pat_span,
                 } => {
+                    let display_type_name = self.display_type_name(type_name, None);
                     let actual = match &it {
                         Type::Named(n) => Some(n.clone()),
                         Type::Apply { name, .. } => Some(name.clone()),
@@ -958,14 +959,14 @@ impl<'a> Checker<'a> {
                             "E0313",
                             format!(
                                 "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
-                                type_name,
-                                type_name,
+                                display_type_name,
+                                display_type_name,
                                 it.show()
                             ),
                             "destructuring with `{ }` pulls fields out of a struct value".to_string(),
                             format!(
                                 "destructure a `{}`, or bind the whole value with a name",
-                                type_name
+                                display_type_name
                             ),
                             Some(*type_span),
                         ));
@@ -978,7 +979,7 @@ impl<'a> Checker<'a> {
                     if actual != *type_name {
                         self.diags.push(Diagnostic::error(
                             "E0313",
-                            format!("this value is a `{}`, not a `{}`", actual, type_name),
+                            format!("this value is a `{}`, not a `{}`", actual, display_type_name),
                             "the type named before `{ }` must match the value you destructure"
                                 .to_string(),
                             format!("write `{} {{ … }}` to match the value", actual),
@@ -1006,7 +1007,7 @@ impl<'a> Checker<'a> {
                         if partial && rest.is_none() {
                             self.diags.push(Diagnostic::error(
                                 "E0326",
-                                format!("this pattern leaves out fields of `{}`", type_name),
+                                format!("this pattern leaves out fields of `{}`", display_type_name),
                                 "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
                                 "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
                                 Some(*pat_span),
@@ -1015,7 +1016,7 @@ impl<'a> Checker<'a> {
                             if let Some(rest_span) = rest {
                                 self.diags.push(Diagnostic::error(
                                     "E0327",
-                                    format!("`..` is redundant — this pattern already names every field of `{}`", type_name),
+                                    format!("`..` is redundant — this pattern already names every field of `{}`", display_type_name),
                                     "a trailing `..` only makes sense when some fields are left unnamed".to_string(),
                                     "remove the `..`".to_string(),
                                     Some(*rest_span),
