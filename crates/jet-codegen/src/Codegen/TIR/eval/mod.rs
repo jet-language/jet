@@ -825,7 +825,7 @@ pub(super) struct EvalCtx<'a> {
     runtime: Arc<Mutex<EvalRuntime<'a>>>,
     /// Thread-confined Cell values and loans. Never shared with spawned tasks.
     local_cells: local_cell::EvalLocalCells,
-    shared_transactions: Vec<Vec<EvalSharedDelta<'a>>>,
+    shared_transactions: Vec<EvalSharedTransaction<'a>>,
     /// Spawn bodies are lowered separately because native tiers compile them as
     /// independent functions. The evaluator records each outcome behind a task
     /// handle, then observes it only at join/group boundaries.
@@ -857,6 +857,20 @@ pub(super) struct EvalSharedDelta<'a> {
     pub(super) shared_index: usize,
     pub(super) lambda: &'a TIR::TLambda,
     pub(super) captured: HashMap<String, CtValue>,
+}
+
+pub(super) struct EvalSharedTransaction<'a> {
+    pub(super) transaction: shared_protocol::JetSharedTransaction,
+    pub(super) deltas: Vec<EvalSharedDelta<'a>>,
+}
+
+impl<'a> EvalSharedTransaction<'a> {
+    pub(super) fn new() -> Self {
+        Self {
+            transaction: shared_protocol::jet_shared_transaction_begin(),
+            deltas: Vec::new(),
+        }
+    }
 }
 
 enum EvalCallable<'a> {
@@ -940,7 +954,7 @@ struct EvalRuntime<'a> {
     interrupt_handlers: Vec<usize>,
     streams: Vec<EvalStream<'a>>,
     shared_values: Vec<Arc<EvalSharedState>>,
-    shared_guards: Vec<Arc<shared_protocol::JetSharedPermit>>,
+    shared_guards: Vec<Arc<shared_protocol::JetSharedGuardState>>,
     shared_conditions: Vec<Arc<shared_protocol::JetConditionProtocol>>,
     clocks: Vec<i64>,
     channels: Vec<EvalChannel>,
@@ -969,7 +983,17 @@ impl EvalSharedState {
         editable: bool,
         cancel: Option<&Arc<AtomicBool>>,
     ) -> Option<Arc<shared_protocol::JetSharedPermit>> {
-        self.protocol.acquire(editable, || {
+        shared_protocol::jet_shared_acquire(&self.protocol, editable, || {
+            cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
+        })
+    }
+
+    fn acquire_guard(
+        self: &Arc<Self>,
+        editable: bool,
+        cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<Arc<shared_protocol::JetSharedGuardState>> {
+        shared_protocol::jet_shared_guard_acquire(&self.protocol, editable, || {
             cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire))
         })
     }
@@ -979,14 +1003,16 @@ struct EvalConditionWaiter {
     notified: Mutex<bool>,
     wake: Condvar,
     cancel: Option<Arc<AtomicBool>>,
+    deadline: Option<i64>,
 }
 
 impl EvalConditionWaiter {
-    fn new(cancel: Option<Arc<AtomicBool>>) -> Self {
+    fn new(cancel: Option<Arc<AtomicBool>>, deadline: Option<i64>) -> Self {
         Self {
             notified: Mutex::new(false),
             wake: Condvar::new(),
             cancel,
+            deadline,
         }
     }
 }
@@ -1002,6 +1028,7 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
                 .cancel
                 .as_ref()
                 .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+                || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
             {
                 return Err(());
             }
@@ -1020,6 +1047,13 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = true;
         self.wake.notify_one();
+    }
+
+    fn interrupted(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
     }
 }
 

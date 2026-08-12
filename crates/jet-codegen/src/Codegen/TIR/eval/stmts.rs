@@ -283,16 +283,34 @@ impl<'a> EvalCtx<'a> {
             .copied()
             .partition(|guard| preserve.contains(guard));
         self.shared_guards.truncate(mark);
-        self.shared_guards.extend(keep);
-        let leases = {
+        self.shared_guards.extend(keep.iter().copied());
+        let permits = {
             let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            guard_ids
+            let kept_permits = keep
+                .iter()
+                .filter_map(|index| runtime.shared_guards.get(*index).cloned())
+                .map(|lease| lease.permit_arc())
+                .collect::<Vec<_>>();
+            let mut permits = Vec::new();
+            for lease in guard_ids
                 .into_iter()
                 .filter_map(|index| runtime.shared_guards.get(index).cloned())
-                .collect::<Vec<_>>()
+            {
+                let permit = lease.permit_arc();
+                if !kept_permits
+                    .iter()
+                    .any(|held| std::sync::Arc::ptr_eq(held, &permit))
+                    && !permits
+                    .iter()
+                    .any(|held| std::sync::Arc::ptr_eq(held, &permit))
+                {
+                    permits.push(permit);
+                }
+            }
+            permits
         };
-        for lease in leases.into_iter().rev() {
-            lease.release();
+        for permit in permits.into_iter().rev() {
+            permit.release();
         }
     }
 
@@ -1516,7 +1534,7 @@ impl<'a> EvalCtx<'a> {
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
             TStmt::Transact {
                 snapshots,
-                uses_stm,
+                stm,
                 body,
                 ..
             } => {
@@ -1538,8 +1556,9 @@ impl<'a> EvalCtx<'a> {
                     on_commit: Vec::new(),
                     on_rollback: Vec::new(),
                 });
-                if *uses_stm {
-                    self.shared_transactions.push(Vec::new());
+                if stm.is_some() {
+                    self.shared_transactions
+                        .push(super::EvalSharedTransaction::new());
                 }
                 let flow = self.exec_stmts(body, scope);
                 let frame = self.txn_stack.pop().unwrap_or(super::EvalTxnFrame {
@@ -1547,56 +1566,62 @@ impl<'a> EvalCtx<'a> {
                     on_commit: Vec::new(),
                     on_rollback: Vec::new(),
                 });
-                let staged = if *uses_stm {
-                    self.shared_transactions.pop().unwrap_or_default()
+                let staged = if stm.is_some() {
+                    self.shared_transactions.pop()
                 } else {
-                    Vec::new()
+                    None
                 };
                 match flow {
                     Ok(Flow::Normal) => {
-                        let slots = {
-                            let runtime =
-                                self.runtime.lock().expect("evaluator runtime poisoned");
-                            staged
-                                .iter()
-                                .filter_map(|delta| {
-                                    runtime
-                                        .shared_values
-                                        .get(delta.shared_index)
-                                        .cloned()
-                                        .map(|slot| (delta.shared_index, slot))
-                                })
-                                .collect::<Vec<_>>()
-                        };
-                        let permits = super::shared_protocol::jet_shared_acquire_ordered(
-                            slots
-                                .iter()
-                                .map(|(_, slot)| slot.protocol.clone())
-                                .collect(),
-                        );
-                        for mut delta in staged {
-                            let slot = slots
-                                .iter()
-                                .find_map(|(index, slot)| {
-                                    (*index == delta.shared_index).then_some(slot)
-                                })
-                                .expect("staged Shared delta has a locked slot");
-                            let current = slot
-                                .value
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .clone();
-                            let (_, updated) = self.eval_tlambda_mut_arg(
-                                delta.lambda,
-                                current,
-                                &mut delta.captured,
-                            )?;
-                            *slot
-                                .value
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner()) = updated;
+                        if let Some(staged) = staged {
+                            let slots = {
+                                let runtime =
+                                    self.runtime.lock().expect("evaluator runtime poisoned");
+                                staged
+                                    .deltas
+                                    .iter()
+                                    .filter_map(|delta| {
+                                        runtime
+                                            .shared_values
+                                            .get(delta.shared_index)
+                                            .cloned()
+                                            .map(|slot| (delta.shared_index, slot))
+                                    })
+                                    .collect::<Vec<_>>()
+                            };
+                            let super::EvalSharedTransaction {
+                                transaction,
+                                deltas,
+                            } = staged;
+                            transaction.commit_with(|| {
+                                let result: Result<(), Diagnostic> = (|| {
+                                    for mut delta in deltas {
+                                        let slot = slots
+                                            .iter()
+                                            .find_map(|(index, slot)| {
+                                                (*index == delta.shared_index).then_some(slot)
+                                            })
+                                            .expect("staged Shared delta has a locked slot");
+                                        let current = slot
+                                            .value
+                                            .lock()
+                                            .unwrap_or_else(|error| error.into_inner())
+                                            .clone();
+                                        let (_, updated) = self.eval_tlambda_mut_arg(
+                                            delta.lambda,
+                                            current,
+                                            &mut delta.captured,
+                                        )?;
+                                        *slot
+                                            .value
+                                            .lock()
+                                            .unwrap_or_else(|error| error.into_inner()) = updated;
+                                    }
+                                    Ok(())
+                                })();
+                                result
+                            })?;
                         }
-                        drop(permits);
                         for lam in frame.on_commit.into_iter().rev() {
                             let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
                         }
