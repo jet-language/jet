@@ -9,9 +9,13 @@
 )]
 
 use crate::JetShow;
+use crate::Crypto::runtime::{
+    jet_crypto_entropy_fill_for_host as jet_crypto_entropy_fill, JetCryptoSecretBytes,
+};
 use jet_codegen::scheduler::{
-    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_blocking_wait_enter,
-    jet_scheduler_blocking_wait_leave, jet_scheduler_park_ms, jet_scheduler_sleep_ms,
+    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms,
+    jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave, jet_scheduler_park_ms,
+    jet_scheduler_sleep_ms,
     jet_scheduler_spawn, jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_cancelled,
     jet_scheduler_wait_point_cancelled, jet_scheduler_wait_without_unwind, jet_std_time_now,
     JetDeadlineGuard, JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
@@ -53,36 +57,8 @@ struct JetFileWriter {
     inner: std::io::BufWriter<std::fs::File>,
     path: String,
 }
-#[derive(Clone)]
-struct JetCryptoSecretBytes(Vec<u8>);
-impl JetCryptoSecretBytes {
-    fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    fn as_vec(&self) -> &Vec<u8> {
-        &self.0
-    }
-}
-impl Drop for JetCryptoSecretBytes {
-    fn drop(&mut self) {
-        for b in &mut self.0 {
-            *b = 0;
-        }
-    }
-}
 fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
-}
-fn jet_crypto_entropy_fill(buf: &mut [u8]) -> Result<(), String> {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .map_err(|e| e.to_string())
-}
-fn jet_crypto_entropy_zeroize(buf: &mut [u8]) {
-    for b in buf {
-        *b = 0;
-    }
 }
 fn jet_scheduler_io_wait(
     _stream: &std::net::TcpStream,
@@ -90,7 +66,7 @@ fn jet_scheduler_io_wait(
     _write: bool,
     _wait_kind: &str,
 ) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 fn jet_scheduler_shielded() -> bool {
     false
@@ -246,14 +222,8 @@ pub mod jet_std {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
-fn jet_deadline_remaining_ms() -> Option<i64> {
-    jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-}
-
-fn jet_deadline_check(_wait_kind: &str) {}
-
 fn jet_scheduler_tcp_listener_io_wait(_listener: &std::net::TcpListener, _wait_kind: &str) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 
 fn jet_scheduler_tcp_stream_io_wait(
@@ -262,7 +232,7 @@ fn jet_scheduler_tcp_stream_io_wait(
     _write: bool,
     _wait_kind: &str,
 ) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 
 fn jet_scheduler_tcp_stream_ready_wait(
@@ -280,7 +250,7 @@ fn jet_scheduler_udp_io_wait(
     _write: bool,
     _wait_kind: &str,
 ) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 
 #[cfg(unix)]
@@ -288,7 +258,7 @@ fn jet_scheduler_unix_listener_io_wait(
     _listener: &std::os::unix::net::UnixListener,
     _wait_kind: &str,
 ) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 
 #[cfg(unix)]
@@ -298,7 +268,7 @@ fn jet_scheduler_unix_stream_io_wait(
     _write: bool,
     _wait_kind: &str,
 ) {
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    jet_scheduler_sleep_ms(5);
 }
 
 #[cfg(unix)]

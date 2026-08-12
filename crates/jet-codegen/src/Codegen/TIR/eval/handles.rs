@@ -1,6 +1,6 @@
 //! Exhaustive THandleOp dispatch (#777).
 use crate::AST::Type;
-use crate::Comptime::Builtins::{apply_method, apply_mutating_with_type};
+use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_mutating_with_type};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;

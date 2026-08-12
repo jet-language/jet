@@ -8,7 +8,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn jet_deadline_remaining_ms() -> Option<i64> {
+pub fn jet_deadline_remaining_ms() -> Option<i64> {
     if TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get()) {
         return Some(0);
     }
@@ -16,7 +16,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 #[cfg(not(test))]
-fn jet_deadline_remaining_ms() -> Option<i64> {
+pub fn jet_deadline_remaining_ms() -> Option<i64> {
     jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
 }
 

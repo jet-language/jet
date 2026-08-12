@@ -394,7 +394,7 @@ impl<'a> Interp<'a> {
                         self.poll_repl_interrupt();
                         let _runtime_call =
                             super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
-                        apply_repl_authorized_core_call(
+                        apply_repl_authorized_core_call_with_type(
                             &module,
                             method,
                             vec![list],
@@ -403,9 +403,17 @@ impl<'a> Interp<'a> {
                             self.sink.as_deref_mut(),
                             &self.repl_grants,
                             reborrow_repl_authorizer(&mut self.repl_authorizer),
+                            resolved_ret,
                         )?
                     } else {
-                        apply_core_call(&module, method, vec![list], span, false)?
+                        apply_core_call_with_type(
+                            &module,
+                            method,
+                            vec![list],
+                            span,
+                            false,
+                            resolved_ret,
+                        )?
                     };
                     let CtValue::List(items) = value else {
                         return Err(unsupported("random.shuffle needs a list", span));

@@ -5399,12 +5399,13 @@ impl<'a> EvalCtx<'a> {
                             ) {
                                 return Err(diagnostic);
                             }
-                            let value = apply_core_call(
+                            let value = apply_core_call_with_type(
                                 module,
                                 &method.name,
                                 argv,
                                 self.span(),
                                 self.repl_mode,
+                                Some(&expr.ty),
                             )?;
                             if module == "core.random" && method.name == "shuffle" {
                                 if let (Some(place), CtValue::List(items)) =

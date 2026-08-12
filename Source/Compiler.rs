@@ -29,6 +29,19 @@ pub fn eval_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    eval_core_call_with_type(module, method, args, span, None)
+}
+
+/// Ambient callback variant carrying the resolved return type for typed
+/// absence payloads. The compiler API wrapper above stays four-argument for
+/// callers that use the public read-only toolkit directly.
+pub fn eval_core_call_with_type(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+) -> Option<Result<CtValue, Diagnostic>> {
     if module != "core.compiler" {
         return None;
     }

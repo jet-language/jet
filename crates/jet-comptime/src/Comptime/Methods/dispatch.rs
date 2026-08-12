@@ -25,12 +25,12 @@ use super::super::Interpreter::{Flow, Interp};
 use crate::AST::{as_bytes, CtValue};
 use jet_foundation::Names::{mangle, user_type_rust};
 use super::core_calls::{
-    apply_core_call, apply_core_call_with_type, apply_data_line_call,
+    apply_core_call_with_type, apply_data_line_call,
     apply_impure_core_call_with_type, as_float, display_core_pure_value,
     eval_regex_replace_all_with, sketch_add, solver_new, solver_require,
 };
 use super::repl_process::{
-    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+    apply_repl_authorized_core_call_with_type,
 };
 
 mod seeded_random_kernel {
