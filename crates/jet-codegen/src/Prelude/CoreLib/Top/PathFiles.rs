@@ -8,6 +8,16 @@ impl JetShow for JetPath {
         self.inner.to_string_lossy().to_string()
     }
 }
+impl JetDisplay for JetPath {
+    fn jet_display(&self) -> String {
+        self.inner.to_string_lossy().to_string()
+    }
+}
+impl JetDebug for JetPath {
+    fn jet_debug(&self) -> String {
+        self.inner.to_string_lossy().to_string()
+    }
+}
 fn jet_path_from(s: &String) -> JetPath {
     JetPath {
         inner: std::path::PathBuf::from(s),

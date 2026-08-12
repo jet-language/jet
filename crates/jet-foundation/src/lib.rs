@@ -44,7 +44,6 @@ pub mod Syntax;
 pub mod TargetMachine;
 pub mod Terminal;
 pub mod Traits;
-pub mod TypedHeads;
 pub mod WasmDebug;
 pub mod WebApp;
 pub mod WebPartition;

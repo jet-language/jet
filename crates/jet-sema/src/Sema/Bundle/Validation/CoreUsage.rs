@@ -208,6 +208,24 @@ fn note_core_usage(
     }
 }
 
+fn note_typed_boundary_core_usage(
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    name: &str,
+    span: Option<crate::Diagnostics::Span>,
+) {
+    let Some(kind) = Syntax::typed_head_kind(name).filter(|kind| kind.is_boundary()) else {
+        return;
+    };
+    let key = match kind {
+        Syntax::TypedHeadKind::URL => "core.url::typed_head",
+        Syntax::TypedHeadKind::Path => "core.path::typed_head",
+        Syntax::TypedHeadKind::DateTime => "core.time::typed_head",
+        _ => unreachable!("typed boundary usage descriptor is complete"),
+    };
+    note_core_usage(used, spans, key, span);
+}
+
 fn is_http_nominal_type(name: &str) -> bool {
     matches!(
         name,
@@ -684,22 +702,10 @@ pub(crate) fn collect_core_expr(
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));
             }
-            // D-BOUND-HEAD1=A: sema rewrites URL/Path/DateTime heads to their
+            // D-BOUND-HEAD1=A: sema rewrites typed boundary heads to their
             // ordinary alternating literal/hole call before this reachability
-            // walk. Keep the owning optional prelude fragment reachable from
-            // that canonical call instead of inspecting source text.
-            match c.name.as_str() {
-                Syntax::TYPE_URL => {
-                    note_core_usage(used, spans, "core.url::typed_head", Some(c.name_span))
-                }
-                Syntax::TYPE_PATH => {
-                    note_core_usage(used, spans, "core.path::typed_head", Some(c.name_span))
-                }
-                Syntax::TYPE_DATETIME => {
-                    note_core_usage(used, spans, "core.time::typed_head", Some(c.name_span))
-                }
-                _ => {}
-            }
+            // walk. The Syntax descriptor selects the owning prelude fragment.
+            note_typed_boundary_core_usage(used, spans, &c.name, Some(c.name_span));
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
                 // already proved this bare function name is passed as a stable
@@ -798,18 +804,7 @@ pub(crate) fn collect_core_expr(
         }
         Expr::TypedLit { head, body, span } => {
             if let Some(Type::Named(name)) = head {
-                match name.as_str() {
-                    Syntax::TYPE_URL => {
-                        note_core_usage(used, spans, "core.url::typed_head", Some(*span))
-                    }
-                    Syntax::TYPE_PATH => {
-                        note_core_usage(used, spans, "core.path::typed_head", Some(*span))
-                    }
-                    Syntax::TYPE_DATETIME => {
-                        note_core_usage(used, spans, "core.time::typed_head", Some(*span))
-                    }
-                    _ => {}
-                }
+                note_typed_boundary_core_usage(used, spans, name, Some(*span));
             }
             body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
         }

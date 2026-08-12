@@ -2761,6 +2761,15 @@ pub fn lower_expr_for_eval(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<TExpr, Diagnostic> {
+    let mut diagnostic = None;
+    crate::Comptime::walk_expr_nodes_for_validation(expr, &mut |node| {
+        if diagnostic.is_none() {
+            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(node);
+        }
+    });
+    if let Some(diagnostic) = diagnostic {
+        return Err(diagnostic);
+    }
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
@@ -2797,6 +2806,15 @@ pub fn lower_stmts_for_eval(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<Vec<TStmt>, Diagnostic> {
+    let mut diagnostic = None;
+    crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
+        if diagnostic.is_none() {
+            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(expr);
+        }
+    });
+    if let Some(diagnostic) = diagnostic {
+        return Err(diagnostic);
+    }
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);

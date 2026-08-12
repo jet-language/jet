@@ -4992,13 +4992,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::ReflectFieldName
         | THandleOp::ReflectFieldValue => args.is_empty(),
         THandleOp::UrlMimeMethod { method, .. } => match method.as_str() {
-            "to_string" | "host" | "path" | "query_pairs" | "path_segments" | "fragment"
-            | "essence" | "username" | "password" | "userinfo" | "authority" | "default_port"
+            "to_string" | "scheme" | "host" | "port" | "path" | "query" | "query_pairs"
+            | "path_segments" | "fragment" | "essence" | "username" | "password"
+            | "userinfo" | "authority" | "default_port" | "normalize"
                 if args.is_empty() =>
             {
                 true
             }
             "join" | "param" if args.len() == 1 => true,
+            "set_query" | "add_query" if args.len() == 2 => true,
             _ => false,
         },
         THandleOp::TcpListenerAccept

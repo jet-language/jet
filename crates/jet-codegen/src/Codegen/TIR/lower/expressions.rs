@@ -49,7 +49,7 @@ use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::tuple_fields_plain;
 use crate::Codegen::tuple_struct_name;
-use crate::Diagnostics::Span;
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -1155,7 +1155,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 
 /// D-BOUND-HEAD1=A: comptime can lower a typed head before sema has rewritten
 /// it to the ordinary alternating literal/hole call. Keep that early path on
-/// the same TIR host node used after sema.
+/// the same TIR host node used after sema. Evaluation callers validate the
+/// typed boundary before entering this lowering seam.
 fn lower_boundary_typed_lit(
     type_name: &str,
     body: &TypedLitBody,
@@ -1184,17 +1185,8 @@ fn lower_boundary_typed_lit(
     if literals.len() == holes.len() {
         literals.push(String::new());
     }
-    let kind = match type_name {
-        Syntax::TYPE_URL => crate::Codegen::TIR::TTypedTextInterpKind::URL,
-        Syntax::TYPE_PATH => crate::Codegen::TIR::TTypedTextInterpKind::Path,
-        Syntax::TYPE_DATETIME => crate::Codegen::TIR::TTypedTextInterpKind::DateTime,
-        _ => return None,
-    };
-    let ty = if type_name == Syntax::TYPE_URL {
-        Type::Named("Url".to_string())
-    } else {
-        Type::Named(type_name.to_string())
-    };
+    let kind = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary())?;
+    let ty = Type::Named(kind.internal_type_name().to_string());
     Some(TExpr {
         ty,
         kind: TExprKind::HostCall(Box::new(
@@ -1204,6 +1196,62 @@ fn lower_boundary_typed_lit(
                 holes,
             },
         )),
+    })
+}
+
+/// D-BOUND-HEAD1=A: comptime evaluation can reach this seam before sema has
+/// rewritten the typed head. Apply the same boundary parser checks first, so
+/// invalid heads retain their normal E0155 diagnostic instead of becoming a
+/// plain TIR value.
+pub(crate) fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
+    let Expr::TypedLit {
+        head: Some(Type::Named(type_name)),
+        body: TypedLitBody::Value(inner),
+        ..
+    } = e
+    else {
+        return None;
+    };
+    let Expr::Str(parts, literal_span) = inner.as_ref() else {
+        return None;
+    };
+    let mut has_holes = false;
+    let mut literals = vec![String::new()];
+    for part in parts.iter() {
+        match part {
+            StrPart::Lit(text) => {
+                literals.last_mut().unwrap().push_str(text);
+            }
+            StrPart::Interp(..) => {
+                has_holes = true;
+                literals.push(String::new());
+            }
+        }
+    }
+    let Some(kind) = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary()) else {
+        return None;
+    };
+    let validation = crate::Comptime::validate_typed_boundary_literal(kind, &literals);
+    if kind.forbids_holes() && has_holes {
+        return Some(Diagnostic::error(
+            "E0155",
+            "a `DateTime` literal cannot contain interpolation".to_string(),
+            "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
+            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
+            Some(*literal_span),
+        ));
+    }
+    validation.err().map(|reason| {
+        Diagnostic::error(
+            "E0155",
+            format!("this `{}` literal is invalid", kind.source_name()),
+            reason,
+            format!(
+                "fix the literal, or parse a runtime String with the ordinary `{}` constructor",
+                kind.source_name()
+            ),
+            Some(*literal_span),
+        )
     })
 }
 
@@ -2098,13 +2146,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // compile-time-known literal segment, odd index is a hole value. A hole
             // never re-enters the template text: `SQL` keeps it as a separate bound
             // param, `HTML` HTML-escapes it before joining.
-            if (call.name == "SQL"
-                || call.name == "HTML"
-                || call.name == "Sh"
-                || call.name == Syntax::TYPE_URL
-                || call.name == Syntax::TYPE_PATH
-                || call.name == Syntax::TYPE_DATETIME)
-                && !cx.sigs.contains_key(&call.name)
+            if let Some(kind) = Syntax::typed_head_kind(&call.name)
+                .filter(|kind| kind.is_interpolated_template())
+                .filter(|_| !cx.sigs.contains_key(&call.name))
             {
                 let mut literals: Vec<String> = Vec::new();
                 let mut holes: Vec<TExpr> = Vec::new();
@@ -2122,20 +2166,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         holes.push(lower_expr(&a.expr, cx, env));
                     }
                 }
-                let kind = match call.name.as_str() {
-                    "SQL" => crate::Codegen::TIR::TTypedTextInterpKind::SQL,
-                    "Sh" => crate::Codegen::TIR::TTypedTextInterpKind::Sh,
-                    "HTML" => crate::Codegen::TIR::TTypedTextInterpKind::HTML,
-                    Syntax::TYPE_URL => crate::Codegen::TIR::TTypedTextInterpKind::URL,
-                    Syntax::TYPE_PATH => crate::Codegen::TIR::TTypedTextInterpKind::Path,
-                    Syntax::TYPE_DATETIME => crate::Codegen::TIR::TTypedTextInterpKind::DateTime,
-                    _ => unreachable!("typed-head lowering guard and kind table disagree"),
-                };
-                let ty = if call.name == Syntax::TYPE_URL {
-                    Type::Named("Url".to_string())
-                } else {
-                    Type::Named(call.name.clone())
-                };
+                let ty = Type::Named(kind.internal_type_name().to_string());
                 return TExpr {
                     ty,
                     kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {

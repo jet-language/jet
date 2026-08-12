@@ -929,7 +929,20 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
 /// agree on this list. Splitting it is what let interpolation accept a value
 /// that print rejected.
 pub(crate) fn is_core_shown_type(name: &str) -> bool {
-    matches!(name, "ServiceUpgradeReceipt")
+    matches!(
+        name,
+        "Mime"
+            | "ServiceUpgradeReceipt"
+            | "Url"
+            | "Path"
+            | "Date"
+            | "LocalTime"
+            | "DateTime"
+            | "Instant"
+            | "Period"
+            | "Zone"
+            | "ZonedDateTime"
+    )
 }
 
 pub(crate) fn is_printable(
@@ -948,7 +961,10 @@ pub(crate) fn is_printable(
             is_printable(ok, registry, trait_reg) && is_printable(err, registry, trait_reg)
         }
         Type::List(inner) => is_printable(inner, registry, trait_reg),
-        Type::Map { value, .. } => is_printable(value, registry, trait_reg),
+        Type::Map { key, value, .. } => {
+            is_printable(key, registry, trait_reg)
+                && is_printable(value, registry, trait_reg)
+        }
         Type::Named(n) => {
             registry.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)

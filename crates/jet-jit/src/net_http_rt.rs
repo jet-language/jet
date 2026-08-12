@@ -24,8 +24,6 @@ use std::sync::Arc;
 
 type JetDataTree = crate::Encoding::json_rt::DataTree;
 
-include!("../../jet-foundation/src/TypedHeads.rs");
-
 trait __jet_Encode {
     fn jet_encode(&self) -> JetDataTree;
 }
@@ -143,7 +141,7 @@ pub mod jet_std {
         }
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug)]
     pub struct JetURL {
         pub scheme: String,
         pub username: Option<String>,
@@ -153,6 +151,8 @@ pub mod jet_std {
         pub path: String,
         pub query: Vec<(String, String)>,
         pub fragment: Option<String>,
+        pub typed_host: Option<Vec<(String, bool)>>,
+        pub typed_path: Option<Vec<(String, bool)>>,
     }
 
     #[derive(Clone, Debug, PartialEq)]

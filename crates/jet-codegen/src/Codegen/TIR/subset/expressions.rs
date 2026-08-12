@@ -205,10 +205,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     || c.name == crate::Syntax::TYPE_DECIMAL
                     || c.name == crate::Syntax::TYPE_FRACTION)
                 && !cx.type_names.contains(&c.name);
-            // D-TYPEDTEXT1=D: the synthetic `SQL`/`HTML` call sema rewrote a typed
-            // text literal into (see `lower_expr`'s matching case).
+            // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call
+            // sema rewrote a typed literal into (see `lower_expr`'s matching case).
             let is_typed_text_ctor = !locals.contains(&c.name)
-                && (c.name == "SQL" || c.name == "HTML" || c.name == "Sh")
+                && Syntax::typed_head_kind(&c.name)
+                    .is_some_and(|kind| kind.is_interpolated_template())
                 && !cx.type_names.contains(&c.name);
             // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
             // this compiler-owned one-argument constructor.

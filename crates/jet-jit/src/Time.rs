@@ -87,6 +87,20 @@ pub(crate) fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R
     })
 }
 
+pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
+    let index = handle.saturating_sub(1) as usize;
+    match rt.time_values.get(index).and_then(|slot| slot.as_ref()) {
+        Some(TimeValue::Date(value)) => value.to_string_fmt(),
+        Some(TimeValue::DateTime(value)) => value.to_string_fmt(),
+        Some(TimeValue::Period(value)) => value.to_string_fmt(),
+        Some(TimeValue::Instant(value)) => value.to_string_fmt(),
+        Some(TimeValue::Zone(value)) => value.to_string_fmt(),
+        Some(TimeValue::Zoned(value)) => value.to_string_fmt(),
+        Some(TimeValue::LocalTime(value)) => value.to_string_fmt(),
+        None => String::new(),
+    }
+}
+
 fn result_err(msg: String) -> i64 {
     result_err_msg(&msg)
 }
@@ -354,6 +368,10 @@ extern "C" fn jet_jit_civil_time_method(
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
+        (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
+        (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
+        (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
+        (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
         (TimeValue::Zoned(z), "format") => {
             alloc_string(z.format_pattern(&clone_string(arg0)))

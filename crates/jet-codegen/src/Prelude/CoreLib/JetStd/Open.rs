@@ -102,7 +102,7 @@ mod jet_std {
         pub timed_out: bool,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug)]
     pub struct JetURL {
         pub scheme: String,
         pub username: Option<String>,
@@ -112,6 +112,8 @@ mod jet_std {
         pub path: String,
         pub query: Vec<(String, String)>,
         pub fragment: Option<String>,
+        pub typed_host: Option<Vec<(String, bool)>>,
+        pub typed_path: Option<Vec<(String, bool)>>,
     }
 
     #[derive(Clone, Debug, PartialEq)]

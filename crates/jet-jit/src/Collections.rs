@@ -1581,7 +1581,9 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
 /// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
-/// 4 = Float, 5 = Bool, 6 = Char, 7 = F32.
+/// 4 = Float, 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle. Debug list marshalling uses 5 = Bool, 6 = Char,
+/// 7 = F32.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
@@ -1591,6 +1593,55 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
 }
 
 fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
+    if !debug {
+        let values = || rt.heap.clone_int_list(list).unwrap_or_default();
+        match kind {
+            5 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::Net::show_value(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            6 => {
+                return collection_semantics::show_bool_list(
+                    values().into_iter().map(|value| value != 0).collect(),
+                );
+            }
+            7 => {
+                return collection_semantics::show_char_list(
+                    values()
+                        .into_iter()
+                        .map(|value| char::from_u32(value as u32).unwrap_or('?'))
+                        .collect(),
+                );
+            }
+            8 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::CoreHost::show_path(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            9 => {
+                return format!(
+                    "[{}]",
+                    values()
+                        .into_iter()
+                        .map(|handle| crate::Time::show_value(rt, handle))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            _ => {}
+        }
+    }
     match kind {
         1 => {
             let values = rt
@@ -1817,7 +1868,9 @@ extern "C" fn jet_jit_str_push_debug_variant(
 
 /// Print `T?` using its JIT Option carrier.
 /// `kind`: 0 = packed i64, 1 = packed string, 2 = packed f64 bits,
-/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN.
+/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN,
+/// 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
+/// 9 = civil-time handle.
 extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let result_abi = kind >= 10;
@@ -1829,7 +1882,7 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
             return;
         }
         let kind = if result_abi { kind - 10 } else { kind };
-        let payload = if result_abi || kind >= 3 {
+        let payload = if result_abi || matches!(kind, 3 | 4) {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
             packed.wrapping_sub(1)
@@ -1848,6 +1901,16 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
                     &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
                 );
             }
+            5 => rt.stdout.push_str(&crate::Net::show_value(rt, payload)),
+            6 => rt.stdout.push_str(&(payload != 0).to_string()),
+            7 => {
+                let text = char::from_u32(payload as u32)
+                    .map(|character| character.to_string())
+                    .unwrap_or_default();
+                rt.stdout.push_str(&text);
+            }
+            8 => rt.stdout.push_str(&crate::CoreHost::show_path(rt, payload)),
+            9 => rt.stdout.push_str(&crate::Time::show_value(rt, payload)),
             _ => {
                 rt.stdout.push_str(&payload.to_string());
             }

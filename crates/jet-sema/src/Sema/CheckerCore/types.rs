@@ -41,11 +41,18 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
                 }
-                // D-BOUND-HEAD1=A: `URL` is the canonical source spelling;
-                // keep the existing `Url` nominal in semantic and generated
-                // value types.
-                Type::Named(n) if n == crate::Syntax::TYPE_URL => {
-                    Type::Named("Url".to_string())
+                // D-BOUND-HEAD1=A: the shared typed-head descriptor owns the
+                // source-to-nominal spelling for URL (`Url` remains internal).
+                Type::Named(n)
+                    if crate::Syntax::typed_head_kind(&n)
+                        .is_some_and(|kind| kind.internal_type_name() != n.as_str()) =>
+                {
+                    Type::Named(
+                        crate::Syntax::typed_head_kind(&n)
+                            .expect("descriptor guard checked above")
+                            .internal_type_name()
+                            .to_string(),
+                    )
                 }
                 // D-LANGNS-NAME1=A: `core.lang` publishes compiler vocabulary as
                 // ordinary generated enum declarations. Membership is decided by

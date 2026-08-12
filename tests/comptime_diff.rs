@@ -164,12 +164,10 @@ const MODULE_CASES: &[&str] = &[
     "use core.math as math\n$comptime_value :: math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.url` (D-URL1=A), ported verbatim from AOT's
     // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
-    // Only the plain-`String`-returning free functions go through this
-    // rustc-verified differential (parse/from_parts/file/data return a `Url`
-    // struct whose instance methods — `.scheme()` etc — are a separate,
-    // out-of-scope gap, so there's no printable way to compare their
-    // contents byte-for-byte here; those are covered by
-    // `tests/repl.rs::repl_core_url_dispatch` instead).
+    // Plain string-returning free functions use this differential. URL
+    // structs retain their canonical typed metadata through the comptime
+    // marshalled value path; tier-wide typed-head coverage lives in
+    // `tests/tir_language_features.rs`.
     // parity: guard tests/repl.rs::repl_core_url_dispatch
     "use core.url as url\n$comptime_value :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.url as url\n$comptime_value :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",

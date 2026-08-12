@@ -321,7 +321,7 @@ pub fn apply_impure_core_call_with_type(
         ("core.io", "print") => {
             let text = args
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {
@@ -333,7 +333,7 @@ pub fn apply_impure_core_call_with_type(
         ("core.io", "eprint") => {
             let text = args
                 .iter()
-                .map(|v| v.jet_show())
+                .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {

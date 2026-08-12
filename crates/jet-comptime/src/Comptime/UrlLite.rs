@@ -1,9 +1,7 @@
 //! CtValue adapters over the canonical Prelude URL/MIME kernel.
 
-include!("../../../jet-foundation/src/TypedHeads.rs");
-
 mod url_kernel {
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug)]
     pub struct JetURL {
         pub scheme: String,
         pub username: Option<String>,
@@ -13,6 +11,8 @@ mod url_kernel {
         pub path: String,
         pub query: Vec<(String, String)>,
         pub fragment: Option<String>,
+        pub typed_host: Option<Vec<(String, bool)>>,
+        pub typed_path: Option<Vec<(String, bool)>>,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -41,8 +41,51 @@ mod url_kernel {
 
 pub(super) type UrlParts = url_kernel::JetURL;
 
+/// Re-enter the canonical URL value without reparsing or normalizing it.
+///
+/// The TIR value adapter may only marshal fields across the `CtValue` boundary;
+/// the URL kernel remains the owner of the representation and formatter.
+pub(super) fn from_marshaled(
+    scheme: String,
+    username: Option<String>,
+    password: Option<String>,
+    host: Option<String>,
+    port: Option<i64>,
+    path: String,
+    query: Vec<(String, String)>,
+    fragment: Option<String>,
+    typed_host: Option<Vec<(String, bool)>>,
+    typed_path: Option<Vec<(String, bool)>>,
+) -> UrlParts {
+    url_kernel::JetURL {
+        scheme,
+        username,
+        password,
+        host,
+        port,
+        path,
+        query,
+        fragment,
+        typed_host,
+        typed_path,
+    }
+}
+
 pub(super) fn parse(input: &str) -> Result<UrlParts, String> {
     url_kernel::JetURL::parse(&input.to_string())
+}
+
+pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), String> {
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    url_kernel::jet_validate_typed_url_literal(&literal_refs)
+}
+
+pub(super) fn typed_url_literal(
+    literals: &[String],
+    holes: &[String],
+) -> UrlParts {
+    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    url_kernel::jet_typed_url_literal(&literal_refs, holes.to_vec())
 }
 
 pub(super) fn from_parts(
