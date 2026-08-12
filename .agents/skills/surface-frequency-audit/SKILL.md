@@ -27,6 +27,23 @@ Read these files before starting:
 2. [`references/report-template.md`](references/report-template.md) for the final report contract.
 3. [`../isomorphic-ontology-audit/ontology.md`](../isomorphic-ontology-audit/ontology.md) for the canonical category catalog.
 4. [`../simple/SKILL.md`](../simple/SKILL.md) for owner-facing prose.
+5. [`../_shared/standing-lens.md`](../_shared/standing-lens.md) for the standing lens.
+
+Apply the standing lens in full. The owner never has to ask for it. Three parts
+of it govern this skill in particular:
+
+- The **micro sweep** is the taxonomy's companion. Frequency data says how often
+  a surface appears; the sweep says whether the shape is good. Report both, or a
+  common-but-bad surface reads as a target to copy.
+- **Honesty rules** bind harder here than anywhere, because this skill produces
+  numbers. Confirm a column holds real data before ranking on it, and state the
+  declared scope and every coverage gap, as the bounds above already require.
+- The **four questions** apply to the ranking, not only the findings. A surface
+  that is common everywhere and that Jet could beat outright is worth more than
+  a surface Jet merely lacks.
+
+The bounds above still hold: this skill never writes Tower state, whatever the
+lens says about logging findings elsewhere.
 
 Read `AGENTS.md`. Search the current tree before broad reading. Preserve unrelated worktree changes.
 

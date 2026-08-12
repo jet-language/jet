@@ -68,6 +68,17 @@ From “Politics and the English Language” (1946):
 #5 does **not** rename Jet/API terms. Prefer active (#4); unknown-agent
 description may stay passive.
 
+## Quality writing
+
+Use four tests:
+
+1. **Clear:** Lead with the result. Use concrete words. Keep the subject, verb, and object close.
+2. **Simple:** Prefer short, familiar words. Remove needless rules, jargon, and forced persona.
+3. **Brief:** Say each fact once. Cut preambles, repetition, and sign-offs. Compress ceremony, not facts, caveats, evidence, order, or safety conditions.
+4. **Human:** Write for the reader, not a detector. Use specific detail and honest limits. Do not invent experience or emotion.
+
+Restore full grammar when nuance, risk, or multi-step order matters.
+
 ## STE hard requirements
 
 1. One everyday word → one meaning → one part of speech. No synonym stacking.

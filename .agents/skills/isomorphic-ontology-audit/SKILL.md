@@ -59,6 +59,20 @@ Read and use as the closed category catalog:
 Do not invent a parallel taxonomy. Extend `ontology.md` only when a concept
 cannot land in an existing family (follow its extension protocol).
 
+## The standing lens (partial)
+
+Apply the **probe the running binary** and **honesty rules** sections of
+`.agents/skills/_shared/standing-lens.md`. Skip the four questions and the micro
+sweep: this skill measures Jet's internal concept unity, and a competitive frame
+would pull it toward comparison shopping instead.
+
+Two rules from that page matter most here. Map the surface that **runs**, not
+the one the spec describes — a form the parser accepts but sema ignores, or a
+declared construct nothing emits, belongs in the map with that fact attached.
+And say plainly where a false rhyme means Jet is currently worse than a peer at
+the same concept; internal coherence work is where that admission is hardest and
+most useful.
+
 ## Method
 
 Search live specs, examples, stdlib, Syntax registry, and CLI surfaces. Prefer

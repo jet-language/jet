@@ -3,6 +3,20 @@
 Pick **one** skill. Do not chain audits, research, cleanup, or verify unless the
 owner asks. Extra tests run only when they are the job.
 
+## The standing lens applies to every audit and research skill
+
+`.agents/skills/_shared/standing-lens.md` holds the four questions, the five
+agent-optimality quantities, the micro sweep, the probe-the-running-binary
+discipline, and the honesty rules. Every skill below points at it; none copies
+it. The owner never has to ask for any of it.
+
+Most skills apply it in full. `spec-compliance-audit`,
+`isomorphic-ontology-audit`, and `type-unification-audit` apply the probe and
+honesty sections only — each measures something internal that a competitive
+frame would distort, and each says so in its own file.
+
+Change the lens in that one file. Never fork it into a skill.
+
 ## Outputs
 
 | Kind | Where |

@@ -29,6 +29,37 @@ Do not invent shipped Jet features — verify each claimed gap against the tree
 before reporting it. Prefer `scripts/agent/jet-env` runs. Write the report with
 the `simple` skill prose rules.
 
+## The standing lens
+
+Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
+five agent-optimality quantities, the micro sweep, probe the running binary, and
+the honesty rules. The owner never has to ask for any of it.
+
+The day-zero frame above and the lens agree: both strip away maturity, adoption,
+and history, and compete on the artifact. Where they appear to disagree, the
+day-zero frame wins for this skill.
+
+## The beat table
+
+Section 2's ranked backlog answers "what Jet lacks". Add its mirror, answering
+"what Jet wins", as a ranked table:
+
+| Vector | Peer evidence | Jet's mechanism | Shipped or designed | What they must change to match |
+|---|---|---|---|---|
+
+Rank by how categorical the win is, never by effort. A vector a peer could adopt
+next release is worth less than one that would break its own model — say which
+each is.
+
+**Mark shipped versus ratified-but-unbuilt on every row.** A design that wins on
+paper and does not run is a plan, not an advantage, and reporting it as an
+advantage is how a competitive audit starts lying. Verify each row against the
+tree the same way section 1 verifies gaps.
+
+**Name where Jet is behind, first.** A field audit with no losing row has not
+looked hard enough. Losing on a peer's strongest axis is the most valuable
+finding the skill can produce, and it belongs at the top of the report.
+
 ## Output
 
 Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):

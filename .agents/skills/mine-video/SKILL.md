@@ -1,31 +1,37 @@
 ---
 name: mine-video-for-jet
-description: Mine one or more YouTube videos using duplicate-safe source tracking, resumable transcript/comment evidence, caption-quality checks, stratified anonymous comment samples, claim ledgers, linked sources, and cross-video contradiction synthesis; update Jet's prior-art registry for every completed mine; cross-check findings against Jet's specs, code, tests, plans, and Tower; and, only when explicitly requested, create deduplicated Tower cards and ballot-ready decisions. Use for "analyze this video for Jet," "extract lessons and pitfalls," "cross-check these videos," or "make frozen Tower cards/ballots from this video."
+description: Mine one or more YouTube videos using resumable transcript/comment evidence, caption-quality checks, stratified anonymous comment samples, claim ledgers, linked sources, and cross-video contradiction synthesis; mine macro lessons and micro details (syntax, ergonomics, surfaces, APIs, types, defaults, error text, UX/DX, tooling) with equal weight; run the standing competitive lens — how Jet beats the subject on a level playing field, what to avoid, and what makes Jet the best language an agent could use; cross-check every finding against Jet's running binary, code, specs, tests, and Tower; and, by default, log every actionable finding as deduplicated Tower cards and ballot-ready decisions. Use for "analyze this video for Jet," "extract lessons and pitfalls," "cross-check these videos," or "make Tower cards/ballots from this video."
 ---
 
 # Mine Video for Jet
 
 Extract evidence first. Persist progress. Separate video claims, comment signals, verified facts, Jet state, and recommendations. Never turn popularity into truth.
 
+## The standing lens
+
+Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
+five agent-optimality quantities, the micro sweep, probe the running binary, and
+the honesty rules. The owner never has to ask for any of it, and a request for
+"lessons" never narrows it.
+
+Read that page before starting. The rest of this skill covers what is specific
+to mining a video: getting the evidence out, judging its quality, and not
+mistaking popularity for truth.
+
+Two places the lens bites hardest here. A video's own conclusion is evidence,
+never the finding — state the real mechanism when the two differ. And the
+subject is usually a language that works, so question 2 always has material:
+whatever it got wrong is on display next to whatever it got right.
+
 ## Workflow
 
 ### 1. Establish scope
 
-- Confirm the YouTube URL and requested outcome: report only, repo changes, Tower cards, ballots, or some combination.
-- Treat Tower writes and repo edits as unauthorized unless requested explicitly. The mandatory `docs/reference/prior-art.md` source-registry update is the sole exception.
-- Read `AGENTS.md`, then its required spec files in order. Read `plugins/tower/skills/tower/SKILL.md` and `plugins/tower/skills/tower-ballot/SKILL.md` before any Tower work.
+- Confirm the YouTube URL and any outcome the owner named.
+- Tower logging is the default outcome (owner directive 2026-08-06): every actionable finding — gap, deferred consideration, measurement, owner gate — becomes a Tower card or ballot in the same run, never a "revisit later" line in the report. Skip Tower writes only when the owner explicitly says report-only.
+- Repo edits remain unauthorized unless requested explicitly.
+- Read `AGENTS.md`, then its required spec files in order. Read `.agents/skills/tower/SKILL.md` and `.agents/skills/tower-ballot/SKILL.md` before any Tower work.
 - Preserve unrelated dirty-tree changes. Do not checkpoint or delegate when doing so would commit another worker's changes.
-- Extract each stable YouTube video ID and run the duplicate preflight before capture:
-
-```sh
-scripts/agent/jet-env python3 \
-  .agents/skills/mine-video/scripts/check_sources.py VIDEO_URL...
-```
-
-- Stop before transcript, comment, or linked-source retrieval when any ID is already tracked. Show the existing registry line and ask for explicit rerun confirmation.
-- Continue a duplicate only after the owner clearly says to rerun that exact video. Then pass `--allow-rerun VIDEO_ID` for that ID and record the confirmation in the report. Repeat the flag for each separately confirmed ID; never approve a whole batch.
-- Do not treat a different playlist index, query string, shortened URL, or timestamp as a different video.
-- Treat the same ID repeated inside one input batch as an input error. Remove the repeated input; `--allow-rerun` does not mine it twice.
 
 ### 2. Capture source material
 
@@ -58,6 +64,15 @@ For long or multi-session work, keep a small progress manifest (`/tmp/jet-youtub
 
 - Process transcript in bounded timestamp chunks until the full runtime is covered.
 - Reconstruct thesis, causal chain, measurements, proposed fixes, caveats, and unresolved questions.
+- Run the **micro sweep** from the shared lens over the transcript, every
+  category, not only the ones the video dwells on. Each micro item gets its own
+  ledger row and its own Jet cross-check. Never fold one into a macro theme,
+  never drop one for looking too small. A category with nothing in it is a valid
+  result; skipping it is not.
+- A demo is a micro goldmine and is easy to skim past. When the video shows a
+  command, a snippet, an error, or an editor session, read what is actually on
+  screen: the exact spelling, the flags, the output shape, the message wording.
+  That is primary evidence about a surface, unlike the narration over it.
 - Distinguish host commentary from material being quoted or read.
 - Preserve timestamps for important claims, but paraphrase in final output unless a short quote is necessary.
 - Note caption quality. Creator captions (`subtitles` in the info JSON) are high quality; auto/unknown captions are never high-confidence evidence without corroboration.
@@ -123,21 +138,12 @@ Classify every ledger item:
 
 Check actual code, not plans alone. Flag plan/implementation drift. Do not invent syntax or duplicate an existing card.
 
-Run a cut-level polish pass after the mechanism pass. Check small improvements across:
-
-- syntax and API shape;
-- names, defaults, and discoverability;
-- diagnostics, help, examples, and fixes;
-- microcopy, information density, progress, latency feedback, copy/paste, and recovery affordances;
-- terminal, editor, LSP, semantic-index, and Canvas parity;
-- empty, loading, invalid, offline, permission, stale, interrupted, resume, and rollback states;
-- keyboard, focus, accessibility, ANSI, and `NO_COLOR`;
-- performance attribution, profile/target disclosure, and audit receipts;
-- install, migration, maintenance, recovery, and expert override paths.
-
-For every praised or lauded shape, capture the exact syntax, API, interaction, or presentation quality that earned praise. Then test whether Jet already proves it or can adopt its useful property. Mine small moments of clarity and delight, not only failures and large mechanisms.
-
-Do not call a cut covered because an umbrella card has a similar title. Map it to exact open criteria, a ratified decision, or executable proof.
+**Probe the running binary**, per the shared lens. The highest-value findings
+come from taking the video's central mechanism and running Jet's version of it,
+rather than reading what Jet says it does. Build the smallest input that should
+exercise the surface, run it through `scripts/agent/jet-env`, and read the real
+output, exit code, and emitted paths. A live two-case contrast — one input that
+works and one that should and does not — is the finding, in one paste.
 
 Run two-facet review:
 
@@ -157,14 +163,21 @@ For each validated gap, state:
 
 Keep measurement fixes separate from product choices. Prefer internal instrumentation before public syntax. Never trade safety, beginner experience, runtime performance, or one mechanical path for implementation ease.
 
-For a multi-video mine, a zero-new-work result needs a written proof. For every actionable cut, cite one of:
+Then answer the standing lens directly, as its own part of the report:
 
-- exact existing Tower criterion that owns it;
-- executable code/test proof that it already works;
-- governing law that rejects it;
-- measurement needed before product work.
-
-If no exact criterion or proof owns the action, classify it as a real gap. Propose one coherent card. If the gap needs an owner choice, make the options ballot-ready. Do not use broad alignment as a substitute for this audit.
+- **Beat vectors.** Rank by how categorical the win is, not by effort. For each:
+  the video evidence, the mechanism, whether Jet's version is shipped or only
+  ratified, and what a competitor would have to change to match it. A vector the
+  subject cannot adopt without breaking its own model is worth more than a
+  vector it could copy next release.
+- **Avoid list.** One row per mistake: the mistake, its evidence, and Jet's
+  exposure. Include mistakes Jet is structurally immune to; immunity is a design
+  asset worth stating once.
+- **Agent-optimality.** Walk the five quantities. Say which one this video moves
+  and which one Jet is weakest on right now.
+- **Surface coverage.** Name types, methods, APIs, defaults, and commands in
+  three groups: already covered with proof, worth checking, and missing. Use
+  exact names so the list is actionable without re-derivation.
 
 ### 8. Synthesize multiple videos
 
@@ -175,36 +188,9 @@ Build one ledger per video, then group all claims by exact `topic` key (a short 
 - Read every conflicting claim and primary source. Never resolve contradiction by count, likes, or confidence labels alone.
 - Merge recommendations only when Jet impact and acceptance proof match. Preserve distinct mechanisms or contexts.
 
-### 9. Persist source provenance
+### 9. Write Tower (default)
 
-Update `docs/reference/prior-art.md` for every completed mine, including report-only runs and runs with no Jet recommendation.
-
-- Add each video once under **Videos, talks & podcasts**.
-- Record title, creator/channel, canonical `https://www.youtube.com/watch?v=ID` URL, mine date, and one concise adopted/rejected lesson.
-- Link the durable report, Tower cards, or decisions when they exist.
-- Keep the canonical video ID searchable as plain text.
-- Re-run `.agents/skills/mine-video/scripts/check_sources.py --verify-tracked VIDEO_URL...` after the edit. Pass every completed video URL; each ID must report `tracked`.
-- Never leave provenance only in `/tmp`, a chat response, a Tower log, or a playlist URL.
-
-Example, first mine:
-
-```text
-input:  https://youtu.be/abc123DEF45?t=90
-check:  new
-action: mine video, then add https://www.youtube.com/watch?v=abc123DEF45 to prior-art.md
-```
-
-Example, duplicate:
-
-```text
-input:  https://www.youtube.com/watch?v=abc123DEF45&list=PL...
-check:  tracked at docs/reference/prior-art.md:52
-action: stop and ask; rerun only after explicit confirmation
-rerun:  --allow-rerun abc123DEF45
-```
-
-### 10. Write Tower only when requested
-
+- Log everything now. Any finding whose action is not "none" gets a Tower card (or attaches to an existing card) in this run. Never end with a deferred list; "revisit at 1.0" still means a card exists today, homed appropriately.
 - Read Tower status and search for duplicates first.
 - Create one card per coherent deliverable, not one card per bullet.
 - Add one ballot per independently decidable owner choice. Use full tower-ballot fields and worked options.
@@ -218,17 +204,28 @@ rerun:  --allow-rerun abc123DEF45
 Lead with verdict. Include:
 
 - source coverage and limitations;
-- source-registry additions and any explicitly confirmed reruns;
 - manifest completion, caption quality, retrieval warnings, and unresolved linked sources;
 - strongest lessons;
+- **verified defects, with the live contrast that proves each one**;
 - corrections and disputed claims;
-- Jet alignment and gaps;
+- Jet alignment and gaps, stating shipped versus ratified-and-unbuilt;
+- **the avoid list** — mistake, evidence, Jet's exposure;
+- **the beat vectors** — ranked, with shipped/unbuilt marked;
+- **agent-optimality** — which of the five quantities this moves;
+- **surface coverage** — covered, worth checking, missing, by exact name;
 - prioritized implement/avoid list;
 - owner gates;
 - Tower card/decision IDs when created;
 - exact local file links and primary-source links.
 
+Follow the owner's report format: visual-first, tables over prose, example-led,
+no hard wrapping, no stuffiness. Lead with the reframe when the popular reading
+of the video is wrong — say so plainly and give the real mechanism.
+
 Keep comments anonymous unless identity materially affects credibility. Avoid long transcript/comment quotations.
+
+A one-line note about the strongest unverified assumption in the report is worth
+more than another paragraph of confirmed findings. End with it when one exists.
 
 ## Failure guards
 
@@ -240,7 +237,11 @@ Keep comments anonymous unless identity materially affects credibility. Avoid lo
 - Do not compare clean and incremental builds, CPU-summed and wall time, or debug and release profiles as equivalents.
 - Do not solve backend cost through hidden allocation, silent de-optimization, or new surface syntax.
 - Do not expose backend diagnostics as Jet user errors.
-- Do not mutate Tower or repo merely because report recommends work.
-- Do not start capture before duplicate preflight.
-- Do not finish a completed mine before `docs/reference/prior-art.md` tracks every video ID.
-- Do not claim zero new work from broad architectural alignment or umbrella-card titles.
+- Do not mutate the repo merely because the report recommends work; Tower logging, by contrast, is mandatory for every actionable finding unless the owner said report-only.
+- Do not report a finding as "revisit later" without a card that carries it.
+- Do not wait to be asked for the competitive lens, the micro sweep, or the surface list. They are standing requirements of every run.
+
+The shared lens carries the rest: probe before believing a spec, name where Jet
+is behind, mark shipped versus designed, do not quote a metric from a column you
+have not checked, confirm a surprising source-level finding with a second
+reader, and never restate the subject's own conclusion as the finding.

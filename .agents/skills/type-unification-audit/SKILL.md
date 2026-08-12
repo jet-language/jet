@@ -39,6 +39,23 @@ construct is a second lambda (I8). The type-shaped thing near a keyword is
 its artifact: the handle, the yielded collection, the range, the stream.
 Audit the artifacts, not the keywords.
 
+## The standing lens (partial)
+
+Apply the **probe the running binary** and **honesty rules** sections of
+`.agents/skills/_shared/standing-lens.md`. Skip the four questions and the micro
+sweep: this skill measures whether Jet's own facts are honestly typed, and a
+competitive frame would distort it.
+
+The probe rule sharpens the phantom-type census. A closed compiler table, a
+marker with no reachable behaviour, and an unnameable handle all look identical
+in source; only running the surface separates a fact the compiler enforces from
+one it merely records. The review-pass traps below already say re-verify rather
+than assume — that is this rule, learned the hard way once.
+
+Where a phantom type costs an agent rather than a human, say so. An unnameable
+handle is a repair-determinism problem as much as a modelling one: a fact that
+cannot be named cannot be suggested in a fix.
+
 ## Method
 
 Search live registries and law; probe the real compiler. Prefer

@@ -20,6 +20,12 @@ does not produce those, the synthesis is not done.
 
 ## Mission and non-negotiables
 
+Apply `.agents/skills/_shared/standing-lens.md` in full alongside everything
+below: the four questions, the five agent-optimality quantities, the micro
+sweep, probe the running binary, and the honesty rules. The owner never has to
+ask for any of it. Where the lens and this skill overlap, this skill is the
+more demanding of the two and wins.
+
 - **Unify, simplify, AND power up. Never trade one for another.** The output
   preserves every existing capability, expands where the model naturally
   allows, and deletes mechanisms rather than adding them. Planning and
@@ -149,9 +155,19 @@ space is where the unification usually hides.
   style law that all existing ratified rules turn out to be instances of.
   Ratified precedent expressed as theorems of the new model is the strongest
   argument the model is right.
+- **Run the agent pass.** Beginner and expert are two of three readers; the
+  third drives the surface unattended. Test the one idea against the five
+  agent-optimality quantities in `.agents/skills/_shared/standing-lens.md`:
+  does the checker catch a misuse rather than production, does a verdict
+  arrive fast enough to sit in a loop, can the report be acted on without
+  guessing, what does the surface cost in tokens, and does a mistake admit one
+  obvious repair or several. A unification that collapses several mechanisms
+  into one usually improves repair determinism outright — say so, because that
+  is a real argument for the model and it is routinely left unstated.
 - Keep the honest kill-check: if the unification hollows beginner defaults,
-  needs an invariant carve-out, or duplicates a mechanism it claims to
-  delete, kill or narrow that slice before it reaches the owner.
+  needs an invariant carve-out, duplicates a mechanism it claims to delete, or
+  makes a mistake harder for a machine to repair, kill or narrow that slice
+  before it reaches the owner.
 
 ## Phase 3 — the proposal (`docs/proposals/<area>-<slug>.md`)
 

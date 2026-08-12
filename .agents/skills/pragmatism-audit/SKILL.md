@@ -47,6 +47,31 @@ Conflict rule: **getting the job done beats theoretical purity**. Ceremony
 wins only when it buys safety, clarity, or expert control that cannot live
 behind opt-in.
 
+## The standing lens
+
+Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
+five agent-optimality quantities, the micro sweep, probe the running binary, and
+the honesty rules. The owner never has to ask for any of it.
+
+## Third facet: the agent has to finish the job too
+
+The dual-facet bar above covers the beginner and the expert. Most Jet code will
+be written by an agent driving the same surface, and "does this help me finish
+the job?" is exactly the right question to ask on its behalf.
+
+Add a third requirement to every finding:
+
+3. **Agent path.** An unattended agent can complete the job from the compiler's
+   own output: the checker catches the mistake rather than production, the
+   verdict arrives fast enough to sit in a loop, the report can be acted on
+   without guessing, the loop does not burn tokens re-reading long errors, and
+   the error admits one obvious repair rather than four plausible ones.
+
+Those are the five quantities in the shared lens. Grade them per finding, not
+once per report. Ceremony that a human tolerates once per file is paid on every
+iteration by an agent, so friction that looks minor to a reader can be the
+dominant cost in a loop — weigh it that way.
+
 ## Method
 
 Search live specs, examples, stdlib, CLI, and package surfaces. Prefer
@@ -124,7 +149,8 @@ One short paragraph: where Jet helps finish jobs vs where it stops short.
 
 ## Findings
 Ranked. Each: kind, domain, evidence (file/example/command), beginner impact,
-expert reject/override status, smallest fix, owner-gate? (yes/no + ballot title).
+expert reject/override status, agent-path grade (which of the five quantities it
+costs), smallest fix, owner-gate? (yes/no + ballot title).
 
 ## Defaults map
 Table of “most likely use case → today’s default → reject path → override path”.

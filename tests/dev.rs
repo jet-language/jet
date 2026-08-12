@@ -8,7 +8,7 @@
 //! parity: guard tests/dev.rs::interpreter_matches_compiled_binary
 //!
 //! Also tested:
-//!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
+//!   - the E2201 honest-boundary note (FFI/`#Unsafe`/native std),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on,
 //!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
 
@@ -1386,7 +1386,7 @@ fn fluent_method_chain_preserves_fuel_order_and_spans() {
 }
 
 #[test]
-fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
+fn task_programs_run_in_the_canonical_tir_interpreter() {
     let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {
         RunOutcome::Ran {
@@ -1394,7 +1394,7 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
             stderr,
             exit_code,
         } => {
-            assert_eq!(stdout, "5050\n");
+            assert_eq!(stdout, "5050\npaused=false,cancel=false\n");
             assert!(stderr.is_empty());
             assert_eq!(exit_code, 0);
         }
@@ -1403,10 +1403,6 @@ fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
         }
     }
 
-    let unsupported_path = std::env::temp_dir().join(format!(
-        "jet_task_tir_boundary_{}.jet",
-        std::process::id()
-    ));
     fs::write(
         &unsupported_path,
         "use core.tasks as tasks\nfn run() {\n    handle :: tasks.spawn(() => 1)\n    handle.cancel()\n}\n",
@@ -2711,10 +2707,10 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
 }
 
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
-/// execution. For a task program it then fails honestly at whatever
-/// unsupported construct it actually hits during interpretation, rather than
-/// refusing up front at the pre-scan's (earlier, more conservative) report
-/// site — no guarantees, but it tried.
+/// execution. An OS-only program then fails honestly at whatever unsupported
+/// construct it actually hits during interpretation, rather than refusing up
+/// front at the pre-scan's (earlier, more conservative) report site — no
+/// guarantees, but it tried.
 ///
 /// c139 JIT-parity fix (2026-07-03): the dev interpreter's own comptime-leak
 /// errors (E0956/E3401) are now rewrapped as E2201 for a consistent voice
@@ -2726,12 +2722,21 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
 /// past the boundary before hitting trouble.
 #[test]
 fn try_anyway_skips_the_boundary_scan() {
-    let file = "examples/features/concurrency/tasks.jet";
-    let RunOutcome::Problems(blocked) = dev_iteration(file, false, true) else {
+    let path = std::env::temp_dir().join(format!(
+        "jet_try_anyway_boundary_{}.jet",
+        std::process::id()
+    ));
+    fs::write(
+        &path,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let file = path.to_string_lossy().into_owned();
+    let RunOutcome::Problems(blocked) = dev_iteration(&file, false, true) else {
         panic!("expected the E2201 pre-scan to block this program up front");
     };
     assert_eq!(blocked[0].code, "E2201", "pre-scan should report E2201");
-    match dev_iteration(file, true, true) {
+    match dev_iteration(&file, true, true) {
         RunOutcome::Problems(diags) => {
             assert_ne!(
                 diags.first().and_then(|d| d.span),
@@ -2743,6 +2748,7 @@ fn try_anyway_skips_the_boundary_scan() {
         // pre-scan was skipped.
         RunOutcome::Ran { .. } => {}
     }
+    let _ = fs::remove_file(path);
 }
 
 /// c139 M1: the Cranelift tier-1 backend runs `basics/hello.jet` with byte-identical
@@ -5034,6 +5040,7 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
     }
     let _guard = dev_diff_lock().lock().unwrap();
     let stems = [
+        "crypto/auth_sessions",
         "crypto/auth_tokens",
         "crypto/crypto_envelope",
         "crypto/crypto_migration",

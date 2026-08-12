@@ -15,6 +15,33 @@ titles or card ids only — do not create cards unless asked).
 Search live specs, examples, stdlib, and CLI surfaces. Prefer
 `scripts/agent/jet-env` and `rg` over memory.
 
+## The standing lens
+
+Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
+five agent-optimality quantities, the micro sweep, probe the running binary, and
+the honesty rules. The owner never has to ask for any of it.
+
+## Method: the micro sweep is this skill
+
+"Shape, uniformity, and consistency" is measured category by category, not by
+impression. Walk every category in the shared lens's micro sweep — syntax,
+ergonomics, surfaces, APIs and types and methods, defaults, naming, error text,
+UX and DX, tooling and CLI shape, ceremony versus control — and report each one
+even when it is clean. A category with no finding is a result worth printing; a
+category you skipped is a hole in the audit.
+
+For each outlier, say which of the four it is:
+
+- **Inconsistent** — the same idea spelled two ways. Name both and pick one.
+- **Absent** — a shape the language implies but does not offer.
+- **Ceremonial** — required text that buys the reader nothing.
+- **Asymmetric** — the beginner road and the expert road disagree about the
+  same concept.
+
+Judge each finding against verdict actionability and repair determinism as well
+as human readability. A surface with one obvious spelling is cheaper for an
+agent to drive, which is the machine-facing half of I8.
+
 ## Output
 
 Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):

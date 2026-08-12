@@ -1,29 +1,29 @@
 use super::*;
 
 #[test]
-fn external_completion_preserves_checked_subcommands() {
-    let dir = isolated_cwd("shape_cli_subcommands");
+fn external_completion_preserves_global_shared_flags() {
+    let dir = isolated_cwd("shape_cli_global");
     fs::write(dir.join("commands.jet"), r#"#CLI
-struct ServeArgs {
-    #[Doc("port to listen on"), Short("p"), Env("JET_SERVE_PORT")] port: Int = 3000
+struct Commands {
+    #[Doc("configuration file"), Env("JET_CONFIG")] config: String?
+
+    #Doc("serve the service")
+    fn serve(self, port: Int = 3000) {}
+
+    #Doc("import a file")
+    fn import(self, file: String) {}
 }
-#CLI
-struct ImportArgs {
-    #Doc("file to import") file: String
-}
-enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
-fn run(cmd: Cmd) {}
 "#).unwrap();
     let build = Command::new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap();
-    assert!(build.status.success(), "subcommand build failed: {}", String::from_utf8_lossy(&build.stderr));
+    assert!(build.status.success(), "global CLI build failed: {}", String::from_utf8_lossy(&build.stderr));
     let help = Command::new(dir.join("build/commands"))
         .arg("--help")
         .current_dir(&dir)
         .output()
         .unwrap();
-    assert!(help.status.success(), "subcommand root help failed: {}", String::from_utf8_lossy(&help.stderr));
+    assert!(help.status.success(), "global CLI root help failed: {}", String::from_utf8_lossy(&help.stderr));
     let help = String::from_utf8(help.stdout).unwrap();
-    assert_eq!(help, "Usage: commands <command> [options]\n\nCommands:\n  serve\n  import\n");
+    assert_eq!(help, "Usage: commands [options]\n\nOptions:\n  --config CONFIG          configuration file [env: JET_CONFIG] [precedence: flag > env > default]\n  --help                   show this help\n\nCommands:\n  serve                 serve the service\n  import                import a file\n");
     assert!(!help.contains("Serve") && !help.contains("Import"));
 
     for shell in ["bash", "zsh", "fish", "powershell"] {
@@ -32,19 +32,19 @@ fn run(cmd: Cmd) {}
             .current_dir(&dir)
             .output()
             .unwrap();
-        assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
+            assert!(completion.status.success(), "{shell} global CLI completion failed: {}", String::from_utf8_lossy(&completion.stderr));
         let script = String::from_utf8(completion.stdout).unwrap();
         let expected = match shell {
-            "bash" => ["serve", "import", "--port -p", "file --file"],
-            "zsh" => ["serve", "import", "{-p,--port}", ":file:file to import"],
-            "fish" => ["serve", "import", "-l port -s p", "-l file"],
-            "powershell" => ["serve", "import", "'--port','-p'", "'file','--file'"],
+            "bash" => ["--help --config serve import", "--config", "--port", "--file"],
+            "zsh" => ["serve", "import", "--config", "{-p,--port}", ":file:file to import"],
+            "fish" => ["-l config", "serve", "import", "-l port", "-l file"],
+            "powershell" => ["'--help','--config','serve','import'", "'--config'", "'--port'", "'file','--file'"],
             _ => unreachable!(),
         };
         for fragment in expected {
             assert!(script.contains(fragment), "{shell} external completion omitted {fragment}: {script}");
         }
-        check_snapshot(&format!("shape_cli_enum_{shell}.txt"), &script);
+        check_snapshot(&format!("shape_cli_global_{shell}.txt"), &script);
     }
     let dossier = Command::new(jet())
         .args(["inspect", "dossier", "commands.jet", "run", "--json"])
@@ -53,8 +53,8 @@ fn run(cmd: Cmd) {}
         .unwrap();
     assert!(dossier.status.success());
     let dossier = String::from_utf8(dossier.stdout).unwrap();
-    assert!(dossier.contains("\"completion_words\":[\"--help\",\"serve\",\"import\"]"), "dossier flattened enum flags: {dossier}");
-    for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
+    assert!(dossier.contains("\"completion_words\":[\"--help\",\"--config\",\"serve\",\"import\"]"), "dossier omitted shared flags: {dossier}");
+    for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--config\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
         assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
     }
     let dossier = Command::new(jet())
@@ -66,9 +66,10 @@ fn run(cmd: Cmd) {}
     let dossier = String::from_utf8(dossier.stdout).unwrap();
     for fact in [
         "command serve",
-        "-p / --port: Int (optional, default 3000, env JET_SERVE_PORT) — port to listen on",
+        "--config: String (optional, env JET_CONFIG) — configuration file",
+        "--port: Int (optional, default 3000) — value for --port",
         "command import",
-        "--file: String (required) — file to import",
+        "--file: String (required) — value for --file",
     ] {
         assert!(dossier.contains(fact), "text dossier omitted {fact}: {dossier}");
     }
