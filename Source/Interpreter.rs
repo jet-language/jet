@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "fn job() => Int {\n    return 1\n}\nfn run() {\n    h :: task job()\n    print(h.join())\n}\n";
+        let src = "fn job() => Int {\n    return 1\n}\nfn run() {\n    h :: task job()\n    print(h.join() ?? 0)\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }

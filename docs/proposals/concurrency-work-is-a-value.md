@@ -29,10 +29,10 @@ code.
 | Job | Today | Ratified form |
 |---|---|---|
 | Run two things at once | 5 lines, a group, two handles, a list call | `(a, b) :: task.all { f(), g() }` |
-| First result wins | group + handles + `g.race([slow, fast])` | `task.race { slow(), fast() }` |
-| First successful result | group + handles + `g.any([try_a, try_b])` | `task.any { try_a(), try_b() }` |
-| One background task | `tasks.spawn(() => work())` | `task work()` |
-| Task failure | `h.exception() == "cancelled"` string test | `h.join() ?? fallback` — the normal `?` rail |
+| First result wins | group + handles + a list wait | `task.race { slow(), fast() }` |
+| First successful result | group + handles + a list wait | `task.any { try_a(), try_b() }` |
+| One background task | imported spawn helper plus a lambda | `task work()` |
+| Task failure | string state and trace helpers | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
 | Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
 | Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
@@ -51,10 +51,9 @@ parameter positions. `D-CONC-FAIL1=A` retires the separate task outcome
 surface from `D-CONC-OUTCOME1=A`; `D-CONC-CHAN2=D` changes the readiness-table
 spelling selected by `D-CONC-CHAN1=A`.
 
-**Breaking changes.** This is a greenfield redesign. `taskgroup`, `g.task =>`,
-`tasks.spawn(() => …)`, the select builder chain, and the `read`/`edit`
-closures are replaced by the ratified forms. Each decision names the earlier
-law it amends.
+**Breaking changes.** This is a greenfield redesign. The earlier task-group,
+handle-list, imported-spawn, select-builder, and shared-value closure forms are
+replaced by the ratified forms. Each decision names the earlier law it amends.
 
 ## Glossary
 
@@ -115,32 +114,22 @@ code, and what gets deleted. Every ratified form is marked by its decision.
 
 ### 1. Spawning and fan-out — D-CONC-SPAWN1=D
 
-**Today.** Two spawn forms, one behind a module import and a lambda.
-
-```jet
-use core.tasks as tasks
-taskgroup g {
-    a :: g.task => sum_range(1, 25)
-    b :: g.task => sum_range(26, 50)
-    results :: g.all([a, b])
-    print(results[0] + results[1])
-}
-h :: tasks.spawn(() => work())
-h.join()
-```
+**Earlier draft.** Spawning required an imported helper or a named group with
+one handle per child, followed by a list wait. The ratified form removes that
+ceremony.
 
 **Ratified law.** One keyword covers the spawn surface. No import. No lambda
 wrapper for the common forms.
 
 ```jet
-(a, b) :: task.all { sum_range(1, 25), sum_range(26, 50) }   // run both, wait, get both
-print(a + b)
+results :: (task.all { sum_range(1, 25), sum_range(26, 50) }) ?? []
+print(results[0] + results[1])
 
-winner :: task.race { slow(), fast() }   // first result wins; the loser is cancelled
-first  :: task.any  { try_eu(), try_us() } // first Ok wins; errors wait for a winner
+winner :: (task.race { slow(), fast() }) ?? 0       // first success; cancel losers
+first  :: (task.any { try_eu(), try_us() }) ?? 0    // first completion; cancel the rest
 
 h :: task work()                         // one child task, handle in hand
-h.join()
+h.join() ?? 0
 
 task.group g(limit: 4) {                  // dynamic fan-out with a worker cap
     loop url, urls { task fetch(url) }
@@ -152,28 +141,25 @@ The rules, in plain words:
 - `task f()` starts a child of the current scope. Bind the handle and the
   duty to join or detach it is yours. Leave it unbound and the scope joins it
   at the end.
-- `task.all` / `task.race` / `task.any` keep their ratified meanings (fail
-  fast, cancel losers, first Ok). They need no handles at all.
+- `task.all` / `task.race` / `task.any` return `T ? TaskFailure`. `all` waits
+  for every branch and fail-fast cancels siblings; `race` returns the first
+  successful result and cancels losers; `any` returns the first completed
+  result and cancels the rest. They need no handles at all.
 - `task.group g(limit: N)` is for dynamic counts and caps. `g` is a value you
-  can pass to helpers (`fn drain(g: Group, rx: Receiver<Job>)`). It can never
+  can pass to helpers (`fn drain(g: TaskGroup, rx: Receiver<Job>)`). It can never
   be stored, so no child outlives its scope.
 - `D-CONC-GROUP1=A` allows a group borrow in free-function and method
   parameters. Storage, return, capture, and fields remain banned.
 
-**Deleted:** `taskgroup` blocks, `g.task =>`, `g.all([…])`, `g.race`, `g.any`,
-`tasks.spawn(() => …)`, `tasks.spawn_group`. D-CONC-SPAWN1=D keeps the
+**Deleted:** the earlier task-group blocks, handle-list combinators, imported
+spawn helper, and parallel task-outcome surface. D-CONC-SPAWN1=D keeps the
 structured lifetime and combinator laws while changing their spelling.
 D-CONC-GROUP1=A amends D-TASKGROUP-PARAM1's parameter-position rule.
 
 ### 2. Task failure on the `?` rail — D-CONC-FAIL1=A
 
-**Today.** Failure facts hide in strings, and a child panic kills the process.
-
-```jet
-h.cancel()
-if h.exception() == "cancelled" { print("stopped") }
-print(h.trace())     // "paused=false,cancel=true"
-```
+**Earlier draft.** Failure facts were exposed as strings and traces, and a
+child panic killed the process instead of becoming a joined error.
 
 **Ratified law.** `join` is fallible like any other call. One rail carries
 every error in the language.
@@ -199,8 +185,8 @@ if slow.join() == {                      // tell the failures apart (S68 arm tab
 There is no separate outcome type. A task failure is an error. This is the
 type-system-v2 answer: no parallel concept beside results.
 
-**Deleted:** `trace()`, `exception()`, `TaskOutcome`, `TaskStatus`, and the
-panic-kills-process rule for joined children. D-CONC-FAIL1=A amends
+**Deleted:** the string trace/state accessors, separate outcome/status types,
+and the panic-kills-process rule for joined children. D-CONC-FAIL1=A amends
 D-COROUTINE1 and retires the task-outcome surface ratified by
 D-CONC-OUTCOME1=A.
 
@@ -415,7 +401,7 @@ records the amendment.
 | D-CONC-UNIT1 | A | State, duty, and reach use one substrate: typestate, single-use obligations, and one crossing plane. No surface change. |
 | D-CONC-JOIN1 | A | Dropping a bound task handle is a compile error. Join it, use its result, or detach it. The rule extends D-LIN1 and amends L1101. |
 | D-CONC-GROUP1 | A | A group borrow works in free-function and method parameters. It cannot be stored, returned, captured, or put in a field. |
-| D-CONC-OUTCOME1 | A, retired by FAIL1=A | The typed outcome/status surface was ratified, then retired. `TaskOutcome` and `TaskStatus` do not ship; `trace()` and `exception()` stay deleted. |
+| D-CONC-OUTCOME1 | A, retired by FAIL1=A | The typed outcome/status surface was ratified, then retired. Separate status and trace accessors do not ship. |
 | D-CONC-CROSS1 | A | Crossing safety is one registered fact plane with one error family. Existing task, adapter, kernel, cell, and fixed-backing semantics stay unchanged. |
 | D-CONC-STM1 | A | A transaction body runs once. The commit takes locks in fixed order. Contention waits; it does not retry. |
 | D-CONC-SCHED1 | A | Schedule values use the typed time rail. A job is a task the runtime starts. Services use supervisor tasks and groups. |

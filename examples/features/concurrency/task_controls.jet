@@ -1,5 +1,5 @@
 // 157 — D-COROUTINE1: coroutine-grade control via task handles (internal substrate).
-// #1468: yield_now, exception, wait_any, current_task, Sender/Receiver.close.
+// Task failure uses the canonical `TaskFailure` rail.
 use core.tasks as tasks
 use core.time as time
 
@@ -12,19 +12,13 @@ fn run() {
     print(tasks.current_task())
     tasks.yield_now()
 
-    t :: tasks.spawn(() => 7)
+    t :: task 7
     t.pause()
-    print(t.trace())
-    print(t.exception())
     t.resume()
     t.cancel()
-    print(t.trace())
-    print(t.exception())
-    print(t.join())
+    print(t.join() ?? panic("cancelled task"))
 
-    fast :: tasks.spawn(() => 1)
-    slow :: tasks.spawn(() => slow_two())
-    print(tasks.wait_any([slow, fast]))
+    print(task.any { slow_two(), 1 } ?? panic("any failed"))
 
     (tx, rx) :: tasks.channel<Int>()
     tx.send(9)

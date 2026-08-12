@@ -137,7 +137,6 @@ pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
         ("join", 0)
-            
             | ("detach", 0)
             | ("pause", 0)
             | ("pause", 1)

@@ -1184,6 +1184,9 @@ impl<'a> Checker<'a> {
         if enum_name == crate::Syntax::TYPE_KEY {
             return Some(core_key_variants());
         }
+        if let Some(v) = core_task_failure_variants(enum_name) {
+            return Some(v);
+        }
         // D-PROCESS1=A: `ProcessStreamMode` is a core enum — synthesise its variant
         // table so `.Stream`/`.Inherit`/`.Capture` dot-literals resolve (D-ENUMDOT2).
         if enum_name == "ProcessStreamMode" {

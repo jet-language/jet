@@ -686,7 +686,10 @@ fn eval_session_method(
                     Some(diagnostic_span),
                 ));
             } else {
-                session.diagnostics.push(Diagnostic::error(code, what, why, fix, Some(diagnostic_span)));
+                match build_project_error(code, what, why, fix, Some(diagnostic_span)) {
+                    Ok(diagnostic) => session.diagnostics.push(diagnostic),
+                    Err(detail) => session.diagnostics.push(build_diag(detail, diagnostic_span)),
+                }
             }
             return Ok(CtValue::Unit);
         }
@@ -990,4 +993,14 @@ fn build_diag(detail: &str, span: Span) -> Diagnostic {
         "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph".to_string(),
         Some(span),
     )
+}
+
+fn build_project_error(
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    span: Option<Span>,
+) -> Result<Diagnostic, &'static str> {
+    Diagnostic::project_error(code, what, why, fix, span)
 }

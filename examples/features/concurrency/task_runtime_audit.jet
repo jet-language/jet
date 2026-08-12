@@ -8,7 +8,7 @@ fn run() {
         blocked :: task sender.send(2)
         print(ch.receive() ?? panic("channel closed"))
         print(ch.receive() ?? panic("channel closed"))
-        blocked.join().drop("synchronizes with the channel receives above; the send already landed")
+        blocked.join() ?? panic("blocked task failed")
         timeout :: g.select().after(0, -1).wait()
         print(timeout)
         once :: tasks.after(0, 7)

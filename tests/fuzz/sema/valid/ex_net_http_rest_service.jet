@@ -18,11 +18,11 @@ fn run() {
     mux.post("/api/:name/*path", (req: HTTPRequest) => handle_api(req))
     mux.get("/events", (req: HTTPRequest) => Ok(http_server.sse("ready")))
     mux.get("/file", (req: HTTPRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
-    t :: tasks.spawn(() => {
+    t :: task {
         http_server.serve_once_listener(listener, mux) ?? panic("serve1")
         http_server.serve_once_listener(listener, mux) ?? panic("serve2")
         http_server.serve_once_listener(listener, mux) ?? panic("serve3")
-    })
+    }
     req0 :: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1 :: req0.form("tool", "jet")
     req2 :: req1.cookie("session", "abc")
@@ -40,5 +40,5 @@ fn run() {
     file_resp :: file_req.header("range", "bytes=2-5").send() ?? panic("file")
     print(file_resp.status())
     print(file_resp.body().text(8 * 1024 * 1024) ?? "invalid body")
-    t.join()
+    t.join() ?? panic("server failed")
 }

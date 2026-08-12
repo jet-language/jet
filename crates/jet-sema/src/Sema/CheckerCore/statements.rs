@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
-use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
+use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
@@ -2371,11 +2371,7 @@ impl<'a> Checker<'a> {
                     self.taskgroup_stack
                         .push(TaskGroupCtx::new(name.clone(), *name_span));
                     self.check_block(body, false);
-                    let join_start = body.len();
-                    self.append_taskgroup_auto_joins(body);
-                    for s in &mut body[join_start..] {
-                        self.check_stmt(s);
-                    }
+                    self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Lexical);
                     self.taskgroup_stack.pop();
                     self.pop_scope();
                 }

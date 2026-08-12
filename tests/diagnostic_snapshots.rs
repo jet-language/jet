@@ -217,6 +217,12 @@ fn ui_snapshots() {
         let dev_interpreter = src
             .lines()
             .any(|l| l.trim() == "// @dev_interpreter");
+        // D-CANCELMODEL1: parent-control cancellation is produced by a live
+        // task wait, so this fixture renders the shared Prelude diagnostic at
+        // the representative wait expression without inventing user syntax.
+        let parent_control_cancel = src
+            .lines()
+            .any(|l| l.trim() == "// @parent_control_cancel");
         // Compiler/tool-generated Jet may use the reserved `__name` lane.
         // Ordinary fixtures never take this path.
         let generated_source = src.lines().any(|l| l.trim() == "// @generated_source")
@@ -359,6 +365,19 @@ fn ui_snapshots() {
                 } if exit_code != 0 => stderr,
                 jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
             }
+        } else if parent_control_cancel {
+            let cancellation = jet::Codegen::task_group::jet_task_cancellation();
+            let wait_start = src
+                .find("time.sleep")
+                .expect("parent-control fixture must name its wait expression");
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                cancellation.code,
+                cancellation.what.to_string(),
+                cancellation.why.to_string(),
+                cancellation.fix.to_string(),
+                Some(jet::Diagnostics::Span::new(wait_start, wait_start + "time.sleep".len())),
+            );
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if repl_deny {
             let input = src
                 .lines()

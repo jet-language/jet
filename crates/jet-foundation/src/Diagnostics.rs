@@ -8,6 +8,11 @@
 //! (owner, 2026-06-11) — and width-aware caret columns so the underline
 //! lines up even when the source line holds wide characters or emoji.
 
+use std::sync::OnceLock;
+
+const DIAGNOSTICS_SPEC: &str = include_str!("../../../docs/spec/diagnostics.md");
+static CANONICAL_DIAGNOSTIC_CODES: OnceLock<Vec<&'static str>> = OnceLock::new();
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     /// Byte offset into the source, inclusive.
@@ -81,6 +86,86 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub const REPORT_SCHEMA: &str = "jet.report/v1";
+
+/// A code that the canonical diagnostics registry has explicitly registered.
+/// Compiler diagnostics must cross this typed boundary before they become
+/// user-facing reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DiagnosticCode(&'static str);
+
+impl DiagnosticCode {
+    pub fn parse(code: &str) -> Option<Self> {
+        canonical_diagnostic_codes()
+            .iter()
+            .copied()
+            .find(|registered| *registered == code)
+            .map(Self)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+
+    fn from_input(code: &str) -> Self {
+        if let Some(code) = Self::parse(code) {
+            return code;
+        }
+        match code {
+            "__CT_ERR_PROPAGATE__" => Self("__CT_ERR_PROPAGATE__"),
+            "__CT_EARLY_RETURN__" => Self("__CT_EARLY_RETURN__"),
+            _ => crate::ice!(None, "unregistered diagnostic code `{code}`"),
+        }
+    }
+}
+
+impl From<&str> for DiagnosticCode {
+    fn from(code: &str) -> Self {
+        Self::from_input(code)
+    }
+}
+
+impl From<&String> for DiagnosticCode {
+    fn from(code: &String) -> Self {
+        Self::from_input(code)
+    }
+}
+
+impl From<String> for DiagnosticCode {
+    fn from(code: String) -> Self {
+        Self::from_input(&code)
+    }
+}
+
+fn canonical_diagnostic_codes() -> &'static [&'static str] {
+    CANONICAL_DIAGNOSTIC_CODES
+        .get_or_init(|| {
+            let mut in_registry = false;
+            let mut codes = Vec::new();
+            for line in DIAGNOSTICS_SPEC.lines() {
+                let trimmed = line.trim();
+                if trimmed == "## Error code registry" {
+                    in_registry = true;
+                    continue;
+                }
+                if in_registry && trimmed.starts_with("## ") {
+                    break;
+                }
+                if !in_registry || !trimmed.starts_with('|') {
+                    continue;
+                }
+                let mut cells = trimmed.split('|').map(str::trim);
+                let _ = cells.next();
+                let Some(code) = cells.next() else {
+                    continue;
+                };
+                if code != "Code" && (code.starts_with('E') || code.starts_with('L')) {
+                    codes.push(code);
+                }
+            }
+            codes
+        })
+        .as_slice()
+}
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
 pub const MAX_SOURCE_NESTING: usize = 256;
@@ -166,6 +251,27 @@ pub struct Diagnostic {
     pub structured: Option<StructuredDiagnostic>,
 }
 
+/// Control-flow sentinels used by the in-process evaluator and comptime
+/// bridge. This namespace is internal; these values never become product
+/// diagnostics or enter the registered diagnostic-code surface.
+#[doc(hidden)]
+pub mod internal {
+    use super::{Diagnostic, Span};
+
+    pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Diagnostic {
+        Diagnostic::internal_sentinel("SOFT_EXIT", what, why, span)
+    }
+
+    pub fn task_cancelled(span: Option<Span>) -> Diagnostic {
+        Diagnostic::internal_sentinel(
+            "TASK_CANCELLED",
+            "task cancelled".to_string(),
+            "the owning task group stopped this task".to_string(),
+            span,
+        )
+    }
+}
+
 impl Diagnostic {
     /// If `fix` is `replace \`from\` with \`to\`` or `remove \`tok\` …`, attach
     /// a span edit for LSP/CLI autocorrect (M6 phase 4).
@@ -202,7 +308,38 @@ impl Diagnostic {
     /// row's holes after sema has filled them; code, severity, and moment never
     /// come from a second call-site policy.
     pub fn error(
-        code: impl Into<String>,
+        code: impl Into<DiagnosticCode>,
+        what: String,
+        why: String,
+        fix: String,
+        span: Option<Span>,
+    ) -> Self {
+        Self::from_parts(code.into().as_str().to_string(), what, why, fix, span)
+    }
+
+    /// Build a compile-time error emitted by a programmable build rule.
+    ///
+    /// Build rules may use project-owned codes instead of the compiler's
+    /// registry. Keep that escape checked here so the runtime bridge never
+    /// constructs a report by hand.
+    pub fn project_error(
+        code: String,
+        what: String,
+        why: String,
+        fix: String,
+        span: Option<Span>,
+    ) -> Result<Self, &'static str> {
+        if code.is_empty() {
+            return Err("custom diagnostic code must not be empty");
+        }
+        if code.chars().any(char::is_control) {
+            return Err("custom diagnostic code must not contain control characters");
+        }
+        Ok(Self::from_parts(code, what, why, fix, span))
+    }
+
+    fn from_parts(
+        code: String,
         what: String,
         why: String,
         fix: String,
@@ -265,7 +402,7 @@ impl Diagnostic {
         Self::internal_sentinel(
             "TASK_CANCELLED",
             "task cancelled".to_string(),
-            "the owning taskgroup stopped this task".to_string(),
+            "the owning task group stopped this task".to_string(),
             span,
         )
     }
@@ -313,7 +450,7 @@ impl Diagnostic {
     }
 
     pub fn lint(
-        code: impl Into<String>,
+        code: impl Into<DiagnosticCode>,
         what: String,
         why: String,
         fix: String,
@@ -912,6 +1049,31 @@ pub fn display_char_width(c: char) -> usize {
         return 2;
     }
     1
+}
+
+#[cfg(test)]
+mod diagnostic_code_tests {
+    use super::{Diagnostic, DiagnosticCode};
+
+    #[test]
+    fn canonical_registry_includes_runtime_control_codes() {
+        assert_eq!(DiagnosticCode::parse("E3003").unwrap().as_str(), "E3003");
+        assert_eq!(DiagnosticCode::parse("E3004").unwrap().as_str(), "E3004");
+        assert_eq!(DiagnosticCode::parse("L0507").unwrap().as_str(), "L0507");
+        assert!(DiagnosticCode::parse("__CT_ERR_PROPAGATE__").is_none());
+    }
+
+    #[test]
+    fn established_comptime_sentinels_keep_their_private_escape() {
+        let diagnostic = Diagnostic::error(
+            "__CT_ERR_PROPAGATE__",
+            String::new(),
+            String::new(),
+            String::new(),
+            None,
+        );
+        assert_eq!(diagnostic.code, "__CT_ERR_PROPAGATE__");
+    }
 }
 
 /// Render a batch of diagnostics, blank line between each.

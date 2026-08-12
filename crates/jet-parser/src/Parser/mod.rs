@@ -438,7 +438,17 @@ impl<'a> Parser<'a> {
             Token {
                 kind: TokKind::Ident(name),
                 span,
-            } => Ok((name, span)),
+            } if name != Syntax::KW_CONC_TASK => Ok((name, span)),
+            Token {
+                kind: TokKind::Ident(name),
+                span,
+            } => Err(Diagnostic::error(
+                "E0003",
+                format!("`{name}` is reserved for structured task syntax"),
+                "the `task` word starts a child or task combinator".to_string(),
+                "choose a different identifier name".to_string(),
+                Some(span),
+            )),
             t => Err(Diagnostic::error(
                 "E0003",
                 format!("expected a name {}, found {}", where_, describe(&t.kind)),
@@ -628,7 +638,7 @@ mod s61_tests {
         });
         match &bind.expect("binding").init {
             Expr::MethodCall { method, args, .. } => {
-                assert_eq!(method, "spawn");
+                assert_eq!(method, Syntax::INTERNAL_TASK_SPAWN_METHOD);
                 assert_eq!(args.len(), 1);
                 assert!(matches!(args[0].expr, Expr::Lambda(_)));
             }
@@ -659,7 +669,7 @@ mod s61_tests {
         let Expr::MethodCall { method, args, .. } = &binding.init else {
             panic!("expected task.race method call, got {:?}", binding.init);
         };
-        assert_eq!(method, "race");
+        assert_eq!(method, Syntax::INTERNAL_TASK_RACE_METHOD);
         let Expr::ListLit(branches, _) = &args[0].expr else {
             panic!("expected task.race branch list, got {:?}", args[0].expr);
         };
@@ -670,13 +680,13 @@ mod s61_tests {
                 method,
                 args,
                 ..
-            } if method == "spawn"
+            } if method == Syntax::INTERNAL_TASK_SPAWN_METHOD
                 && matches!(
                     args.first().map(|arg| &arg.expr),
                     Some(Expr::Lambda(Lambda {
                         body: LambdaBody::Expr(inner),
                         ..
-                    })) if matches!(inner.as_ref(), Expr::MethodCall { method, .. } if method == "all")
+                    })) if matches!(inner.as_ref(), Expr::MethodCall { method, .. } if method == Syntax::INTERNAL_TASK_ALL_METHOD)
                 )
         ));
         assert!(matches!(
@@ -685,7 +695,7 @@ mod s61_tests {
                 method,
                 args,
                 ..
-            } if method == "spawn"
+            } if method == Syntax::INTERNAL_TASK_SPAWN_METHOD
                 && matches!(
                     args.first().map(|arg| &arg.expr),
                     Some(Expr::Lambda(Lambda {

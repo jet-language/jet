@@ -292,10 +292,10 @@ fn jit_map_intn_value_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. }))
 }
 
-pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
+pub(crate) fn jit_list_task_type(ty: &Type) -> bool {
     if let Type::List(inner) = ty {
         if let Type::Apply { name, args } = inner.as_ref() {
-            return name == "Task" && args.len() == 1 && matches!(&args[0], Type::Int);
+            return name == "Task" && args.len() == 1 && jit_concurrency_elem(&args[0]);
         }
     }
     false
@@ -392,7 +392,7 @@ pub(crate) fn jit_enum_type(ty: &Type) -> bool {
 fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
         || jit_list_of_int_list_type(ty)
-        || jit_list_task_int_type(ty)
+        || jit_list_task_type(ty)
         || jit_list_record_type(ty)
         || jit_map_string_type(ty)
         || jit_struct_type(ty)
@@ -511,7 +511,7 @@ fn jit_cell_value_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR)
+    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR || n == jet_foundation::Syntax::TYPE_TASK_FAILURE)
         || jit_value_type(ty)
 }
 
@@ -1252,7 +1252,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     Type::List(inner) if jit_list_native_type(inner)
                         && matches!(inner.as_ref(), Type::List(elem) if matches!(elem.as_ref(), Type::String))
                 ) && elems.iter().all(|e| resident_safe_expr(e, callees)))
-                || (jit_list_task_int_type(&expr.ty)
+                || (jit_list_task_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_record_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
@@ -1645,10 +1645,28 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             resident_safe_closure_method(recv, op, args, callees)
         }
         TExprKind::TaskGroupAll { tasks } => {
-            jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
+            matches!(
+                &expr.ty,
+                Type::Result { ok, err }
+                    if matches!(
+                        err.as_ref(),
+                        Type::Named(name) if name == jet_foundation::Syntax::TYPE_TASK_FAILURE
+                    )
+                        && jit_list_native_type(ok)
+            ) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::TaskGroupRace { tasks } | TExprKind::TaskGroupAny { tasks } => {
-            matches!(&expr.ty, Type::Int) && resident_safe_task_list_expr(tasks, callees)
+            matches!(
+                &expr.ty,
+                Type::Result { ok, err }
+                    if matches!(
+                        ok.as_ref(),
+                        ty if jit_value_type(ty)
+                        && matches!(
+                            err.as_ref(),
+                            Type::Named(name) if name == jet_foundation::Syntax::TYPE_TASK_FAILURE
+                        )
+            )) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::SelectStart => true,
         TExprKind::SelectRecv { builder, channel } => {
@@ -3387,10 +3405,15 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::EnumMatch {
-            arms, else_body, ..
+            scrutinee,
+            arms,
+            else_body,
+            ..
         } => {
-            arms.iter()
-                .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
+            resident_safe_expr(scrutinee, callees)
+                && arms
+                    .iter()
+                    .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
@@ -3763,6 +3786,21 @@ pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
     for f in &program.funcs {
         count_spawn_sites_stmts(&f.body, &mut n);
     }
+    // A task lambda can contain another task/combinator. Its spawn expression
+    // lives in the lambda table rather than in the enclosing function body,
+    // so count those nested sites as well. Each table entry is visited once;
+    // the enclosing expression still accounts for the entry that launched it.
+    for lambda in &program.spawn_lambdas {
+        match &lambda.body {
+            TJitSpawnBody::Expr(expr) => count_spawn_sites_expr(expr, &mut n),
+            TJitSpawnBody::Block { prefix, tail } => {
+                count_spawn_sites_stmts(prefix, &mut n);
+                if let Some(tail) = tail {
+                    count_spawn_sites_expr(tail, &mut n);
+                }
+            }
+        }
+    }
     n
 }
 
@@ -3842,8 +3880,12 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::StructDestructure { init, .. }
             | TStmt::ListDestructure { init, .. } => count_spawn_sites_expr(init, n),
             TStmt::EnumMatch {
-                arms, else_body, ..
+                scrutinee,
+                arms,
+                else_body,
+                ..
             } => {
+                count_spawn_sites_expr(scrutinee, n);
                 for arm in arms {
                     count_spawn_sites_stmts(&arm.body, n);
                 }
@@ -3977,10 +4019,95 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             }
         }
         TExprKind::OrFallback { value, .. } => count_spawn_sites_expr(value, n),
+        TExprKind::ListLit(elems) => {
+            for elem in elems {
+                count_spawn_sites_expr(elem, n);
+            }
+        }
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
         _ => {}
+    }
+}
+
+/// Return the first global callback site referenced by a nested spawn lambda.
+///
+/// Top-level functions share one traversal cursor. A nested lambda has its own
+/// compiler pass, so it must start that cursor at the first site in its body;
+/// otherwise the second nested task/combinator resolves to the first lambda's
+/// callback. The TIR site is already authoritative; this helper only locates
+/// it for the JIT adapter.
+pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
+    fn find_expr(node: &TExpr) -> Option<usize> {
+        match &node.kind {
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn { site, .. },
+            } => Some(*site),
+            TExprKind::Print(inner)
+            | TExprKind::Unary { operand: inner, .. }
+            | TExprKind::Clone(inner)
+            | TExprKind::Ok(inner)
+            | TExprKind::Err(inner)
+            | TExprKind::Try { inner, .. } => find_expr(inner),
+            TExprKind::Binary { lhs, rhs, .. } => find_expr(lhs).or_else(|| find_expr(rhs)),
+            TExprKind::Call { args, .. } => args.iter().find_map(|arg| find_expr(&arg.value)),
+            TExprKind::HandleMethod { recv, args, .. }
+            | TExprKind::BuiltinMethod { recv, args, .. }
+            | TExprKind::ClosureMethod { recv, args, .. } => find_expr(recv)
+                .or_else(|| args.iter().find_map(find_expr)),
+            TExprKind::CoreCall { args, .. } => args.iter().find_map(find_expr),
+            TExprKind::OrFallback { value, fallback } => find_expr(value).or_else(|| match fallback {
+                TOrFallback::Value(inner) | TOrFallback::Return(Some(inner)) => find_expr(inner),
+                TOrFallback::Panic { msg, .. } => find_expr(msg),
+                TOrFallback::Return(None)
+                | TOrFallback::Break
+                | TOrFallback::Continue
+                | TOrFallback::BreakLabel(_)
+                | TOrFallback::ContinueLabel(_) => None,
+            }),
+            TExprKind::ListLit(elems) => elems.iter().find_map(find_expr),
+            TExprKind::TaskGroupAll { tasks }
+            | TExprKind::TaskGroupRace { tasks }
+            | TExprKind::TaskGroupAny { tasks } => find_expr(tasks),
+            _ => None,
+        }
+    }
+    fn find_stmts(stmts: &[TStmt]) -> Option<usize> {
+        stmts.iter().find_map(|stmt| match stmt {
+            TStmt::Let { init, .. }
+            | TStmt::Assign { value: init, .. }
+            | TStmt::ExprStmt(init)
+            | TStmt::Return(Some(init)) => find_expr(init),
+            TStmt::TaskGroup { body, .. }
+            | TStmt::Region(body)
+            | TStmt::Impure(body)
+            | TStmt::Inline(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Shield { body }
+            | TStmt::DebugOnly(body)
+            | TStmt::Layout { body, .. } => find_stmts(body),
+            TStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => find_stmts(then_body).or_else(|| else_body.as_deref().and_then(find_stmts)),
+            TStmt::EnumMatch {
+                scrutinee,
+                arms,
+                else_body,
+                ..
+            } => find_expr(scrutinee)
+                .or_else(|| arms.iter().find_map(|arm| find_stmts(&arm.body)))
+                .or_else(|| else_body.as_deref().and_then(find_stmts)),
+            _ => None,
+        })
+    }
+    match &lambda.body {
+        TJitSpawnBody::Expr(expr) => find_expr(expr),
+        TJitSpawnBody::Block { prefix, tail } => {
+            find_stmts(prefix).or_else(|| tail.as_deref().and_then(find_expr))
+        }
     }
 }
 
@@ -4002,7 +4129,7 @@ fn resident_safe_expr_list(exprs: &[TExpr], callees: &HashSet<String>) -> bool {
 }
 
 fn resident_safe_task_list_expr(tasks: &TExpr, callees: &HashSet<String>) -> bool {
-    jit_list_task_int_type(&tasks.ty) && resident_safe_expr(tasks, callees)
+    jit_list_task_type(&tasks.ty) && resident_safe_expr(tasks, callees)
 }
 
 fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool {
@@ -4283,20 +4410,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::TaskCancel
         | THandleOp::TaskDetach
         | THandleOp::TaskPause
-        | THandleOp::TaskResume
-        | THandleOp::TaskTrace
-        | THandleOp::TaskException => {
+        | THandleOp::TaskResume => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
-        }
-        // D-VERDICT-1323-1: the list twins take a list of task handles.
-        THandleOp::TaskDetachAll
-        | THandleOp::TaskCancelAll
-        | THandleOp::TaskPauseAll
-        | THandleOp::TaskResumeAll
-        | THandleOp::TaskTraceAll => {
-            args.is_empty()
-                && matches!(&recv.ty, Type::List(inner)
-                    if matches!(inner.as_ref(), Type::Apply { name, .. } if name == "Task"))
         }
         THandleOp::ChannelReceive => {
             args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Receiver")

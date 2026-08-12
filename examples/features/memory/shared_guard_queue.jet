@@ -24,7 +24,7 @@ fn run() {
     task.group workers {
         producer :: task produce(queue, changed)
         consume(queue, changed)
-        producer.join().drop("synchronizes with consume; the producer's own task body already ran to completion")
+        producer.join() ?? panic("producer failed")
     }
     print(queue.read(value => value.jobs.first() ?? 0))
 }

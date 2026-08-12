@@ -268,10 +268,6 @@ pub struct LambdaMeta {
     /// projector. Later tiers consume this fact instead of reinterpreting the
     /// lambda body.
     pub cell_projection_path: Option<Vec<String>>,
-    /// D-TASKBORROW1=A: this lambda is a `taskgroup` child that captures one or
-    /// more borrowed places sema proved disjoint. Every tier spawns it through
-    /// the scoped path whose loan the group closes at join.
-    pub scoped_task_borrow: bool,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

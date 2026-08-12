@@ -1204,10 +1204,10 @@ fn mk() {
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer is
         // covered via the core-call shape (a fixed-string `jet_std::channel::<T>()`
         // emit; its `(Sender<T>, Receiver<T>)` return type rides on `resolved_ret`,
-        // filled from the call-site turbofish). `tasks.spawn` stays out of this
-        // shape — it has its own bespoke `CoreClosureCall` shape (a `move |…|` closure).
+        // filled from the call-site turbofish). Canonical `task` stays out of
+        // this shape — it has its own bespoke `CoreClosureCall` shape (a
+        // `move |…|` closure).
         assert!(core_call_covered("core.tasks", "channel"));
-        assert!(!core_call_covered("core.tasks", "spawn"));
         // c109 Phase 25: the HTTPRouter producer + parse/dispatch core calls are covered
         // (fixed-string emits; their return types live in sema's `infer_core_call`, not
         // `core_fixed_sig`). `http.serve` stays out (closure-taking → `CoreClosureCall`).
@@ -1522,7 +1522,7 @@ fn greet() => String { return input() }
         // `build_cx`-only (no sema), so the method calls carry `recv_type == None`
         // (the unannotated AST default), which is exactly what the d3 shape keys on;
         // the `Receiver<Int>` annotation supplies the value type. (The
-        // `tasks.spawn(take(..) …)`/`Task.join` slice depends on sema-filled
+        // `task take(..)`/`Task.join` slice depends on sema-filled
         // `Lambda.meta`, so it's proven end-to-end in the TIR feature integration
         // targets.)
         let src = "\

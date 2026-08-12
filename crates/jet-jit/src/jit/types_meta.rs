@@ -82,7 +82,7 @@ pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool>
 
 use super::safety::{
     jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
-    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_int_type,
+    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_type,
     jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
@@ -259,7 +259,7 @@ pub(crate) fn clif_ty_with_distinct(
                     Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
                 )
         )
-        || jit_list_task_int_type(&ty)
+        || jit_list_task_type(&ty)
         || jit_list_record_type(&ty)
         || jit_list_iter_elem_type(&ty).is_some()
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
@@ -625,6 +625,16 @@ impl<'a> JitMeta<'a> {
 
     /// Discriminant index from structured enum + variant Jet names.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
+        // D-CONC-FAIL1=A: Prelude TaskFailure uses the same order on every
+        // packed enum ABI, even when no user enum table reaches this JIT.
+        if enum_name == jet_foundation::Syntax::TYPE_TASK_FAILURE {
+            return match variant {
+                "Cancelled" => Some(0),
+                "DeadlineBlown" => Some(1),
+                "Panicked" => Some(2),
+                _ => None,
+            };
+        }
         // Core ProcessStreamMode is not registered on JitProgram; fixed order
         // matches jet_std::ProcessStreamMode { Stream, Inherit, Capture }.
         if enum_name == "ProcessStreamMode" {
@@ -878,6 +888,7 @@ impl<'a> JitMeta<'a> {
                 | "ServiceReceipt"
                 | "IOOperation"
                 | "IOError"
+                | jet_foundation::Syntax::TYPE_TASK_FAILURE
         ) || self.enum_variants.contains_key(name)
     }
 

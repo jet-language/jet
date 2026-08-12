@@ -538,7 +538,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
             env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
             // Rust reference need the window type when this local crosses into
-            // a taskgroup child. AOT ignores this fact.
+            // a task group child. AOT ignores this fact.
             if let Some(elem) = elem_ty.clone() {
                 let handle = if candidate.write {
                     Some(Type::Apply {

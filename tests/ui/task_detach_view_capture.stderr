@@ -1,23 +1,23 @@
 Error [E2305]: a returned view cannot borrow from a temporary argument
-  --> tests/ui/task_detach_view_capture.jet:7:33
+  --> tests/ui/task_detach_view_capture.jet:5:20
     |
-  7 |     t :: tasks.spawn(() => peek([1, 2, 3]))
-    |                                 ^^^^^^^^^
+  5 |     t :: task peek([1, 2, 3])
+    |                    ^^^^^^^^^
  Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
  Fix: store the owner in a named binding first, then pass that binding to the view-returning call
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:7:22
+  --> tests/ui/task_detach_view_capture.jet:5:15
     |
-  7 |     t :: tasks.spawn(() => peek([1, 2, 3]))
-    |                      ^^^^^^^^^^
+  5 |     t :: task peek([1, 2, 3])
+    |               ^^^^
  Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E1106]: can't detach task `t` — it captured a `view` borrow that may not live long enough
-  --> tests/ui/task_detach_view_capture.jet:8:7
+  --> tests/ui/task_detach_view_capture.jet:6:7
     |
-  8 |     t.detach()
+  6 |     t.detach()
     |       ^^^^^^
  Why: a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
  Fix: pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`

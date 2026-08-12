@@ -516,7 +516,7 @@ fn run() {
     assert_eq!(stdout, "200: m=GET p=/x\n");
 }
 
-/// c109 Phase 21: `tasks.spawn` + `Task<T>` value + `Task.join()` — the spawn/join
+/// c109 Phase 21: `task` + `Task<T>` value + `Task.join()` — the spawn/join
 /// surface (32_tasks). The spawn closure is Phase-11/13 covered; the new coverage is the
 /// `Task<Int>` binding value type + the `recv_type == None` `.join()` method.
 #[test]
@@ -525,7 +525,6 @@ fn task_spawn_join() {
         return;
     }
     let src = "\
-use core.tasks as tasks
 fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n, first..last {
@@ -534,9 +533,9 @@ fn sum_range(first: Int, last: Int) => Int {
     return total
 }
 fn run() {
-    a :: tasks.spawn(() => sum_range(1, 25))
-    b :: tasks.spawn(() => sum_range(26, 50))
-    print((a.join() + b.join()))
+    a :: task sum_range(1, 25)
+    b :: task sum_range(26, 50)
+    print((a.join() ?? 0) + (b.join() ?? 0))
 }
 ";
     let (code, stdout) = build_and_run("tir_task_spawn_join", src);
@@ -583,8 +582,11 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
                 stderr,
                 exit_code,
             } => {
-                assert_eq!(exit_code, code, "{tier} exit drift");
-                assert_eq!(stderr, "", "{tier} stderr drift");
+                assert_eq!(
+                    exit_code, code,
+                    "{tier} exit drift: stdout={tier_stdout:?} stderr={stderr:?}"
+                );
+                assert_eq!(stderr, "", "{tier} stderr drift: stdout={tier_stdout:?}");
                 assert_eq!(tier_stdout, stdout, "{tier} ordered output drift");
                 if !force_interpreter {
                     assert!(
@@ -608,15 +610,14 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
     }
 }
 
-/// D-FANOUT3=C: `tasks.join_all` consumes each handle, waits in list order,
-/// and returns the results in that same order.
+/// D-CONC-SPAWN1=D: `task.all` waits for each branch in source order and
+/// returns the results in that same order.
 #[test]
-fn task_join_all() {
+fn task_all() {
     if !have_rustc() {
         return;
     }
-    let src = "\
-use core.tasks as tasks
+    let src = r#"
 fn work(value: Int, turns: Int) => Int {
     total := value
     loop _, 1..turns {
@@ -626,61 +627,127 @@ fn work(value: Int, turns: Int) => Int {
     return total
 }
 fn run() {
-    first :: tasks.spawn(() => work(10, 10000))
-    second :: tasks.spawn(() => work(20, 1))
-    third :: tasks.spawn(() => work(30, 100))
-    results :: tasks.join_all([first, second, third])
+    results :: (task.all {
+        work(10, 10000),
+        work(20, 1),
+        work(30, 100)
+    }) ?? panic("task.all failed")
     print(results[0], results[1], results[2])
 }
-";
-    assert_task_tier_parity("tir_task_join_all", src, "10\n20\n30\n");
+"#;
+    assert_task_tier_parity("tir_task_all", src, "10\n20\n30\n");
 }
 
+/// D-CONC-FAIL1=A: child failure is one typed rail on AOT, resident JIT, and
+/// forced interpreter. `??` is the only consumer-side recovery form.
 #[test]
-fn task_join_all_allows_nested_loose_spawn_in_every_tier() {
+fn task_failure_rail() {
     if !have_rustc() {
         return;
     }
-    let src = "\
-use core.tasks as tasks
-fn nested(value: Int) => Int {
-    inner :: tasks.spawn(() => value + 1)
-    return tasks.join_all([inner])[0]
+    let src = r#"
+use core.time as time
+
+fn boom() => Int {
+    panic("boom")
+    return 0
+}
+fn deadline() => Int {
+    #Context(deadline: 0) {
+        time.sleep(1)
+    }
+    return 0
+}
+fn failure_label(error: TaskFailure) => String {
+    if error == {
+        .Panicked(reason) -> {
+            return "panic:{reason}"
+        }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
 }
 fn run() {
-    outer :: tasks.spawn(() => nested(40))
-    print(tasks.join_all([outer])[0])
+    task.group workers {
+        failed :: task boom()
+        failed_result :: failed.join()
+        if failed_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong panic variant") }
+        }
+        all_result :: task.all { boom(), 2 }
+        if all_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong all variant") }
+        }
+        expired :: task deadline()
+        expired_result :: expired.join()
+        if expired_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong deadline variant") }
+        }
+        cancelled :: task {
+            time.sleep(1000)
+        }
+        cancelled.cancel()
+        cancelled_result :: cancelled.join()
+        if cancelled_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong cancel variant") }
+        }
+    }
 }
-";
-    assert_task_tier_parity("tir_task_join_all_nested", src, "41\n");
+"#;
+    assert_task_tier_parity(
+        "tir_task_failure_rail",
+        src,
+        "panic:boom\npanic:boom\ndeadline\ncancelled\n",
+    );
 }
 
 #[test]
-fn task_join_all_parent_deadline_is_e3003_in_every_tier() {
+fn task_all_allows_nested_task_in_every_tier() {
     if !have_rustc() {
         return;
     }
     let src = "\
-use core.tasks as tasks
+fn nested(value: Int) => Int {
+    inner :: task value + 1
+    return inner.join() ?? 0
+}
+fn run() {
+    outer :: task nested(40)
+    print(outer.join() ?? 0)
+}
+";
+    assert_task_tier_parity("tir_task_all_nested", src, "41\n");
+}
+
+#[test]
+fn task_join_parent_deadline_is_e3003_in_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
 fn run() {
     #Context(deadline: 0) {
-        handle :: tasks.spawn(() => 10)
-        tasks.join_all([handle])
+        handle :: task 10
+        handle.join() ?? 0
     }
     print(\"unreachable\")
 }
 ";
     let (code, stdout, stderr) =
-        build_and_run_full("jet_tir_test", "tir_task_join_all_deadline", src);
+        build_and_run_full("jet_tir_test", "tir_task_join_deadline", src);
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
-        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        stderr.contains("Error [E3003]: deadline exceeded while waiting in task join"),
         "{stderr}"
     );
 
     let dir = std::env::temp_dir().join(format!(
-        "jet_task_join_all_deadline_parity_{}",
+        "jet_task_join_deadline_parity_{}",
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
@@ -743,65 +810,104 @@ fn run() {
 }
 
 #[test]
-fn task_join_all_consumes_handles_once() {
-    let valid = "\
-use core.tasks as tasks
+fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.time as time
+
+fn slow(value: Int) => Int {
+    time.sleep(1)
+    return value
+}
+
 fn run() {
-    first :: tasks.spawn(() => 10)
-    second :: tasks.spawn(() => 20)
-    handles :: [first, second]
-    results :: tasks.join_all(^handles)
-    print(results.len())
+    #Context(deadline: 0) {
+        task.group workers {
+            if (task.all { slow(1), slow(2) }) == {
+                .Ok(results) -> {
+                    print(results[0], results[1])
+                }
+                .Err(error) -> {
+                    panic(\"unexpected child task failure\")
+                }
+            }
+        }
+    }
+    print(\"unreachable\")
 }
 ";
-    let compiled = jet::compile(valid).expect("join_all should consume the handle list");
+    let (code, stdout, stderr) =
+        build_and_run_full("jet_tir_test", "tir_task_all_deadline", src);
+    assert_eq!(code, 70, "{stderr}");
+    assert_eq!(stdout, "", "{stderr}");
     assert!(
-        compiled.lints.iter().all(|lint| lint.code != "L1101"),
-        "joined handles must not trigger L1101: {:?}",
-        compiled.lints
+        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        "{stderr}"
     );
 
-    let duplicate = "\
-use core.tasks as tasks
-fn run() {
-    handle :: tasks.spawn(() => 10)
-    tasks.join_all([handle, handle])
-}
-";
-    let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
+    let dir = std::env::temp_dir().join(format!(
+        "jet_task_all_deadline_parity_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("combinator bundle should load");
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                jet::Diagnostics::Severity::Error
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "combinator program must type-check: {errors:?}");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
-        "expected E0121 for duplicate handle consumption, got {diagnostics:?}"
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "combinator program must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
+    jet_jit::try_compile_bundle(&bundle)
+        .expect("combinator program must compile in resident JIT");
 
-    let reused = "\
-use core.tasks as tasks
-fn run() {
-    handle :: tasks.spawn(() => 10)
-    tasks.join_all([handle])
-    handle.join()
-}
-";
-    let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
-        "expected E0121 after join_all consumption, got {diagnostics:?}"
-    );
-
-    let borrowed_list = "\
-use core.tasks as tasks
-fn run() {
-    handle :: tasks.spawn(() => 10)
-    handles :: [handle]
-    tasks.join_all(handles)
-}
-";
-    let diagnostics =
-        jet::compile(borrowed_list).expect_err("named handle lists need an ownership transfer");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"),
-        "expected E0201 for a borrowed handle list, got {diagnostics:?}"
-    );
+    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+        jet_jit::reset_jit_trace_for_test();
+        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_ne!(exit_code, 0, "{tier} ignored the expired deadline");
+                assert_eq!(stdout, "", "{tier} continued after the expired deadline");
+                assert!(stderr.contains("E3003"), "{tier}: {stderr}");
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                assert!(
+                    diagnostics.iter().any(|diagnostic| diagnostic.code == "E3003"),
+                    "{tier} reported the wrong deadline error: {diagnostics:?}"
+                );
+            }
+        }
+        if !force_interpreter {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "combinator program must execute native resident JIT code"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "combinator program resident JIT must not invoke fallback"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "combinator program resident JIT must not deopt"
+            );
+        }
+    }
 }
 
 /// c109 Phase 21: `Task.detach()` (D-DETACH1) — fire-and-forget; drops the handle.
@@ -811,9 +917,9 @@ fn task_detach() {
         return;
     }
     let src = "\
-use core.tasks
 fn run() {
-    tasks.spawn(() => 42).detach()
+    handle :: task 42
+    handle.detach()
     print(\"launched\")
 }
 ";
@@ -824,36 +930,36 @@ fn run() {
 
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
 /// `tasks.channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
-/// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `take(..)`
-/// spawn closure), `Task.join()`, and `Receiver.receive() ?? panic(..)`
+/// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `task` body),
+/// `Task.join()`, and `Receiver.receive() ?? panic(..)`
 /// (`Result<T, Closed>` unwrap).
 #[test]
 fn channel_send_receive() {
     if !have_rustc() {
         return;
     }
-    let src = "\
+    let src = r#"
 use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
     s2 :: ~s1
-    t1 :: tasks.spawn(() => {
+    t1 :: task {
         s1.send(30)
-    })
-    t2 :: tasks.spawn(() => {
+    }
+    t2 :: task {
         s2.send(12)
-    })
-    t1.join()
-    t2.join()
+    }
+    t1.join() ?? panic("task failed")
+    t2.join() ?? panic("task failed")
     results := [Int].{}
-    results.push(ch.receive() ?? panic(\"channel closed\"))
-    results.push(ch.receive() ?? panic(\"channel closed\"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
     results.sort()
     loop x, results {
         print(x)
     }
 }
-";
+"#;
     let (code, stdout) = build_and_run("tir_channel", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "12\n30\n");
@@ -870,7 +976,9 @@ fn run() {
     task.group g {
         (sender, receiver) :: tasks.channel<Int>()
         sender.send(42)
-        value :: g.select().recv(receiver).wait()
+        value :: if {
+            received, receiver -> received
+        }
         print(value)
     }
 }

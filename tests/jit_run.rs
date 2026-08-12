@@ -160,7 +160,7 @@ fn bounded_workers_example_has_total_tir() {
     // frames (#1319). Direct calls to jet_jit's lowering helpers bypass the
     // 32 MiB compiler worker thread that public entry points like
     // `jet::compile` route through, so they still run on libtest's default
-    // 2 MiB thread. bounded_workers's four sequential `tasks.spawn` closures
+    // 2 MiB thread. bounded_workers's four sequential `task` closures
     // plus channel/generic inference push that over the edge. Same fix as
     // #1614/#1615: give this test the same 16 MiB thread jit_coverage_audit
     // uses, instead of overflowing.

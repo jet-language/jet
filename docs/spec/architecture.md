@@ -96,7 +96,7 @@ native build must not lean on rustc `Send` as the backstop (I2).
 Covered mechanisms (`tests/concurrency_boundaries.rs` and matching UI
 snapshots):
 
-- A task created by `tasks.spawn` or `g.task` owns or copies its captures.
+- A child created by `task` owns or copies its captures.
   Values accepted by Jet's ordinary copy law are copied when the closure is
   created, so the source binding remains available without a preparatory
   binding. Owned values that cannot be copied move.

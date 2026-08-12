@@ -2,9 +2,9 @@ use core.tasks
 
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
-    t :: tasks.spawn(() => {
+    t :: task {
         sender.send(1)
-    })
-    t.join()
+    }
+    t.join() ?? panic("task did not send a value")
     print(ch.receive() ?? panic("task did not send a value"))
 }

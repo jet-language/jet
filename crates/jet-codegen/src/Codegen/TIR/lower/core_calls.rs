@@ -62,6 +62,9 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 /// c109 Phase 13: lower a closure-taking core call (`http.serve`/`scope.guard`)
 /// into a bespoke `CoreClosureCall` node. Returns `None` when `(module, method)`
 /// isn't one of the two (so the caller falls through to the plain
+/// c109 Phase 13: lower a closure-taking core call (`http.serve`/`scope.guard`)
+/// into a bespoke `CoreClosureCall` node. Returns `None` when `(module, method)`
+/// isn't one of the two (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
 pub(super) fn core_module_path_from_receiver(

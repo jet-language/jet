@@ -305,7 +305,7 @@ pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 21: a `Task<T>`/`Channel<T>`/`Sender<T>` element type. Any covered value
 /// type, PLUS `Unit` (`Type::Named("Unit")`) — the result type of a `() => { … }` spawn
-/// closure that returns nothing (`tasks.spawn(() => { s.send(…) })` →
+/// closure that returns nothing (`task { s.send(…) }` →
 /// `Task<Unit>`, the `[Task<Unit>]` worker list in 34_parallel_scan). `Unit` renders via
 /// `cx.rust_type` to `()` (Source/Codegen/Context.rs), so `JetTask<()>` is byte-identical
 /// to the AST path. (`Unit` is not a covered value type generally — it has no binding/

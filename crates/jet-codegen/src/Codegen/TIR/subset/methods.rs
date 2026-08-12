@@ -179,10 +179,10 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-CONC-SPAWN1=D: canonical task nodes lower through the same scoped
-    // spawn/select TIR shapes as the pre-existing task implementation.
+    // D-CONC-SPAWN1=D: canonical task nodes lower through the same spawn/select
+    // TIR shapes as the pre-existing task implementation.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-        && method == "spawn"
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         return args.len() == 1
             && args[0].label.is_none()
@@ -190,7 +190,12 @@ pub(crate) fn method_call_in_subset(
             && expr_in_subset(&args[0].expr, cx, locals);
     }
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
-        && matches!(method, "all" | "race" | "any")
+        && matches!(
+            method,
+            Syntax::INTERNAL_TASK_ALL_METHOD
+                | Syntax::INTERNAL_TASK_RACE_METHOD
+                | Syntax::INTERNAL_TASK_ANY_METHOD
+        )
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
@@ -199,7 +204,7 @@ pub(crate) fn method_call_in_subset(
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     );
     if task_group_receiver
-        && method == Syntax::TASKGROUP_SPAWN_METHOD
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         return args.len() == 1
             && args[0].label.is_none()
@@ -209,13 +214,14 @@ pub(crate) fn method_call_in_subset(
     // D-CONC-SPAWN1=D: canonical `task.group` combinators use the same TIR
     // nodes as top-level `task.all`/`task.race`/`task.any`.
     if task_group_receiver
-        && method == Syntax::TASKGROUP_ALL_METHOD
+        && method == Syntax::INTERNAL_TASK_ALL_METHOD
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
     // D-CONC-SPAWN1=D: `task.race { … }` / `task.any { … }` — nested child combinators.
     if task_group_receiver
-        && (method == Syntax::TASKGROUP_RACE_METHOD || method == Syntax::TASKGROUP_ANY_METHOD)
+        && (method == Syntax::INTERNAL_TASK_RACE_METHOD
+            || method == Syntax::INTERNAL_TASK_ANY_METHOD)
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
@@ -675,9 +681,7 @@ pub(crate) fn method_call_in_subset(
     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
     // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
-    if recv_type.is_none()
-        && (is_concurrency_method_name(method, args.len())
-            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
+    if recv_type.is_none() && is_concurrency_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args

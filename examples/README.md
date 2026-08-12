@@ -17,7 +17,7 @@ the only path.
 | Teach first | Keep beside it as expert |
 |---|---|
 | `#CLI` typed entry args | raw `io.args()` walks |
-| `para_map` / `taskgroup` | hand-rolled channels + spawn + join |
+| `para_map` / `task.group` | hand-rolled channels + `task` + join |
 | streaming `files.open(…).lines()` | materializing `String.lines()` for file-scale work |
 
 New examples should land the same way: beginner default in the named flagship,

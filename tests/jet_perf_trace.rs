@@ -585,17 +585,17 @@ use core.time as time
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
-    server :: tasks.spawn(() => {
+    server :: task {
         stream :: listener.accept() ?? panic("accept")
         message :: stream.read_text(16) ?? panic("read")
         stream.write_all("echo:{message}".bytes()) ?? panic("write")
-    })
+    }
     // Cross two 100 ms observe publications before completing the wait.
     time.sleep(250)
     client :: net.tcp_connect(address) ?? panic("connect")
     client.write_all("ping".bytes()) ?? panic("write")
     print(client.read_text(16) ?? panic("read"))
-    server.join()
+    server.join() ?? panic("server failed")
 }
 "#,
     )
@@ -913,16 +913,16 @@ fn run() {
     // Channel setup before arena so spawn panic cannot capture the arena view.
     (ready_sender, ready) :: tasks.channel<Int>()
     (hold_sender, blocked) :: tasks.channel<Int>(1)
-    child :: tasks.spawn(() => {
+    child :: task {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
-    })
+    }
     child.detach()
     // Second child blocks on accept with no client — real observe I/O wait.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    io_child :: tasks.spawn(() => {
+    io_child :: task {
         _ :: listener.accept() ?? panic("accept")
-    })
+    }
     io_child.detach()
     ready.receive() ?? panic("closed")
     // hold_sender stays live so the blocked receive keeps real waiters.
@@ -1025,16 +1025,16 @@ fn run() {
     // Channel setup before arena so spawn panic cannot capture the arena view.
     (ready_sender, ready) :: tasks.channel<Int>()
     (hold_sender, blocked) :: tasks.channel<Int>(1)
-    child :: tasks.spawn(() => {
+    child :: task {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
-    })
+    }
     child.detach()
     // Second child blocks on accept with no client — real observe I/O wait.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    io_child :: tasks.spawn(() => {
+    io_child :: task {
         _ :: listener.accept() ?? panic("accept")
-    })
+    }
     io_child.detach()
     ready.receive() ?? panic("closed")
     // hold_sender stays live so the blocked receive keeps real waiters.

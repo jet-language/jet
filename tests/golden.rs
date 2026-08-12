@@ -848,12 +848,12 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// JET_VETTED_UNSAFE_BEGIN: jet_ws_upgrade",
         "// JET_VETTED_UNSAFE_END: jet_ws_upgrade",
     );
-    // D-TASKBORROW1=A: a scoped taskgroup child borrows places sema proved
+    // D-TASKBORROW1=A: a canonical task-group child borrows places sema proved
     // disjoint. The one lifetime erasure is closed by the group's join-on-drop.
     s = strip_region(
         &s,
-        "// JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_scoped",
-        "// JET_VETTED_UNSAFE_END: jet_taskgroup_scoped",
+        "// JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_borrowed_spawn",
+        "// JET_VETTED_UNSAFE_END: jet_taskgroup_borrowed_spawn",
     );
     s = strip_region(
         &s,

@@ -2,11 +2,9 @@
 use core.tasks as tasks
 
 fn run() {
-    t :: tasks.spawn(() => 7)
+    t :: task 7
     t.pause()
-    print(t.trace())
     t.resume()
     t.cancel()
-    print(t.trace())
-    print(t.join())
+    print(t.join() ?? panic("cancelled task"))
 }

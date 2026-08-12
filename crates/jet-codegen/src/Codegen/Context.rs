@@ -395,6 +395,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Decimal" => Some("JetDecimal"),
         "Fraction" => Some("JetFraction"),
         "Closed" => Some("Closed"),
+        n if n == Syntax::TYPE_TASK_FAILURE => Some("JetTaskFailure"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
@@ -2572,7 +2573,7 @@ pub(crate) fn register_bundle_unit_metadata(
 
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
-/// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
+/// lowering mis-gates `use core.tasks as tasks` channel calls.
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
@@ -3800,6 +3801,22 @@ fn register_core_event_enums(cx: &mut Cx) {
                 .entry((*variant).to_string())
                 .or_insert_with(|| (*enum_name).to_string());
         }
+    }
+    let task_failure = vec![
+        ("Cancelled".to_string(), VariantPayload::Unit),
+        ("DeadlineBlown".to_string(), VariantPayload::Unit),
+        (
+            "Panicked".to_string(),
+            VariantPayload::Single(Type::String, Span::new(0, 0)),
+        ),
+    ];
+    cx.enum_variants
+        .entry(Syntax::TYPE_TASK_FAILURE.to_string())
+        .or_insert(task_failure);
+    for variant in ["Cancelled", "DeadlineBlown", "Panicked"] {
+        cx.variant_owner
+            .entry(variant.to_string())
+            .or_insert_with(|| Syntax::TYPE_TASK_FAILURE.to_string());
     }
 }
 

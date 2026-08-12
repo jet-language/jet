@@ -8,15 +8,15 @@ use core.tasks as tasks
 fn run() {
     (sender, ch) :: tasks.channel<String>()
     // Mini one-shot server: bind, send address back, handle one request.
-    t :: tasks.spawn(() => {
+    t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         sender.send(listener.local_addr() ?? panic("address failed"))
         stream :: listener.accept() ?? panic("accept failed")
         _req :: stream.read_text(8192) ?? panic("read failed")
         net.tcp_reply(^stream, "200 OK", "hello, world!") ?? panic("tcp reply")
-    })
+    }
     addr :: ch.receive() ?? panic("no address")
     resp :: http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body().text(8 * 1024 * 1024) ?? panic("body text"))
-    t.join()
+    t.join() ?? panic("server failed")
 }

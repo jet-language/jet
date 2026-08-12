@@ -651,6 +651,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
             .unwrap_or(variant);
         return format!("{}JetRemoveBy::{}", cx.root_prefix, variant);
     }
+    if type_name == crate::Syntax::TYPE_TASK_FAILURE {
+        return format!("{}jet_std::JetTaskFailure::{}", cx.root_prefix, variant);
+    }
     if type_name == "DataEvent" {
         return format!("{}jet_std::DataEvent::{}", cx.root_prefix, variant);
     }

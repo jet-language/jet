@@ -48,7 +48,7 @@ fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<S
     });
     let user = common::strip_vetted_module(
         &common::strip_vetted_prelude_modules(&out.rust),
-        "jet_taskgroup_scoped",
+        "jet_taskgroup_borrowed_spawn",
     );
     if !allow_authored_unsafe {
         let leaked: Vec<&str> = user
@@ -416,13 +416,11 @@ fn run() {{
 fn a_pin_cannot_cross_a_task_boundary() {
     let src = format!(
         r#"{NODE}
-use core.tasks
-
 fn run() {{
     node := Node.{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
-    handle :: tasks.spawn(() => pinned.payload)
-    print("{{(handle.join())}}")
+    handle :: task pinned.payload
+    print("{{(handle.join() ?? 0)}}")
 }}
 "#
     );
@@ -566,17 +564,15 @@ fn cancelling_a_task_cannot_smuggle_a_pin_across_the_boundary() {
     // and must not become a cross-task escape hatch (criterion 4 + task law).
     let src = format!(
         r#"{NODE}
-use core.tasks
-
 fn run() {{
     node := Node.{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
-    handle :: tasks.spawn(() => {{
+    handle :: task {{
         pinned.hops += 1
         return pinned.payload
-    }})
+    }}
     handle.cancel()
-    print("{{(handle.join())}}")
+    print("{{(handle.join() ?? 0)}}")
 }}
 "#
     );

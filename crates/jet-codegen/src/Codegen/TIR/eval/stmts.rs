@@ -496,7 +496,7 @@ impl<'a> EvalCtx<'a> {
                 let mut run_body = |this: &mut Self| {
                     let value = this.new_taskgroup(limit.as_ref(), scope)?;
                     let index = Self::taskgroup_index(&value)
-                        .expect("new taskgroup always carries an evaluator index");
+                        .expect("new task group always carries an evaluator index");
                     scope.insert(group.name.clone(), value);
                     let body_result = this.exec_stmts(body, scope);
                     let close_result = this.close_taskgroup(index);
@@ -1505,9 +1505,15 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { body } => {
+                if self.task_cancel.is_some() {
+                    crate::scheduler::jet_scheduler_shield_enter();
+                }
                 self.shield_depth += 1;
                 let result = self.exec_stmts(body, scope);
                 self.shield_depth -= 1;
+                if self.task_cancel.is_some() {
+                    let _ = crate::scheduler::jet_scheduler_shield_leave_status();
+                }
                 if self.shield_depth == 0 {
                     self.task_wait_cancel_check()?;
                 }

@@ -1369,6 +1369,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             .map(str::to_string)
             .collect(),
     );
+    // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
+    // packed JIT/AOT shape even when the source only reaches it through
+    // `Task<T>.join()` and never constructs a variant explicitly.
+    enum_variants.insert(
+        crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+        ["user_Cancelled", "user_DeadlineBlown", "user_Panicked"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
+    enum_variant_payload_types.insert(
+        format!("user_{}::user_Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+        vec![Type::String],
+    );
     let mut int_constants = std::collections::HashMap::new();
     let mut constants = std::collections::HashMap::new();
     // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
@@ -2667,7 +2681,7 @@ pub enum TStmt {
     /// Body bindings live only in the child `LowerEnv` matching that Rust scope.
     Region(Vec<TStmt>),
     /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
-    /// constraint block. Unlike `Region`/the taskgroup path, this DOES need a
+    /// constraint block. Unlike `Region`/the `task.group` path, this DOES need a
     /// real runtime object: `handle` is the slot the fresh `jet_layout::Handle`
     /// binds into, `label` is the source name (for the
     /// handle's debug/conflict-report label), and `body` is the block's
@@ -3519,9 +3533,9 @@ pub enum TExprKind {
         op: THandleOp,
         args: Vec<TExpr>,
     },
-    /// c109 Phase 13: a closure-taking core/stdlib call — `tasks.spawn`,
-    /// `http.serve`, `scope.guard`. These are NOT in `core_fixed_sig` and each has a
-    /// bespoke emit shape the plain `CoreCall` cannot reproduce: `spawn` wraps a
+    /// c109 Phase 13: a closure-taking core/stdlib call.
+    /// `task`, `http.serve`, and `scope.guard` are NOT in `core_fixed_sig` and each
+    /// has a bespoke emit shape the plain `CoreCall` cannot reproduce: `task` wraps a
     /// `emit_spawn_lambda` (`move |…|`,
     /// NEVER `Box::new`) in `JetTask::spawn(…)`; `serve` (lambda handler) emits
     /// `jet_http_serve(&(addr), <lambda>)`; `guard` emits `jet_scope_guard(<lambda>)`.
@@ -3530,15 +3544,15 @@ pub enum TExprKind {
     CoreClosureCall {
         kind: TCoreClosureKind,
     },
-    /// D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join every handle, collect results.
+    /// D-CONC-SPAWN1=D: `task.all { … }` — join every child, collect results.
     TaskGroupAll {
         tasks: Box<TExpr>,
     },
-    /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first completed result wins.
+    /// D-CONC-SPAWN1=D: `task.race { … }` — first successful child wins.
     TaskGroupRace {
         tasks: Box<TExpr>,
     },
-    /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result (v1 alias).
+    /// D-CONC-SPAWN1=D: `task.any { … }` — first completed child wins.
     TaskGroupAny {
         tasks: Box<TExpr>,
     },
@@ -3629,12 +3643,12 @@ pub struct TExternArg {
     pub clone: bool,
 }
 
-/// c109 Phase 13: the three closure-taking core-call shapes (see
+/// c109 Phase 13: the closure-taking core-call shapes (see
 /// `TExprKind::CoreClosureCall`). Each holds the already-rendered closure string
 /// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
 /// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
 pub enum TCoreClosureKind {
-    /// `tasks.spawn(<lambda>)` uses no group. `g.task => …` carries the same
+    /// `task <body>` uses no group. A `task.group` child carries the same
     /// internal group collector through every named helper call.
     Spawn {
         group: Option<Box<TExpr>>,
@@ -4603,14 +4617,9 @@ pub enum THandleOp {
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x).fields()`'s `Field` handle.
     ReflectFieldName,
     ReflectFieldValue,
-    /// c109 Phase 21: Task `join()` → `(recv).join()` (the no-arg `join` arm of
-    /// built-in method `join` arm — shared with list no-arg join, but here it's the
-    /// JetTask method. Returns the task's value `T`.
+    /// D-CONC-FAIL1=A: Task `join()` → `(recv).join()`; sema types it as
+    /// `T ? TaskFailure`.
     TaskJoin,
-    /// Compiler-generated task-group scope join. It consumes the task and
-    /// unwraps `TaskFailure` instead of exposing the explicit `.join()` Result
-    /// rail to a discarded cleanup expression.
-    TaskScopeJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.
     TaskDetach,
@@ -4620,17 +4629,6 @@ pub enum THandleOp {
     TaskResume,
     /// D-COROUTINE1=A: Task control-plane cancel request (thread-runtime v1: metadata only).
     TaskCancel,
-    /// D-COROUTINE1=A: Task control-plane trace string.
-    TaskTrace,
-    /// Failure query → `(recv).exception()` → `Option<String>`.
-    TaskException,
-    // D-VERDICT-1323-1: the list twins. Each calls the same Prelude symbol its
-    // single-handle counterpart does, applied over the whole group in order.
-    TaskDetachAll,
-    TaskCancelAll,
-    TaskPauseAll,
-    TaskResumeAll,
-    TaskTraceAll,
     /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
     /// `Result<T, Closed>`.
     ChannelReceive,

@@ -477,7 +477,7 @@ with a count.
 - `core.auth` — verify_jwt/paseto, register_user, password_login,
   session_*, magic_link_*, oauth_*
 - `core.uuid` — v4, v7
-- `core.tasks` — spawn, spawn_group, join_all, channel, after, interval
+- `task`, `task.all`, `task.race`, `task.any`, `task.group`; `core.tasks` — channel, after, interval
 - `core.sync` — text_*/counter_*/map_*/list_*/policy_*
 - `core.event` — new, with_policy, hook, decision_hook, scope, …
 - `core.reactive` — signal, derived, computed, effect; `.loadable.*`

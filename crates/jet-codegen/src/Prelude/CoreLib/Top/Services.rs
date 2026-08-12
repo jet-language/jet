@@ -724,7 +724,7 @@ fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
         &mut tree.task_group,
         std::sync::Arc::new(JetTaskGroupRuntime::new()),
     );
-    let _ = group.close_with(|_| {}, |_| Ok::<(), ()>(()));
+    group.close_with(|_| {});
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     for worker in &mut tree.workers {
         worker.running = false;

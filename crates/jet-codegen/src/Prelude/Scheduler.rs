@@ -91,6 +91,7 @@ where
             f()
         }));
         flag.set(previous);
+        jet_std::jet_task_deadline_clear_pending();
         result
     })
 }
@@ -124,6 +125,23 @@ struct JetCancelUnwind;
 
 struct JetDeadlineUnwind {
     rendered: String,
+}
+
+fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
+        .unwrap_or_else(|| "task panicked".to_string());
+    // AOT's rich panic path includes its source location in the Rust unwind
+    // payload. That location is an internal diagnostic detail, not the
+    // TaskFailure reason; strip only the compiler-shaped suffix so AOT,
+    // resident JIT, and the interpreter publish the same child value.
+    message
+        .rsplit_once(" (at ")
+        .filter(|(_, location)| location.ends_with(')') && location[..location.len() - 1].contains(':'))
+        .map(|(reason, _)| reason.to_string())
+        .unwrap_or(message)
 }
 
 fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
@@ -195,7 +213,7 @@ fn jet_scheduler_shielded() -> bool {
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_enter() {
     // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
-    if current_task_control().is_some() && jet_scheduler_panic_should_unwind() {
+    if current_task_control().is_some() {
         SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
     }
 }
@@ -214,7 +232,7 @@ pub enum JetShieldExit {
 pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
     // Match `enter`: ambient deadlines must never begin unwinding merely because
     // ordinary non-task code crossed a lexical shield boundary.
-    if current_task_control().is_none() || !jet_scheduler_panic_should_unwind() {
+    if current_task_control().is_none() {
         return JetShieldExit::None;
     }
     let landed = SHIELD_DEPTH.with(|d| {
@@ -269,6 +287,7 @@ fn jet_task_deliver_cancel() {
 /// unless the running task is cancelled and unshielded, in which case it unwinds
 /// (inside a task) exactly like every other wait point.
 fn jet_task_wait_point_cancel_check() {
+    jet_scheduler_wait_while_paused();
     if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
         jet_task_deliver_cancel();
     }
@@ -321,9 +340,15 @@ impl ParkSlot {
     }
 }
 
+impl jet_std::JetTaskGroupWaiter for ParkSlot {
+    fn wake(&self) {
+        ParkSlot::wake(self);
+    }
+}
+
 pub struct JetTaskControl {
-    pub paused: AtomicBool,
-    pub cancelled: AtomicBool,
+    pub paused: Arc<AtomicBool>,
+    pub cancelled: Arc<AtomicBool>,
     /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
     pub pause_mode: AtomicU8,
     observe_id: AtomicUsize,
@@ -334,8 +359,8 @@ pub struct JetTaskControl {
 impl JetTaskControl {
     pub fn new() -> Arc<Self> {
         Arc::new(JetTaskControl {
-            paused: AtomicBool::new(false),
-            cancelled: AtomicBool::new(false),
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
             pause_mode: AtomicU8::new(0),
             observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
@@ -405,7 +430,25 @@ impl JetTaskControl {
 
     fn wait_while_paused(&self) {
         while self.paused.load(Ordering::Relaxed) && !self.cancelled.load(Ordering::Relaxed) {
-            self.park.park(None);
+            let shielded = jet_scheduler_shielded();
+            if !shielded
+                && jet_std::jet_task_deadline_if_expired(
+                    jet_deadline_remaining_ms(),
+                    "task pause",
+                )
+                .is_some()
+            {
+                jet_deadline_exceeded("task pause");
+            }
+            let timeout = if shielded {
+                None
+            } else {
+                jet_deadline_remaining_ms()
+                    .map(|remaining| {
+                        Duration::from_millis(jet_task_delay_ms_defaulted(remaining))
+                    })
+            };
+            self.park.park(timeout);
         }
     }
 }
@@ -421,6 +464,14 @@ pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
 
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
+}
+
+/// Apply the shared pause wait to the current task. The evaluator uses this
+/// boundary instead of reimplementing the native control loop.
+pub fn jet_scheduler_wait_while_paused() {
+    if let Some(control) = current_task_control() {
+        control.wait_while_paused();
+    }
 }
 
 /// D-TASK-PAUSE-TIER1=E: strong pause (`CheckLoops`) honors pause at loop
@@ -506,6 +557,27 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
         ctrl.wait_while_paused();
     }
     jet_observe_task_update("running", "", jet_deadline_remaining_ms());
+}
+
+/// Shared bounded-task admission wait. The task-group Prelude owns the
+/// deadline/cancellation ordering; this scheduler function only supplies the
+/// ambient task control and park primitive to every engine.
+pub fn jet_scheduler_task_group_wait(waiter: &Arc<ParkSlot>) {
+    let deadline = jet_std::jet_task_deadline_if_expired(
+        jet_deadline_remaining_ms(),
+        "task admission",
+    );
+    match jet_std::jet_task_wait_policy(
+        deadline,
+        jet_scheduler_task_cancelled(),
+        jet_scheduler_shielded(),
+    ) {
+        Ok(()) => jet_scheduler_yield("task admission", waiter, None),
+        Err(jet_std::JetTaskWaitInterrupt::Deadline(_)) => {
+            jet_deadline_exceeded("task admission")
+        }
+        Err(jet_std::JetTaskWaitInterrupt::Cancelled) => jet_task_deliver_cancel(),
+    }
 }
 
 pub fn jet_scheduler_wake(slot: &ParkSlot) {
@@ -611,6 +683,31 @@ fn timer_wheel() -> Arc<TimerWheel> {
 
 pub fn jet_scheduler_sleep_ms(millis: u64) {
     jet_scheduler_park_ms("time sleep", millis);
+}
+
+/// Canonical default for a non-negative task delay. All execution tiers call
+/// this before adapting a language-level millisecond value to `Duration`.
+pub fn jet_task_delay_ms_defaulted(millis: i64) -> u64 {
+    millis.max(0) as u64
+}
+
+/// Canonical default for an interval period. Intervals make progress at least
+/// once per millisecond instead of spinning on a zero or negative period.
+pub fn jet_task_interval_ms_defaulted(millis: i64) -> u64 {
+    millis.max(1) as u64
+}
+
+/// Canonical `core.time.sleep` wait. The delay default and deadline wait-point
+/// policy live here; AOT, JIT, and the evaluator only marshal the call.
+pub fn jet_task_sleep_ms_defaulted(millis: i64) {
+    let delay = jet_task_delay_ms_defaulted(millis);
+    if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() {
+        jet_deadline_exceeded("time sleep");
+    }
+    jet_scheduler_sleep_ms(delay);
+    if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() {
+        jet_deadline_exceeded("time sleep");
+    }
 }
 
 pub fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
@@ -1718,8 +1815,8 @@ impl<T: Send> JetSchedulerChannel<T> {
         Self::with_capacity(None)
     }
 
-    pub fn bounded(capacity: usize) -> Self {
-        Self::with_capacity(Some(capacity.max(1)))
+    pub fn bounded(capacity: i64) -> Self {
+        Self::with_capacity(Some(capacity.max(1) as usize))
     }
 
     fn with_capacity(capacity: Option<usize>) -> Self {
@@ -2287,21 +2384,21 @@ fn scheduler() -> Arc<Scheduler> {
 
 pub enum JetSchedulerResult<T> {
     Value(T),
-    Panicked,
+    Panicked(String),
     Cancelled,
     Deadline(String),
 }
 
-fn jet_scheduler_task_failure<T>(result: JetSchedulerResult<T>) -> JetTaskFailure {
-    match result {
-        JetSchedulerResult::Panicked => JetTaskFailure::Panicked("a task panicked".to_string()),
-        JetSchedulerResult::Cancelled => JetTaskFailure::Cancelled,
-        JetSchedulerResult::Deadline(_) => JetTaskFailure::DeadlineBlown,
-        JetSchedulerResult::Value(_) => unreachable!("successful task is not a failure"),
-    }
+/// The selector must carry parent control separately from a child's typed
+/// completion. Parent interrupts are propagated after the shared selector has
+/// cancelled and drained its children; only `Child` reaches `TaskFailure`.
+enum JetSchedulerSelectError<T> {
+    ParentDeadline,
+    ParentCancelled,
+    Child(JetSchedulerResult<T>),
 }
 
-fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
+pub fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
     if jet_scheduler_panic_should_unwind() {
         std::panic::panic_any(JetDeadlineUnwind { rendered });
     }
@@ -2311,26 +2408,45 @@ fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
 pub struct JetSchedulerJoin<T> {
     rx: std::sync::mpsc::Receiver<JetSchedulerResult<T>>,
     completion_order: Arc<OnceLock<u128>>,
+    completion_wait: Arc<ParkSlot>,
+}
+
+/// One parent-wait deadline policy for AOT and Cranelift adapters. A child
+/// deadline is a `TaskFailure`; an expired joining context is the E3003 control
+/// diagnostic owned by this wait point.
+pub fn jet_task_join_deadline_check() {
+    if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task join").is_some() {
+        jet_deadline_exceeded("task join");
+    }
 }
 
 impl<T> JetSchedulerJoin<T> {
-    pub fn join(self) -> JetOutcome<T, JetTaskFailure> {
-        // D-CANCELMODEL1=C: join is a wait point. If the joining task is already
-        // cancelled, unwind here before blocking.
-        jet_task_wait_point_cancel_check();
-        self.join_for_cleanup()
-    }
-
-    /// Drain a child during lexical task-group cleanup.
-    ///
-    /// Cleanup has already made the cancellation decision for every child. It
-    /// must drain each child even when the parent is cancelled, or the parent's
-    /// cancellation would interrupt its own Drop and leave a child running.
-    pub fn join_for_cleanup(self) -> JetOutcome<T, JetTaskFailure> {
-        match self.rx.recv() {
-            Ok(JetSchedulerResult::Value(v)) => Ok(v),
-            Ok(failure) => Err(jet_scheduler_task_failure(failure)),
-            Err(_) => Err(JetTaskFailure::Panicked("a task panicked".to_string())),
+    /// D-CONC-FAIL1=A: child control failures are ordinary values on the
+    /// language failure rail. Only cancellation of the joining parent remains
+    /// a scheduler unwind at this wait point.
+    pub fn join(&mut self) -> Result<T, jet_std::JetTaskFailure> {
+        loop {
+            jet_task_wait_point_cancel_check();
+            match self.rx.try_recv() {
+                Ok(JetSchedulerResult::Value(value)) => return Ok(value),
+                Ok(JetSchedulerResult::Panicked(reason)) => {
+                    return Err(jet_std::JetTaskFailure::Panicked(reason));
+                }
+                Ok(JetSchedulerResult::Cancelled) => {
+                    return Err(jet_std::JetTaskFailure::Cancelled);
+                }
+                Ok(JetSchedulerResult::Deadline(_rendered)) => {
+                    return Err(jet_std::JetTaskFailure::DeadlineBlown);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return Err(jet_std::JetTaskFailure::Panicked(
+                        "task completion disconnected".to_string(),
+                    ));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    jet_scheduler_yield("task join", &self.completion_wait, None);
+                }
+            }
         }
     }
 
@@ -2338,7 +2454,9 @@ impl<T> JetSchedulerJoin<T> {
         match self.rx.try_recv() {
             Ok(r) => Some(r),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(JetSchedulerResult::Panicked(
+                "task completion disconnected".to_string(),
+            )),
         }
     }
 
@@ -2354,29 +2472,27 @@ impl<T> JetSchedulerJoin<T> {
 fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
     mode: jet_std::JetTaskSelectMode,
-) -> JetOutcome<Vec<T>, JetTaskFailure> {
-    use jet_std::{
-        jet_task_deadline, jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt,
-    };
+) -> Result<Vec<T>, jet_std::JetTaskFailure> {
+    use jet_std::{jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt};
     let result = jet_task_select(
         entries,
         mode,
-        || {
-            let deadline = matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0)
-                .then(|| jet_task_deadline("task selection").render());
+        || -> Result<(), JetSchedulerSelectError<T>> {
+            let deadline = jet_std::jet_task_deadline_if_expired(
+                jet_deadline_remaining_ms(),
+                "task selection",
+            );
             jet_task_wait_policy(deadline, jet_scheduler_task_cancelled(), jet_scheduler_shielded())
                 .map_err(|interrupt| match interrupt {
-                    JetTaskWaitInterrupt::Deadline(rendered) => {
-                        JetSchedulerResult::Deadline(rendered)
-                    }
-                    JetTaskWaitInterrupt::Cancelled => JetSchedulerResult::Cancelled,
+                    JetTaskWaitInterrupt::Deadline(_) => JetSchedulerSelectError::ParentDeadline,
+                    JetTaskWaitInterrupt::Cancelled => JetSchedulerSelectError::ParentCancelled,
                 })
         },
         |(join, _)| join.completion_order(),
         |(join, _)| {
             join.try_recv().map(|result| match result {
                 JetSchedulerResult::Value(value) => Ok(value),
-                failure => Err(failure),
+                failure => Err(JetSchedulerSelectError::Child(failure)),
             })
         },
         |(_, control)| control.cancel(),
@@ -2385,37 +2501,42 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
     jet_scheduler_drain();
     match result {
         Ok(values) => Ok(values),
-        Err(failure) => Err(jet_scheduler_task_failure(failure)),
+        Err(JetSchedulerSelectError::ParentDeadline) => jet_deadline_exceeded("task selection"),
+        Err(JetSchedulerSelectError::ParentCancelled) => jet_task_unwind_cancel(),
+        Err(JetSchedulerSelectError::Child(JetSchedulerResult::Deadline(_rendered))) => {
+            Err(jet_std::JetTaskFailure::DeadlineBlown)
+        }
+        Err(JetSchedulerSelectError::Child(JetSchedulerResult::Cancelled)) => {
+            Err(jet_std::JetTaskFailure::Cancelled)
+        }
+        Err(JetSchedulerSelectError::Child(JetSchedulerResult::Panicked(reason))) => {
+            Err(jet_std::JetTaskFailure::Panicked(reason))
+        }
+        Err(JetSchedulerSelectError::Child(JetSchedulerResult::Value(_))) => unreachable!(),
     }
 }
 
 /// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
 pub fn jet_scheduler_all<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> JetOutcome<Vec<T>, JetTaskFailure> {
+) -> Result<Vec<T>, jet_std::JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::All)
 }
 
 /// D-CONCCOMB1/D-RACEWIN1: first successful result wins; cancel losers.
 pub fn jet_scheduler_race<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> JetOutcome<T, JetTaskFailure> {
-    let mut values = jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)?;
-    match values.pop() {
-        Some(value) => Ok(value),
-        None => unreachable!("race result missing"),
-    }
+) -> Result<T, jet_std::JetTaskFailure> {
+    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)
+        .map(|mut values| values.pop().expect("race result missing"))
 }
 
 /// D-CONCCOMB1: first completed result wins (success or failure path visible).
 pub fn jet_scheduler_any<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> JetOutcome<T, JetTaskFailure> {
-    let mut values = jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)?;
-    match values.pop() {
-        Some(value) => Ok(value),
-        None => unreachable!("any result missing"),
-    }
+) -> Result<T, jet_std::JetTaskFailure> {
+    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)
+        .map(|mut values| values.pop().expect("any result missing"))
 }
 
 /// D-SELECT-GENERIC1=A: the one typed select door. Every engine supplies
@@ -2506,6 +2627,8 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
+    let completion_wait = ParkSlot::new();
+    let task_completion_wait = completion_wait.clone();
     scheduler().submit(Job{blocking,run:Box::new(move || {
         if observe_id != 0 {
             JET_OBSERVE_TASK_ID.with(|current| current.set(observe_id));
@@ -2530,6 +2653,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
                 .set(next_task_completion_order())
                 .expect("task completion recorded twice");
             let _ = tx.send(JetSchedulerResult::Cancelled);
+            task_completion_wait.wake();
             return;
         }
         let out = jet_scheduler_catch_task_unwind(f);
@@ -2546,7 +2670,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
                     .expect("deadline payload type checked");
                 JetSchedulerResult::Deadline(deadline.rendered)
             }
-            Err(_) => JetSchedulerResult::Panicked,
+            Err(e) => JetSchedulerResult::Panicked(jet_scheduler_panic_message(&*e)),
         };
         if let Some(registry) = jet_observe_registry() {
             registry.tasks.lock().unwrap().remove(&observe_id);
@@ -2555,10 +2679,12 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
             .set(next_task_completion_order())
             .expect("task completion recorded twice");
         let _ = tx.send(result);
+        task_completion_wait.wake();
     })});
     JetSchedulerJoin {
         rx,
         completion_order,
+        completion_wait,
     }
 }
 

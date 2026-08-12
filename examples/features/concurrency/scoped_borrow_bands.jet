@@ -1,4 +1,4 @@
-// D-TASKBORROW1=A: a taskgroup joins every child, so a child may borrow a place
+// D-TASKBORROW1=A: a task group joins every child, so a child may borrow a place
 // its owner still gives access. Reads are free. Writes are admitted only where sema can
 // prove the places never overlap — here, two constant indexes into one list.
 // The loan opens before the child launches and closes when the group joins, so
@@ -17,8 +17,10 @@ fn run() {
     task.group g {
         left :: &particles[0]
         right :: &particles[2]
-        moved :: task.all { { left.position += left.velocity; left.position }, { right.position += right.velocity; right.position } }
-        print(moved)
+        print(task.all {
+            { left.position += left.velocity; left.position },
+            { right.position += right.velocity; right.position }
+        } ?? panic("task.all failed"))
     }
     print(particles[0].position)
     print(particles[1].position)
@@ -32,7 +34,7 @@ fn run() {
             only.position += only.velocity
             only.position
         }
-        print(done.wait())
+        print(done.join() ?? panic("task failed"))
     }
     print(particles[1].position)
 }

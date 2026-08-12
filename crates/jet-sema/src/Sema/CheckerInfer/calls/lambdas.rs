@@ -116,7 +116,7 @@ use std::collections::HashSet;
                     continue;
                 }
                 // D-TASKBORROW1=A: a write borrow (`&place`) is already a
-                // changeable place. Inside a taskgroup child it stays one; the
+                // changeable place. Inside a task group child it stays one; the
                 // disjointness proof below is what keeps the writes safe.
                 if self.in_taskgroup_spawn && self.is_write_borrow(name) {
                     continue;
@@ -213,7 +213,7 @@ use std::collections::HashSet;
                         self.diags.push(Diagnostic::error(
                             "E1110",
                             format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
-                            "a taskgroup is a scoped spawn authority that may flow only through direct named-function calls"
+                            "a task group is a scoped spawn authority that may flow only through direct named-function calls"
                                 .to_string(),
                             format!(
                                 "move this work to `fn helper({name}: TaskGroup)` and call the helper directly"
@@ -224,10 +224,10 @@ use std::collections::HashSet;
                     }
                     let taken = take_set.contains(name);
                     let cloneable = is_cloneable(&cap_ty, self.registry);
-                    // D-TASKBORROW1=A: a `taskgroup` child is joined by its group,
+                    // D-TASKBORROW1=A: a `task.group` child is joined by its group,
                     // so it may borrow places the owner still holds. Reads are free;
                     // writes need proven-disjoint places. Detached tasks, channels,
-                    // and `tasks.spawn` keep the ownership-only rules below.
+                    // and detached tasks keep the ownership-only rules below.
                     if self.in_taskgroup_spawn {
                         let fallback = match cap_conv {
                             Some(AccessConvention::Write) => Some(ViewAccess::Write),
@@ -236,7 +236,15 @@ use std::collections::HashSet;
                         };
                         match self.admit_scoped_borrow(name, fallback, lam.span) {
                             Some(true) => {
-                                lam.meta.scoped_task_borrow = true;
+                                if self.is_task_spawn {
+                                    if let Some(binding) = self
+                                        .current_binding_name
+                                        .as_ref()
+                                        .or(self.task_spawn_binding_name.as_ref())
+                                    {
+                                        self.view_borrow_escape_tasks.insert(binding.clone());
+                                    }
+                                }
                                 continue;
                             }
                             Some(false) => continue,
@@ -352,8 +360,8 @@ use std::collections::HashSet;
                         // clone into the closure. Lock-ordered storage makes the clone
                         // Send without leaning on rustc.
                         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
-                        // Arc-backed "copyable door" meant to be captured freely across
-                        // `tasks.spawn` closures with no `take`; suppress the same lint.
+                                // Arc-backed "copyable door" meant to be captured freely across
+                                // `task` closures with no `take`; suppress the same lint.
                         if is_reactive_handle_ty(&cap_ty) {
                             if let Some(info) = self.lookup(name) {
                                 if info.reactive_local {

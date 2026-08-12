@@ -103,8 +103,7 @@ pub(crate) struct JitRuntime {
     pub(crate) next_stream_sender: i64,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
-    pub(crate) task_groups:
-        Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
+    pub(crate) task_groups: Vec<Option<super::Concurrency::JitTaskGroup>>,
     /// D-LOCALCELL1=A: one-thread canonical Cell values and guards.
     pub(crate) cells: LocalCell::CellState,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
@@ -309,7 +308,11 @@ extern "C" fn jet_jit_is_trapped() -> i64 {
     if Concurrency::in_scheduler_task() {
         return i64::from(Concurrency::task_trap_pending());
     }
-    Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
+    if Concurrency::local_rich_panic_pending() {
+        1
+    } else {
+        Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
+    }
 }
 
 extern "C" fn jet_jit_add_i64(a: i64, b: i64, _line: u32) -> i64 {
@@ -1001,29 +1004,38 @@ extern "C" fn jet_jit_rich_panic(
     msg: i64,
     locals: i64,
 ) -> i64 {
+    let in_task = Concurrency::in_jit_task();
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let locals = rt.heap.clone_string(locals).unwrap_or_default();
-        let line_s = line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        let col_offset = (col as u64).saturating_sub(1) as usize;
-        let caret = "^".repeat((caret as usize).max(1));
-        let mut out = String::new();
-        out.push_str(&format!("panic: {msg}\n"));
-        out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
-        out.push_str(&format!("   {pad}|\n"));
-        out.push_str(&format!("{line_s} | {src_line}\n"));
-        out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
-        if !locals.is_empty() {
-            out.push_str(&format!("locals: {locals}\n"));
+        Concurrency::set_rich_panic_reason(msg.clone());
+        if in_task {
+            // A child failure is a typed TaskFailure. Its trap must remain
+            // thread-local: the resident runtime is shared with the parent,
+            // and a shared trap would make the parent skip unrelated joins.
+            Concurrency::set_local_rich_panic();
+        } else {
+            let line_s = line.to_string();
+            let margin = line_s.len();
+            let pad = " ".repeat(margin);
+            let col_offset = (col as u64).saturating_sub(1) as usize;
+            let caret = "^".repeat((caret as usize).max(1));
+            let mut out = String::new();
+            out.push_str(&format!("panic: {msg}\n"));
+            out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
+            out.push_str(&format!("   {pad}|\n"));
+            out.push_str(&format!("{line_s} | {src_line}\n"));
+            out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
+            if !locals.is_empty() {
+                out.push_str(&format!("locals: {locals}\n"));
+            }
+            rt.stderr.push_str(&out);
+            rt.exit_code = Some(70);
+            rt.set_trap("__jet_rich_panic__");
         }
-        rt.stderr.push_str(&out);
-        rt.exit_code = Some(70);
-        rt.set_trap("__jet_rich_panic__");
         0
     })
 }

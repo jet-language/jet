@@ -86,11 +86,11 @@ you. Expert unsafe is opt-in via `#Unsafe("reason") { … }`, not the default.
 Jet is statically typed with generics and traits, and stricter error handling —
 you cannot ignore a fallible result. Bindings are `name :: value` (immutable)
 or `name := value` (mutable). Use `core.tasks` channels for concurrency
-and scoped `taskgroup`s for structured child lifetimes.
+and scoped `task.group`s for structured child lifetimes.
 
 **Where is async?**  
 Jet intentionally rejects `async`/`await` syntax (E0040); it is not deferred.
-Taskgroups and channels run on the shipped M:N scheduler, which parks tasks at
+Task groups and channels run on the shipped M:N scheduler, which parks tasks at
 channel, timer, and I/O waits without coloring functions `async`.
 
 **Do I type semicolons?**  

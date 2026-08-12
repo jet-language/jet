@@ -2341,7 +2341,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
-        // A taskgroup loan outlives the borrow binding's last lexical use: the
+        // A task group loan outlives the borrow binding's last lexical use: the
         // child still holds it until the group joins. Check that first — the
         // view scan below would already have let this place go.
         if self.report_scoped_loan_conflict(changed, action, span) {
@@ -4867,7 +4867,11 @@ impl<'a> Checker<'a> {
             crossing,
             SendCrossing::TaskCapture | SendCrossing::TaskResult
         ) {
-            if let Some(name) = &self.current_binding_name {
+            if let Some(name) = self
+                .current_binding_name
+                .as_ref()
+                .or(self.task_spawn_binding_name.as_ref())
+            {
                 if matches!(problem.kind, SendProblemKind::ViewBorrow) {
                     self.view_borrow_escape_tasks.insert(name.clone());
                 } else {
@@ -4906,8 +4910,8 @@ impl<'a> Checker<'a> {
             other => other,
         };
         match place {
-            // Bare name: the fix names that list. Suggest `^` only when it is a
-            // parameter, and only then offer the group helpers on the same name.
+            // Bare name: the fix names the list. Suggest `^` only when it is a
+            // parameter; the canonical task combinators are written at spawn.
             Expr::Ident(name, _) => {
                 let info = self.lookup(name);
                 let is_param = info.as_ref().is_some_and(|info| info.param_conv.is_some());
@@ -4920,12 +4924,12 @@ impl<'a> Checker<'a> {
                 });
                 let fix = if is_param && is_task_list {
                     format!(
-                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`",
+                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or collect the work in a canonical `task.all` or `task.group` block",
                         Syntax::SIGIL_MOVE
                     )
                 } else if is_task_list {
                     format!(
-                        "move the list into a local this scope owns, or drive the group without a loop: `{name}.wait_all()`, `{name}.cancel_all()`, `{name}.pause_all()`"
+                        "move the list into a local this scope owns before the loop consumes its task handles"
                     )
                 } else {
                     "move the list into a local this scope owns first".to_string()
@@ -4939,7 +4943,8 @@ impl<'a> Checker<'a> {
                 ));
             }
             // Field / index / slice: the root's type is not the list, so do not
-            // rewrite it as `root: ^[Task<…>]` or invent `root.wait_all()`.
+            // rewrite it as `root: ^[Task<…>]`; the field or index itself must
+            // first be copied into a local this scope owns.
             _ => {
                 self.diags.push(Diagnostic::error(
                     "E0120",

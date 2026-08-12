@@ -1646,7 +1646,7 @@ fn emit_tir_stmt(
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. NOT wrapped in a
         // nested Rust block — `name` must stay a live Rust local for
         // statements AFTER this one (`NAME.value(v)`, `NAME.suggest(…)`),
-        // unlike `Region`/taskgroup, which are genuinely lexical.
+        // unlike `Region`/`task.group`, which are genuinely lexical.
         TStmt::Layout {
             handle,
             label,

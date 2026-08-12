@@ -162,6 +162,8 @@ pub fn jet_show_io_error(
 
 /// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
 /// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
+/// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
+/// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
 pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
     format!("paused={paused},cancel={cancel}")
 }

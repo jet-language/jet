@@ -650,7 +650,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E1110",
                     "`TaskGroup` cannot be stored inside another value".to_string(),
-                    "a taskgroup is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
+                    "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
                     "pass `group: TaskGroup` directly to a named helper and use it there"
                         .to_string(),

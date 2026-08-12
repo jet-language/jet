@@ -3485,7 +3485,7 @@ fn check_bundle_opts_for_output_inner(
     }
     // D-MEM1 S6: `Shared<T>`/`Pool<T>`/`Id<T>` need `CORELIB_PRELUDE`'s `jet_std`
     // module (`JetShared`/`JetPool`/`JetId`), but need no `use core.X` import to
-    // reach them (unlike `tasks.spawn` etc.) — `collect_used_core` only walks
+    // reach them — `collect_used_core` only walks
     // import aliases, so it never sees them. Same forced-insert shape as
     // D-CLIFLAG1 above; a cheap source-text scan is deliberately over-eager (a
     // false positive just includes the prelude when it wasn't strictly needed —

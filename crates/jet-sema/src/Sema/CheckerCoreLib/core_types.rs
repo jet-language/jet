@@ -199,7 +199,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "U8" | Syntax::TYPE_ERR | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -373,6 +373,30 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
         || is_utf8_error_type_name(name)
+}
+
+/// D-CONC-FAIL1=A: the task wait report is a normal closed enum. Its variants
+/// are synthesized here because the runtime owns the type, but user code can
+/// construct and match the same values on every tier.
+pub(crate) fn core_task_failure_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    if enum_name != Syntax::TYPE_TASK_FAILURE {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        [
+            ("Cancelled".to_string(), (zero, VariantPayload::Unit)),
+            ("DeadlineBlown".to_string(), (zero, VariantPayload::Unit)),
+            (
+                "Panicked".to_string(),
+                (zero, VariantPayload::Single(Type::String, zero)),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
 }
 
 /// D-RULEARG-TYPES1=A: enum variants generated from the marker registry.

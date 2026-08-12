@@ -755,6 +755,20 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         // MIME kernel. AOT already embeds that kernel as the preceding part.
         out.push_str(part.strip_prefix("    include!(\"Mime.rs\");\n\n").unwrap_or(part));
     }
+    // D-CONC-FAIL1=A: the typed child-failure value lives in the optional
+    // JetStd kernel, so emit its root value traits only beside that kernel.
+    // Programs without Core runtime reachability must not name `jet_std`.
+    out.push_str(
+        "\nimpl JetShow for jet_std::JetTaskFailure {\n\
+            fn jet_show(&self) -> String { format!(\"{self:?}\") }\n\
+        }\n\
+        impl JetDisplay for jet_std::JetTaskFailure {\n\
+            fn jet_display(&self) -> String { self.jet_show() }\n\
+        }\n\
+        impl JetDebug for jet_std::JetTaskFailure {\n\
+            fn jet_debug(&self) -> String { self.jet_show() }\n\
+        }\n",
+    );
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by

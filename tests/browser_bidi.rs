@@ -670,7 +670,7 @@ fn run() {
     profile :: browser.profile("bidi-2025.5") ?? return
     timeout :: browser.timeout(10) ?? return
     session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
-    task :: tasks.spawn(() => session.close())
+    handle :: task session.close()
     (sender, channel) :: tasks.channel<Browser>()
     sender.send(session)
 }
@@ -3214,4 +3214,3 @@ fn run() {
         ["session.status", "session.new", "session.end"]
     );
 }
-

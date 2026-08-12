@@ -1,14 +1,12 @@
-use core.tasks as tasks
-
 struct Pool { handles: [Task<Int>] }
 
 fn drain(p: Pool) => Int {
     total := 0
-    loop h, p.handles { total += h.wait() }
+    loop h, p.handles { total += h.join() ?? 0 }
     total
 }
 
 fn run() {
-    p :: Pool.{ handles: [tasks.spawn(() => 1)] }
+    p :: Pool.{ handles: [task 1] }
     print(drain(p))
 }

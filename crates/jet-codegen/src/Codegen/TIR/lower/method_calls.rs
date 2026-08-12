@@ -1557,10 +1557,11 @@ fn lower_method_call_impl(
             }
         }
     }
-    // D-CONC-SPAWN1=D: parser-created `task` nodes use the existing spawn and
-    // combinator TIR nodes. The receiver is compiler-private and is never emitted.
+    // D-CONC-SPAWN1=D: parser-created `task` nodes outside a lexical group
+    // still lower through the existing spawn/select TIR nodes. The receiver is
+    // compiler-private and is never emitted or looked up as a Rust value.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE) {
-        if method == "spawn" {
+        if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 let body_ty = lambda_body_ty(lam, cx, env);
                 let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
@@ -1587,17 +1588,23 @@ fn lower_method_call_impl(
             let tasks = lower_expr(&args[0].expr, cx, env);
             let elem = taskgroup_result_elem(&tasks);
             let ty = resolved_ret.cloned().unwrap_or_else(|| match method {
-                "all" => Type::List(Box::new(elem.clone())),
-                _ => elem,
+                Syntax::INTERNAL_TASK_ALL_METHOD => Type::Result {
+                    ok: Box::new(Type::List(Box::new(elem.clone()))),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                },
+                _ => Type::Result {
+                    ok: Box::new(elem),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                },
             });
             let kind = match method {
-                "all" => TExprKind::TaskGroupAll {
+                Syntax::INTERNAL_TASK_ALL_METHOD => TExprKind::TaskGroupAll {
                     tasks: Box::new(tasks),
                 },
-                "race" => TExprKind::TaskGroupRace {
+                Syntax::INTERNAL_TASK_RACE_METHOD => TExprKind::TaskGroupRace {
                     tasks: Box::new(tasks),
                 },
-                "any" => TExprKind::TaskGroupAny {
+                Syntax::INTERNAL_TASK_ANY_METHOD => TExprKind::TaskGroupAny {
                     tasks: Box::new(tasks),
                 },
                 _ => return TExpr { ty, kind: TExprKind::Unit },
@@ -1611,7 +1618,7 @@ fn lower_method_call_impl(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_SPAWN_METHOD
+        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             let body_ty = lambda_body_ty(lam, cx, env);
@@ -1640,7 +1647,7 @@ fn lower_method_call_impl(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_ALL_METHOD
+        && method == Syntax::INTERNAL_TASK_ALL_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
@@ -1648,7 +1655,10 @@ fn lower_method_call_impl(
         return TExpr {
             ty: resolved_ret
                 .cloned()
-                .unwrap_or_else(|| Type::List(Box::new(elem))),
+                .unwrap_or_else(|| Type::Result {
+                    ok: Box::new(Type::List(Box::new(elem))),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+                }),
             kind: TExprKind::TaskGroupAll {
                 tasks: Box::new(tasks),
             },
@@ -1658,13 +1668,16 @@ fn lower_method_call_impl(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_RACE_METHOD
+        && method == Syntax::INTERNAL_TASK_RACE_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: resolved_ret.cloned().unwrap_or(elem),
+            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(elem),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+            }),
             kind: TExprKind::TaskGroupRace {
                 tasks: Box::new(tasks),
             },
@@ -1674,13 +1687,16 @@ fn lower_method_call_impl(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     )
-        && method == Syntax::TASKGROUP_ANY_METHOD
+        && method == Syntax::INTERNAL_TASK_ANY_METHOD
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
         let elem = taskgroup_result_elem(&tasks);
         return TExpr {
-            ty: resolved_ret.cloned().unwrap_or(elem),
+            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(elem),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
+            }),
             kind: TExprKind::TaskGroupAny {
                 tasks: Box::new(tasks),
             },
@@ -3574,16 +3590,10 @@ fn lower_method_call_impl(
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
     // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
-    // → `Result<T, TaskFailure>`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
+    // → `T ? TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
-    if recv_type.is_none()
-        && (is_concurrency_method_name(method, args.len())
-            || (method == Syntax::METHOD_TASK_SCOPE_JOIN && args.is_empty()))
-    {
-        // D-VERDICT-1323-1 / I8: `handles.wait_all()` and `handles.join_all()` are
-        // the method spelling of `tasks.join_all`, so they lower to the same node
-        // every engine already drives. No second mechanism.
+    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         let recv_t = lower_expr(receiver, cx, env);
         // The element type `T` from the receiver's `Apply<T>` (the first type arg).
         let elem = match &recv_t.ty {
@@ -3596,10 +3606,9 @@ fn lower_method_call_impl(
                 THandleOp::TaskJoin,
                 resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                     ok: Box::new(elem),
-                    err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_TASK_FAILURE.to_string())),
                 }),
             ),
-            Syntax::METHOD_TASK_SCOPE_JOIN => (THandleOp::TaskScopeJoin, elem),
             "detach" => (THandleOp::TaskDetach, unit_type()),
             "pause" => (THandleOp::TaskPause, unit_type()),
             "resume" => (THandleOp::TaskResume, unit_type()),

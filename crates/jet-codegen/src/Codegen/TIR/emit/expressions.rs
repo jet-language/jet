@@ -3829,10 +3829,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
-                THandleOp::TaskScopeJoin => format!(
-                    "{}jet_std::jet_task_outcome_unwrap(({recv}).join())",
-                    cx.root_prefix
-                ),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {
                     if args.is_empty() {
@@ -3843,32 +3839,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
-                THandleOp::TaskTrace => format!("({}).trace()", recv),
-                THandleOp::TaskException => format!("({}).exception()", recv),
-                THandleOp::TaskDetachAll => {
-                    format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
-                }
-                THandleOp::TaskCancelAll => {
-                    format!("{}jet_std::jet_task_cancel_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskPauseAll => {
-                    if args.is_empty() {
-                        format!("{}jet_std::jet_task_pause_all(&({}))", cx.root_prefix, recv)
-                    } else {
-                        format!(
-                            "{}jet_std::jet_task_pause_all_mode(&({}), {})",
-                            cx.root_prefix,
-                            recv,
-                            a(0)
-                        )
-                    }
-                }
-                THandleOp::TaskResumeAll => {
-                    format!("{}jet_std::jet_task_resume_all(&({}))", cx.root_prefix, recv)
-                }
-                THandleOp::TaskTraceAll => {
-                    format!("{}jet_std::jet_task_trace_all(&({}))", cx.root_prefix, recv)
-                }
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelClose => format!("({}).close()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
@@ -5183,13 +5153,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TCoreClosureKind::Spawn {
                 group,
                 spawn_closure,
-                scoped,
                 ..
             } => match group {
                 Some(group) => format!(
                     "({}).{}({})",
                     emit_tir_expr(group, cx),
-                    if *scoped { "spawn_scoped" } else { "spawn" },
+                    "spawn",
                     spawn_closure
                 ),
                 None => format!(
@@ -5249,31 +5218,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             }
         },
-        // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
-        // D-CONC-FAIL1=A: sema types these combinators as plain `[T]`/`T`, not
-        // `Result` — unwrap the Prelude call's fail-fast outcome so the
-        // generated Rust value matches the Jet-level type (see
-        // `jet_task_outcome_unwrap` in `Prelude/CoreLib/JetStd/MathTaskMem.rs`).
+        // D-CONC-SPAWN1=D: `task.all { … }` — join each child in source order.
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_all({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_all({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupRace { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_race({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_race({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupAny { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{root}jet_std::jet_task_outcome_unwrap({root}jet_std::jet_task_any({list}))",
-                root = cx.root_prefix
-            )
+            format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
         }
         TExprKind::SelectStart => {
             format!("{}jet_std::JetSelectBuilder::start()", cx.root_prefix)

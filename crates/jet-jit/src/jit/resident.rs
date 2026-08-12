@@ -282,6 +282,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::close_active_task_groups();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
+        jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
         Concurrency::clear_http_shared_runtime();
         if let Some(rendered) = runtime.deadline_exceeded.take() {

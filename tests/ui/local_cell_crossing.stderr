@@ -9,8 +9,8 @@ Error [E0106]: the name `Cache` is built in and can't be redefined
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
   --> tests/ui/local_cell_crossing.jet:4:27
     |
-  4 |     worker :: tasks.spawn(() => {
-    |                           ^^^^^^^
+  2 |     worker :: task {
+    |                ^^^^
  Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
  Fix: create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
 

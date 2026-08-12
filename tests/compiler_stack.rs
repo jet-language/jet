@@ -1,16 +1,15 @@
 mod common;
 
 const SHARED_SOURCE: &str = r#"
-use core.tasks
 struct Counter { value: Int }
 fn run() {
     counter := Shared.new(Counter.{ value: 0 })
-    task :: tasks.spawn(() => {
+    handle :: task {
         counter.edit((value) => {
             value.value += 1
         })
-    })
-    task.join()
+    }
+    handle.join() ?? panic("task failed")
     print(counter.read((value) => value.value))
 }
 "#;

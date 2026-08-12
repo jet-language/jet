@@ -55,13 +55,13 @@ fn scan_parallel(paths: [String]) => [String] {
     loop path, paths {
         tx :: ~sender
         file :: ~path
-        workers.push(tasks.spawn(() => {
+        workers.push(task {
             tx.send(scan_one(file))
-        }))
+        })
     }
     loop workers.len() > 0 {
         worker :: workers.pop() ?? panic("missing worker")
-        worker.join()
+        worker.join() ?? panic("worker failed")
     }
     results := [String].{}
     got := 0

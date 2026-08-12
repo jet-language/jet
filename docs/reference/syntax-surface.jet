@@ -554,24 +554,18 @@ fn embedding() {
 // ============================================================================
 // ASYNC / TASKS
 // ============================================================================
-// Tasks ship via `core.tasks` (S53 surface): spawn returns a Task, `.join()`
-// blocks, `.detach()` fires and forgets. No shared mutable state.
+// Tasks use one reserved word: `task` starts a child, `.join()` is fallible,
+// and `.detach()` fires and forgets. No shared mutable state.
 
 fn tasks_demo() {
-    a :: tasks.spawn(() => square(5))
-    b :: tasks.spawn(() => square(6))
-    print("{a.join() + b.join()}")
-    tasks.spawn(() => square(7)).detach()
+    a :: task square(5)
+    b :: task square(6)
+    print("{(a.join() ?? 0) + (b.join() ?? 0)}")
+    (task square(7)).detach()
 }
 
-// # RATIFIED, NOT YET IMPLEMENTED (S53)
-// `#Async { }` scoped-effect block is reserved for Epoch 3 (the `tasks` library
-// above is the shipped surface).
-// fn async_block() {
-//     #Async {
-//         // ...
-//     }
-// }
+// `task.all`, `task.race`, `task.any`, and `task.group` are the nested
+// combinators; `all`/`race`/`any` remain ordinary identifiers elsewhere.
 
 
 // ============================================================================

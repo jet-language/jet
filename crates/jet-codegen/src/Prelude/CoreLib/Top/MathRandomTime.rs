@@ -9,6 +9,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
+    jet_std::jet_task_deadline_mark_pending();
     if jet_interrupt_handler_should_unwind()
         || jet_scheduler_wait_boundary_should_unwind()
         || jet_typed_deadline_boundary_should_unwind()
@@ -25,18 +26,7 @@ fn jet_deadline_check(wait_kind: &str) {
 }
 
 fn jet_std_time_sleep(millis: i64) {
-    let want = millis.max(0);
-    if let Some(remaining) = jet_deadline_remaining_ms() {
-        if remaining <= 0 {
-            jet_deadline_exceeded("time sleep");
-        }
-        if want > remaining {
-            jet_scheduler_sleep_ms(remaining as u64);
-            jet_deadline_exceeded("time sleep");
-        }
-    }
-    jet_scheduler_sleep_ms(want as u64);
-    jet_deadline_check("time sleep");
+    jet_task_sleep_ms_defaulted(millis);
 }
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch {

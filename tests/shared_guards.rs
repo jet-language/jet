@@ -9,8 +9,6 @@ use jet::JitBackend::JitBackend;
 const QUEUE: &str = include_str!("../examples/features/memory/shared_guard_queue.jet");
 
 const CANCEL_WAIT: &str = r#"
-use core.tasks as tasks
-
 fn mark_started(started: Shared<Int>, began: Condition) {
     started_guard :: started.guard_edit()
     started_guard.value = 1
@@ -41,7 +39,10 @@ fn run() {
     started := Shared.new(0)
     began := Condition.new()
     task.group workers {
-        print(task.race { wait_until_cancel(shared, changed, started, began), finish_after_start(started, began) })
+        print((task.race {
+            wait_until_cancel(shared, changed, started, began),
+            finish_after_start(started, began)
+        }) ?? panic("race failed"))
     }
     reacquired :: shared.guard_edit()
     reacquired.value += 1
@@ -109,8 +110,6 @@ fn run() {
 "#;
 
 const TRANSACTION_DELTAS: &str = r#"
-use core.tasks as tasks
-
 struct Counter {
     value: Int
 }
@@ -126,8 +125,8 @@ fn run() {
     task.group workers {
         first := task increment(counter)
         second := task increment(counter)
-        first.join().drop("waits for the transaction to land; the task body already ran to completion")
-        second.join().drop("waits for the transaction to land; the task body already ran to completion")
+        first.join() ?? panic("task failed")
+        second.join() ?? panic("task failed")
     }
     guard := counter.guard_read()
     print(guard.value.value)
