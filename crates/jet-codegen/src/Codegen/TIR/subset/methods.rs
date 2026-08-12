@@ -417,6 +417,20 @@ pub(crate) fn method_call_in_subset(
                 return core_call_covered(&submodule, method)
                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
             }
+            if let Expr::Field(base, leaf, _) = receiver {
+                if let Expr::Ident(owner, _) = base.as_ref() {
+                    if cx
+                        .inline_reexport_foreign
+                        .contains_key(&(owner.clone(), leaf.clone()))
+                    {
+                        return args.iter().all(|a| {
+                            !a.flags.shared_auto_clone
+                                && arg_conv_in_subset(a)
+                                && expr_in_subset(&a.expr, cx, locals)
+                        });
+                    }
+                }
+            }
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
@@ -436,6 +450,13 @@ pub(crate) fn method_call_in_subset(
                 {
                     return core_call_covered(module, real_method)
                         && core_call_args_in_subset(module, real_method, args, cx, locals);
+                }
+                if cx.any_foreign_import_module(alias).is_some() {
+                    return args.iter().all(|a| {
+                        !a.flags.shared_auto_clone
+                            && arg_conv_in_subset(a)
+                            && expr_in_subset(&a.expr, cx, locals)
+                    });
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a

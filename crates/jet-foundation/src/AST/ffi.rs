@@ -38,6 +38,10 @@ impl ExternFn {
 #[derive(Debug, Clone)]
 pub struct CImportLink {
     pub importing_idx: usize,
+    /// `None` is a file-wide import; `Some` names the inline module whose
+    /// body owns the import. Inline modules may intentionally reuse an alias,
+    /// so the scope is part of the resolution key.
+    pub scope: Option<String>,
     pub alias: String,
     pub target_idx: usize,
 }
@@ -58,9 +62,22 @@ pub struct CFfi {
 
 impl CFfi {
     pub fn target_for(&self, importing_idx: usize, alias: &str) -> Option<usize> {
+        self.target_for_scope(importing_idx, None, alias)
+    }
+
+    pub fn target_for_scope(
+        &self,
+        importing_idx: usize,
+        scope: Option<&str>,
+        alias: &str,
+    ) -> Option<usize> {
         self.import_links
             .iter()
-            .find(|l| l.importing_idx == importing_idx && l.alias == alias)
+            .find(|l| {
+                l.importing_idx == importing_idx
+                    && l.scope.as_deref() == scope
+                    && l.alias == alias
+            })
             .map(|l| l.target_idx)
     }
 

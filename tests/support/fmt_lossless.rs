@@ -34,7 +34,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/continue_teaches_next.jet",
     "tests/ui/control_body_needs_braces.jet",
     "tests/ui/copy_keyword_retired_e0991.jet",
-    "tests/ui/core_selective_import.jet",
     "tests/ui/debug_unknown_selector.jet",
     "tests/ui/defer_only_close.jet",
     "tests/ui/deref_forbidden.jet",

@@ -5,21 +5,142 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+fn all_imports(
+    module: &crate::AST::LoadedModule,
+) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
+    crate::AST::walk_imports(module)
+        .into_iter()
+        .map(|(scope, import)| (scope, import))
+}
+
+fn foreign_imports_after_frontend(
+    imp: &ImportDecl,
+) -> Vec<(crate::AST::ForeignNamespace, String)> {
+    imp.foreign_imports().unwrap_or_else(|error| {
+        unreachable!(
+            "invalid foreign import reached codegen after sema: {}",
+            error.path
+        )
+    })
+}
+
+fn is_c_import_after_frontend(imp: &ImportDecl) -> bool {
+    imp.is_c_import().unwrap_or_else(|error| {
+        unreachable!(
+            "invalid foreign import reached codegen after sema: {}",
+            error.path
+        )
+    })
+}
+
+fn is_foreign_member_list(imp: &ImportDecl) -> bool {
+    matches!(imp.kind, ImportKind::Unqualified { .. })
+        && !foreign_imports_after_frontend(imp).is_empty()
+}
+
 /// Look up the pre-resolved module index for an import. Returns `None` for
 /// core modules, C imports, and unqualified imports (they have no file target).
 #[inline]
-fn import_is_active(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> bool {
-    bundle
-        .name_ledger
-        .effective_alias(module_idx, &imp.import_alias())
-        .is_some()
+fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
+    bundle.name_ledger.import_target(module_idx, imp.span)
 }
 
-fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
-    if !import_is_active(bundle, module_idx, imp) {
-        return None;
-    }
-    bundle.name_ledger.import_target(module_idx, imp.span)
+fn required_import_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> usize {
+    resolve_target(bundle, module_idx, imp).unwrap_or_else(|| {
+        unreachable!(
+            "import target missing after sema: module={} alias={} span={:?}",
+            module_idx,
+            imp.import_alias(),
+            imp.span
+        )
+    })
+}
+
+fn required_c_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    scope: Option<&str>,
+    alias: &str,
+) -> usize {
+    bundle
+        .cffi
+        .target_for_scope(module_idx, scope, alias)
+        .unwrap_or_else(|| {
+            unreachable!(
+                "C import target missing after sema: module={} scope={scope:?} alias={alias}",
+                module_idx
+            )
+        })
+}
+
+fn foreign_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    namespace: crate::AST::ForeignNamespace,
+    alias: String,
+    scope: Option<&str>,
+) -> Option<(String, usize)> {
+    let target = if namespace.language == crate::AST::ForeignLanguage::C {
+        bundle.cffi.target_for_scope(module_idx, scope, &alias)
+    } else {
+        bundle
+            .modules
+            .iter()
+            .position(|module| module.display == namespace.display())
+    }?;
+    Some((alias, target))
+}
+
+/// Resolve the targets named by any foreign import. The parser and AST keep
+/// member lists in `ImportKind::Unqualified`; single-library imports remain
+/// `Module` imports and share this resolver at inline scope.
+pub(crate) fn foreign_import_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+) -> Vec<(String, usize)> {
+    foreign_import_targets_in_scope(bundle, module_idx, imp, None)
+}
+
+pub(crate) fn foreign_import_targets_in_scope(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+    scope: Option<&str>,
+) -> Vec<(String, usize)> {
+    foreign_imports_after_frontend(imp)
+        .into_iter()
+        .map(|(namespace, alias)| {
+            foreign_target(bundle, module_idx, namespace, alias, scope).unwrap_or_else(|| {
+                unreachable!(
+                    "foreign import target missing after sema: module={} scope={scope:?}",
+                    module_idx
+                )
+            })
+        })
+        .collect()
+}
+
+/// Resolve only a foreign member-list import. This keeps the list branch
+/// explicit for file-wide maps that still handle the single `Module` form in
+/// their existing path.
+pub(crate) fn foreign_list_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+) -> Vec<(String, usize)> {
+    foreign_list_targets_in_scope(bundle, module_idx, imp, None)
+}
+
+pub(crate) fn foreign_list_targets_in_scope(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+    scope: Option<&str>,
+) -> Vec<(String, usize)> {
+    matches!(imp.kind, ImportKind::Unqualified { .. })
+        .then(|| foreign_import_targets_in_scope(bundle, module_idx, imp, scope))
+        .unwrap_or_default()
 }
 
 fn file_import_target(
@@ -44,14 +165,17 @@ pub(crate) fn selective_nominal_targets(
 ) -> Vec<(usize, String)> {
     let mut targets = Vec::new();
     for import in &bundle.modules[module_idx].imports {
-        let ImportKind::Unqualified { items, .. } = &import.kind else {
+        if !matches!(import.kind, ImportKind::Unqualified { .. }) {
             continue;
-        };
-        for (original, local_alias) in items {
-            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+        }
+        for binding in import.walk_bindings() {
+            let Some(original) = binding.original else {
+                continue;
+            };
+            let local = binding.local;
             let Some(target) = bundle
                 .name_ledger
-                .alias(module_idx, local)
+                .alias(module_idx, &local)
                 .and_then(|alias| alias.target_module)
             else {
                 continue;
@@ -143,50 +267,67 @@ pub(crate) fn foreign_type_map(
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
-    for imp in &module.imports {
-        if imp.is_c_import() {
-            continue;
-        }
-        if let Some(target) = resolve_target(bundle, module_idx, imp) {
-            let rust_mod = mangle(&bundle.modules[target].alias);
-            for item in &bundle.modules[target].items {
-                match item {
-                    Item::Struct(s)
-                        if bundle.name_ledger.visible(module_idx, target, &s.name) =>
-                    {
-                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
-                            map.insert(identity, rust_mod.clone());
-                        }
+    let is_local = |name: &str| {
+        module.items.iter().any(|item| match item {
+            Item::Struct(structure) => structure.name == name,
+            Item::Enum(enumeration) => enumeration.name == name,
+            _ => false,
+        })
+    };
+    let mut add_target = |target: usize| {
+        let rust_mod = mangle(&bundle.modules[target].alias);
+        for item in &bundle.modules[target].items {
+            match item {
+                Item::Struct(s)
+                    if bundle.name_ledger.visible(module_idx, target, &s.name)
+                        && !is_local(&s.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
+                        map.insert(identity, rust_mod.clone());
                     }
-                    Item::Enum(e)
-                        if bundle.name_ledger.visible(module_idx, target, &e.name) =>
-                    {
-                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
-                            map.insert(identity, rust_mod.clone());
-                        }
+                }
+                Item::Enum(e)
+                    if bundle.name_ledger.visible(module_idx, target, &e.name)
+                        && !is_local(&e.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
+                        map.insert(identity, rust_mod.clone());
                     }
-                    Item::Distinct(d)
-                        if bundle.name_ledger.visible(module_idx, target, &d.name) =>
-                    {
-                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
-                            map.insert(identity, rust_mod.clone());
-                        }
+                }
+                Item::Distinct(d)
+                    if bundle.name_ledger.visible(module_idx, target, &d.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                        map.insert(identity, rust_mod.clone());
                     }
-                    Item::UnitFamily(family) => {
-                        for member in family.distinct_defs() {
-                            if bundle.name_ledger.visible(module_idx, target, &member.name) {
-                                if let Some(identity) =
-                                    bundle.name_ledger.nominal_identity(target, &member.name)
-                                {
-                                    map.insert(identity, rust_mod.clone());
-                                }
+                }
+                Item::UnitFamily(family) => {
+                    for member in family.distinct_defs() {
+                        if bundle.name_ledger.visible(module_idx, target, &member.name) {
+                            if let Some(identity) =
+                                bundle.name_ledger.nominal_identity(target, &member.name)
+                            {
+                                map.insert(identity, rust_mod.clone());
                             }
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
+    };
+    for (scope, imp) in all_imports(module) {
+        for (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) {
+            add_target(target);
+        }
+        if is_foreign_member_list(imp)
+            || is_c_import_after_frontend(imp)
+            || matches!(imp.kind, ImportKind::Unqualified { .. })
+            || imp.core_module_path().is_some()
+        {
+            continue;
+        }
+        add_target(required_import_target(bundle, module_idx, imp));
     }
     for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
         let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
@@ -243,19 +384,14 @@ pub(crate) fn foreign_type_map(
     map
 }
 
-/// Populate `cx.variant_owner` and `cx.enum_variants` with pub enum variants
-/// from imported file-modules, so cross-module pattern matching works in codegen.
 pub(crate) fn register_foreign_enum_variants(
     cx: &mut Cx,
     bundle: &ProgramBundle,
     module_idx: usize,
 ) {
     let module = &bundle.modules[module_idx];
-    for imp in &module.imports {
-        if imp.is_c_import() {
-            continue;
-        }
-        if let Some(target) = resolve_target(bundle, module_idx, imp) {
+    for (scope, imp) in all_imports(module) {
+        for (_, target) in foreign_list_targets_in_scope(bundle, module_idx, imp, scope) {
             for item in &bundle.modules[target].items {
                 if let Item::Enum(e) = item {
                     if bundle.name_ledger.visible(module_idx, target, &e.name) {
@@ -285,6 +421,50 @@ pub(crate) fn register_foreign_enum_variants(
                                 .entry(v.name.clone())
                                 .or_insert_with(|| identity.clone());
                         }
+                    }
+                }
+            }
+        }
+        if is_foreign_member_list(imp) {
+            continue;
+        }
+        if is_c_import_after_frontend(imp) {
+            continue;
+        }
+        if matches!(imp.kind, ImportKind::Unqualified { .. })
+            || imp.core_module_path().is_some()
+        {
+            continue;
+        }
+        let target = required_import_target(bundle, module_idx, imp);
+        for item in &bundle.modules[target].items {
+            if let Item::Enum(e) = item {
+                if bundle.name_ledger.visible(module_idx, target, &e.name) {
+                    let Some(identity) =
+                        bundle.name_ledger.nominal_identity(target, &e.name)
+                    else {
+                        continue;
+                    };
+                    cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
+                        e.variants
+                            .iter()
+                            .map(|v| {
+                                (
+                                    v.name.clone(),
+                                    qualify_imported_variant_payload(
+                                        bundle,
+                                        target,
+                                        &identity,
+                                        &v.payload,
+                                    ),
+                                )
+                            })
+                            .collect()
+                    });
+                    for v in &e.variants {
+                        cx.variant_owner
+                            .entry(v.name.clone())
+                            .or_insert_with(|| identity.clone());
                     }
                 }
             }
@@ -358,26 +538,29 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        let alias = imp.import_alias();
-        // S59: C `use` forms target a synthetic merged module by alias.
-        if imp.is_c_import() {
-            if !import_is_active(bundle, module_idx, imp) {
-                continue;
-            }
-            if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
-                let stem = &bundle.modules[target].alias;
-                map.insert(alias, mangle(stem));
-            }
-            continue;
-        }
-        if let Some(target) = bundle
-            .name_ledger
-            .effective_alias(module_idx, &alias)
-            .and_then(|name| name.target_module)
-        {
+        for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
             let stem = &bundle.modules[target].alias;
             map.insert(alias, mangle(stem));
         }
+        if is_foreign_member_list(imp) {
+            continue;
+        }
+        let alias = imp.import_alias();
+        // S59: C `use` forms target a synthetic merged module by alias.
+        if is_c_import_after_frontend(imp) {
+            let target = required_c_target(bundle, module_idx, None, &alias);
+            let stem = &bundle.modules[target].alias;
+            map.insert(alias, mangle(stem));
+            continue;
+        }
+        if matches!(imp.kind, ImportKind::Unqualified { .. })
+            || imp.core_module_path().is_some()
+        {
+            continue;
+        }
+        let target = required_import_target(bundle, module_idx, imp);
+        let stem = &bundle.modules[target].alias;
+        map.insert(alias, mangle(stem));
     }
     for (local, target) in unqualified_file_module_targets(bundle, module_idx) {
         map.insert(local, mangle(&bundle.modules[target].alias));
@@ -395,19 +578,19 @@ fn unqualified_file_module_targets(
     let module = &bundle.modules[module_idx];
     let mut targets = Vec::new();
     for imp in &module.imports {
-        let ImportKind::Unqualified {
-            module_alias,
-            items,
-            ..
-        } = &imp.kind
-        else {
+        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
             continue;
         };
+        if is_foreign_member_list(imp) {
+            continue;
+        }
         let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
             continue;
         };
-        for (original, local_alias) in items {
-            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+        for binding in imp.walk_bindings() {
+            let Some(original) = binding.original else {
+                continue;
+            };
             let Some(declaration) = bundle.name_ledger.declaration(parent, original) else {
                 continue;
             };
@@ -423,7 +606,7 @@ fn unqualified_file_module_targets(
             else {
                 continue;
             };
-            targets.push((local.to_string(), target));
+            targets.push((binding.local, target));
         }
     }
     targets
@@ -443,40 +626,45 @@ pub(crate) fn reexport_call_map(
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
             continue;
         }
-        let alias = imp.import_alias();
-        let Some(target_idx) = resolve_target(bundle, module_idx, imp) else {
+        if imp.core_module_path().is_some() || is_c_import_after_frontend(imp) {
             continue;
-        };
+        }
+        let alias = imp.import_alias();
+        let target_idx = required_import_target(bundle, module_idx, imp);
         let target = &bundle.modules[target_idx];
         for reimp in &target.imports {
             let ImportKind::Unqualified {
-                module_alias: _,
-                items,
+                module_alias,
                 ..
             } = &reimp.kind
             else {
                 continue;
             };
-            for (orig, alias_opt) in items {
-                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
-                let Some(name) = bundle.name_ledger.effective_alias(target_idx, local) else {
-                    continue;
-                };
-                let Some(real_idx) = name.target_module else {
-                    continue;
-                };
-                if !bundle.name_ledger.visible(module_idx, target_idx, local) {
-                    continue;
-                }
-                let real_name = name
-                    .target
-                    .rsplit_once('.')
-                    .map(|(_, leaf)| leaf)
-                    .unwrap_or(orig)
-                    .to_string();
+            if !reimp.is_pub {
+                continue;
+            }
+            // Resolve `module_alias` within the target module's own imports.
+            if is_foreign_member_list(reimp)
+                || crate::AST::core_list_prefix(module_alias).is_some()
+            {
+                continue;
+            }
+            let real_idx = file_import_target(bundle, target_idx, module_alias)
+                .unwrap_or_else(|| {
+                    unreachable!(
+                        "re-export target missing after sema: module={} alias={module_alias}",
+                        target_idx
+                    )
+                });
+            let real_mod = mangle(&bundle.modules[real_idx].alias);
+            for binding in reimp.walk_bindings() {
+                let orig = binding
+                    .original
+                    .expect("member walker returned a binding without a member");
+                let local = binding.local;
                 map.insert(
-                    (alias.clone(), local.to_string()),
-                    (mangle(&bundle.modules[real_idx].alias), real_name),
+                    (alias.clone(), local),
+                    (real_mod.clone(), orig.to_string()),
                 );
             }
         }
@@ -492,7 +680,6 @@ pub(crate) fn reexport_call_map(
         for reimp in &cm.imports {
             let ImportKind::Unqualified {
                 module_alias,
-                items,
                 ..
             } = &reimp.kind
             else {
@@ -501,15 +688,27 @@ pub(crate) fn reexport_call_map(
             if !reimp.is_pub {
                 continue;
             }
-            let Some(real_idx) = file_import_target(bundle, module_idx, module_alias) else {
+            if is_foreign_member_list(reimp)
+                || crate::AST::core_list_prefix(module_alias).is_some()
+            {
                 continue;
-            };
+            }
+            let real_idx = file_import_target(bundle, module_idx, module_alias)
+                .unwrap_or_else(|| {
+                    unreachable!(
+                        "inline re-export target missing after sema: module={} alias={module_alias}",
+                        module_idx
+                    )
+                });
             let real_mod = mangle(&bundle.modules[real_idx].alias);
-            for (orig, alias_opt) in items {
-                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+            for binding in reimp.walk_bindings() {
+                let orig = binding
+                    .original
+                    .expect("member walker returned a binding without a member");
+                let local = binding.local;
                 map.insert(
-                    (cm.name.clone(), local.to_string()),
-                    (real_mod.clone(), orig.clone()),
+                    (cm.name.clone(), local),
+                    (real_mod.clone(), orig.to_string()),
                 );
             }
         }
@@ -524,9 +723,6 @@ pub(crate) fn core_import_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        if !import_is_active(bundle, module_idx, imp) {
-            continue;
-        }
         if let Some(core_module) = imp.core_module_path() {
             map.insert(imp.import_alias(), core_module);
             continue;
@@ -536,16 +732,15 @@ pub(crate) fn core_import_map(
         // `use core.item as item` would.
         if let ImportKind::Unqualified {
             module_alias,
-            items,
             ..
         } = &imp.kind
         {
             if crate::AST::core_list_prefix(module_alias).is_some() {
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
-                    if bundle.name_ledger.effective_alias(module_idx, local).is_none() {
-                        continue;
-                    }
+                for binding in imp.walk_bindings() {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local;
                     match crate::AST::core_list_path(module_alias, orig) {
                         Some(crate::AST::CoreListPath::Module(module)) => {
                             map.insert(local.to_string(), module);
@@ -556,7 +751,9 @@ pub(crate) fn core_import_map(
                             // core-import map for every backend.
                             map.insert(local.to_string(), module);
                         }
-                        None => {}
+                        None => unreachable!(
+                            "invalid Core member import reached codegen after sema: {module_alias}.{orig}"
+                        ),
                     }
                 }
             }
@@ -567,7 +764,7 @@ pub(crate) fn core_import_map(
 
 /// D-MOD3: build unqualified-import maps for codegen.
 /// Returns (inline_map, file_map) where:
-///   inline_map: unqualified name → canonical member name (for inline code modules)
+///   inline_map: unqualified name → "alias__method" (for inline code modules)
 ///   file_map:   unqualified name → (rust_mod_name, fn_name) (for file modules)
 pub(crate) fn unqualified_import_maps(
     bundle: &ProgramBundle,
@@ -575,10 +772,6 @@ pub(crate) fn unqualified_import_maps(
 ) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
     let mut inline_map: HashMap<String, String> = HashMap::new();
     let mut file_map: HashMap<String, (String, String)> = HashMap::new();
-    let file_module_locals: HashSet<String> = unqualified_file_module_targets(bundle, module_idx)
-        .into_iter()
-        .map(|(local, _)| local)
-        .collect();
     let module = &bundle.modules[module_idx];
     // Build a set of inline code module aliases for this module.
     let code_mod_aliases: std::collections::HashSet<String> = module
@@ -596,38 +789,46 @@ pub(crate) fn unqualified_import_maps(
     for imp in &module.imports {
         let ImportKind::Unqualified {
             module_alias,
-            items,
             ..
         } = &imp.kind
         else {
             continue;
         };
+        if is_foreign_member_list(imp) {
+            // Foreign member lists are mounted namespaces, not ordinary
+            // unqualified functions; `foreign_list_targets` handles them.
+            continue;
+        }
         if crate::AST::core_list_prefix(module_alias).is_some() {
             // Std namespace — handled separately by core_import_map.
             continue;
         }
-        for (orig, alias_opt) in items {
-            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
-            if file_module_locals.contains(local) {
-                continue;
-            }
-            let Some(name) = bundle.name_ledger.effective_alias(module_idx, local) else {
-                continue;
-            };
+        for binding in imp.walk_bindings() {
+            let orig = binding
+                .original
+                .expect("member walker returned a binding without a member");
+            let local = binding.local;
+            let alias = bundle.name_ledger.effective_alias(module_idx, &local);
             if code_mod_aliases.contains(module_alias.as_str()) {
-                // Inline code module. Sema already stored the canonical member
-                // name, including generic-module substitutions.
-                inline_map.insert(local.to_string(), name.target.clone());
-            } else if let Some(target) = name.target_module {
-                // File module. Sema already resolved the alias to its target.
-                let real_name = name
-                    .target
-                    .rsplit_once('.')
-                    .map(|(_, leaf)| leaf)
-                    .unwrap_or(orig)
-                    .to_string();
+                // Inline code module. Sema stores the canonical member identity,
+                // including generic-module substitutions, in the ledger.
+                let target = alias
+                    .map(|name| name.target.clone())
+                    .unwrap_or_else(|| jet_foundation::Names::member_name(module_alias, orig));
+                inline_map.insert(local, target);
+            } else if let Some(target) = alias
+                .and_then(|name| name.target_module)
+                .or_else(|| file_import_target(bundle, module_idx, module_alias))
+            {
+                let real_name = alias
+                    .and_then(|name| {
+                        name.target
+                            .rsplit_once('.')
+                            .map(|(_, leaf)| leaf.to_string())
+                    })
+                    .unwrap_or_else(|| orig.to_string());
                 file_map.insert(
-                    local.to_string(),
+                    local,
                     (mangle(&bundle.modules[target].alias), real_name),
                 );
             }
@@ -674,33 +875,63 @@ pub(crate) fn inline_import_maps(
         for imp in &cm.imports {
             let ImportKind::Unqualified {
                 module_alias,
-                items,
                 ..
             } = &imp.kind
             else {
                 continue;
             };
+            if is_foreign_member_list(imp) {
+                continue;
+            }
             if code_module_names.contains(module_alias) {
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
-                    inline_scope.insert(local.to_string(), format!("{module_alias}__{orig}"));
-                    names.insert(local.to_string());
+                for binding in imp.walk_bindings() {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local;
+                    let target = bundle
+                        .name_ledger
+                        .effective_alias(module_idx, &local)
+                        .map(|name| name.target.clone())
+                        .unwrap_or_else(|| {
+                            jet_foundation::Names::member_name(module_alias, orig)
+                        });
+                    inline_scope.insert(local.clone(), target.clone());
+                    names.insert(local.clone());
                     if imp.is_pub {
                         inline_reexports.insert(
-                            (cm.name.clone(), local.to_string()),
-                            format!("{module_alias}__{orig}"),
+                            (cm.name.clone(), local),
+                            target,
                         );
                     }
                 }
             } else if crate::AST::core_list_prefix(module_alias).is_none() {
                 let target = file_import_target(bundle, module_idx, module_alias);
-                if let Some(target) = target {
-                    let rust_mod = mangle(&bundle.modules[target].alias);
-                    for (orig, alias_opt) in items {
-                        let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
-                        file_scope.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
-                        names.insert(local.to_string());
-                    }
+                let target = target.unwrap_or_else(|| {
+                    unreachable!(
+                        "inline unqualified import target missing after sema: module={} alias={module_alias}",
+                        module_idx
+                    )
+                });
+                for binding in imp.walk_bindings() {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local;
+                    let real_name = bundle
+                        .name_ledger
+                        .effective_alias(module_idx, &local)
+                        .and_then(|name| {
+                            name.target
+                                .rsplit_once('.')
+                                .map(|(_, leaf)| leaf.to_string())
+                        })
+                        .unwrap_or_else(|| orig.to_string());
+                    file_scope.insert(
+                        local.clone(),
+                        (mangle(&bundle.modules[target].alias), real_name),
+                    );
+                    names.insert(local);
                 }
             }
         }
@@ -708,7 +939,7 @@ pub(crate) fn inline_import_maps(
             let Item::Func(function) = inner else {
                 continue;
             };
-            let key = format!("{}__{}", cm.name, function.name);
+            let key = jet_foundation::Names::member_name(&cm.name, &function.name);
             if !inline_scope.is_empty() {
                 inline_scopes.insert(key.clone(), inline_scope.clone());
             }
@@ -718,6 +949,243 @@ pub(crate) fn inline_import_maps(
         }
     }
     (inline_scopes, file_scopes, names, inline_reexports)
+}
+
+/// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign namespace aliases imported
+/// inside an inline module body. They use the same foreign member-list
+/// resolver as file-level imports, but remain scoped to each emitted function.
+pub(crate) fn inline_foreign_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<String, HashMap<String, String>> {
+    let module = &bundle.modules[module_idx];
+    let mut scopes = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut scope = HashMap::new();
+        for imp in &cm.imports {
+            for (alias, target) in
+                foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
+            {
+                scope.insert(alias, mangle(&bundle.modules[target].alias));
+            }
+        }
+        if scope.is_empty() {
+            continue;
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            scopes.insert(
+                jet_foundation::Names::member_name(&cm.name, &function.name),
+                scope.clone(),
+            );
+        }
+    }
+    scopes
+}
+
+/// D-NAME-WALK1=A / D-VERDICT-1867-1: build the foreign call facts for each
+/// emitted inline function. Signature and return facts are deliberately not
+/// merged into the file-wide `(alias, method)` maps: sibling inline modules
+/// may reuse an alias without sharing its target library.
+pub(crate) fn inline_foreign_import_signature_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
+    HashMap<String, HashMap<(String, String), Option<Type>>>,
+) {
+    let module = &bundle.modules[module_idx];
+    let mut signatures = HashMap::new();
+    let mut returns = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        let Some(body) = &cm.body else {
+            continue;
+        };
+        let mut sig_scope = HashMap::new();
+        let mut ret_scope = HashMap::new();
+        for imp in &cm.imports {
+            for (alias, target) in
+                foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
+            {
+                for item in &bundle.modules[target].items {
+                    match item {
+                        Item::Func(function) if function.is_pub => {
+                            sig_scope.insert(
+                                (alias.clone(), function.name.clone()),
+                                function
+                                    .params
+                                    .iter()
+                                    .map(|param| {
+                                        (
+                                            param.convention,
+                                            qualify_unit_type(bundle, target, &param.ty),
+                                        )
+                                    })
+                                    .collect(),
+                            );
+                            ret_scope.insert(
+                                (alias.clone(), function.name.clone()),
+                                function
+                                    .return_type
+                                    .as_ref()
+                                    .map(|ty| qualify_unit_type(bundle, target, ty)),
+                            );
+                        }
+                        Item::CModule(c_module) => {
+                            for function in &c_module.functions {
+                                sig_scope.insert(
+                                    (alias.clone(), function.name.clone()),
+                                    function
+                                        .params
+                                        .iter()
+                                        .map(|param| (param.convention, param.ty.clone()))
+                                        .collect(),
+                                );
+                                ret_scope.insert(
+                                    (alias.clone(), function.name.clone()),
+                                    function.return_type.clone(),
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if sig_scope.is_empty() && ret_scope.is_empty() {
+            continue;
+        }
+        for inner in body {
+            let Item::Func(function) = inner else {
+                continue;
+            };
+            let key = jet_foundation::Names::member_name(&cm.name, &function.name);
+            signatures.insert(key.clone(), sig_scope.clone());
+            returns.insert(key, ret_scope.clone());
+        }
+    }
+    (signatures, returns)
+}
+
+/// D-VERDICT-1867-1: an inline module may publicly re-export a foreign
+/// namespace. The exported namespace is still just the same mounted Rust
+/// module; callers reach it as `inline_alias.exported_alias.method(...)`.
+pub(crate) fn inline_foreign_reexport_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<(String, String), String> {
+    let module = &bundle.modules[module_idx];
+    let mut map = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        if cm.body.is_none() {
+            continue;
+        }
+        for imp in &cm.imports {
+            if !imp.is_pub {
+                continue;
+            }
+            for (alias, target) in
+                foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
+            {
+                map.insert(
+                    (cm.name.clone(), alias),
+                    mangle(&bundle.modules[target].alias),
+                );
+            }
+        }
+    }
+    map
+}
+
+/// Build signature and return facts for calls through an inline module's
+/// public foreign namespace re-export. These calls occur in the enclosing
+/// module, so their facts are keyed by the exporting inline module rather than
+/// by the caller's emitted function.
+pub(crate) fn inline_foreign_reexport_signature_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (
+    HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
+    HashMap<(String, String, String), Option<Type>>,
+) {
+    let module = &bundle.modules[module_idx];
+    let mut signatures = HashMap::new();
+    let mut returns = HashMap::new();
+    for item in &module.items {
+        let Item::CodeModule(cm) = item else {
+            continue;
+        };
+        if cm.body.is_none() {
+            continue;
+        }
+        for imp in &cm.imports {
+            if !imp.is_pub {
+                continue;
+            }
+            for (alias, target) in
+                foreign_import_targets_in_scope(bundle, module_idx, imp, Some(&cm.name))
+            {
+                for item in &bundle.modules[target].items {
+                    match item {
+                        Item::Func(function) if function.is_pub => {
+                            signatures.insert(
+                                (cm.name.clone(), alias.clone(), function.name.clone()),
+                                function
+                                    .params
+                                    .iter()
+                                    .map(|param| {
+                                        (
+                                            param.convention,
+                                            qualify_unit_type(bundle, target, &param.ty),
+                                        )
+                                    })
+                                    .collect(),
+                            );
+                            returns.insert(
+                                (cm.name.clone(), alias.clone(), function.name.clone()),
+                                function
+                                    .return_type
+                                    .as_ref()
+                                    .map(|ty| qualify_unit_type(bundle, target, ty)),
+                            );
+                        }
+                        Item::CModule(c_module) => {
+                            for function in &c_module.functions {
+                                signatures.insert(
+                                    (cm.name.clone(), alias.clone(), function.name.clone()),
+                                    function
+                                        .params
+                                        .iter()
+                                        .map(|param| (param.convention, param.ty.clone()))
+                                        .collect(),
+                                );
+                                returns.insert(
+                                    (cm.name.clone(), alias.clone(), function.name.clone()),
+                                    function.return_type.clone(),
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    (signatures, returns)
 }
 
 /// D-NAME-WALK1=A: build the Core portion of every inline-module import
@@ -749,7 +1217,6 @@ pub(crate) fn inline_core_import_maps(
             }
             let ImportKind::Unqualified {
                 module_alias,
-                items,
                 ..
             } = &imp.kind
             else {
@@ -758,11 +1225,16 @@ pub(crate) fn inline_core_import_maps(
             if crate::AST::core_list_prefix(module_alias).is_none() {
                 continue;
             }
-            for (orig, alias_opt) in items {
-                let local = crate::AST::import_item_alias(orig, alias_opt.as_deref()).to_string();
-                let Some(path) = crate::AST::core_list_path(module_alias, orig) else {
-                    continue;
-                };
+            for binding in imp.walk_bindings() {
+                let orig = binding
+                    .original
+                    .expect("member walker returned a binding without a member");
+                let local = binding.local;
+                let path = crate::AST::core_list_path(module_alias, orig).unwrap_or_else(|| {
+                    unreachable!(
+                        "invalid Core member import reached codegen after sema: {module_alias}.{orig}"
+                    )
+                });
                 match path {
                     crate::AST::CoreListPath::Module(core_module) => {
                         scope.insert(local, core_module);
@@ -784,7 +1256,7 @@ pub(crate) fn inline_core_import_maps(
                 continue;
             };
             scopes.insert(
-                format!("{}__{}", cm.name, function.name),
+                jet_foundation::Names::member_name(&cm.name, &function.name),
                 scope.clone(),
             );
         }
@@ -810,28 +1282,39 @@ fn unqualified_file_function_entries(
     for imp in imports {
         let ImportKind::Unqualified {
             module_alias,
-            items,
             ..
         } = &imp.kind
         else {
             continue;
         };
         let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
-            continue;
+            if is_foreign_member_list(imp)
+                || crate::AST::core_list_prefix(module_alias).is_some()
+            {
+                continue;
+            }
+            unreachable!(
+                "file import target missing after sema: module={module_idx} alias={module_alias}"
+            );
         };
-        for (orig, alias_opt) in items {
-            let local = crate::AST::import_item_alias(orig, alias_opt.as_deref()).to_owned();
+        for binding in imp.walk_bindings() {
+            let orig = binding
+                .original
+                .expect("member walker returned a binding without a member");
+            let local = binding.local;
             let Some(item) = bundle.modules[target].items.iter().find(|item| match item {
-                Item::Func(f) => f.name == *orig && f.is_pub,
+                Item::Func(f) => {
+                    f.name == orig && bundle.name_ledger.visible(module_idx, target, &f.name)
+                }
                 _ => false,
             }) else {
                 if let Some(Item::CModule(cm)) = bundle.modules[target].items.iter().find(|item| {
                     matches!(item, Item::CModule(_))
                 }) {
-                    if let Some(function) = cm.functions.iter().find(|function| function.name == *orig) {
+                    if let Some(function) = cm.functions.iter().find(|function| function.name == orig) {
                         entries.push((
                             local,
-                            orig.clone(),
+                            orig.to_string(),
                             function
                                 .params
                                 .iter()
@@ -846,16 +1329,21 @@ fn unqualified_file_function_entries(
                                 .collect(),
                             function.return_type.clone(),
                         ));
+                        continue;
                     }
                 }
-                continue;
+                unreachable!(
+                    "imported member missing after sema: module={module_idx} alias={module_alias} member={orig}"
+                );
             };
             let Item::Func(function) = item else {
-                continue;
+                unreachable!(
+                    "imported member is not a function after sema: module={module_idx} alias={module_alias} member={orig}"
+                );
             };
             entries.push((
                 local,
-                orig.clone(),
+                orig.to_string(),
                 function
                     .params
                     .iter()
@@ -888,25 +1376,52 @@ pub(crate) fn import_sig_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        if !import_is_active(bundle, module_idx, imp) {
+        for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
+            for item in &bundle.modules[target].items {
+                match item {
+                    Item::Func(f) if f.is_pub => {
+                        map.insert(
+                            (alias.clone(), f.name.clone()),
+                            f.params
+                                .iter()
+                                .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
+                                .collect(),
+                        );
+                    }
+                    Item::CModule(cm) => {
+                        for ef in &cm.functions {
+                            map.insert(
+                                (alias.clone(), ef.name.clone()),
+                                ef.params
+                                    .iter()
+                                    .map(|p| (p.convention, p.ty.clone()))
+                                    .collect(),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if is_foreign_member_list(imp) {
             continue;
         }
         let alias = imp.import_alias();
         // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
-        let target = if imp.is_c_import() {
-            match bundle.cffi.target_for(module_idx, &alias) {
-                Some(t) => t,
-                None => continue,
-            }
+        let target = if is_c_import_after_frontend(imp) {
+            required_c_target(bundle, module_idx, None, &alias)
+        } else if matches!(imp.kind, ImportKind::Unqualified { .. })
+            || imp.core_module_path().is_some()
+        {
+            continue;
         } else {
-            match resolve_target(bundle, module_idx, imp) {
-                Some(t) => t,
-                None => continue,
-            }
+            required_import_target(bundle, module_idx, imp)
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
+                Item::Func(f)
+                    if bundle.name_ledger.visible(module_idx, target, &f.name) =>
+                {
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -995,8 +1510,8 @@ pub(crate) fn import_sig_map(
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
-                        && f.name == real_fn
+                    if f.name == real_fn
+                        && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
                     {
                         map.insert(
                             (alias.clone(), item.clone()),
@@ -1039,24 +1554,43 @@ pub(crate) fn import_ret_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        if !import_is_active(bundle, module_idx, imp) {
+        for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
+            for item in &bundle.modules[target].items {
+                match item {
+                    Item::Func(f) if f.is_pub => {
+                        let ret = f
+                            .return_type
+                            .as_ref()
+                            .map(|ty| qualify_unit_type(bundle, target, ty));
+                        map.insert((alias.clone(), f.name.clone()), ret);
+                    }
+                    Item::CModule(cm) => {
+                        for ef in &cm.functions {
+                            map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if is_foreign_member_list(imp) {
             continue;
         }
         let alias = imp.import_alias();
-        let target = if imp.is_c_import() {
-            match bundle.cffi.target_for(module_idx, &alias) {
-                Some(t) => t,
-                None => continue,
-            }
+        let target = if is_c_import_after_frontend(imp) {
+            required_c_target(bundle, module_idx, None, &alias)
+        } else if matches!(imp.kind, ImportKind::Unqualified { .. })
+            || imp.core_module_path().is_some()
+        {
+            continue;
         } else {
-            match resolve_target(bundle, module_idx, imp) {
-                Some(t) => t,
-                None => continue,
-            }
+            required_import_target(bundle, module_idx, imp)
         };
         for item in &bundle.modules[target].items {
             match item {
-                Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
+                Item::Func(f)
+                    if bundle.name_ledger.visible(module_idx, target, &f.name) =>
+                {
                     let ret = f
                         .return_type
                         .as_ref()
@@ -1106,8 +1640,8 @@ pub(crate) fn import_ret_map(
         if let Some((real_idx, real)) = bundle.modules.iter().enumerate().find(|(_, m)| m.alias == stem) {
             for it in &real.items {
                 if let Item::Func(f) = it {
-                    if bundle.name_ledger.visible(module_idx, real_idx, &f.name)
-                        && f.name == real_fn
+                    if f.name == real_fn
+                        && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
                     {
                         map.insert(
                             (alias.clone(), item.clone()),

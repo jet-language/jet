@@ -16,9 +16,11 @@ pub use types::{
 mod program_imports;
 pub use program_imports::{
     AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
-    ForeignNamespace, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
+    ForeignImportError, ForeignNamespace, ImportBinding, ImportDecl, ImportKind, InlineVersion,
+    LoadedModule, MigrationDecl,
     MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_list_path,
-    core_list_prefix, import_item_alias,
+    core_list_prefix, member_import_local,
+    walk_imports,
 };
 pub use crate::Names::{
     mangle, mangle_path, member_name, NameLedger,

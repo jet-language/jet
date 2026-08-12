@@ -93,21 +93,21 @@ impl TraitRegistry {
             .map(|(module_idx, module)| {
                 let mut selected = HashMap::new();
                 for import in &module.imports {
-                    let ImportKind::Unqualified { items, .. } = &import.kind else {
-                        continue;
-                    };
-                    for (original, local_alias) in items {
-                        let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+                    for binding in import.walk_bindings() {
+                        let Some(original) = binding.original else {
+                            continue;
+                        };
+                        let local = binding.local;
                         let leaf = original.rsplit('.').next().unwrap_or(original);
                         let candidate = name_ledger
-                            .alias(module_idx, local)
+                            .alias(module_idx, &local)
                             .and_then(|alias| alias.target_module)
                             .filter(|target| {
                                 registries[*target].local_types.contains(leaf)
                                     && name_ledger.visible(module_idx, *target, leaf)
                             })
                             .map(|target| (target, leaf.to_string()));
-                        match selected.entry(local.to_string()) {
+                        match selected.entry(local) {
                             std::collections::hash_map::Entry::Vacant(entry) => {
                                 entry.insert(candidate);
                             }

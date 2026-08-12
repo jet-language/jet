@@ -619,18 +619,19 @@ fn core_aliases(module: &crate::AST::LoadedModule) -> std::collections::HashMap<
                 };
                 aliases.insert(alias, name.clone());
             }
-        } else if let crate::AST::ImportKind::Unqualified {
-            module_alias,
-            items,
-            ..
-        } = &import.kind {
-            if let Some(prefix) = crate::AST::core_list_prefix(module_alias) {
-                for (original, alias) in items {
-                    let full = format!("{prefix}.{original}");
-                    if crate::Syntax::is_known_core_module(&full) {
-                        let local = crate::AST::import_item_alias(original, alias.as_deref());
-                        aliases.insert(local.to_string(), full);
-                    }
+        } else if let Some(prefix) = match &import.kind {
+            crate::AST::ImportKind::Unqualified { module_alias, .. } => {
+                crate::AST::core_list_prefix(module_alias)
+            }
+            _ => None,
+        } {
+            for binding in import.walk_bindings() {
+                let Some(original) = binding.original else {
+                    continue;
+                };
+                let full = format!("{prefix}.{original}");
+                if crate::Syntax::is_known_core_module(&full) {
+                    aliases.insert(binding.local, full);
                 }
             }
         }

@@ -53,6 +53,13 @@ impl LoaderError {
     }
 }
 
+fn is_foreign_namespace_import(imp: &ImportDecl) -> Result<bool, Diagnostic> {
+    let active = crate::Foreign::is_active_namespace_import(imp)
+        .map_err(|error| error.diagnostic())?;
+    let c = crate::CFFI::is_c_import(imp).map_err(|error| error.diagnostic())?;
+    Ok(active || c)
+}
+
 fn record_loader_error(
     sink: &mut Option<&mut Vec<LoaderDiagnostic>>,
     error: LoaderError,
@@ -809,16 +816,27 @@ fn load_entry_with_overlays_mode_with_sink(
     }
 
     if load_adjacent_unqualified {
-        let aliases: Vec<(String, crate::Diagnostics::Span)> = modules[0]
-            .imports
-            .iter()
-            .filter_map(|import| match &import.kind {
-                ImportKind::Unqualified { module_alias, module_alias_span, .. } => {
-                    Some((module_alias.clone(), *module_alias_span))
+        let mut aliases = Vec::new();
+        for import in &modules[0].imports {
+            if !matches!(import.kind, ImportKind::Unqualified { .. }) {
+                continue;
+            }
+            let is_foreign = import
+                .foreign_imports()
+                .map_err(|error| vec![error.diagnostic()])?;
+            if !is_foreign.is_empty() {
+                continue;
+            }
+            if let Some(binding) = import.walk_bindings().into_iter().next() {
+                if crate::AST::core_list_prefix(binding.module_alias).is_some() {
+                    continue;
                 }
-                _ => None,
-            })
-            .collect();
+                aliases.push((
+                    binding.module_alias.to_string(),
+                    binding.module_alias_span,
+                ));
+            }
+        }
         for (alias, span) in aliases {
             if modules.iter().any(|module| module.alias == alias) {
                 continue;
@@ -929,7 +947,7 @@ fn load_entry_with_overlays_mode_with_sink(
             if matches!(imp.kind, ImportKind::Unqualified { .. }) {
                 continue;
             }
-            if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
+            if is_foreign_namespace_import(imp).map_err(|diagnostic| vec![diagnostic])? {
                 continue;
             }
             if core_module_path(imp).is_some() {
@@ -1649,8 +1667,10 @@ fn load_file(
     });
 
     for imp in &imports {
+        let is_foreign = is_foreign_namespace_import(imp)
+            .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
         // S59: C `use` forms use the reserved `c.` root legitimately.
-        if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
+        if is_foreign {
             continue;
         }
         // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
@@ -1663,11 +1683,6 @@ fn load_file(
             return Err(LoaderError::at(display, &source, vec![d]));
         }
         if core_module_path(imp).is_some() {
-            continue;
-        }
-        // Active foreign namespace imports (`use c.<lib>`, `use js.<lib>`) do
-        // not load local `.jet` modules. Each binder owns its cache/materializer.
-        if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
         let target = match resolve_import(

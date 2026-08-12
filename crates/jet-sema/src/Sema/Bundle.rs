@@ -1310,18 +1310,20 @@ fn populate_name_ledger(
                 alias_visibility,
             );
 
-            let ImportKind::Unqualified {
-                module_alias,
-                items,
-                ..
-            } = &import.kind
-            else {
-                continue;
-            };
-            for (original, local_alias) in items {
-                let local = crate::AST::import_item_alias(original, local_alias.as_deref());
-                let target = if let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) {
+            for binding in import.walk_bindings() {
+                let Some(original) = binding.original else {
+                    continue;
+                };
+                let local = binding.local.as_str();
+                let target = if let Some(core_prefix) =
+                    crate::AST::core_list_prefix(binding.module_alias)
+                {
                     Some((format!("{core_prefix}.{original}"), None))
+                } else if let Some(target_module) = state.imports.get(local) {
+                    Some((
+                        bundle.modules[*target_module].alias.clone(),
+                        Some(*target_module),
+                    ))
                 } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
                     Some((
                         format!("{}.{}", bundle.modules[*target_module].alias, real),
@@ -1329,7 +1331,7 @@ fn populate_name_ledger(
                     ))
                 } else if let Some(resolved) = state.unqualified.get(local) {
                     Some((resolved.clone(), Some(module_idx)))
-                } else if let Some(target_module) = state.imports.get(module_alias) {
+                } else if let Some(target_module) = state.imports.get(binding.module_alias) {
                     Some((
                         format!("{}.{}", bundle.modules[*target_module].alias, original),
                         Some(*target_module),

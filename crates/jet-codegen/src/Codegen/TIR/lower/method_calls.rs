@@ -2534,6 +2534,49 @@ fn lower_method_call_impl(
                 };
             }
         }
+        // D-VERDICT-1867-1: lower `inline.foreign_alias.method(...)` after
+        // sema has resolved the exported namespace. Its signatures use the
+        // same per-function foreign scope as a direct inline import.
+        if let Expr::Field(base, leaf, _) = receiver {
+            if let Expr::Ident(owner, _) = base.as_ref() {
+                if !env.locals.contains_key(owner) {
+                    if let Some(rust_mod) = cx
+                        .inline_reexport_foreign
+                        .get(&(owner.clone(), leaf.clone()))
+                        .cloned()
+                    {
+                        let sig = cx
+                            .inline_foreign_reexport_sigs
+                            .get(&(owner.clone(), leaf.clone(), method.to_string()))
+                            .cloned()
+                            .or_else(|| {
+                                cx.import_signature_for_function(&env.fn_name, leaf, method)
+                            });
+                        let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                        let ret = cx
+                            .inline_foreign_reexport_rets
+                            .get(&(owner.clone(), leaf.clone(), method.to_string()))
+                            .cloned()
+                            .or_else(|| {
+                                cx.import_return_for_function(&env.fn_name, leaf, method)
+                            })
+                            .flatten()
+                            .unwrap_or_else(unit_type);
+                        return TExpr {
+                            ty: ret,
+                            kind: TExprKind::ModuleCall {
+                                form: TModuleCallForm::Qualified {
+                                    rust_mod,
+                                    rust_fn: mangle(method).to_string(),
+                                },
+                                type_args: type_args.to_vec(),
+                                args: targs,
+                            },
+                        };
+                    }
+                }
+            }
+        }
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {
                 // c109 Phase 14: a qualified cross-module call `alias.method(args)`.
@@ -2626,6 +2669,56 @@ fn lower_method_call_impl(
                         .import_rets
                         .get(&(alias.clone(), method.to_string()))
                         .cloned()
+                        .flatten()
+                        .unwrap_or_else(unit_type);
+                    return TExpr {
+                        ty: ret,
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::Qualified {
+                                rust_mod: mod_name,
+                                rust_fn: mangle(method).to_string(),
+                            },
+                            type_args: type_args.to_vec(),
+                            args: targs,
+                        },
+                    };
+                }
+                if let Some(mod_name) = cx
+                    .import_module_for_function(&env.fn_name, alias)
+                    .map(str::to_owned)
+                {
+                    let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
+                    if let Some(wrapper) = cx
+                        .extern_funcs
+                        .get(&format!("{mod_name}::{method}"))
+                        .cloned()
+                    {
+                        let eargs = args
+                            .iter()
+                            .enumerate()
+                            .map(|(index, arg)| {
+                                let conv = sig
+                                    .as_ref()
+                                    .and_then(|params| params.get(index))
+                                    .map(|(convention, ty)| (*convention, ty.clone()));
+                                lower_extern_call_arg(arg, conv, env, cx)
+                            })
+                            .collect();
+                        let ty = cx
+                            .import_return_for_function(&env.fn_name, alias, method)
+                            .flatten()
+                            .unwrap_or_else(unit_type);
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::ExternCall {
+                                wrapper,
+                                args: eargs,
+                            },
+                        };
+                    }
+                    let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                    let ret = cx
+                        .import_return_for_function(&env.fn_name, alias, method)
                         .flatten()
                         .unwrap_or_else(unit_type);
                     return TExpr {

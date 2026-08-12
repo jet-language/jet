@@ -1298,12 +1298,15 @@ pub(crate) fn update_core_imports_from_ledger(
     let module_idx = bundle.entry;
     let module = &bundle.modules[module_idx];
     for import in &module.imports {
-        if let ImportKind::Unqualified { items, .. } = &import.kind {
-            for (original, alias) in items {
-                let local = crate::AST::import_item_alias(original, alias.as_deref());
-                if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, local) {
+        if matches!(import.kind, ImportKind::Unqualified { .. }) {
+            for binding in import.walk_bindings() {
+                let local = binding.local;
+                if let Some(binding) = bundle
+                    .name_ledger
+                    .effective_alias(module_idx, &local)
+                {
                     if binding.target == "core" || binding.target.starts_with("core.") {
-                        map.insert(local.to_string(), binding.target.clone());
+                        map.insert(local, binding.target.clone());
                     }
                 }
             }

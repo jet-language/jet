@@ -1668,6 +1668,13 @@ fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<
                 .flatten()
         })
         .or_else(|| {
+            entry.imports.iter().find_map(|import| {
+                crate::Codegen::foreign_list_targets(bundle, bundle.entry, import)
+                    .into_iter()
+                    .find_map(|(member_alias, target)| (member_alias == alias).then_some(target))
+            })
+        })
+        .or_else(|| {
             bundle
                 .modules
                 .iter()

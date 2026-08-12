@@ -592,19 +592,9 @@ impl<'a> Parser<'a> {
                         self.bump();
                         continue;
                     }
-                    if matches!(self.peek().kind, TokKind::KwUse)
-                        || (matches!(self.peek().kind, TokKind::KwPub)
-                            && matches!(self.peek2().kind, TokKind::KwUse))
-                    {
-                        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-                        if is_pub {
-                            self.bump(); // consume `pub`
-                        }
-                        match self.import_decl() {
-                            Ok(mut import) => {
-                                import.is_pub = is_pub;
-                                imports.push(import);
-                            }
+                    if self.at_code_module_import() {
+                        match self.code_module_import() {
+                            Ok(import) => imports.push(import),
                             Err(d) => {
                                 self.diags.push(d);
                                 self.sync_stmt();
@@ -683,19 +673,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
-            if matches!(self.peek().kind, TokKind::KwUse)
-                || (matches!(self.peek().kind, TokKind::KwPub)
-                    && matches!(self.peek2().kind, TokKind::KwUse))
-            {
-                let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-                if is_pub {
-                    self.bump(); // consume `pub`
-                }
-                match self.import_decl() {
-                    Ok(mut import) => {
-                        import.is_pub = is_pub;
-                        imports.push(import);
-                    }
+            if self.at_code_module_import() {
+                match self.code_module_import() {
+                    Ok(import) => imports.push(import),
                     Err(d) => {
                         self.diags.push(d);
                         self.sync_stmt();
@@ -805,6 +785,31 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    /// D-MOD3/4 and D-PUBPKG1: parse one import owned by an inline code
+    /// module. The same visibility qualifier is carried by the canonical
+    /// `ImportDecl` for ordinary, Core, and foreign member-list imports.
+    fn at_code_module_import(&self) -> bool {
+        matches!(self.peek().kind, TokKind::KwUse)
+            || (matches!(self.peek().kind, TokKind::KwPub)
+                && (matches!(self.peek2().kind, TokKind::KwUse)
+                    || (matches!(self.peek2().kind, TokKind::LParen)
+                        && matches!(self.peek3().kind, TokKind::Ident(_))
+                        && matches!(self.peek4().kind, TokKind::RParen)
+                        && matches!(self.peek5().kind, TokKind::KwUse))))
+    }
+
+    fn code_module_import(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
+        let (is_pub, is_package_pub) = if matches!(self.peek().kind, TokKind::KwPub) {
+            self.parse_pub_qualifier()
+        } else {
+            (false, false)
+        };
+        let mut import = self.import_decl()?;
+        import.is_pub = is_pub;
+        import.is_package_pub = is_package_pub;
+        Ok(import)
+    }
+
     /// Parse one top-level item inside an inline `module name { … }` body.
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
@@ -844,17 +849,6 @@ impl<'a> Parser<'a> {
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                TokKind::KwUse => {
-                    let span = self.peek().span;
-                    self.sync_stmt();
-                    Err(Diagnostic::error(
-                        "E0003",
-                        "`pub use` inside an inline code module is not yet supported".to_string(),
-                        "unqualified imports inside modules need D-MOD4 ratification".to_string(),
-                        "call items by their qualified path for now".to_string(),
-                        Some(span),
-                    ))
-                }
                 _ => self.func().map(Item::Func),
             },
             TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
@@ -900,17 +894,6 @@ impl<'a> Parser<'a> {
             // D-META-STAGE1=B: a module-level `$name :: expr` binding.
             TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
                 self.comptime_def().map(Item::Const)
-            }
-            TokKind::KwUse => {
-                let span = self.peek().span;
-                self.sync_stmt();
-                Err(Diagnostic::error(
-                    "E0003",
-                    "`use` inside an inline code module is not yet supported".to_string(),
-                    "unqualified imports inside modules need D-MOD4 ratification".to_string(),
-                    "call items by their qualified path for now".to_string(),
-                    Some(span),
-                ))
             }
             TokKind::At => {
                 let span = self.bump().span;

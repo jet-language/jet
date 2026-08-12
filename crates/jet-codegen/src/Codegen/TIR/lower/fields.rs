@@ -204,7 +204,9 @@ pub(crate) fn register_imported_struct_shapes(
     let module = &bundle.modules[module_idx];
     let mut imported = Vec::<(usize, String)>::new();
     for import in &module.imports {
-        if import.is_c_import() {
+        if import.is_c_import().unwrap_or_else(|error| {
+            unreachable!("invalid foreign import reached codegen: {}", error.path)
+        }) {
             continue;
         }
         let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {

@@ -817,19 +817,19 @@ fn capture_sites_for_target(target: &Target) -> Vec<CaptureSite> {
                         aliases.entry(short.to_string()).or_insert(module);
                     }
                 }
-                if let jet::AST::ImportKind::Unqualified {
-                    module_alias,
-                    items,
-                    ..
-                } = &import.kind
-                {
-                    if let Some(prefix) = jet::AST::core_list_prefix(module_alias) {
-                        for (original, alias) in items {
-                            let module = format!("{prefix}.{original}");
-                            if jet::Syntax::is_known_core_module(&module) {
-                                let local = jet::AST::import_item_alias(original, alias.as_deref());
-                                aliases.insert(local.to_string(), module);
-                            }
+                if let Some(prefix) = match &import.kind {
+                    jet::AST::ImportKind::Unqualified { module_alias, .. } => {
+                        jet::AST::core_list_prefix(module_alias)
+                    }
+                    _ => None,
+                } {
+                    for binding in import.walk_bindings() {
+                        let Some(original) = binding.original else {
+                            continue;
+                        };
+                        let module = format!("{prefix}.{original}");
+                        if jet::Syntax::is_known_core_module(&module) {
+                            aliases.insert(binding.local, module);
                         }
                     }
                 }

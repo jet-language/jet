@@ -1,5 +1,41 @@
 use super::*;
 
+fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut seen = HashSet::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for (_, import) in crate::AST::walk_imports(module) {
+            if !seen.insert((module_idx, import.span)) {
+                continue;
+            }
+            if let Err(error) = import.foreign_imports() {
+                diagnostics.push(error.diagnostic());
+            }
+        }
+    }
+    diagnostics
+}
+
+fn foreign_imports_after_validation(
+    import: &crate::AST::ImportDecl,
+) -> Vec<(crate::AST::ForeignNamespace, String)> {
+    import.foreign_imports().unwrap_or_else(|error| {
+        unreachable!(
+            "invalid foreign import reached sema after validation: {}",
+            error.path
+        )
+    })
+}
+
+fn is_c_import_after_validation(import: &crate::AST::ImportDecl) -> bool {
+    import.is_c_import().unwrap_or_else(|error| {
+        unreachable!(
+            "invalid foreign import reached sema after validation: {}",
+            error.path
+        )
+    })
+}
+
 pub(super) fn check_bundle_opts_for_output(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
@@ -51,6 +87,13 @@ fn check_bundle_opts_for_output_inner(
     mut incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+    let foreign_diags = validate_foreign_imports(bundle);
+    if !foreign_diags.is_empty() {
+        return (
+            foreign_diags,
+            super::super::Effects::SemIndexEffectFacts::default(),
+        );
+    }
     let mut diags = Vec::new();
     diags.extend(validate_script_entries(bundle));
     diags.extend(inject_units_prelude(bundle));
@@ -96,6 +139,8 @@ fn check_bundle_opts_for_output_inner(
             registry: builtin_type_registry(),
             consts: HashMap::new(),
             imports: HashMap::new(),
+            inline_foreign_imports: HashMap::new(),
+            inline_reexport_foreign: HashMap::new(),
             core_imports: HashMap::new(),
             tests: HashMap::new(),
             trait_reg: TraitRegistry::default(),
@@ -225,7 +270,6 @@ fn check_bundle_opts_for_output_inner(
                 }
                 let ImportKind::Unqualified {
                     module_alias,
-                    items,
                     ..
                 } = &import.kind
                 else {
@@ -234,11 +278,14 @@ fn check_bundle_opts_for_output_inner(
                 let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) else {
                     continue;
                 };
-                for (original, alias) in items {
-                    let local = crate::AST::import_item_alias(original, alias.as_deref());
+                for binding in import.walk_bindings() {
+                    let original = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local;
                     let full = format!("{core_prefix}.{original}");
                     if crate::Syntax::is_known_core_module(&full) {
-                        imports.insert(local.to_string(), full);
+                        imports.insert(local, full);
                     }
                 }
             }
@@ -797,8 +844,58 @@ fn check_bundle_opts_for_output_inner(
     for (idx, module) in bundle.modules.iter().enumerate() {
         let st = &mut states[idx];
         for imp in &module.imports {
-            // Unqualified imports are handled in the dedicated pass below.
+            // Foreign member lists retain the ordinary unqualified AST shape,
+            // but bind mounted namespaces here as one transactional group.
             if matches!(&imp.kind, ImportKind::Unqualified { .. }) {
+                let foreign = foreign_imports_after_validation(imp);
+                if foreign.is_empty() {
+                    continue;
+                }
+                let mut group_failed = false;
+                let mut resolved = Vec::new();
+                let mut names = HashSet::new();
+                for (namespace, alias) in foreign {
+                    if st.imports.contains_key(&alias)
+                        || st.core_imports.contains_key(&alias)
+                        || !names.insert(alias.clone())
+                    {
+                        group_failed = true;
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{alias}` is used twice"),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", Syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                        continue;
+                    }
+                    let target = if namespace.language == crate::AST::ForeignLanguage::C {
+                        bundle.cffi.target_for(idx, &alias)
+                    } else {
+                        bundle
+                            .modules
+                            .iter()
+                            .position(|candidate| candidate.display == namespace.display())
+                    };
+                    if let Some(target) = target {
+                        resolved.push((alias, target));
+                    } else {
+                        group_failed = true;
+                        let root = namespace.language.root();
+                        diags.push(Diagnostic::error(
+                            "E1002",
+                            format!("`{root}` is reserved for first-party or foreign packages"),
+                            "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
+                            format!("make the `{root}` binding available or rename the import"),
+                            Some(imp.alias_span),
+                        ));
+                    }
+                }
+                if !group_failed {
+                    for (alias, target) in resolved {
+                        st.imports.insert(alias, target);
+                    }
+                }
                 continue;
             }
             let alias = imp.import_alias();
@@ -885,11 +982,60 @@ fn check_bundle_opts_for_output_inner(
                 st.core_imports.insert(alias, module);
                 continue;
             }
+            if matches!(&imp.kind, ImportKind::File(path, _) if path.ends_with(".h")) {
+                let target = bundle.cffi.target_for(idx, &alias).unwrap_or_else(|| {
+                    unreachable!(
+                        "C header import target missing after CFFI assembly: module={} alias={alias}",
+                        idx
+                    )
+                });
+                st.imports.insert(alias.clone(), target);
+                name_ledger.record_import_target(idx, imp.span, target);
+                continue;
+            }
+            let foreign = foreign_imports_after_validation(imp);
+            if !foreign.is_empty() {
+                let mut group_failed = false;
+                let mut resolved = Vec::new();
+                for (namespace, foreign_alias) in foreign {
+                    let target = if namespace.language == crate::AST::ForeignLanguage::C {
+                        bundle.cffi.target_for(idx, &foreign_alias)
+                    } else {
+                        bundle
+                            .modules
+                            .iter()
+                            .position(|candidate| candidate.display == namespace.display())
+                    };
+                    if let Some(target) = target {
+                        resolved.push((foreign_alias, target));
+                    } else {
+                        group_failed = true;
+                        let root = namespace.language.root();
+                        diags.push(Diagnostic::error(
+                            "E1002",
+                            format!("`{root}` is reserved for first-party or foreign packages"),
+                            "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
+                            format!("make the `{root}` binding available or rename the import"),
+                            Some(imp.alias_span),
+                        ));
+                    }
+                }
+                if !group_failed {
+                    for (foreign_alias, target) in resolved {
+                        st.imports.insert(foreign_alias, target);
+                    }
+                    if let Some(target) = st.imports.get(&alias).copied() {
+                        name_ledger.record_import_target(idx, imp.span, target);
+                    }
+                }
+                continue;
+            }
             // S59 (E2-M14): C `use` forms bind to a synthetic merged module
             // resolved by `CFFI::assemble` (E3204 already reported there).
-            if imp.is_c_import() {
+            if is_c_import_after_validation(imp) {
                 if let Some(target) = bundle.cffi.target_for(idx, &alias) {
-                    st.imports.insert(alias, target);
+                    st.imports.insert(alias.clone(), target);
+                    name_ledger.record_import_target(idx, imp.span, target);
                 }
                 continue;
             }
@@ -907,19 +1053,43 @@ fn check_bundle_opts_for_output_inner(
             let ImportKind::Unqualified {
                 module_alias,
                 module_alias_span,
-                items,
                 ..
             } = &imp.kind
             else {
                 continue;
             };
+            if !foreign_imports_after_validation(imp).is_empty() {
+                continue;
+            }
+            let bindings = imp.walk_bindings();
             let st = &mut states[idx];
+            let group_diagnostics = diags.len();
+            let mut inserted_unqualified = Vec::new();
+            let mut inserted_reexports = Vec::new();
+            let mut inserted_core = Vec::new();
+            let mut inserted_core_items = Vec::new();
+            let mut inserted_file = Vec::new();
+            let mut inserted_imports = Vec::new();
             if let Some(canonical) = st.code_modules.get(module_alias.as_str()) {
                 // Inline module: items are mangled as `__jet_{alias}__{item}`.
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                for binding in &bindings {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local.clone();
                     let mangled = jet_foundation::Names::member_name(canonical, orig);
-                    if !st.funcs.contains_key(&mangled) {
+                    if st.unqualified.contains_key(&local)
+                        || st.unqualified_file.contains_key(&local)
+                        || st.core_imports.contains_key(&local)
+                    {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{local}` is used twice"),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", Syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                    } else if !st.funcs.contains_key(&mangled) {
                         diags.push(Diagnostic::error(
                             "E0611",
                             format!("`{}` is not defined in module `{}`", orig, module_alias),
@@ -927,8 +1097,7 @@ fn check_bundle_opts_for_output_inner(
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
                         ));
-                    } else if !name_ledger.exported(idx, &mangled)
-                    {
+                    } else if !name_ledger.exported(idx, &mangled) {
                         diags.push(Diagnostic::error(
                             "E0609",
                             format!("`{}` is private in module `{}`", orig, module_alias),
@@ -940,9 +1109,11 @@ fn check_bundle_opts_for_output_inner(
                             Some(*module_alias_span),
                         ));
                     } else {
-                        st.unqualified.insert(local.to_string(), mangled.clone());
+                        st.unqualified.insert(local.clone(), mangled.clone());
+                        inserted_unqualified.push(local.clone());
                         if imp.is_pub {
-                            st.reexports.insert(local.to_string(), (mangled, idx));
+                            st.reexports.insert(local.clone(), (mangled, idx));
+                            inserted_reexports.push(local);
                         }
                     }
                 }
@@ -951,8 +1122,11 @@ fn check_bundle_opts_for_output_inner(
                 // submodule (`core.encoding.[json]`) or an item in the
                 // longest known module prefix (`core.math.[abs]`).
                 let st = &mut states[idx];
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                for binding in &bindings {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local.clone();
                     let full = format!("{core_prefix}.{orig}");
                     let target = match crate::AST::core_list_path(module_alias, orig) {
                         Some(crate::AST::CoreListPath::Module(module)) => Some((module, None)),
@@ -983,7 +1157,10 @@ fn check_bundle_opts_for_output_inner(
                         }
                         continue;
                     };
-                    if st.core_imports.contains_key(local) {
+                    if st.core_imports.contains_key(&local)
+                        || st.unqualified.contains_key(&local)
+                        || st.unqualified_file.contains_key(&local)
+                    {
                         diags.push(Diagnostic::error(
                             "E0105",
                             format!("the import name `{}` is used twice", local),
@@ -1010,9 +1187,11 @@ fn check_bundle_opts_for_output_inner(
                                 bundle.inferred_layer = mod_layer;
                             }
                         }
-                        st.core_imports.insert(local.to_string(), module);
+                        st.core_imports.insert(local.clone(), module);
+                        inserted_core.push(local.clone());
                         if let Some(item) = item {
-                            st.core_item_imports.insert(local.to_string(), item);
+                            st.core_item_imports.insert(local.clone(), item);
+                            inserted_core_items.push(local);
                         }
                     }
                 }
@@ -1020,8 +1199,11 @@ fn check_bundle_opts_for_output_inner(
                 // File module: look up items in the target module's state.
                 let target_idx = st.imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(orig, alias_opt.as_deref());
+                for binding in &bindings {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local.clone();
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
                     let file_module_target = states[target_idx]
                         .imports
@@ -1032,7 +1214,18 @@ fn check_bundle_opts_for_output_inner(
                                 .declaration(target_idx, orig)
                                 .is_some_and(|declaration| declaration.kind == "file_module")
                         });
-                    if let Some(file_module_target) = file_module_target {
+                    if st.unqualified.contains_key(&local)
+                        || st.unqualified_file.contains_key(&local)
+                        || st.core_imports.contains_key(&local)
+                    {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{local}` is used twice"),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", Syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                    } else if let Some(file_module_target) = file_module_target {
                         if !is_pub {
                             diags.push(Diagnostic::error(
                                 "E0609",
@@ -1042,9 +1235,8 @@ fn check_bundle_opts_for_output_inner(
                                 Some(*module_alias_span),
                             ));
                         } else {
-                            states[idx]
-                                .imports
-                                .insert(local.to_string(), file_module_target);
+                            states[idx].imports.insert(local.clone(), file_module_target);
+                            inserted_imports.push(local.clone());
                         }
                         continue;
                     }
@@ -1068,11 +1260,13 @@ fn check_bundle_opts_for_output_inner(
                     } else {
                         states[idx]
                             .unqualified_file
-                            .insert(local.to_string(), (orig.clone(), target_idx));
+                            .insert(local.clone(), (orig.to_string(), target_idx));
+                        inserted_file.push(local.clone());
                         if is_reexport {
                             states[idx]
                                 .reexports
-                                .insert(local.to_string(), (orig.clone(), target_idx));
+                                .insert(local.clone(), (orig.to_string(), target_idx));
+                            inserted_reexports.push(local);
                         }
                     }
                 }
@@ -1085,6 +1279,26 @@ fn check_bundle_opts_for_output_inner(
                     format!("add `import … as {}`  before this `use`", module_alias),
                     Some(*module_alias_span),
                 ));
+            }
+            if diags.len() != group_diagnostics {
+                for name in inserted_unqualified {
+                    st.unqualified.remove(&name);
+                }
+                for name in inserted_reexports {
+                    st.reexports.remove(&name);
+                }
+                for name in inserted_core {
+                    st.core_imports.remove(&name);
+                }
+                for name in inserted_core_items {
+                    st.core_item_imports.remove(&name);
+                }
+                for name in inserted_file {
+                    st.unqualified_file.remove(&name);
+                }
+                for name in inserted_imports {
+                    st.imports.remove(&name);
+                }
             }
         }
     }
@@ -1105,6 +1319,7 @@ fn check_bundle_opts_for_output_inner(
             })
             .collect();
         for (inline_name, imports) in inline_imports {
+            let mut inline_names = HashSet::new();
             for imp in imports {
                 // Qualified Core imports use the enclosing file's Core
                 // namespace, but their binding remains local to this inline
@@ -1138,25 +1353,125 @@ fn check_bundle_opts_for_output_inner(
                             bundle.inferred_layer = mod_layer;
                         }
                     }
-                    states[idx].inline_core_imports.insert(
-                        (inline_name.clone(), imp.import_alias()),
-                        module,
-                    );
+                    let local = imp
+                        .walk_bindings()
+                        .into_iter()
+                        .next()
+                        .map(|binding| binding.local)
+                        .unwrap_or_else(|| imp.import_alias());
+                    if !inline_names.insert(local.clone()) {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{local}` is used twice"),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", Syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                        continue;
+                    }
+                    states[idx]
+                        .inline_core_imports
+                        .insert((inline_name.clone(), local), module);
+                    continue;
+                }
+                let foreign = foreign_imports_after_validation(&imp);
+                if !foreign.is_empty() {
+                    let mut group_failed = false;
+                    let mut resolved = Vec::new();
+                    let mut group_names = Vec::new();
+                    for (namespace, alias) in foreign {
+                        if !inline_names.insert(alias.clone()) {
+                            group_failed = true;
+                            diags.push(Diagnostic::error(
+                                "E0105",
+                                format!("the import name `{alias}` is used twice"),
+                                "each import needs a unique namespace name in this file".to_string(),
+                                format!("rename one with `{} alias`", Syntax::KW_AS),
+                                Some(imp.alias_span),
+                            ));
+                            continue;
+                        }
+                        group_names.push(alias.clone());
+                        let target = if namespace.language == crate::AST::ForeignLanguage::C {
+                            bundle
+                                .cffi
+                                .target_for_scope(idx, Some(&inline_name), &alias)
+                        } else {
+                            bundle
+                                .modules
+                                .iter()
+                                .position(|candidate| candidate.display == namespace.display())
+                        };
+                        if let Some(target) = target {
+                            resolved.push((alias, target));
+                        } else {
+                            group_failed = true;
+                            let root = namespace.language.root();
+                            diags.push(Diagnostic::error(
+                                "E1002",
+                                format!("`{root}` is reserved for first-party or foreign packages"),
+                                "a foreign namespace must resolve to a mounted library before it can be imported".to_string(),
+                                format!("make the `{root}` binding available or rename the import"),
+                                Some(imp.alias_span),
+                            ));
+                        }
+                    }
+                    if !group_failed {
+                        for (alias, target) in resolved {
+                            states[idx]
+                                .inline_foreign_imports
+                                .insert((inline_name.clone(), alias.clone()), target);
+                            if imp.is_pub {
+                                states[idx]
+                                    .inline_reexport_foreign
+                                    .insert((inline_name.clone(), alias), target);
+                            }
+                        }
+                    } else {
+                        for alias in group_names {
+                            inline_names.remove(&alias);
+                        }
+                    }
                     continue;
                 }
                 let ImportKind::Unqualified {
                     module_alias,
                     module_alias_span,
-                    items,
                     ..
-                } = imp.kind
+                } = &imp.kind
                 else {
                     // Inline bodies inherit file/module aliases; a second
                     // module-loading declaration has no loader target.
                     continue;
                 };
-                for (orig, alias_opt) in items {
-                    let local = crate::AST::import_item_alias(&orig, alias_opt.as_deref()).to_string();
+                let module_alias = module_alias.as_str();
+                let module_alias_span = *module_alias_span;
+                let bindings = imp.walk_bindings();
+                let group_diagnostics = diags.len();
+                let mut group_names = Vec::new();
+                let mut inserted_inline = Vec::new();
+                let mut inserted_file = Vec::new();
+                let mut inserted_core = Vec::new();
+                let mut inserted_core_items = Vec::new();
+                let mut inserted_reexport_inline = Vec::new();
+                let mut inserted_reexport_file = Vec::new();
+                let mut inserted_reexport_core = Vec::new();
+                for binding in bindings {
+                    let orig = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local = binding.local;
+                    if !inline_names.insert(local.clone()) {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{local}` is used twice"),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", Syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                        continue;
+                    }
+                    group_names.push(local.clone());
                     enum Target {
                         Inline { alias: String, mangled: String },
                         File { name: String, module_idx: usize },
@@ -1188,7 +1503,7 @@ fn check_bundle_opts_for_output_inner(
                                     None
                                 } else {
                                     Some(Target::Inline {
-                                        alias: module_alias.clone(),
+                                        alias: module_alias.to_string(),
                                         mangled,
                                     })
                                 }
@@ -1254,7 +1569,7 @@ fn check_bundle_opts_for_output_inner(
                                 None
                             } else {
                                 Some(Target::File {
-                                    name: orig.clone(),
+                                    name: orig.to_string(),
                                     module_idx: target_idx,
                                 })
                             }
@@ -1275,11 +1590,13 @@ fn check_bundle_opts_for_output_inner(
                         Target::Inline { alias, mangled } => {
                             st.inline_unqualified
                                 .insert((inline_name.clone(), local.clone()), mangled.clone());
+                            inserted_inline.push((inline_name.clone(), local.clone()));
                             if imp.is_pub {
                                 st.inline_reexport_inline.insert(
-                                    (inline_name.clone(), local),
+                                    (inline_name.clone(), local.clone()),
                                     (alias, mangled),
                                 );
+                                inserted_reexport_inline.push((inline_name.clone(), local));
                             }
                         }
                         Target::File { name, module_idx } => {
@@ -1287,24 +1604,56 @@ fn check_bundle_opts_for_output_inner(
                                 (inline_name.clone(), local.clone()),
                                 (name.clone(), module_idx),
                             );
+                            inserted_file.push((inline_name.clone(), local.clone()));
                             if imp.is_pub {
                                 st.inline_reexport_file
-                                    .insert((inline_name.clone(), local), (name, module_idx));
+                                    .insert((inline_name.clone(), local.clone()), (name, module_idx));
+                                inserted_reexport_file.push((inline_name.clone(), local));
                             }
                         }
                         Target::Core { module, item } => {
                             let key = (inline_name.clone(), local.clone());
                             st.inline_core_imports
                                 .insert(key.clone(), module.clone());
+                            inserted_core.push(key.clone());
                             if let Some(item) = item {
                                 st.inline_core_items
                                     .insert(key.clone(), item.clone());
+                                inserted_core_items.push(key.clone());
                                 if imp.is_pub {
                                     st.inline_reexport_core
-                                        .insert(key, (module, item));
+                                        .insert(key.clone(), (module, item));
+                                    inserted_reexport_core.push(key);
                                 }
                             }
                         }
+                    }
+                }
+                if diags.len() != group_diagnostics {
+                    let st = &mut states[idx];
+                    for key in inserted_inline {
+                        st.inline_unqualified.remove(&key);
+                    }
+                    for key in inserted_file {
+                        st.inline_unqualified_file.remove(&key);
+                    }
+                    for key in inserted_core {
+                        st.inline_core_imports.remove(&key);
+                    }
+                    for key in inserted_core_items {
+                        st.inline_core_items.remove(&key);
+                    }
+                    for key in inserted_reexport_inline {
+                        st.inline_reexport_inline.remove(&key);
+                    }
+                    for key in inserted_reexport_file {
+                        st.inline_reexport_file.remove(&key);
+                    }
+                    for key in inserted_reexport_core {
+                        st.inline_reexport_core.remove(&key);
+                    }
+                    for name in group_names {
+                        inline_names.remove(&name);
                     }
                 }
             }

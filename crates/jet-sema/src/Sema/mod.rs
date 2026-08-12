@@ -1170,6 +1170,12 @@ pub(crate) struct ModuleState {
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
+    /// D-NAME-WALK1=A / D-VERDICT-1867-1: foreign namespace aliases scoped
+    /// to one inline module body.
+    inline_foreign_imports: HashMap<(String, String), usize>,
+    /// D-VERDICT-1867-1: foreign namespace aliases publicly re-exported by
+    /// an inline module.
+    inline_reexport_foreign: HashMap<(String, String), usize>,
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
@@ -1245,6 +1251,7 @@ pub(crate) struct Checker<'a> {
     inline_reexport_inline: &'a HashMap<(String, String), (String, String)>,
     inline_reexport_file: &'a HashMap<(String, String), (String, usize)>,
     inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
+    inline_reexport_foreign: &'a HashMap<(String, String), usize>,
     module_path: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,

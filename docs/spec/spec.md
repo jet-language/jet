@@ -1100,15 +1100,18 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 
 Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
+Every root accepts the same single-library form and the same member list:
+`use <lang>.<lib> as alias` or `use <lang>.[lib as alias, other]`.
 C, C++, and JS are active namespace binders. C uses the namespace surface
-(`use c.<lib>` / `#Extern module c.<lib>`). C++ uses `use cpp.<lib>` over a
+(`use c.<lib>` or `use c.[lib as alias, other]` / `#Extern module c.<lib>`).
+C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
 `T ? CppError`, pure named callbacks keep their checked C ABI, and template
 instantiations are requested on demand. `jet inspect bind cpp` requires the
 selected target and absolute clang/archiver paths; include/library search paths
 and link libraries are audited in binding provenance and reused at final link.
-JS uses one `use js.<lib>` surface;
+JS uses the same single/member-list surface;
 the host is target-dispatched, with browser JS on web targets and the native
 JS-on-WASM host on native targets. Generated JS binding caches live under
 `.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
@@ -1161,7 +1164,7 @@ overlay. (Full spec follows in this section.)
 |---|---|
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
-| Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
+| Call site | `use "header.h" as alias`, `use c.<lib> as alias`, or `use c.[lib as alias, other]` (one bring-in per lib per file) |
 
 Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
 "InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
@@ -1211,7 +1214,7 @@ functions whose parameters and optional result are `int64`, `float64`, or
 `uintptr`, runs
 the provisioned Go compiler with `go build -buildmode=c-archive`, and writes
 the archive plus a typed `.jet/bindings/go/<lib>.jet` cache. Programs import it
-with `use go.<lib> as alias`; calls execute in-process through the shared C ABI
+with `use go.<lib> as alias` or `use go.[lib as alias, other]`; calls execute in-process through the shared C ABI
 linker, so the Go runtime is part of the native program rather than a sidecar.
 `uintptr` maps to a private-field, move-only `go.<lib>.Handle`; passing it to a
 foreign function consumes it, preventing Jet from reusing a released

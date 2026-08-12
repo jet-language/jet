@@ -332,15 +332,15 @@ fn run() {
 }
 
 /// D-NAME-WALK1=A: an inline module gets the same Core member walk as the
-/// enclosing file. This covers both a body-local Core list and a Core item
+/// enclosing file. This covers both dotted-prefix body lists and a Core item
 /// re-exported through the inline module's public surface.
 #[test]
 fn inline_module_core_use_list_and_pub_reexport_match_all_tiers() {
     let src = "\
 use core.math.[abs, min]
 module api {
-    use core.math.[abs]
-    pub use core.math.[abs as exported]
+    use core.[math.abs]
+    pub use core.[math.abs as exported]
     pub fn local(n: Int) => Int {
         return abs(n)
     }

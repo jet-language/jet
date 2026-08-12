@@ -471,98 +471,213 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
             lexical_scope,
         });
     }
-    for (module_idx, module) in bundle.modules.iter().enumerate() {
-        for import in &module.imports {
-            match &import.kind {
-                jet_foundation::AST::ImportKind::Unqualified {
-                    items,
-                    items_span,
-                    ..
-                } => {
-                    for (original, alias) in items {
-                        let local_name = jet_foundation::AST::import_item_alias(
-                            original,
-                            alias.as_deref(),
-                        );
-                        let alias_fact = bundle.name_ledger.effective_alias(module_idx, local_name);
-                        let target = alias_fact.and_then(|name| {
-                            let target_module = name.target_module?;
-                            let target_name = name
-                                .target
-                                .rsplit_once('.')
-                                .map(|(_, leaf)| leaf)
-                                .unwrap_or(name.target.as_str());
-                            let imported = &bundle.modules[target_module];
-                            symbols.iter().find(|symbol| {
-                                symbol.module_path == imported.display && symbol.name == target_name
+    for module in &bundle.modules {
+        collect_import_symbols(&mut symbols, bundle, module, &module.imports, None);
+        collect_inline_import_symbols(db, bundle, module, &module.items, None, &mut symbols);
+    }
+    SemanticSymbolIndex::new(symbols)
+}
+
+fn collect_import_symbols(
+    symbols: &mut Vec<SemanticSymbol>,
+    bundle: &ProgramBundle,
+    module: &jet_foundation::AST::LoadedModule,
+    imports: &[jet_foundation::AST::ImportDecl],
+    lexical_scope: Option<&SemanticLexicalScope>,
+) {
+    for import in imports {
+        match &import.kind {
+            jet_foundation::AST::ImportKind::Unqualified {
+                module_alias,
+                ..
+            } => {
+                let source_import = imports
+                    .iter()
+                    .chain(module.imports.iter())
+                    .find(|candidate| {
+                        !matches!(
+                            &candidate.kind,
+                            jet_foundation::AST::ImportKind::Unqualified { .. }
+                        ) && candidate.import_alias() == *module_alias
+                    });
+                let imported_module = source_import.and_then(|source_import| {
+                    match &source_import.kind {
+                        jet_foundation::AST::ImportKind::File(path, _) => {
+                            let relative = module
+                                .path
+                                .parent()
+                                .unwrap_or_else(|| std::path::Path::new("."))
+                                .join(format!("{path}.jet"));
+                            bundle.modules.iter().find(|candidate| {
+                                candidate.path == relative
+                                    || candidate.path.file_stem() == relative.file_stem()
                             })
-                        });
-                        let mut symbol = target.cloned().unwrap_or_else(|| SemanticSymbol {
-                            identity: String::new(),
-                            name: local_name.to_string(),
-                            qualified_name: local_name.to_string(),
-                            owner: None,
-                            module_path: module.display.clone(),
-                            kind: SemanticSymbolKind::Local,
-                            signature: local_name.to_string(),
-                            summary: format!(
-                                "Imported from {}.",
-                                alias_fact
-                                    .map(|name| name.target.as_str())
-                                    .unwrap_or("module")
-                            ),
-                            examples: Vec::new(),
-                            provenance: SemanticProvenance::Source {
-                                module_path: module.display.clone(),
-                            },
-                            span: Some((*items_span).into()),
-                            lexical_scope: None,
-                        });
-                        let target_name = alias_fact
-                            .map(|name| name.target.as_str())
-                            .unwrap_or(original);
-                        symbol.identity = format!(
-                            "import:{}::{target_name}::{local_name}",
-                            module.display,
-                        );
-                        symbol.name = local_name.to_string();
-                        symbol.qualified_name = local_name.to_string();
-                        symbol.owner = None;
-                        symbol.module_path = module.display.clone();
-                        symbol.provenance = SemanticProvenance::Source {
-                            module_path: module.display.clone(),
-                        };
-                        symbol.span = Some((*items_span).into());
-                        symbol.lexical_scope = None;
-                        symbols.push(symbol);
+                        }
+                        jet_foundation::AST::ImportKind::Module(name, _) => bundle
+                            .modules
+                            .iter()
+                            .find(|candidate| candidate.alias == *name),
+                        jet_foundation::AST::ImportKind::Unqualified { .. } => None,
                     }
-                }
-                jet_foundation::AST::ImportKind::File(_, _)
-                | jet_foundation::AST::ImportKind::Module(_, _) => {
-                    let alias = import.import_alias();
-                    let ledger_alias = bundle.name_ledger.effective_alias(module_idx, &alias);
-                    let alias_name = ledger_alias.map(|name| name.name.as_str()).unwrap_or(alias.as_str());
-                    symbols.push(SemanticSymbol {
-                        identity: format!("import:{}::{alias_name}", module.display),
-                        name: alias_name.to_string(),
-                        qualified_name: alias_name.to_string(),
+                });
+                let bindings = import.walk_bindings();
+                let items_span = bindings
+                    .first()
+                    .and_then(|binding| binding.items_span)
+                    .unwrap_or(import.span);
+                for binding in &bindings {
+                    let original = binding
+                        .original
+                        .expect("member walker returned a binding without a member");
+                    let local_name = binding.local.clone();
+                    let target = imported_module
+                        .and_then(|imported| {
+                            symbols.iter().find(|symbol| {
+                                symbol.module_path == imported.display && symbol.name == original
+                            })
+                        })
+                        .cloned();
+                    let mut symbol = target.unwrap_or_else(|| SemanticSymbol {
+                        identity: String::new(),
+                        name: local_name.clone(),
+                        qualified_name: local_name.clone(),
                         owner: None,
                         module_path: module.display.clone(),
-                        kind: SemanticSymbolKind::Module,
-                        signature: format!("use {alias_name}"),
-                        summary: "Imported module.".to_string(),
+                        kind: SemanticSymbolKind::Local,
+                        signature: local_name.clone(),
+                        summary: format!("Imported from {module_alias}."),
                         examples: Vec::new(),
                         provenance: SemanticProvenance::Source {
                             module_path: module.display.clone(),
                         },
-                        span: Some(import.alias_span.into()),
-                        lexical_scope: None,
+                        span: Some(items_span.into()),
+                        lexical_scope: lexical_scope.cloned(),
                     });
+                    let suffix = format!("{module_alias}.{original}::{local_name}");
+                    symbol.identity = import_identity(module, lexical_scope, &suffix);
+                    symbol.name = local_name.clone();
+                    symbol.qualified_name = local_name;
+                    symbol.owner = None;
+                    symbol.module_path = module.display.clone();
+                    symbol.provenance = SemanticProvenance::Source {
+                        module_path: module.display.clone(),
+                    };
+                    symbol.span = Some(items_span.into());
+                    symbol.lexical_scope = lexical_scope.cloned();
+                    symbols.push(symbol);
                 }
+            }
+            jet_foundation::AST::ImportKind::File(_, _)
+            | jet_foundation::AST::ImportKind::Module(_, _) => {
+                let alias = import.import_alias();
+                let module_idx = bundle
+                    .modules
+                    .iter()
+                    .position(|candidate| candidate.display == module.display);
+                let alias_name = module_idx
+                    .and_then(|module_idx| {
+                        bundle
+                            .name_ledger
+                            .effective_alias(module_idx, &alias)
+                    })
+                    .map(|name| name.name.clone())
+                    .unwrap_or_else(|| alias.clone());
+                symbols.push(SemanticSymbol {
+                    identity: import_identity(module, lexical_scope, &alias_name),
+                    name: alias_name.clone(),
+                    qualified_name: alias_name.clone(),
+                    owner: None,
+                    module_path: module.display.clone(),
+                    kind: SemanticSymbolKind::Module,
+                    signature: format!("use {alias_name}"),
+                    summary: "Imported module.".to_string(),
+                    examples: Vec::new(),
+                    provenance: SemanticProvenance::Source {
+                        module_path: module.display.clone(),
+                    },
+                    span: Some(import.alias_span.into()),
+                    lexical_scope: lexical_scope.cloned(),
+                });
             }
         }
     }
-    SemanticSymbolIndex::new(symbols)
+}
+
+fn import_identity(
+    module: &jet_foundation::AST::LoadedModule,
+    lexical_scope: Option<&SemanticLexicalScope>,
+    suffix: &str,
+) -> String {
+    lexical_scope.map_or_else(
+        || format!("import:{}::{suffix}", module.display),
+        |scope| format!("import:{}::{}::{suffix}", module.display, scope.identity),
+    )
+}
+
+fn collect_inline_import_symbols(
+    db: &SymbolDB,
+    bundle: &ProgramBundle,
+    module: &jet_foundation::AST::LoadedModule,
+    items: &[AST::Item],
+    parent_scope: Option<&SemanticLexicalScope>,
+    symbols: &mut Vec<SemanticSymbol>,
+) {
+    for item in items {
+        let AST::Item::CodeModule(code_module) = item else {
+            continue;
+        };
+        let scope = inline_module_scope(db, module.display.as_str(), code_module, parent_scope);
+        collect_import_symbols(
+            symbols,
+            bundle,
+            module,
+            &code_module.imports,
+            Some(&scope),
+        );
+        if let Some(body) = &code_module.body {
+            collect_inline_import_symbols(db, bundle, module, body, Some(&scope), symbols);
+        }
+    }
+}
+
+fn inline_module_scope(
+    db: &SymbolDB,
+    module_path: &str,
+    module: &AST::CodeModule,
+    parent_scope: Option<&SemanticLexicalScope>,
+) -> SemanticLexicalScope {
+    let identity = db
+        .defs
+        .iter()
+        .find(|def| {
+            def.module_path == module_path
+                && def.def_span == module.name_span
+                && matches!(&def.kind, SymKind::Module)
+        })
+        .map(|def| def.identity.clone())
+        .unwrap_or_else(|| {
+            let parent_identity = parent_scope
+                .map(|scope| scope.identity.clone())
+                .unwrap_or_else(|| format!("module:{module_path}"));
+            format!("module:{parent_identity}::{}", module.name)
+        });
+    let structural_parent = db
+        .nodes
+        .iter()
+        .find(|node| {
+            node.module_path == module_path
+                && node.span == module.span.into()
+                && node.class == "item"
+        })
+        .map_or(0, |node| node.id);
+    SemanticLexicalScope {
+        identity,
+        structural_parent,
+        structural_slot: "items".to_string(),
+        span: module.span.into(),
+        depth: parent_scope.map_or(1, |scope| scope.depth + 1),
+        declaration_offset: module.name_span.start,
+    }
 }
 
 fn collect_distinct_conversion_symbols(

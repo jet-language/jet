@@ -64,7 +64,11 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                     feature: "calls into Rust code through `extern rust`".to_string(),
                     span: Some(block.span),
                 }),
-                Item::CModule(module) => return Some(Boundary {
+                // An empty synthetic C module is only the resolution target for
+                // an unused `use c.[…]`; it carries no foreign call to execute.
+                // Keep the import runnable on tier 0, while real C surfaces
+                // retain the native-only boundary.
+                Item::CModule(module) if !module.functions.is_empty() => return Some(Boundary {
                     feature: "calls into a C library".to_string(),
                     span: Some(module.span),
                 }),

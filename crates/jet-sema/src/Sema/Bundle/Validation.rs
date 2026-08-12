@@ -1480,11 +1480,17 @@ fn check_func_body_bundle_scoped(
     inline_module: Option<&str>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
+    let mut scoped_imports = st.imports.clone();
     let mut scoped_core_imports = st.core_imports.clone();
     let mut scoped_unqualified = st.unqualified.clone();
     let mut scoped_unqualified_file = st.unqualified_file.clone();
     let mut scoped_core_item_imports = st.core_item_imports.clone();
     if let Some(inline_module) = inline_module {
+        for ((scope, name), target) in &st.inline_foreign_imports {
+            if scope == inline_module {
+                scoped_imports.insert(name.clone(), *target);
+            }
+        }
         for ((scope, name), module) in &st.inline_core_imports {
             if scope == inline_module {
                 scoped_core_imports.insert(name.clone(), module.clone());
@@ -1513,7 +1519,7 @@ fn check_func_body_bundle_scoped(
         consts: &st.consts,
         modules: Some(states),
         module_idx,
-        imports: &st.imports,
+        imports: &scoped_imports,
         core_imports: &scoped_core_imports,
         code_modules: &st.code_modules,
         code_module_identities: &st.code_module_identities,
@@ -1526,6 +1532,7 @@ fn check_func_body_bundle_scoped(
         inline_reexport_inline: &st.inline_reexport_inline,
         inline_reexport_file: &st.inline_reexport_file,
         inline_reexport_core: &st.inline_reexport_core,
+        inline_reexport_foreign: &st.inline_reexport_foreign,
         module_path: &st.module_path,
         policy_declarations: &st.policy_declarations,
         rule_facts: st.rule_facts.clone(),
