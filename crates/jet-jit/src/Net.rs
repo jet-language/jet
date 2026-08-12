@@ -785,22 +785,26 @@ fn email_message_from_handle(handle: i64) -> Option<runtime::jet_email::Message>
     })
 }
 
-fn email_recipient_report_handle(report: &runtime::jet_email::RecipientReport) -> i64 {
+fn email_recipient_report_handle(report: runtime::jet_email::RecipientReport) -> i64 {
+    let runtime::jet_email::RecipientReport {
+        address,
+        accepted,
+        code,
+        message,
+    } = report;
     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(4));
-    let address = push(NetValue::EmailAddress(report.address.clone()));
-    let message = alloc_string(report.message.clone());
+    let address = push(NetValue::EmailAddress(address));
+    let message = alloc_string(message);
     Concurrency::with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_int(handle, 0, address);
-        let _ = rt.heap.record_set_bool(handle, 1, report.accepted);
-        let _ = rt.heap.record_set_int(handle, 2, report.code);
+        let _ = rt.heap.record_set_bool(handle, 1, accepted);
+        let _ = rt.heap.record_set_int(handle, 2, code);
         let _ = rt.heap.record_set_string(handle, 3, message);
     });
     handle
 }
 
-fn email_recipient_reports_handle(
-    reports: &[runtime::jet_email::RecipientReport],
-) -> i64 {
+fn email_recipient_reports_handle(reports: Vec<runtime::jet_email::RecipientReport>) -> i64 {
     let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
     for report in reports {
         let handle = email_recipient_report_handle(report);
@@ -811,18 +815,26 @@ fn email_recipient_reports_handle(
     list
 }
 
-fn email_send_report_handle(report: &runtime::jet_email::SendReport) -> i64 {
+fn email_send_report_handle(report: runtime::jet_email::SendReport) -> i64 {
+    let runtime::jet_email::SendReport {
+        server,
+        accepted,
+        rejected,
+        response_code,
+        response,
+        accepted_at,
+    } = report;
     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(6));
-    let server = alloc_string(report.server.clone());
-    let accepted = email_recipient_reports_handle(&report.accepted);
-    let rejected = email_recipient_reports_handle(&report.rejected);
-    let response = alloc_string(report.response.clone());
-    let accepted_at = alloc_string(report.accepted_at.clone());
+    let server = alloc_string(server);
+    let accepted = email_recipient_reports_handle(accepted);
+    let rejected = email_recipient_reports_handle(rejected);
+    let response = alloc_string(response);
+    let accepted_at = alloc_string(accepted_at);
     Concurrency::with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_string(handle, 0, server);
         let _ = rt.heap.record_set_int(handle, 1, accepted);
         let _ = rt.heap.record_set_int(handle, 2, rejected);
-        let _ = rt.heap.record_set_int(handle, 3, report.response_code);
+        let _ = rt.heap.record_set_int(handle, 3, response_code);
         let _ = rt.heap.record_set_string(handle, 4, response);
         let _ = rt.heap.record_set_string(handle, 5, accepted_at);
     });
@@ -1003,7 +1015,7 @@ extern "C" fn jet_jit_email_mailer_send(mailer: i64, message: i64) -> i64 {
     let result = mailer_value.send(message);
     put_net(mailer, NetValue::EmailMailer(mailer_value));
     match result {
-        Ok(report) => result_ok(email_send_report_handle(&report) as u64),
+        Ok(report) => result_ok(email_send_report_handle(report) as u64),
         Err(error) => email_err(error),
     }
 }

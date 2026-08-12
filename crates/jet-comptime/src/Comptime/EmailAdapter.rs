@@ -640,34 +640,64 @@ fn store_mailer(mailer: jet_email::Mailer) -> CtValue {
     mailer_value(mailers.len() - 1)
 }
 
-fn recipient_report_value(report: &jet_email::RecipientReport) -> CtValue {
+fn address_value_owned(address: jet_email::Address) -> CtValue {
+    let jet_email::Address { display, mailbox } = address;
     structure(
-        "RecipientReport",
+        "Address",
         vec![
-            ("address", address_value(&report.address)),
-            ("accepted", CtValue::Bool(report.accepted)),
-            ("code", CtValue::Int(report.code)),
-            ("message", CtValue::Str(report.message.clone())),
+            (
+                "display",
+                display.map_or(CtValue::absent(Type::String), |display| {
+                    CtValue::Present(Box::new(CtValue::Str(display)))
+                }),
+            ),
+            ("mailbox", CtValue::Str(mailbox)),
         ],
     )
 }
 
-fn send_report_value(report: &jet_email::SendReport) -> CtValue {
+fn recipient_report_value(report: jet_email::RecipientReport) -> CtValue {
+    let jet_email::RecipientReport {
+        address,
+        accepted,
+        code,
+        message,
+    } = report;
+    structure(
+        "RecipientReport",
+        vec![
+            ("address", address_value_owned(address)),
+            ("accepted", CtValue::Bool(accepted)),
+            ("code", CtValue::Int(code)),
+            ("message", CtValue::Str(message)),
+        ],
+    )
+}
+
+fn send_report_value(report: jet_email::SendReport) -> CtValue {
+    let jet_email::SendReport {
+        server,
+        accepted,
+        rejected,
+        response_code,
+        response,
+        accepted_at,
+    } = report;
     structure(
         "SendReport",
         vec![
-            ("server", CtValue::Str(report.server.clone())),
+            ("server", CtValue::Str(server)),
             (
                 "accepted",
-                CtValue::List(report.accepted.iter().map(recipient_report_value).collect()),
+                CtValue::List(accepted.into_iter().map(recipient_report_value).collect()),
             ),
             (
                 "rejected",
-                CtValue::List(report.rejected.iter().map(recipient_report_value).collect()),
+                CtValue::List(rejected.into_iter().map(recipient_report_value).collect()),
             ),
-            ("response_code", CtValue::Int(report.response_code)),
-            ("response", CtValue::Str(report.response.clone())),
-            ("accepted_at", CtValue::Str(report.accepted_at.clone())),
+            ("response_code", CtValue::Int(response_code)),
+            ("response", CtValue::Str(response)),
+            ("accepted_at", CtValue::Str(accepted_at)),
         ],
     )
 }
@@ -732,5 +762,5 @@ pub fn ambient_handle(
     };
     let send_result = mailer.send(message);
     mailers[index] = Some(mailer);
-    Some(Ok(result(send_result, |value| send_report_value(&value))))
+    Some(Ok(result(send_result, send_report_value)))
 }
