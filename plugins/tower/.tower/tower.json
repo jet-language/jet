@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35667,
+    "rev": 35674,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86809,7 +86809,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Repair the truthfulness suite seam by seam; the title's 'seven' is a stale count — re-derive the live failure set from the seven assertions at tests/truthfulness.rs:222/:318/:467/:929/:947/:970/:1133 once master builds again (#1929). Known statically-contradicted rules today: no-codegen-diagnostics (crates/jet-codegen/src/BrowserHost.rs:122 constructs diagnostics in codegen) and no-include-splices (crates/jet-comptime/src/Comptime/SyncLite.rs:29). Some inputs already exist (examples/canon.jet; examples/features/expected/tooling/test_package_modules.test.out) — but tests/truthfulness.rs:341-365 expects the .out|.err.out pair naming, so either the fixture or the check is wrong; fix at the owning seam, never by loosening the check. Each failing assertion gets its root cause fixed where it lives (example inventory, seam dependency policy, capability ledger via scripts/agent/check-capability-ledger.mjs, diagnostics construction, include splices). Blocked by #1929 for the full-suite proof run.",
       "blockedBy": [],
@@ -86870,56 +86870,56 @@
         {
           "n": 1,
           "text": "All seven failing truthfulness checks are enumerated by name in the card log, each with its root-cause commit or a linked card",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:18.721Z"
+          "evidence": "Seven checks enumerated with root causes (luna-sliceGI3 transcript): codegen_never_constructs_diagnostics (Browser emitter diagnostics), compiler_code_has_no_include_splices (SyncLite splice), compiler_seam_crates_have_only_path_dependencies (missing ratified decision comments), docs_referenced_examples_exist (stale taskgroup.jet path), epoch3_capability_manifest_is_current_and_owned (stale owners/digests), manifest_rejects_hostile_fixtures (stale card owners), every_feature_example_has_expected_output (missing .out pair). canon_jet_exists passed already",
+          "at": "2026-08-12T23:31:47.994Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test truthfulness passes with zero failures",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:19.031Z"
+          "evidence": "cargo test --test truthfulness: ok. 23 passed; 0 failed on master after merges 6588a20f3 + 9eb493f10 (orchestrator ran)",
+          "at": "2026-08-12T23:31:48.554Z"
         },
         {
           "n": 3,
           "text": "No truthfulness check was weakened and no allowlist grew; the diff shows fixes at causes, or a linked card exists for any split-out cause",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:19.347Z"
+          "evidence": "Review round found and reversed a scanner weakening: struct-literal constructions flagged again, TIR/eval directory exemption removed, eval diagnostics routed through sema seam (9eb493f10); no allowlist rows added",
+          "at": "2026-08-12T23:31:49.045Z"
         },
         {
           "n": 4,
           "text": "Every truthfulness assertion passes: scripts/agent/jet-env cargo test --test truthfulness is green on master with zero skipped/loosened checks",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:46.842Z"
+          "evidence": "Truthfulness green with all 23 checks strict on master (orchestrator ran post-merge)",
+          "at": "2026-08-12T23:31:49.564Z"
         },
         {
           "n": 5,
           "text": "The no-codegen-diagnostics violation at BrowserHost.rs:122 and the include-splice at SyncLite.rs:29 are fixed at their seams (moved to sema/registered rows), not allowlisted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:47.259Z"
+          "evidence": "BrowserHost.rs:122 diagnostics now delegate to registered sema rows; SyncLite.rs include-splice moved behind a module seam (SyncLite.rs:26), both at commit 6588a20f3",
+          "at": "2026-08-12T23:31:50.190Z"
         },
         {
           "n": 6,
           "text": "The test_package_modules golden naming mismatch is resolved at the owning seam with the check's pair convention intact",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:47.679Z"
+          "evidence": "test_package_modules golden pair restored at tests/jet_test.rs:58 with plain .out pair; jet_test_package_collects_imported_module_tests green; pair convention intact",
+          "at": "2026-08-12T23:31:50.762Z"
         }
       ],
       "refs": [],
@@ -86929,8 +86929,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T01:48:34.573Z",
-      "updated": "2026-08-12T18:10:07.202Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T23:31:51.439Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T23:31:51.438Z"
     },
     {
       "id": "c0ky778n",
@@ -170069,6 +170070,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-12T23:31:51.439Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0shcqzl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T23:31:50.762Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-12T23:31:50.191Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-12T23:31:49.564Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-12T23:31:49.045Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-12T23:31:48.555Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T23:31:47.995Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0shcqzl",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-12T23:31:02.592Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -173517,55 +173567,6 @@
       "by": "fable-e3-audit",
       "action": "card.update",
       "ref": "c08yj420",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:23.836Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0uu5swt",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:22.887Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0xci9wz",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:22.030Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0x3vq94",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:21.454Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0i5tr9z",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:20.899Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0uvs9qs",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:20.335Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0kfna9f",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:19.773Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0tm6rw5",
       "note": "milestoneId"
     }
   ],
