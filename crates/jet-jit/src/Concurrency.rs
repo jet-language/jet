@@ -1121,7 +1121,7 @@ host_fns! {
     spawn3: "jet_jit_spawn3" => jet_jit_spawn3: sig_spawn3;
     spawn4: "jet_jit_spawn4" => jet_jit_spawn4: sig_spawn4;
     task_group_new: "jet_jit_task_group_new" => jet_jit_task_group_new: sig_i64_i64;
-    task_group_acquire: "jet_jit_task_group_acquire" => jet_jit_task_group_acquire: sig_i64_i64;
+    task_group_acquire: "jet_jit_task_group_acquire" => jet_jit_task_group_acquire: sig_i64;
     task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
     task_group_close: "jet_jit_task_group_close" => jet_jit_task_group_close: sig_i64;
     task_join: "jet_jit_task_join" => jet_jit_task_join: sig_i64;

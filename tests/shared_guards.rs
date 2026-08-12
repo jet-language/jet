@@ -263,10 +263,15 @@ fn assert_native_and_default(
     assert!(errors.is_empty(), "{errors:?}");
 
     let mut backend = jet_jit::CraneliftBackend::new();
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
     jet_jit::reset_jit_trace_for_test();
     match backend.run(&bundle, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-            assert!(!jet_jit::deopt_invoked_for_test());
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "{plan:?} strict={:?}",
+                jet_jit::run_resident_strict_for_test(&bundle)
+            );
             assert!(!jet_jit::fallback_invoked_for_test());
             assert_eq!(stdout, expected);
         }

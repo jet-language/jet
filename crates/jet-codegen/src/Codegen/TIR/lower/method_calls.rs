@@ -1601,8 +1601,14 @@ fn lower_method_call_impl(
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 let body_ty = lambda_body_ty(lam, cx, env);
                 let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-                let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-                cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+                let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+                let site = existing.unwrap_or_else(|| {
+                    let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+                    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                    cx.jit_spawn_sites.borrow_mut().insert(key, site);
+                    site
+                });
                 let spawn_closure = render_spawn_lambda(lam, cx, env);
                 return TExpr {
                     ty: Type::Apply {
@@ -1658,8 +1664,14 @@ fn lower_method_call_impl(
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             let body_ty = lambda_body_ty(lam, cx, env);
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+            let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+            let site = existing.unwrap_or_else(|| {
+                let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+                cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                cx.jit_spawn_sites.borrow_mut().insert(key, site);
+                site
+            });
             let spawn_closure = render_spawn_lambda(lam, cx, env);
             let group = lower_expr(receiver, cx, env);
             return TExpr {

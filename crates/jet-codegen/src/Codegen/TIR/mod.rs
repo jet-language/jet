@@ -1131,6 +1131,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         (None, None) => return None,
     };
     cx.jit_spawn_lambdas.borrow_mut().clear();
+    cx.jit_spawn_sites.borrow_mut().clear();
     cx.jit_method_calls.borrow_mut().clear();
     cx.jit_generic_calls.borrow_mut().clear();
     cx.jit_canonical_deopt.borrow_mut().clear();

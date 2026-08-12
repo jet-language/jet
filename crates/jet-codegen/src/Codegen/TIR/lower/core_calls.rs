@@ -139,8 +139,14 @@ pub(crate) fn lower_core_closure_call(
         let lam = lam_at(0)?;
         let body_ty = lambda_body_ty(lam, cx, env);
         let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-        let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+        let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+        let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+        let site = existing.unwrap_or_else(|| {
+            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            cx.jit_spawn_sites.borrow_mut().insert(key, site);
+            site
+        });
         let spawn_closure = render_spawn_lambda(lam, cx, env);
         return Some(TExpr {
             ty: core_closure_call_return_ty(module, method, body_ty),

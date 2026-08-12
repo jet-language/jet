@@ -442,16 +442,20 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                             | Type::Tuple(_)
                             | Type::List(_)
                         )
-                        || matches!(
-                            t.as_ref(),
-                            Type::Apply { name, .. }
-                                if matches!(
-                                    name.as_str(),
-                                    "CellReadGuard" | "CellEditGuard" | "ViewMut"
-                                )
-                        )
+                        || jit_tuple_handle_field(t)
                 })
     )
+}
+
+fn jit_tuple_handle_field(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, .. } => matches!(
+            name.as_str(),
+            "CellReadGuard" | "CellEditGuard" | "SharedGuard" | "ViewMut"
+        ),
+        Type::Tagged { inner, .. } => jit_tuple_handle_field(inner),
+        _ => false,
+    }
 }
 
 pub(crate) fn jit_enum_type(ty: &Type) -> bool {
@@ -4513,6 +4517,7 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "GameScene"
                 | "GameFrame"
                 | "GameBackend"
+                | "Condition"
                 | "RaylibWindow"
                 | "RaylibColor"
                 | "RaylibSound"
