@@ -24,32 +24,170 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
 }
 
 impl<'a> Checker<'a> {
+    fn qualify_method_type(
+        &self,
+        owner_mod: usize,
+        ty: &Type,
+        generic_names: &HashSet<String>,
+    ) -> Type {
+        let qualify_name = |name: &str| {
+            if generic_names.contains(name) || name.contains("::") {
+                return name.to_string();
+            }
+            if owner_mod != self.module_idx
+                && self
+                    .modules
+                    .is_some_and(|modules| modules[owner_mod].registry.contains(name))
+            {
+                return self.canonical_nominal_name(owner_mod, name);
+            }
+            match self.resolve_type(Type::Named(name.to_string())) {
+                Type::Named(resolved) => resolved,
+                _ => name.to_string(),
+            }
+        };
+        match ty {
+            Type::Named(name) => Type::Named(qualify_name(name)),
+            Type::Apply { name, args } => Type::Apply {
+                name: qualify_name(name),
+                args: args
+                    .iter()
+                    .map(|arg| self.qualify_method_type(owner_mod, arg, generic_names))
+                    .collect(),
+            },
+            Type::List(inner) => Type::List(Box::new(self.qualify_method_type(
+                owner_mod,
+                inner,
+                generic_names,
+            ))),
+            Type::Shared(inner) => Type::Shared(Box::new(self.qualify_method_type(
+                owner_mod,
+                inner,
+                generic_names,
+            ))),
+            Type::Option(inner) => Type::Option(Box::new(self.qualify_method_type(
+                owner_mod,
+                inner,
+                generic_names,
+            ))),
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(self.qualify_method_type(owner_mod, ok, generic_names)),
+                err: Box::new(self.qualify_method_type(owner_mod, err, generic_names)),
+            },
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
+                key: Box::new(self.qualify_method_type(owner_mod, key, generic_names)),
+                key_span: *key_span,
+                value: Box::new(self.qualify_method_type(owner_mod, value, generic_names)),
+            },
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                return_view_provenance,
+            } => Type::Fn {
+                params: params
+                    .iter()
+                    .map(|param| self.qualify_method_type(owner_mod, param, generic_names))
+                    .collect(),
+                ret: ret.as_ref().map(|ret| {
+                    Box::new(self.qualify_method_type(owner_mod, ret, generic_names))
+                }),
+                effect_bound: effect_bound.clone(),
+                param_contract: param_contract.clone(),
+                return_view_provenance: return_view_provenance.clone(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, field)| {
+                        (
+                            name.clone(),
+                            Box::new(self.qualify_method_type(owner_mod, field, generic_names)),
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::FixedList {
+                elem,
+                len,
+                len_symbol,
+            } => Type::FixedList {
+                elem: Box::new(self.qualify_method_type(owner_mod, elem, generic_names)),
+                len: *len,
+                len_symbol: len_symbol.clone(),
+            },
+            Type::Tagged { marker, inner } => Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(self.qualify_method_type(owner_mod, inner, generic_names)),
+            },
+            Type::Union(members) => crate::AST::canonicalize_union(
+                members
+                    .iter()
+                    .map(|member| self.qualify_method_type(owner_mod, member, generic_names))
+                    .collect(),
+            ),
+            Type::Quantity { base, dimension } => Type::Quantity {
+                base: Box::new(self.qualify_method_type(owner_mod, base, generic_names)),
+                dimension: dimension.clone(),
+            },
+            Type::TraitObject(bounds) => Type::TraitObject(bounds.clone()),
+            other => other.clone(),
+        }
+    }
+
+    fn qualify_method_signature(
+        &self,
+        owner_mod: usize,
+        owner_name: &str,
+        sig: &mut MethodSig,
+    ) {
+        if owner_mod == self.module_idx {
+            return;
+        }
+        let mut generic_names: HashSet<String> = sig
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        if let Some(module) = self.modules.and_then(|modules| modules.get(owner_mod)) {
+            if let Some(params) = module
+                .trait_reg
+                .struct_params
+                .get(owner_name)
+                .or_else(|| module.trait_reg.enum_params.get(owner_name))
+            {
+                generic_names.extend(params.iter().map(|param| param.name.clone()));
+            }
+        }
+        for (_, ty) in &mut sig.params {
+            *ty = self.qualify_method_type(owner_mod, ty, &generic_names);
+        }
+        if let Some(ret) = &mut sig.return_type {
+            *ret = self.qualify_method_type(owner_mod, ret, &generic_names);
+        }
+    }
+
     pub(crate) fn resolve_method_sig(
         &self,
         type_name: &str,
         method: &str,
     ) -> Option<(usize, MethodSig)> {
-        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
-        if import_ns.is_none() {
-            if let Some(sig) = self.registry.method(lookup_name, method) {
-                return Some((self.module_idx, sig.clone()));
-            }
-        }
-        let mods = self.modules?;
-        if let Some(alias) = import_ns {
-            let idx = *self.imports.get(alias)?;
-            return self
-                .type_is_pub_in(idx, lookup_name)
-                .then(|| mods[idx].registry.method(lookup_name, method).cloned())
-                .flatten()
-                .map(|sig| (idx, sig));
-        }
-        self.imports.values().find_map(|&idx| {
-            self.type_is_pub_in(idx, lookup_name)
-                .then(|| mods[idx].registry.method(lookup_name, method).cloned())
-                .flatten()
-                .map(|sig| (idx, sig))
-        })
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        let mut sig = if owner == self.module_idx {
+            self.registry.method(leaf, method).cloned()?
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .and_then(|module| module.registry.method(leaf, method).cloned())?
+        };
+        self.qualify_method_signature(owner, leaf, &mut sig);
+        Some((owner, sig))
     }
 
     pub(crate) fn instantiate_method_sig(
@@ -59,20 +197,20 @@ impl<'a> Checker<'a> {
         sig: &mut MethodSig,
         args: &[Type],
     ) {
-        let (_, lookup_name) = self.struct_type_name_parts(type_name);
+        let (_, leaf) = Self::split_type_name(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
-                .get(lookup_name)
-                .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+                .get(leaf)
+                .or_else(|| self.trait_reg.enum_params.get(leaf))
         } else {
             self.modules.and_then(|modules| {
                 modules.get(owner_mod).and_then(|module| {
                     module
                         .trait_reg
                         .struct_params
-                        .get(lookup_name)
-                        .or_else(|| module.trait_reg.enum_params.get(lookup_name))
+                        .get(leaf)
+                        .or_else(|| module.trait_reg.enum_params.get(leaf))
                 })
             })
         };
@@ -242,11 +380,12 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(method, span));
         }
+        let (_, dispatch_type_name) = Self::split_type_name(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
                 .struct_params
-                .get(method_type_name)
-                .or_else(|| self.trait_reg.enum_params.get(method_type_name))
+                .get(dispatch_type_name)
+                .or_else(|| self.trait_reg.enum_params.get(dispatch_type_name))
                 .cloned()
         } else {
             self.modules.and_then(|modules| {
@@ -254,8 +393,8 @@ impl<'a> Checker<'a> {
                     module
                         .trait_reg
                         .struct_params
-                        .get(method_type_name)
-                        .or_else(|| module.trait_reg.enum_params.get(method_type_name))
+                        .get(dispatch_type_name)
+                        .or_else(|| module.trait_reg.enum_params.get(dispatch_type_name))
                         .cloned()
                 })
             })
@@ -267,7 +406,7 @@ impl<'a> Checker<'a> {
             if !declared.is_empty() {
                 let expected = self.expected_type.clone();
                 let mut inference_args = Vec::new();
-                let mut inferred = self.trait_reg.infer_subst(
+                let mut inferred = self.trait_reg.infer_subst_without_bounds(
                     &msig.params,
                     msig.return_type.as_ref(),
                     &[],
@@ -299,7 +438,7 @@ impl<'a> Checker<'a> {
                     if actual.iter().all(Option::is_some) {
                         let actual_types = actual.iter().flatten().cloned().collect::<Vec<_>>();
                         inference_args = actual_types.clone();
-                        inferred = self.trait_reg.infer_subst(
+                        inferred = self.trait_reg.infer_subst_without_bounds(
                             &msig.params,
                             msig.return_type.as_ref(),
                             &actual_types,
@@ -318,7 +457,7 @@ impl<'a> Checker<'a> {
                         for param in &mut unbounded {
                             param.bounds.clear();
                         }
-                        if let Ok(subst) = self.trait_reg.infer_subst(
+                        if let Ok(subst) = self.trait_reg.infer_subst_without_bounds(
                             &msig.params,
                             msig.return_type.as_ref(),
                             &inference_args,
@@ -333,7 +472,7 @@ impl<'a> Checker<'a> {
                                     .bounds
                                     .iter()
                                     .find(|bound| {
-                                        !self.trait_reg.type_implements_trait(concrete, bound)
+                                        !self.type_satisfies_bound(concrete, bound)
                                     })
                                 {
                                     let concrete_name = concrete.name();
@@ -374,7 +513,7 @@ impl<'a> Checker<'a> {
             return msig.return_type.clone();
         }
         let pre_inferred_method = self.instantiate_method_type_args(
-            type_name,
+            dispatch_type_name,
             method,
             &mut msig,
             method_type_args,
@@ -383,7 +522,7 @@ impl<'a> Checker<'a> {
             &mut call_access,
         );
         self.record_method_reference(type_name, method, span);
-        self.record_edge(super::effect_key(Some(type_name), method), span);
+        self.record_edge(super::effect_key(Some(dispatch_type_name), method), span);
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
@@ -394,7 +533,7 @@ impl<'a> Checker<'a> {
             ));
         }
         self.check_method_args(
-            type_name,
+            dispatch_type_name,
             method,
             &msig,
             None,
@@ -504,14 +643,35 @@ impl<'a> Checker<'a> {
         if arg_types.len() != args.len() {
             return Some(pre_inferred);
         }
-        let subst = match self.trait_reg.infer_subst(
+        let subst = match self.trait_reg.infer_subst_without_bounds(
             &params,
             sig.return_type.as_ref(),
             &arg_types,
             &sig.type_params,
             self.expected_type.as_ref(),
         ) {
-            Ok(subst) => subst,
+                    Ok(subst) => {
+                        for param in &sig.type_params {
+                            let Some(concrete) = subst.get(&param.name) else {
+                                continue;
+                            };
+                            if let Some(bound) = param
+                                .bounds
+                                .iter()
+                                .find(|bound| !self.type_satisfies_bound(concrete, bound))
+                            {
+                                let concrete_name = concrete.name();
+                                self.diags.push(crate::Generics::e0905(
+                                    &concrete_name,
+                                    bound,
+                                    span,
+                                    false,
+                                ));
+                                return None;
+                            }
+                        }
+                        subst
+                    }
             Err(param) => {
                 self.diags.push(crate::Generics::e0904(span, &param));
                 return Some(pre_inferred);
@@ -964,35 +1124,152 @@ impl<'a> Checker<'a> {
         type_name: &str,
         import_ns: Option<&str>,
     ) -> Option<usize> {
-        if let Some(alias) = import_ns {
-            let mod_idx = *self.imports.get(alias)?;
+        if let Some(namespace) = import_ns {
+            if namespace.contains("::") {
+                let identity = format!("{namespace}::{type_name}");
+                let mod_idx = self.name_ledger.nominal_module(&identity)?;
+                let mods = self.modules?;
+                return mods
+                    .get(mod_idx)
+                    .filter(|module| module.registry.contains(type_name))
+                    .map(|_| mod_idx);
+            }
+            let mod_idx = *self.imports.get(namespace)?;
             let mods = self.modules?;
             if mods[mod_idx].registry.contains(type_name) {
                 return Some(mod_idx);
             }
             return None;
         }
+        if type_name.contains("::") {
+            let (namespace, leaf) = type_name.rsplit_once("::")?;
+            return self.struct_owner_module(leaf, Some(namespace));
+        }
         if self.registry.contains(type_name) {
             return Some(self.module_idx);
         }
         let mods = self.modules?;
+        if let Some(alias) = self.name_ledger.alias(self.module_idx, type_name) {
+            if let Some(owner) = alias.target_module {
+                let leaf = alias
+                    .target
+                    .rsplit_once("::")
+                    .or_else(|| alias.target.rsplit_once('.'))
+                    .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+                if mods
+                    .get(owner)
+                    .is_some_and(|module| module.registry.contains(leaf))
+                    && self.type_is_pub_in(owner, leaf)
+                {
+                    return Some(owner);
+                }
+            }
+        }
         let mut found = None;
         for (idx, st) in mods.iter().enumerate() {
             if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
+                if found.is_some_and(|previous| previous != idx) {
+                    return None;
+                }
                 found = Some(idx);
             }
         }
         found
     }
 
+    pub(crate) fn split_type_name(type_name: &str) -> (Option<&str>, &str) {
+        type_name
+            .rsplit_once("::")
+            .or_else(|| type_name.rsplit_once('.'))
+            .map_or((None, type_name), |(namespace, leaf)| (Some(namespace), leaf))
+    }
+
     pub(crate) fn struct_type_name_parts<'b>(
         &self,
         type_name: &'b str,
     ) -> (Option<&'b str>, &'b str) {
-        match type_name.split_once('.') {
-            Some((alias, bare)) if self.imports.contains_key(alias) => (Some(alias), bare),
-            _ => (None, type_name),
+        Self::split_type_name(type_name)
+    }
+
+    pub(crate) fn canonical_nominal_name(&self, owner: usize, leaf: &str) -> String {
+        self.name_ledger
+            .nominal_identity(owner, leaf)
+            .expect("name ledger must contain every loaded module")
+    }
+
+    pub(crate) fn struct_fields_for_type_name(
+        &self,
+        type_name: &str,
+    ) -> Option<&[(String, Span, Type)]> {
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        self.struct_fields_of(owner, leaf)
+    }
+
+    pub(crate) fn type_implements_trait_for_name(
+        &self,
+        type_name: &str,
+        trait_name: &str,
+    ) -> bool {
+        let (import_ns, leaf) = Self::split_type_name(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return self.trait_reg.implements_trait(type_name, trait_name);
+        };
+        if owner == self.module_idx {
+            self.trait_reg.implements_trait(leaf, trait_name)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
         }
+    }
+
+    pub(crate) fn capability_type_context(
+        &self,
+        ty: &Type,
+    ) -> (
+        Type,
+        &crate::Sema::TypeRegistry,
+        &crate::Traits::TraitRegistry,
+    ) {
+        let (name, args) = match ty {
+            Type::Named(name) => (name.as_str(), None),
+            Type::Apply { name, args } => (name.as_str(), Some(args.as_slice())),
+            _ => return (ty.clone(), self.registry, self.trait_reg),
+        };
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return (ty.clone(), self.registry, self.trait_reg);
+        };
+        let normalized = match args {
+            None => Type::Named(leaf.to_string()),
+            Some(args) => Type::Apply {
+                name: leaf.to_string(),
+                args: args.to_vec(),
+            },
+        };
+        if owner == self.module_idx {
+            (normalized, self.registry, self.trait_reg)
+        } else if let Some(module) = self.modules.and_then(|modules| modules.get(owner)) {
+            (normalized, &module.registry, &module.trait_reg)
+        } else {
+            (ty.clone(), self.registry, self.trait_reg)
+        }
+    }
+
+    pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
+        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
+    }
+
+    pub(crate) fn types_comparable_type(&self, ty: &Type) -> bool {
+        let (normalized, registry, _) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::types_comparable(&normalized, registry)
+    }
+
+    pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
+        let (normalized, registry, _) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::incomparable_field(&normalized, registry)
     }
 
     pub(crate) fn struct_fields_of(
@@ -1349,6 +1626,14 @@ impl<'a> Checker<'a> {
         fields: &mut Vec<(String, Span, Expr)>,
         span: Span,
     ) -> Type {
+        // A canonical nominal arrives here from an expected type as
+        // `package::path::Type`. Field registries and visibility tables are
+        // keyed by the owner-local leaf, while the returned type below keeps
+        // the canonical identity. Split only for this local lookup; never
+        // reintroduce the short name as semantic identity.
+        let (qualified_namespace, leaf_name) = Self::split_type_name(type_name);
+        let import_ns = import_ns.or(qualified_namespace);
+        let type_name = leaf_name;
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
         // single-use byte Body. The old public-field literals cannot preserve
         // those invariants and ended at this core API break.
@@ -1459,7 +1744,7 @@ impl<'a> Checker<'a> {
             }
             return Type::Named(type_name.to_string());
         };
-        let subst = self.struct_subst(type_name, type_args);
+        let subst = self.struct_subst_for_owner(owner_mod, type_name, type_args);
         let field_names: Vec<String> = def_fields.iter().map(|(n, ..)| n.clone()).collect();
         // D-PATCH1: `T.Patch` literals are partial — omitted fields mean "unchanged"
         // (encoded as `null` / `None`); provided values use the inner field type.
@@ -1491,7 +1776,7 @@ impl<'a> Checker<'a> {
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
             if let Some((_, _, fty)) = field_def {
-                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 self.expected_type = if is_patch_lit {
                     inst.unwrap_option().cloned()
                 } else {
@@ -1546,7 +1831,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some((_, _, fty)) = field_def {
-                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 if let Some(et) = et {
                     // `View<str>` fields accept only live string-view bindings
                     // (or trim/after/before calls). A plain owned `String` is
@@ -1636,13 +1921,13 @@ impl<'a> Checker<'a> {
             let field_def = def_fields.iter().find(|(n, ..)| n == &name);
             let saved_expected = self.expected_type.clone();
             if let Some((_, _, fty)) = field_def {
-                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 self.expected_type = Some(inst);
             }
             let et = self.infer(&mut filled);
             self.expected_type = saved_expected;
             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
-                let inst = self.trait_reg.instantiate_type(fty, &subst);
+                let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 self.check_type_assignable(&inst, &et, filled.span());
             }
             fields.push((name, name_span, filled));
@@ -1660,27 +1945,36 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        let nominal_name = import_ns
-            .map(|alias| format!("{alias}.{type_name}"))
-            .unwrap_or_else(|| type_name.to_string());
+        let nominal_name = if owner_mod == self.module_idx {
+            type_name.to_string()
+        } else {
+            self.canonical_nominal_name(owner_mod, type_name)
+        };
         if !type_args.is_empty() {
             Type::Apply {
                 name: nominal_name,
                 args: type_args.to_vec(),
             }
         } else if self
-            .trait_reg
-            .struct_params
-            .get(type_name)
+            .modules
+            .and_then(|modules| modules.get(owner_mod))
+            .map_or_else(
+                || self.trait_reg.struct_params.get(type_name),
+                |module| module.trait_reg.struct_params.get(type_name),
+            )
             .is_some_and(|p| !p.is_empty())
         {
+            let params = if owner_mod == self.module_idx {
+                self.trait_reg.struct_params.get(type_name)
+            } else {
+                self.modules
+                    .and_then(|modules| modules.get(owner_mod))
+                    .and_then(|module| module.trait_reg.struct_params.get(type_name))
+            }
+            .expect("generic struct parameters exist");
             Type::Apply {
                 name: nominal_name,
-                args: self
-                    .trait_reg
-                    .struct_params
-                    .get(type_name)
-                    .unwrap()
+                args: params
                     .iter()
                     .map(|p| Type::Named(p.name.clone()))
                     .collect(),

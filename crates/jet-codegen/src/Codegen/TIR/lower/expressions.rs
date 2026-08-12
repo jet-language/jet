@@ -2688,12 +2688,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
+                let qualified = cx.foreign_type_identity(alias, type_name).unwrap_or_else(|| {
+                    jet_foundation::ice!(
+                        None,
+                        "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                    )
+                });
                 return TExpr {
                     ty: if type_args.is_empty() {
-                        Type::Named(type_name.clone())
+                        Type::Named(qualified)
                     } else {
                         Type::Apply {
-                            name: type_name.clone(),
+                            name: qualified,
                             args: type_args.clone(),
                         }
                     },
@@ -2873,18 +2879,34 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            let resolved_name = if cx.struct_fields.contains_key(type_name) {
+                type_name.clone()
+            } else {
+                cx.foreign_type_identity("", type_name).unwrap_or_else(|| {
+                    jet_foundation::ice!(
+                        None,
+                        "unqualified struct literal `{type_name}` has no canonical nominal identity (I3)"
+                    )
+                })
+            };
+            let resolved_ty = if type_args.is_empty() {
+                Type::Named(resolved_name.clone())
+            } else {
+                Type::Apply {
+                    name: resolved_name.clone(),
+                    args: type_args.clone(),
+                }
+            };
             // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
             // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
             // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
             let tfields = fields
                 .iter()
                 .map(|(n, _, fe)| {
-                    let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
+                    let boxed = cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
                     let mut value = lower_owned_expr(fe, cx, env);
                     // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
-                    if let Some(fty) =
-                        struct_field_type(cx, &Type::Named(type_name.clone()), n)
-                    {
+                    if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
                         value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
                     }
                     (n.clone(), value, boxed)
@@ -2894,11 +2916,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
             let ty = match as_trait {
                 Some(t) => Type::TraitObject(vec![t.clone()]),
-                None if type_args.is_empty() => Type::Named(type_name.clone()),
-                None => Type::Apply {
-                    name: type_name.clone(),
-                    args: type_args.clone(),
-                },
+                None => resolved_ty,
             };
             TExpr {
                 ty,

@@ -1,6 +1,8 @@
 use super::*;
 use crate::Traits;
-use crate::AST::{AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type};
+use crate::AST::{
+    AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type, VariantPayload,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Look up the pre-resolved module index for an import. Returns `None` for
@@ -33,14 +35,75 @@ fn file_import_target(
         .find_map(|imp| resolve_target(bundle, module_idx, imp))
 }
 
+/// Resolve nominal declarations reached through `use module.Item`. The
+/// selective spelling has no module import edge of its own, so its canonical
+/// owner comes from the ledger alias recorded for the local item binding.
+pub(crate) fn selective_nominal_targets(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> Vec<(usize, String)> {
+    let mut targets = Vec::new();
+    for import in &bundle.modules[module_idx].imports {
+        let ImportKind::Unqualified { items, .. } = &import.kind else {
+            continue;
+        };
+        for (original, local_alias) in items {
+            let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+            let Some(target) = bundle
+                .name_ledger
+                .alias(module_idx, local)
+                .and_then(|alias| alias.target_module)
+            else {
+                continue;
+            };
+            let leaf = original.rsplit('.').next().unwrap_or(original);
+            let is_nominal = bundle.modules[target].items.iter().any(|item| match item {
+                Item::Struct(definition) => definition.name == leaf,
+                Item::Enum(definition) => definition.name == leaf,
+                Item::Distinct(definition) => definition.name == leaf,
+                Item::UnitFamily(family) => family
+                    .distinct_defs()
+                    .iter()
+                    .any(|member| member.name == leaf),
+                _ => false,
+            });
+            if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {
+                targets.push((target, leaf.to_string()));
+            }
+        }
+    }
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
 fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
     ty.map_named_types(&|name| {
         bundle.modules[target]
             .items
             .iter()
             .any(|item| matches!(item, Item::UnitFamily(family) if family.distinct_defs().iter().any(|member| member.name == name)))
-            .then(|| format!("{}.{}", bundle.modules[target].alias, name))
+            .then(|| {
+                bundle
+                    .name_ledger
+                    .nominal_identity(target, name)
+                    .expect("name ledger must contain every loaded module")
+            })
     })
+}
+
+pub(crate) fn qualify_imported_call_type(
+    bundle: &ProgramBundle,
+    target: usize,
+    _alias: &str,
+    ty: &Type,
+) -> Type {
+    let unit_qualified = qualify_unit_type(bundle, target, ty);
+    let owner = bundle
+        .name_ledger
+        .module_identity(target)
+        .expect("name ledger must contain every loaded module");
+    crate::Codegen::TIR::qualify_imported_type(bundle, target, &owner, &unit_qualified)
 }
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneability/hashability checks for any local
@@ -72,22 +135,14 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
     }
 }
 
-/// Build a map from pub type name → Rust module path for all types defined in
-/// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
-/// type references (e.g. `Note` → `__jet_note::__jet_Note`).
+/// Build the cross-module type map with one canonical nominal key per owner.
+/// Import aliases are source lookup projections, never semantic identities.
 pub(crate) fn foreign_type_map(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
-    let is_local = |name: &str| {
-        module.items.iter().any(|item| match item {
-            Item::Struct(structure) => structure.name == name,
-            Item::Enum(enumeration) => enumeration.name == name,
-            _ => false,
-        })
-    };
     for imp in &module.imports {
         if imp.is_c_import() {
             continue;
@@ -97,29 +152,91 @@ pub(crate) fn foreign_type_map(
             for item in &bundle.modules[target].items {
                 match item {
                     Item::Struct(s)
-                        if bundle.name_ledger.visible(module_idx, target, &s.name)
-                            && !is_local(&s.name) =>
+                        if bundle.name_ledger.visible(module_idx, target, &s.name) =>
                     {
-                        map.insert(s.name.clone(), rust_mod.clone());
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
+                            map.insert(identity, rust_mod.clone());
+                        }
                     }
                     Item::Enum(e)
-                        if bundle.name_ledger.visible(module_idx, target, &e.name)
-                            && !is_local(&e.name) =>
+                        if bundle.name_ledger.visible(module_idx, target, &e.name) =>
                     {
-                        map.insert(e.name.clone(), rust_mod.clone());
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
+                            map.insert(identity, rust_mod.clone());
+                        }
+                    }
+                    Item::Distinct(d)
+                        if bundle.name_ledger.visible(module_idx, target, &d.name) =>
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                            map.insert(identity, rust_mod.clone());
+                        }
                     }
                     Item::UnitFamily(family) => {
                         for member in family.distinct_defs() {
                             if bundle.name_ledger.visible(module_idx, target, &member.name) {
-                                map.insert(
-                                    format!("{}.{}", bundle.modules[target].alias, member.name),
-                                    rust_mod.clone(),
-                                );
+                                if let Some(identity) =
+                                    bundle.name_ledger.nominal_identity(target, &member.name)
+                                {
+                                    map.insert(identity, rust_mod.clone());
+                                }
                             }
                         }
                     }
                     _ => {}
                 }
+            }
+        }
+    }
+    for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
+            continue;
+        };
+        map.insert(identity, mangle(&bundle.modules[target].alias));
+    }
+    for ((_, _), (rust_mod, _)) in reexport_call_map(bundle, module_idx) {
+        let Some(target) = bundle
+            .modules
+            .iter()
+            .position(|candidate| mangle(&candidate.alias) == rust_mod)
+        else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            match item {
+                Item::Struct(s)
+                    if bundle.name_ledger.visible(module_idx, target, &s.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &s.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::Enum(e)
+                    if bundle.name_ledger.visible(module_idx, target, &e.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &e.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::Distinct(d)
+                    if bundle.name_ledger.visible(module_idx, target, &d.name) =>
+                {
+                    if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::UnitFamily(family) => {
+                    for member in family.distinct_defs() {
+                        if bundle.name_ledger.visible(module_idx, target, &member.name) {
+                            if let Some(identity) =
+                                bundle.name_ledger.nominal_identity(target, &member.name)
+                            {
+                                map.insert(identity, rust_mod.clone());
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -142,21 +259,98 @@ pub(crate) fn register_foreign_enum_variants(
             for item in &bundle.modules[target].items {
                 if let Item::Enum(e) = item {
                     if bundle.name_ledger.visible(module_idx, target, &e.name) {
-                        cx.enum_variants.entry(e.name.clone()).or_insert_with(|| {
+                        let Some(identity) =
+                            bundle.name_ledger.nominal_identity(target, &e.name)
+                        else {
+                            continue;
+                        };
+                        cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
                             e.variants
                                 .iter()
-                                .map(|v| (v.name.clone(), v.payload.clone()))
+                                .map(|v| {
+                                    (
+                                        v.name.clone(),
+                                        qualify_imported_variant_payload(
+                                            bundle,
+                                            target,
+                                            &identity,
+                                            &v.payload,
+                                        ),
+                                    )
+                                })
                                 .collect()
                         });
                         for v in &e.variants {
                             cx.variant_owner
                                 .entry(v.name.clone())
-                                .or_insert_with(|| e.name.clone());
+                                .or_insert_with(|| identity.clone());
                         }
                     }
                 }
             }
         }
+    }
+    for (target, leaf) in selective_nominal_targets(bundle, module_idx) {
+        let Some(item) = bundle.modules[target].items.iter().find(|item| {
+            matches!(item, Item::Enum(definition) if definition.name == leaf)
+        }) else {
+            continue;
+        };
+        let Item::Enum(e) = item else { continue };
+        let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
+            continue;
+        };
+        cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
+            e.variants
+                .iter()
+                .map(|variant| {
+                    (
+                        variant.name.clone(),
+                        qualify_imported_variant_payload(
+                            bundle,
+                            target,
+                            &identity,
+                            &variant.payload,
+                        ),
+                    )
+                })
+                .collect()
+        });
+        for variant in &e.variants {
+            cx.variant_owner
+                .entry(variant.name.clone())
+                .or_insert_with(|| identity.clone());
+        }
+    }
+}
+
+fn qualify_imported_variant_payload(
+    bundle: &ProgramBundle,
+    target: usize,
+    owner: &str,
+    payload: &VariantPayload,
+) -> VariantPayload {
+    match payload {
+        VariantPayload::Unit => VariantPayload::Unit,
+        VariantPayload::Single(ty, span) => VariantPayload::Single(
+            crate::Codegen::TIR::qualify_imported_type(bundle, target, owner, ty),
+            *span,
+        ),
+        VariantPayload::Named(fields) => VariantPayload::Named(
+            fields
+                .iter()
+                .map(|field| {
+                    let mut qualified = field.clone();
+                    qualified.ty = crate::Codegen::TIR::qualify_imported_type(
+                        bundle,
+                        target,
+                        owner,
+                        &field.ty,
+                    );
+                    qualified
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -661,14 +855,14 @@ fn unqualified_file_function_entries(
                     .map(|param| {
                         (
                             param.convention,
-                            qualify_unit_type(bundle, target, &param.ty),
+                            qualify_imported_call_type(bundle, target, "", &param.ty),
                         )
                     })
                     .collect(),
                 function
                     .return_type
                     .as_ref()
-                    .map(|ty| qualify_unit_type(bundle, target, ty)),
+                    .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
             ));
         }
     }
@@ -705,7 +899,12 @@ pub(crate) fn import_sig_map(
                         (alias.clone(), f.name.clone()),
                         f.params
                             .iter()
-                            .map(|p| (p.convention, qualify_unit_type(bundle, target, &p.ty)))
+                            .map(|p| {
+                                (
+                                    p.convention,
+                                    qualify_imported_call_type(bundle, target, &alias, &p.ty),
+                                )
+                            })
                             .collect(),
                     );
                 }
@@ -748,7 +947,10 @@ pub(crate) fn import_sig_map(
                             .params
                             .iter()
                             .map(|param| {
-                                (param.convention, qualify_unit_type(bundle, target, &param.ty))
+                                (
+                                    param.convention,
+                                    qualify_imported_call_type(bundle, target, "", &param.ty),
+                                )
                             })
                             .collect(),
                     );
@@ -771,7 +973,17 @@ pub(crate) fn import_sig_map(
                             (alias.clone(), item.clone()),
                             f.params
                                 .iter()
-                                .map(|p| (p.convention, qualify_unit_type(bundle, real_idx, &p.ty)))
+                                .map(|p| {
+                                    (
+                                        p.convention,
+                                        qualify_imported_call_type(
+                                            bundle,
+                                            real_idx,
+                                            &alias,
+                                            &p.ty,
+                                        ),
+                                    )
+                                })
                                 .collect(),
                         );
                     }
@@ -814,7 +1026,7 @@ pub(crate) fn import_ret_map(
                     let ret = f
                         .return_type
                         .as_ref()
-                        .map(|ty| qualify_unit_type(bundle, target, ty));
+                        .map(|ty| qualify_imported_call_type(bundle, target, &alias, ty));
                     map.insert((alias.clone(), f.name.clone()), ret);
                 }
                 Item::CModule(cm) => {
@@ -849,7 +1061,7 @@ pub(crate) fn import_ret_map(
                         function
                             .return_type
                             .as_ref()
-                            .map(|ty| qualify_unit_type(bundle, target, ty)),
+                            .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
                     );
                 }
             }
@@ -867,7 +1079,14 @@ pub(crate) fn import_ret_map(
                             (alias.clone(), item.clone()),
                             f.return_type
                                 .as_ref()
-                                .map(|ty| qualify_unit_type(bundle, real_idx, ty)),
+                                .map(|ty| {
+                                    qualify_imported_call_type(
+                                        bundle,
+                                        real_idx,
+                                        &alias,
+                                        ty,
+                                    )
+                                }),
                         );
                     }
                 }

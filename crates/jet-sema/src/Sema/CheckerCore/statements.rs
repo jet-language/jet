@@ -46,6 +46,20 @@ fn encoding_reader_item_type(name: &str) -> Option<Type> {
 
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
+
+fn exits_current_block(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Return(..)
+            | Stmt::Break(..)
+            | Stmt::BreakValue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+            | Stmt::Continue(..)
+            | Stmt::ContinueLabel(..)
+    )
+}
+
 impl<'a> Checker<'a> {
         fn push_loop_value_frame(&mut self, label: Option<&(String, crate::Diagnostics::Span)>) {
             let (kind, pending_label) = self
@@ -278,7 +292,15 @@ impl<'a> Checker<'a> {
             if !self.enter_source_nesting(stmt.span()) {
                 return;
             }
+            let before = self.flow.clone();
             self.check_stmt_inner(stmt);
+            if !before.reachable {
+                // Unreachable source is still checked for diagnostics, but it
+                // is not a path that may contribute facts to a later join.
+                self.flow = before;
+            } else if exits_current_block(stmt) {
+                self.flow.reachable = false;
+            }
             self.leave_source_nesting();
         }
 
@@ -1523,26 +1545,12 @@ impl<'a> Checker<'a> {
                                     &rt,
                                     Type::Union(members) if members.iter().any(|m| m == &et)
                                 );
-                                // D-APILABEL1=A: a function returned through a
-                                // bare `fn` type may keep a more-specific source
-                                // contract, but the reverse direction is a mismatch.
-                                let reported = if matches!(
-                                    (&rt, &et),
-                                    (Type::Fn { .. }, Type::Fn { .. })
-                                ) {
-                                    self.check_type_assignable(&rt, &et, e.span())
-                                } else {
-                                    false
-                                };
-                                // `note.Note` and bare `Note` are one nominal
-                                // type when both resolve to the same imported
-                                // module. Keep the return diagnostic on the
-                                // canonical identity rule; raw enum inequality
-                                // would otherwise reintroduce E0113.
-                                let nominal_type_compatible =
-                                    self.nominal_type_identity(&rt, &et);
+                                // D-APILABEL1=A: every return contract uses
+                                // shared assignability, including qualified
+                                // nominal types.
+                                let reported =
+                                    self.check_type_assignable(&rt, &et, e.span());
                                 if et != rt
-                                    && !nominal_type_compatible
                                     && !reported
                                     && !http_handler_lambda
                                     && !string_view_compatible

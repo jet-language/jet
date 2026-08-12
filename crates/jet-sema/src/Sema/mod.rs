@@ -1580,40 +1580,44 @@ impl<'a> Checker<'a> {
         if let Some(fact) = self.registry.unit_fact(name) {
             return Some((name.clone(), fact.clone()));
         }
-        if let Some((module, leaf)) = name.split_once('.') {
-            return self.modules.and_then(|modules| {
-                self.imports
-                    .get(module)
-                    .and_then(|index| modules.get(*index))
-                    .and_then(|candidate| candidate.registry.unit_fact(leaf))
-                    .map(|fact| (name.clone(), fact.clone()))
-            });
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let modules = self.modules?;
+        if let Some(namespace) = import_ns {
+            let index = if namespace.contains("::") {
+                let identity = format!("{namespace}::{leaf}");
+                self.name_ledger.nominal_module(&identity)?
+            } else {
+                *self.imports.get(namespace)?
+            };
+            let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+            let canonical = if index == self.module_idx {
+                leaf.to_string()
+            } else {
+                self.canonical_nominal_name(index, leaf)
+            };
+            return Some((canonical, fact));
         }
-        None
+        let mut owner = None;
+        for (index, module) in modules.iter().enumerate() {
+            if module.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
+                if owner.is_some_and(|previous| previous != index) {
+                    return None;
+                }
+                owner = Some(index);
+            }
+        }
+        let index = owner?;
+        let fact = modules.get(index)?.registry.unit_fact(leaf)?.clone();
+        let canonical = if index == self.module_idx {
+            leaf.to_string()
+        } else {
+            self.canonical_nominal_name(index, leaf)
+        };
+        Some((canonical, fact))
     }
 
     pub(crate) fn is_unit_type_name(&self, name: &str) -> bool {
-        if self.registry.is_unit_type(name) {
-            return true;
-        }
-        let Some((module, leaf)) = name.split_once('.') else {
-            return false;
-        };
-        let Some(modules) = self.modules else {
-            return false;
-        };
-        let index = self.imports.get(module).copied().or_else(|| {
-            self.imports
-                .values()
-                .copied()
-                .find(|&index| modules[index].module_alias == module)
-        });
-        let Some(index) = index else {
-            return false;
-        };
-        modules.get(index).is_some_and(|candidate| {
-            candidate.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf)
-        })
+        self.unit_fact_for_type(&Type::Named(name.to_string())).is_some()
     }
 
     pub(crate) fn is_unit_type(&self, ty: &Type) -> bool {
@@ -1633,9 +1637,15 @@ impl<'a> Checker<'a> {
             QuantityKind::Point => format!("{stem}Point"),
             QuantityKind::Delta => format!("{stem}Delta"),
         };
-        let candidate = source_name
-            .split_once('.')
-            .map_or_else(|| leaf.clone(), |(module, _)| format!("{module}.{leaf}"));
+        let candidate = Self::split_type_name(source_name)
+            .0
+            .map_or_else(|| leaf.clone(), |namespace| {
+                if namespace.contains("::") {
+                    format!("{namespace}::{leaf}")
+                } else {
+                    format!("{namespace}.{leaf}")
+                }
+            });
         self.unit_fact_for_type(&Type::Named(candidate.clone()))
             .filter(|(_, other)| {
                 other.package == fact.package && other.family == fact.family && other.kind == kind

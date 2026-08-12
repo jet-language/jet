@@ -468,15 +468,33 @@ impl Plane for View {
 }
 
 /// Every per-binding fact the checker holds, in one store.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct FlowFacts {
     /// Open scopes. A row recorded at depth `n` leaves when scope `n` closes.
     pub(crate) depth: usize,
+    /// Whether this path can reach the next statement in its enclosing block.
+    /// Exit statements clear it; branch and loop joins discard unreachable
+    /// paths before asking the individual fact planes to join.
+    pub(crate) reachable: bool,
     pub(crate) bindings: Facts<Binding>,
     pub(crate) narrow: Facts<Narrow>,
     pub(crate) moved: Facts<Moved>,
     pub(crate) uninit: Facts<Uninit>,
     pub(crate) views: Facts<View>,
+}
+
+impl Default for FlowFacts {
+    fn default() -> Self {
+        Self {
+            depth: 0,
+            reachable: true,
+            bindings: Facts::default(),
+            narrow: Facts::default(),
+            moved: Facts::default(),
+            uninit: Facts::default(),
+            views: Facts::default(),
+        }
+    }
 }
 
 impl FlowFacts {
@@ -496,33 +514,47 @@ impl FlowFacts {
     /// The one merge point for the checker's planes. `paths` holds the store as
     /// each path through the branch left it.
     pub(crate) fn merge_paths(before: &Self, paths: &[Self]) -> Self {
+        if !before.reachable {
+            return before.clone();
+        }
+        let paths: Vec<Self> = paths
+            .iter()
+            .filter(|path| path.reachable)
+            .cloned()
+            .collect();
+        if paths.is_empty() {
+            let mut exited = before.clone();
+            exited.reachable = false;
+            return exited;
+        }
         let mut sink = Vec::new();
         let mut view_sink = Vec::new();
         Self {
             depth: before.depth,
+            reachable: true,
             bindings: Facts::merge_paths(
                 &before.bindings,
-                &Self::plane(paths, |facts| &facts.bindings),
+                &Self::plane(&paths, |facts| &facts.bindings),
                 &mut sink,
             ),
             narrow: Facts::merge_paths(
                 &before.narrow,
-                &Self::plane(paths, |facts| &facts.narrow),
+                &Self::plane(&paths, |facts| &facts.narrow),
                 &mut sink,
             ),
             moved: Facts::merge_paths(
                 &before.moved,
-                &Self::plane(paths, |facts| &facts.moved),
+                &Self::plane(&paths, |facts| &facts.moved),
                 &mut Vec::new(),
             ),
             uninit: Facts::merge_paths(
                 &before.uninit,
-                &Self::plane(paths, |facts| &facts.uninit),
+                &Self::plane(&paths, |facts| &facts.uninit),
                 &mut Vec::new(),
             ),
             views: Facts::merge_paths(
                 &before.views,
-                &Self::plane(paths, |facts| &facts.views),
+                &Self::plane(&paths, |facts| &facts.views),
                 &mut view_sink,
             ),
         }
@@ -530,8 +562,12 @@ impl FlowFacts {
 
     /// The one loop rule ([`Facts::after_loop`]), applied to every plane.
     pub(crate) fn after_loop(before: &Self, after_body: &Self) -> Self {
+        if !before.reachable || !after_body.reachable {
+            return before.clone();
+        }
         Self {
             depth: before.depth,
+            reachable: true,
             bindings: Facts::after_loop(&before.bindings, &after_body.bindings, &mut Vec::new()),
             narrow: Facts::after_loop(&before.narrow, &after_body.narrow, &mut Vec::new()),
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),

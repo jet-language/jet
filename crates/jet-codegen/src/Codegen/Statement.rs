@@ -83,7 +83,12 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if t == crate::Syntax::TYPE_TASK_FAILURE {
                 format!("{}jet_std::JetTaskFailure", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(t))
+                format!(
+                    "{}{}::{}",
+                    cx.root_prefix,
+                    rust_mod,
+                    user_type_rust(crate::Codegen::nominal_leaf(t))
+                )
             } else {
                 user_type_rust(t)
             }

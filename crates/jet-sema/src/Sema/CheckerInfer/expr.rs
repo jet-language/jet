@@ -3649,13 +3649,14 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Apply { name, args } = t {
-            if let Some(owner_mod) = self.struct_owner_module(name, None) {
-                if let Some(fields) = self.struct_fields_of(owner_mod, name) {
-                    let subst = self.struct_subst(name, args);
+            let (owner_import_ns, leaf) = Self::split_type_name(name);
+            if let Some(owner_mod) = self.struct_owner_module(leaf, owner_import_ns) {
+                if let Some(fields) = self.struct_fields_of(owner_mod, leaf) {
+                    let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, name, member)
+                                && !self.field_is_pub_in(owner_mod, leaf, member)
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
@@ -3665,15 +3666,15 @@ impl<'a> Checker<'a> {
                             {
                                 self.diags.push(soft_public_use(member, span));
                             }
-                        self.record_field_reference(owner_mod, name, member, span);
-                        return Some(self.trait_reg.instantiate_type(&fty, &subst));
+                        self.record_field_reference(owner_mod, leaf, member, span);
+                        return Some(self.instantiate_type_for_owner(owner_mod, &fty, &subst));
                     }
                     // D-FIELDPOL1: see the `Type::Named` branch above — a
                     // computed field resolves for reads even though it's
                     // absent from `fields`.
-                    if let Some(computed) = self.computed_field_types_of(owner_mod, name) {
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, leaf) {
                         if let Some((_, cty)) = computed.get(member) {
-                            return Some(self.trait_reg.instantiate_type(cty, &subst));
+                            return Some(self.instantiate_type_for_owner(owner_mod, cty, &subst));
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();

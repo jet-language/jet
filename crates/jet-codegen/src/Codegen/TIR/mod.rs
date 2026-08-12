@@ -262,6 +262,37 @@ fn register_enum_variants(
     }
 }
 
+fn register_imported_enum_variants(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    enum_name: &str,
+    variants: &[crate::AST::Variant],
+    enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
+) {
+    let identity = crate::Codegen::TIR::imported_type_name(owner, enum_name);
+    enum_variants.insert(
+        identity.clone(),
+        variants
+            .iter()
+            .map(|variant| mangle_variant(&variant.name))
+            .collect(),
+    );
+    for variant in variants {
+        let pattern = format!(
+            "{}::{}",
+            user_type_rust(&identity),
+            mangle_variant(&variant.name)
+        );
+        let payload = payload_types_for_variant(&variant.payload)
+            .into_iter()
+            .map(|ty| crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, &ty))
+            .collect();
+        enum_variant_payload_types.insert(pattern, payload);
+    }
+}
+
 fn compile_codec_migrations(
     cx: &Cx,
     items: &[Item],
@@ -1587,21 +1618,34 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         for item in &imported.items {
             match item {
                 Item::Struct(s) => {
-                    struct_type_params.insert(
-                        s.name.clone(),
-                        s.type_params.iter().map(|param| param.name.clone()).collect(),
-                    );
-                    struct_fields.insert(
-                        s.name.clone(),
-                        s.fields
-                            .iter()
-                            .map(|field| mangle(&field.name))
-                            .collect(),
-                    );
-                    struct_field_types.insert(
-                        s.name.clone(),
-                        s.fields.iter().map(|field| field.ty.clone()).collect(),
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
+                        struct_type_params.insert(
+                            name.clone(),
+                            s.type_params.iter().map(|param| param.name.clone()).collect(),
+                        );
+                        struct_fields.insert(
+                            name.clone(),
+                            s.fields
+                                .iter()
+                                .map(|field| mangle(&field.name))
+                                .collect(),
+                        );
+                        struct_field_types.insert(
+                            name,
+                            s.fields
+                                .iter()
+                                .map(|field| {
+                                    crate::Codegen::TIR::qualify_imported_type(
+                                        bundle,
+                                        module_idx,
+                                        &owner,
+                                        &field.ty,
+                                    )
+                                })
+                                .collect(),
+                        );
+                    }
                     for field in &s.fields {
                         register_union_type(
                             &field.ty,
@@ -1611,12 +1655,17 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     }
                 }
                 Item::Enum(e) if e.type_params.is_empty() => {
-                    register_enum_variants(
-                        &e.name,
-                        &e.variants,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
+                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                        register_imported_enum_variants(
+                            bundle,
+                            module_idx,
+                            &owner,
+                            &e.name,
+                            &e.variants,
+                            &mut enum_variants,
+                            &mut enum_variant_payload_types,
+                        );
+                    }
                 }
                 Item::CodeModule(code_module) => {
                     let Some(body) = &code_module.body else {

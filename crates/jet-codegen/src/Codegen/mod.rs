@@ -464,9 +464,9 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
-    "\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),
-    "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n",
+    "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n// JET_VETTED_UNSAFE_END: jet_cell\n",
     include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),
     include_str!("../Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
@@ -3263,6 +3263,7 @@ pub fn emit_bundle_dbg(
         // can't disambiguate which file N belongs to across modules.
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
+        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
@@ -3304,6 +3305,7 @@ pub fn emit_bundle_dbg(
     cx.active_os = active_os;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
@@ -3483,6 +3485,7 @@ pub fn emit_bundle_tests_cov(
         cx.coverage = coverage; // inline Core scope setup follows below
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
+        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
@@ -3523,6 +3526,7 @@ pub fn emit_bundle_tests_cov(
     cx.coverage = coverage;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
@@ -3709,6 +3713,7 @@ pub fn emit_bundle_fuzz(
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
+        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
@@ -3747,6 +3752,7 @@ pub fn emit_bundle_fuzz(
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
@@ -3994,6 +4000,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
+        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
@@ -4033,6 +4040,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.coverage = coverage;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);

@@ -77,7 +77,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // clones a by-ref subject regardless of `cx.cloneable`) is valid. The construction
     // side has no reachable cross-module literal syntax (`note.NoteType.User` is E0107),
     // so a foreign enum is only ever MATCHED / passed, never constructed in another module.
-    let is_foreign = cx.foreign_types.contains_key(name);
+    let is_foreign = super::types::foreign_type_module(name, cx).is_some();
     let Some(variants) = cx.enum_variants.get(name) else {
         return false;
     };
@@ -176,8 +176,9 @@ pub(crate) fn core_enum_or_prelude(name: &str) -> bool {
     net_handle_rust_type(name).is_some() || alloc_handle_rust_type(name).is_some()
 }
 
-/// c109 Phase 3: `ty` is a plain user struct the subset can lower. It must be a
-/// bare `Type::Named(S)` that:
+/// c109 Phase 3: `ty` is a plain user struct the subset can lower. A qualified
+/// foreign `Type::Named(alias.S)` uses the foreign-value gate below; local user
+/// structs must be bare and:
 ///  - is a known struct (`cx.struct_fields` has it), not an enum/trait/generic;
 ///  - is NOT a compiler/prelude/foreign/core type (those use different Rust
 ///    heads and field spellings the subset does not emit);
@@ -190,6 +191,9 @@ pub(crate) fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Named(name) = ty else {
         return false;
     };
+    if super::types::foreign_type_module(name, cx).is_some() {
+        return is_covered_foreign_value_ty(ty, cx);
+    }
     struct_is_covered(name, cx, &mut HashSet::new())
 }
 
@@ -210,7 +214,7 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
-        || cx.foreign_types.contains_key(name)
+        || super::types::foreign_type_module(name, cx).is_some()
         || net_handle_rust_type(name).is_some()
         || is_type_var
         || struct_is_generic(name, cx)
@@ -254,7 +258,9 @@ pub(crate) fn boxed_field_payload_constructible(
 /// c109 Phase 19: is `name` a GENERIC user struct (one with declared type params)? A generic
 /// struct's fields reference type vars (`first: T`); `struct_is_covered` admits those
 /// so turbofish construction, `Type::Apply` params, and inherent methods all lower
-/// through TIR. Trait methods keep their separate trait-specific admission rules.
+/// through TIR. Imported struct shapes use the same registered field table after
+/// qualification, so a generic foreign application follows the same value path.
+/// Trait methods keep their separate trait-specific admission rules.
 ///
 /// c148: uses `cx.struct_type_params` (populated from `StructDef.type_params`) rather
 /// than `ty_mentions_type_var`, so multi-char type params (`Kind`, `Elem`) are recognized.
@@ -266,15 +272,15 @@ pub(crate) fn struct_is_generic(name: &str, cx: &Cx) -> bool {
 }
 
 pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-    // A struct that is a trait/enum or a non-user (foreign/core/prelude) type is
-    // out. `cx.struct_fields` only holds user structs declared in this module.
-    // A declared user struct is a concrete type, never a type var (see
+    // A struct that is a trait/enum or a non-user core/prelude type is out.
+    // Imported user structs are registered in `cx.struct_fields` under their
+    // canonical qualified name, so they share this field-coverage path.
+    // A declared struct is a concrete type, never a type var (see
     // `struct_lit_constructible`): a single-uppercase-letter struct name (`P`) is real.
     let is_type_var =
         crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
-        || cx.foreign_types.contains_key(name)
         || net_handle_rust_type(name).is_some()
         || is_type_var
     {

@@ -9,8 +9,8 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef,
-    TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
+    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, ImportKind, Item, ProgramBundle,
+    StructDef, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -73,9 +73,10 @@ impl TraitRegistry {
     }
 
     /// Compute the three automatic structural traits for each bundle module.
-    /// Module index is the nominal identity; an imported `alias.Type` resolves
-    /// through the shared name ledger before its leaf-name facts are consulted.
-    /// Bare names never borrow facts from another module.
+    /// Imported nominals are resolved through the shared name ledger and stored
+    /// under their canonical package/module identity. Import aliases are only
+    /// source lookup projections. A selective import may use a bare source name,
+    /// but its facts still come from the canonical declaration origin.
     pub fn bundle_auto_derives(
         bundle: &ProgramBundle,
         name_ledger: &crate::Names::NameLedger,
@@ -84,6 +85,42 @@ impl TraitRegistry {
             .modules
             .iter()
             .map(|module| Self::auto_derives_for_items(&module.items))
+            .collect();
+        let selective_imports: Vec<HashMap<String, Option<(usize, String)>>> = bundle
+            .modules
+            .iter()
+            .enumerate()
+            .map(|(module_idx, module)| {
+                let mut selected = HashMap::new();
+                for import in &module.imports {
+                    let ImportKind::Unqualified { items, .. } = &import.kind else {
+                        continue;
+                    };
+                    for (original, local_alias) in items {
+                        let local = crate::AST::import_item_alias(original, local_alias.as_deref());
+                        let leaf = original.rsplit('.').next().unwrap_or(original);
+                        let candidate = name_ledger
+                            .alias(module_idx, local)
+                            .and_then(|alias| alias.target_module)
+                            .filter(|target| {
+                                registries[*target].local_types.contains(leaf)
+                                    && name_ledger.visible(module_idx, *target, leaf)
+                            })
+                            .map(|target| (target, leaf.to_string()));
+                        match selected.entry(local.to_string()) {
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(candidate);
+                            }
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                if entry.get().as_ref() != candidate.as_ref() {
+                                    entry.insert(None);
+                                }
+                            }
+                        }
+                    }
+                }
+                selected
+            })
             .collect();
         loop {
             let snapshot = registries.clone();
@@ -100,8 +137,19 @@ impl TraitRegistry {
                 changed |= registries[module_idx].compute_auto_derives_with(
                     &module.items,
                     |name, trait_name| {
-                        let (alias, leaf) = name.split_once('.')?;
-                        let target = *imports.get(alias)?;
+                        let (target, leaf) = if let Some((namespace, leaf)) =
+                            name.rsplit_once("::")
+                        {
+                            let identity = format!("{namespace}::{leaf}");
+                            (name_ledger.nominal_module(&identity)?, leaf)
+                        } else if let Some(Some((target, leaf))) =
+                            selective_imports[module_idx].get(name)
+                        {
+                            return Some(snapshot[*target].implements_trait(leaf, trait_name));
+                        } else {
+                            let (alias, leaf) = name.rsplit_once('.')?;
+                            (*imports.get(alias)?, leaf)
+                        };
                         Some(snapshot[target].implements_trait(leaf, trait_name))
                     },
                 );
@@ -116,25 +164,40 @@ impl TraitRegistry {
                 let Some(target) = name_ledger.import_target(module_idx, import.span) else {
                     continue;
                 };
-                let alias = import.import_alias();
+                let identity = |leaf: &String| name_ledger.nominal_identity(target, leaf);
                 registries[module_idx].auto_printable.extend(
                     snapshot[target]
                         .auto_printable
                         .iter()
-                        .map(|leaf| format!("{alias}.{leaf}")),
+                        .filter_map(identity),
                 );
                 registries[module_idx].auto_debug.extend(
                     snapshot[target]
                         .auto_debug
                         .iter()
-                        .map(|leaf| format!("{alias}.{leaf}")),
+                        .filter_map(identity),
                 );
                 registries[module_idx].auto_equatable.extend(
                     snapshot[target]
                         .auto_equatable
                         .iter()
-                        .map(|leaf| format!("{alias}.{leaf}")),
+                        .filter_map(identity),
                 );
+            }
+            for selected in selective_imports[module_idx].values().flatten() {
+                let (target, leaf) = selected;
+                let Some(identity) = name_ledger.nominal_identity(*target, leaf) else {
+                    continue;
+                };
+                if snapshot[*target].auto_printable.contains(leaf) {
+                    registries[module_idx].auto_printable.insert(identity.clone());
+                }
+                if snapshot[*target].auto_debug.contains(leaf) {
+                    registries[module_idx].auto_debug.insert(identity.clone());
+                }
+                if snapshot[*target].auto_equatable.contains(leaf) {
+                    registries[module_idx].auto_equatable.insert(identity);
+                }
             }
         }
         registries
@@ -1227,6 +1290,28 @@ impl TraitRegistry {
             type_params,
             expected_ret,
             true,
+        )
+    }
+
+    /// Infer substitutions without consulting the registry that owns the
+    /// declaration's bounds. Callers that are checking an imported method use
+    /// this shape and validate each bound in the active bundle context, where
+    /// both local and canonical imported nominals are visible.
+    pub fn infer_subst_without_bounds(
+        &self,
+        params: &[(AccessConvention, Type)],
+        return_type: Option<&Type>,
+        arg_types: &[Type],
+        type_params: &[TypeParam],
+        expected_ret: Option<&Type>,
+    ) -> Result<HashMap<String, Type>, String> {
+        self.infer_subst_inner(
+            params,
+            return_type,
+            arg_types,
+            type_params,
+            expected_ret,
+            false,
         )
     }
 
