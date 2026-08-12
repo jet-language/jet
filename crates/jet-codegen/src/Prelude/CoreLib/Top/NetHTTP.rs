@@ -201,6 +201,8 @@ pub struct JetUDPSocket {
     inner: std::sync::Arc<std::net::UdpSocket>,
     timeout_ms: std::sync::Arc<std::sync::Mutex<Option<i64>>>,
     closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(unix)]
+    scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
 }
 
 #[derive(Clone, Debug)]
@@ -221,17 +223,16 @@ pub struct JetDNSSrv {
 
 #[cfg(unix)]
 pub struct JetUnixListener {
-    inner: std::os::unix::net::UnixListener,
+    inner: std::sync::Arc<std::os::unix::net::UnixListener>,
+    scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
 }
 
 #[cfg(unix)]
 impl Clone for JetUnixListener {
     fn clone(&self) -> Self {
         Self {
-            inner: self
-                .inner
-                .try_clone()
-                .expect("UnixListener try_clone for spawn capture"),
+            inner: self.inner.clone(),
+            scheduler: self.scheduler.clone(),
         }
     }
 }
@@ -239,11 +240,17 @@ impl Clone for JetUnixListener {
 #[cfg(unix)]
 pub struct JetUnixStream {
     inner: std::os::unix::net::UnixStream,
+    scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
     closed: bool,
     read_shutdown: bool,
     write_shutdown: bool,
     read_timeout_ms: Option<i64>,
     write_timeout_ms: Option<i64>,
+}
+
+#[cfg(unix)]
+fn jet_net_scheduler_handle<T: std::os::fd::AsRawFd>(handle: &T) -> std::sync::Arc<JetSchedulerRawIoHandle> {
+    jet_scheduler_raw_io_handle(handle.as_raw_fd())
 }
 
 #[cfg(not(unix))]
@@ -565,6 +572,16 @@ fn jet_net_detail(
     }
 }
 
+fn jet_net_invalid_input(operation: &str, resource: &str) -> JetNetError {
+    JetNetError::InvalidInput(jet_net_detail(
+        operation,
+        None,
+        None,
+        format!("invalid {resource}"),
+        None,
+    ))
+}
+
 fn jet_net_io_error(operation: &str, address: Option<String>, error: std::io::Error) -> JetNetError {
     let detail = jet_net_detail(
         operation,
@@ -683,6 +700,65 @@ fn jet_net_error_name(error: &JetNetError) -> Option<String> {
 fn jet_net_error_message(error: &JetNetError) -> String { error.jet_show() }
 fn jet_net_error_os_code(error: &JetNetError) -> Option<i64> {
     jet_net_error_detail(error).and_then(|d| d.os_code)
+}
+
+// Canonical CoreLib shape used by every engine adapter to marshal `NetError`.
+// Ordinals follow the surface enum order, not the Rust declaration order.
+enum JetNetErrorSurfacePayload {
+    Detail(JetNetErrorDetail),
+    DNS {
+        variant: &'static str,
+        ordinal: i64,
+        value: String,
+    },
+}
+
+struct JetNetErrorSurfaceParts {
+    variant: &'static str,
+    ordinal: i64,
+    payload: JetNetErrorSurfacePayload,
+}
+
+fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
+    let detail = |variant, ordinal, value| JetNetErrorSurfaceParts {
+        variant,
+        ordinal,
+        payload: JetNetErrorSurfacePayload::Detail(value),
+    };
+    match error {
+        JetNetError::InvalidInput(value) => detail("InvalidInput", 0, value),
+        JetNetError::PermissionDenied(value) => detail("PermissionDenied", 1, value),
+        JetNetError::AddressInUse(value) => detail("AddressInUse", 2, value),
+        JetNetError::AddressUnavailable(value) => detail("AddressUnavailable", 3, value),
+        JetNetError::ConnectionRefused(value) => detail("ConnectionRefused", 4, value),
+        JetNetError::ConnectionReset(value) => detail("ConnectionReset", 5, value),
+        JetNetError::NotConnected(value) => detail("NotConnected", 6, value),
+        JetNetError::Closed(value) => detail("Closed", 7, value),
+        JetNetError::Timeout(value) => detail("Timeout", 8, value),
+        JetNetError::Cancelled(value) => detail("Cancelled", 9, value),
+        JetNetError::Unsupported(value) => detail("Unsupported", 10, value),
+        JetNetError::TLS(value) => detail("TLS", 11, value),
+        JetNetError::Protocol(value) => detail("Protocol", 12, value),
+        JetNetError::Other(value) => detail("Other", 13, value),
+        JetNetError::DNS(JetNetDnsError::NotFound(value)) => JetNetErrorSurfaceParts {
+            variant: "DNS",
+            ordinal: 14,
+            payload: JetNetErrorSurfacePayload::DNS {
+                variant: "NotFound",
+                ordinal: 0,
+                value,
+            },
+        },
+        JetNetError::DNS(JetNetDnsError::Failure(value)) => JetNetErrorSurfaceParts {
+            variant: "DNS",
+            ordinal: 14,
+            payload: JetNetErrorSurfacePayload::DNS {
+                variant: "Failure",
+                ordinal: 1,
+                value,
+            },
+        },
+    }
 }
 
 fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTCPStream, JetNetError> {
@@ -843,14 +919,15 @@ fn jet_net_tcp_scheduler_ready_wait(
 
 #[cfg(unix)]
 fn jet_net_unix_scheduler_wait(
-    stream: &std::os::unix::net::UnixStream,
+    stream: &JetUnixStream,
     read: bool,
     write: bool,
     operation: &str,
 ) -> Result<(), JetNetError> {
     match jet_scheduler_wait_without_unwind(|| {
-        jet_scheduler_unix_stream_io_wait(stream, read, write, operation)
+        jet_scheduler_unix_stream_io_wait(&stream.scheduler, read, write, operation)
     }) {
+        JetSchedulerWait::Ready(()) if stream.closed => Err(jet_net_closed(operation)),
         JetSchedulerWait::Ready(()) => Ok(()),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
             operation, None, None, format!("{} cancelled", operation), None,
@@ -864,14 +941,15 @@ fn jet_net_unix_scheduler_wait(
 
 #[cfg(unix)]
 fn jet_net_unix_scheduler_ready_wait(
-    stream: &std::os::unix::net::UnixStream,
+    stream: &JetUnixStream,
     read: bool,
     write: bool,
     operation: &str,
 ) -> Result<(bool, bool), JetNetError> {
     match jet_scheduler_wait_without_unwind(|| {
-        jet_scheduler_unix_stream_ready_wait(stream, read, write, operation)
+        jet_scheduler_unix_stream_ready_wait(&stream.scheduler, read, write, operation)
     }) {
+        JetSchedulerWait::Ready(_) if stream.closed => Err(jet_net_closed(operation)),
         JetSchedulerWait::Ready(observed) => Ok(observed),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
             operation, None, None, format!("{} cancelled", operation), None,
@@ -903,11 +981,11 @@ fn jet_net_tcp_listener_scheduler_wait(
 
 #[cfg(unix)]
 fn jet_net_unix_listener_scheduler_wait(
-    listener: &std::os::unix::net::UnixListener,
+    listener: &JetUnixListener,
     operation: &str,
 ) -> Result<(), JetNetError> {
     match jet_scheduler_wait_without_unwind(|| {
-        jet_scheduler_unix_listener_io_wait(listener, operation)
+        jet_scheduler_unix_listener_io_wait(&listener.scheduler, operation)
     }) {
         JetSchedulerWait::Ready(()) => Ok(()),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
@@ -921,14 +999,26 @@ fn jet_net_unix_listener_scheduler_wait(
 }
 
 fn jet_net_udp_scheduler_wait(
-    socket: &std::net::UdpSocket,
+    socket: &JetUDPSocket,
     read: bool,
     write: bool,
     operation: &str,
 ) -> Result<(), JetNetError> {
+    if jet_scheduler_wait_point_cancelled() {
+        return Err(JetNetError::Cancelled(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} cancelled", operation),
+            None,
+        )));
+    }
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout(operation));
+    }
     let waited = jet_scheduler_wait_without_unwind(|| {
         #[cfg(unix)]
-        jet_scheduler_udp_io_wait(socket, read, write, operation);
+        jet_scheduler_udp_io_wait(&socket.scheduler, read, write, operation);
         #[cfg(not(unix))]
         {
             let _ = (socket, read, write);
@@ -936,6 +1026,23 @@ fn jet_net_udp_scheduler_wait(
         }
     });
     match waited {
+        JetSchedulerWait::Ready(()) if socket.closed.load(std::sync::atomic::Ordering::Acquire) => {
+            Err(jet_net_closed(operation))
+        }
+        JetSchedulerWait::Ready(()) if jet_scheduler_wait_point_cancelled() => {
+            Err(JetNetError::Cancelled(jet_net_detail(
+                operation,
+                None,
+                None,
+                format!("{} cancelled", operation),
+                None,
+            )))
+        }
+        JetSchedulerWait::Ready(())
+            if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) =>
+        {
+            Err(jet_net_deadline_timeout(operation))
+        }
         JetSchedulerWait::Ready(()) => Ok(()),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
             operation, None, None, format!("{} cancelled", operation), None,
@@ -945,6 +1052,78 @@ fn jet_net_udp_scheduler_wait(
             operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
         ))),
     }
+}
+
+#[cfg(unix)]
+fn jet_net_udp_scheduler_ready_wait(
+    socket: &JetUDPSocket,
+    read: bool,
+    write: bool,
+    operation: &str,
+) -> Result<(bool, bool), JetNetError> {
+    if jet_scheduler_wait_point_cancelled() {
+        return Err(JetNetError::Cancelled(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} cancelled", operation),
+            None,
+        )));
+    }
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout(operation));
+    }
+    match jet_scheduler_wait_without_unwind(|| {
+        jet_scheduler_udp_ready_wait(&socket.scheduler, read, write, operation)
+    }) {
+        JetSchedulerWait::Ready(_) if socket.closed.load(std::sync::atomic::Ordering::Acquire) => {
+            Err(jet_net_closed(operation))
+        }
+        JetSchedulerWait::Ready(_observed) if jet_scheduler_wait_point_cancelled() => {
+            Err(JetNetError::Cancelled(jet_net_detail(
+                operation,
+                None,
+                None,
+                format!("{} cancelled", operation),
+                None,
+            )))
+        }
+        JetSchedulerWait::Ready(_) if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) => {
+            Err(jet_net_deadline_timeout(operation))
+        }
+        JetSchedulerWait::Ready(observed) => Ok(observed),
+        JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} cancelled", operation),
+            None,
+        ))),
+        JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
+        JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} scheduler wait failed: {}", operation, message),
+            None,
+        ))),
+    }
+}
+
+#[cfg(not(unix))]
+fn jet_net_udp_scheduler_ready_wait(
+    _socket: &JetUDPSocket,
+    _read: bool,
+    _write: bool,
+    operation: &str,
+) -> Result<(bool, bool), JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail(
+        operation,
+        None,
+        None,
+        "observed UDP readiness is not available on this platform".to_string(),
+        None,
+    )))
 }
 
 fn jet_net_tls_scheduler_wait(
@@ -1910,10 +2089,13 @@ fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+    let inner = std::sync::Arc::new(inner);
     Ok(JetUDPSocket {
-        inner: std::sync::Arc::new(inner),
+        inner: inner.clone(),
         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        #[cfg(unix)]
+        scheduler: jet_net_scheduler_handle(inner.as_ref()),
     })
 }
 
@@ -1922,10 +2104,13 @@ fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetErr
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
+    let inner = std::sync::Arc::new(inner);
     Ok(JetUDPSocket {
-        inner: std::sync::Arc::new(inner),
+        inner: inner.clone(),
         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        #[cfg(unix)]
+        scheduler: jet_net_scheduler_handle(inner.as_ref()),
     })
 }
 
@@ -1979,7 +2164,7 @@ fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPack
             }
             }),
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_udp_scheduler_wait(&socket.inner, true, false, "udp receive")?;
+                jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
             }
             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
         }
@@ -2017,7 +2202,7 @@ fn jet_net_udp_send_slice(
                 format!("udp send wrote {} of {} datagram bytes", n, data.len()), None,
             ))),
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_udp_scheduler_wait(&socket.inner, false, true, "udp send")?;
+                jet_net_udp_scheduler_wait(socket, false, true, "udp send")?;
             }
             Err(error) => return Err(jet_net_io_error("udp send", Some(addr.inner.to_string()), error)),
         }
@@ -2038,7 +2223,7 @@ fn jet_net_udp_receive(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket
         match socket.inner.recv_from(&mut bytes) {
             Ok(packet) => break packet,
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_udp_scheduler_wait(&socket.inner, true, false, "udp receive")?;
+                jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
             }
             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
         }
@@ -2072,7 +2257,13 @@ fn jet_net_udp_send_bytes_to_deadline(
 }
 
 fn jet_net_udp_close(socket: &JetUDPSocket) -> Result<(), JetNetError> {
-    socket.closed.store(true, std::sync::atomic::Ordering::Release);
+    if !socket
+        .closed
+        .swap(true, std::sync::atomic::Ordering::AcqRel)
+    {
+        #[cfg(unix)]
+        socket.scheduler.close();
+    }
     Ok(())
 }
 
@@ -2094,23 +2285,12 @@ fn jet_net_udp_ready(
         "udp ready", None, None, "udp readiness backend is unavailable on this target".to_string(), None,
     )));
     #[cfg(unix)]
-    loop {
-        let readable = if matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite) {
-            let mut byte = [0u8; 1];
-            match socket.inner.peek_from(&mut byte) {
-                Ok(_) => true,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(error) => return Err(jet_net_io_error("udp ready", None, error)),
-            }
-        } else { false };
-        if readable {
-            return Ok(JetNetReady { readable: true, writable: false });
-        }
+    {
+        let want_read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
         let want_write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
-        jet_net_udp_scheduler_wait(&socket.inner, !want_write, want_write, "udp ready")?;
-        if want_write {
-            return Ok(JetNetReady { readable: false, writable: true });
-        }
+        let (readable, writable) =
+            jet_net_udp_scheduler_ready_wait(socket, want_read, want_write, "udp ready")?;
+        Ok(JetNetReady { readable, writable })
     }
 }
 
@@ -2133,7 +2313,11 @@ fn jet_net_unix_listen(path: &String) -> Result<JetUnixListener, JetNetError> {
         .map_err(|e| jet_net_io_error("unix listen", Some(path.clone()), e))?;
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("unix listen", Some(path.clone()), e))?;
-    Ok(JetUnixListener { inner })
+    let inner = std::sync::Arc::new(inner);
+    Ok(JetUnixListener {
+        scheduler: jet_net_scheduler_handle(inner.as_ref()),
+        inner,
+    })
 }
 
 #[cfg(not(unix))]
@@ -2149,6 +2333,7 @@ fn jet_net_unix_accept(listener: &JetUnixListener) -> Result<JetUnixStream, JetN
                 inner.set_nonblocking(true)
                     .map_err(|error| jet_net_io_error("unix accept", None, error))?;
                 return Ok(JetUnixStream {
+                    scheduler: jet_net_scheduler_handle(&inner),
                     inner,
                     closed: false,
                     read_shutdown: false,
@@ -2158,7 +2343,7 @@ fn jet_net_unix_accept(listener: &JetUnixListener) -> Result<JetUnixStream, JetN
                 });
             }
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_unix_listener_scheduler_wait(&listener.inner, "unix accept")?;
+                jet_net_unix_listener_scheduler_wait(listener, "unix accept")?;
             }
             Err(error) => return Err(jet_net_io_error("unix accept", None, error)),
         }
@@ -2202,6 +2387,7 @@ fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("unix connect", Some(path.clone()), e))?;
     Ok(JetUnixStream {
+            scheduler: jet_net_scheduler_handle(&inner),
             inner,
             closed: false,
             read_shutdown: false,
@@ -2262,7 +2448,7 @@ fn jet_net_unix_read_bytes(stream: &mut JetUnixStream, limit: i64) -> Result<Vec
                 return Ok(bytes);
             }
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_unix_scheduler_wait(&stream.inner, true, false, "unix read")?;
+                jet_net_unix_scheduler_wait(stream, true, false, "unix read")?;
             }
             Err(error) => return Err(jet_net_io_error("unix read", None, error)),
         }
@@ -2328,7 +2514,7 @@ fn jet_net_unix_write_slice(stream: &mut JetUnixStream, data: &[u8]) -> Result<i
         match stream.inner.write(data) {
             Ok(count) => return Ok(count as i64),
             Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => {
-                jet_net_unix_scheduler_wait(&stream.inner, false, true, "unix write")?;
+                jet_net_unix_scheduler_wait(stream, false, true, "unix write")?;
             }
             Err(error) => return Err(jet_net_io_error("unix write", None, error)),
         }
@@ -2374,12 +2560,15 @@ fn jet_net_unix_shutdown(_stream: &mut JetUnixStream, _how: JetNetShutdown) -> R
 #[cfg(unix)]
 fn jet_net_unix_close(stream: &mut JetUnixStream) -> Result<(), JetNetError> {
     if stream.closed { return Ok(()); }
+    stream.closed = true;
+    stream.read_shutdown = true;
+    stream.write_shutdown = true;
+    stream.scheduler.close();
     match stream.inner.shutdown(std::net::Shutdown::Both) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
         Err(error) => return Err(jet_net_io_error("unix close", None, error)),
     }
-    stream.closed = true; stream.read_shutdown = true; stream.write_shutdown = true;
     Ok(())
 }
 
@@ -2417,7 +2606,7 @@ fn jet_net_unix_ready(
     let want_read = matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite);
     let want_write = matches!(interest, JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite);
     let (readable, writable) =
-        jet_net_unix_scheduler_ready_wait(&stream.inner, want_read, want_write, "unix ready")?;
+        jet_net_unix_scheduler_ready_wait(stream, want_read, want_write, "unix ready")?;
     Ok(JetNetReady { readable, writable })
 }
 

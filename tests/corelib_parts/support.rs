@@ -136,14 +136,14 @@ fn build_and_run(
         }
         let out = child.wait_with_output().unwrap();
         return (
-            out.status.code().unwrap_or(0),
+            out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
         );
     }
     let out = cmd.output().unwrap();
     (
-        out.status.code().unwrap_or(0),
+        out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
@@ -217,7 +217,7 @@ fn build_and_run_multi(
     );
     let run = Command::new(&bin).current_dir(dir).output().unwrap();
     (
-        run.status.code().unwrap_or(0),
+        run.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&run.stdout).into_owned(),
         String::from_utf8_lossy(&run.stderr).into_owned(),
     )

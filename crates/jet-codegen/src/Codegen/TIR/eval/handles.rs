@@ -101,6 +101,11 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::CBORWriterWrite => "CBORWriterWrite",
         THandleOp::CBORWriterFlush => "CBORWriterFlush",
         THandleOp::CBORWriterFinish => "CBORWriterFinish",
+        THandleOp::TcpStreamReady => "TcpStreamReady",
+        THandleOp::UdpSocketReady => "UdpSocketReady",
+        THandleOp::UdpSocketClose => "UdpSocketClose",
+        THandleOp::UdpSocketReceiveDeadline => "UdpSocketReceiveDeadline",
+        THandleOp::UdpSocketSendToDeadline => "UdpSocketSendToDeadline",
         _ => "",
     };
     name.to_string()
@@ -434,7 +439,21 @@ pub(super) fn eval_handle_with_type(
         return result;
     }
     let op_name = handle_op_name(op);
-    if !op_name.is_empty() {
+    // UDP readiness, deadline I/O, and close are runtime-only operations. Keep
+    // them on the ambient bridge so the interpreter marshals through the same
+    // Prelude socket operation as AOT and JIT, rather than growing local policy.
+    let udp_ambient = matches!(
+        op,
+        THandleOp::UdpSocketReady
+            | THandleOp::UdpSocketClose
+            | THandleOp::UdpSocketReceiveDeadline
+            | THandleOp::UdpSocketSendToDeadline
+    );
+    if udp_ambient {
+        if let Some(result) = crate::Comptime::try_ambient_handle(&op_name, recv, args, span) {
+            return result;
+        }
+    } else if !op_name.is_empty() {
         if let Some(result) = crate::Comptime::eval_args_handle(&op_name, recv, args, span) {
             return result;
         }

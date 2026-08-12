@@ -18,6 +18,15 @@
         pub rows: i64,
     }
 
+    impl Default for TerminalSize {
+        fn default() -> Self {
+            Self {
+                cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+                rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+            }
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum TerminalMode {
         Raw,
@@ -33,12 +42,7 @@
     impl Default for TerminalPolicy {
         fn default() -> Self {
             Self {
-                // Card #1751: one 80x24 fact, shared with ProcessPty.rs's
-                // PtyConfig::default via Prelude/TerminalDefault.rs.
-                size: TerminalSize {
-                    cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
-                    rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
-                },
+                size: TerminalSize::default(),
                 mode: TerminalMode::Cooked,
             }
         }
@@ -361,6 +365,7 @@
     #[derive(Clone, Debug)]
     pub struct ProcessChild {
         pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
+        pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
         pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,

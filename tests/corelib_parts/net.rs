@@ -642,6 +642,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent() {
     let dir = std::env::temp_dir().join(format!(
@@ -672,7 +673,7 @@ fn run() {
     _ready :: ready_rx.receive() ?? panic("ready")
     time.sleep(10)
     waiter.cancel()
-    waiter.join() ?? 0
+    waiter.join() ?? panic("udp readiness task failed")
 
     closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
     closed.close() ?? panic("close")
@@ -979,7 +980,7 @@ fn run() {{
     }}
     _udp_ready :: udp_ready_rx.receive() ?? panic("udp ready")
     udp_wait.cancel()
-    udp_wait.join() ?? 0
+    udp_wait.join() ?? panic("udp wait task failed")
 
     listener :: net.unix_listen("{socket}") ?? panic("unix listen")
     (unix_ready_tx, unix_ready_rx) :: tasks.channel<Int>()
@@ -992,7 +993,7 @@ fn run() {{
     }})
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
     unix_wait.cancel()
-    unix_wait.join() ?? 0
+    unix_wait.join() ?? panic("udp wait task failed")
 }}
 "#
     );
@@ -1791,4 +1792,3 @@ fn run() {{
     );
     let _ = fs::remove_dir_all(dir);
 }
-

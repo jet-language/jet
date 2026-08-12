@@ -3,6 +3,7 @@
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
@@ -14,8 +15,6 @@ use crate::Crypto;
 use crate::DB;
 use crate::IO;
 use jet_codegen::Comptime::ServicesLite as service_prelude;
-
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -35,14 +34,396 @@ fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::e0956_unsupported(what, span)
 }
 
-fn interpreter_process_spec(cmd: Vec<CtValue>) -> CtValue {
-    CtValue::Struct {
-        type_name: "ProcessSpec".to_string(),
-        fields: vec![
-            ("cmd".to_string(), CtValue::List(cmd)),
-            ("terminal".to_string(), CtValue::Bool(false)),
-        ],
+// The interpreter only owns CtValue handles. Process policy and lifecycle
+// semantics stay in the exact Prelude fragments used by AOT; this module
+// supplies the native values and logical-environment hooks those fragments
+// need at the interpreter boundary.
+pub(crate) mod process_prelude {
+    use std::ffi::{OsStr, OsString};
+
+    use jet_foundation::Outcome::{jet_outcome_of, JetAbsent, JetOutcome};
+    use jet_codegen::scheduler::{jet_scheduler_wait_without_unwind, JetSchedulerWait};
+    #[cfg(unix)]
+    use jet_codegen::scheduler::{
+        jet_scheduler_raw_io_handle, jet_scheduler_raw_io_set_nonblocking,
+        jet_scheduler_raw_io_write_wait,
+    };
+
+    mod terminal_default {
+        include!("../../jet-codegen/src/Prelude/TerminalDefault.rs");
     }
+
+    mod jet_process_pty {
+        pub use jet_codegen::process_pty::*;
+    }
+
+    pub(crate) mod jet_std {
+        use super::{JetAbsent, JetOutcome};
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub enum IOOperation {
+            Read,
+            Write,
+            Flush,
+            Connect,
+            Accept,
+            Close,
+            Resolve,
+            Codec,
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct IOContext {
+            pub operation: IOOperation,
+            pub resource: JetOutcome<String, JetAbsent>,
+            pub os_code: JetOutcome<i64, JetAbsent>,
+            pub cause: JetOutcome<String, JetAbsent>,
+        }
+
+        impl IOContext {
+            pub fn new(
+                operation: IOOperation,
+                resource: Option<String>,
+                os_code: Option<i64>,
+                cause: Option<String>,
+            ) -> Self {
+                Self {
+                    operation,
+                    resource: super::jet_outcome_of(resource),
+                    os_code: super::jet_outcome_of(os_code),
+                    cause: super::jet_outcome_of(cause),
+                }
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum IOError {
+            InvalidInput(IOContext),
+            NotFound(IOContext),
+            PermissionDenied(IOContext),
+            TimedOut(IOContext),
+            Cancelled(IOContext),
+            Closed(IOContext),
+            Protocol(IOContext),
+            Other(IOContext),
+        }
+
+        impl IOError {
+            pub fn other(
+                operation: IOOperation,
+                resource: Option<String>,
+                cause: impl ToString,
+            ) -> Self {
+                Self::Other(IOContext::new(
+                    operation,
+                    resource,
+                    None,
+                    Some(cause.to_string()),
+                ))
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum EnvError {
+            InvalidName,
+            InvalidValue,
+            NonUnicode,
+        }
+
+        impl EnvError {
+            pub fn jet_show(&self) -> String {
+                match self {
+                    Self::InvalidName => "invalid environment variable name".to_string(),
+                    Self::InvalidValue => "invalid environment variable value".to_string(),
+                    Self::NonUnicode => "environment contains non-unicode data".to_string(),
+                }
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct ProcessResult {
+            pub code: i64,
+            pub output: String,
+            pub errors: String,
+            pub success: bool,
+            pub signal: Option<i64>,
+            pub timed_out: bool,
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum ProcessStreamMode {
+            Stream,
+            Inherit,
+            Capture,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct TerminalSize {
+            pub cols: i64,
+            pub rows: i64,
+        }
+
+        impl Default for TerminalSize {
+            fn default() -> Self {
+                Self {
+                    cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+                    rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+                }
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum TerminalMode {
+            Raw,
+            Cooked,
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct TerminalPolicy {
+            pub size: TerminalSize,
+            pub mode: TerminalMode,
+        }
+
+        impl Default for TerminalPolicy {
+            fn default() -> Self {
+                Self {
+                    size: TerminalSize::default(),
+                    mode: TerminalMode::Cooked,
+                }
+            }
+        }
+
+        #[derive(Clone, Debug)]
+        pub struct TerminalSession {
+            pub master: std::rc::Rc<std::fs::File>,
+        }
+
+        impl PartialEq for TerminalSession {
+            fn eq(&self, other: &Self) -> bool {
+                std::rc::Rc::ptr_eq(&self.master, &other.master)
+            }
+        }
+
+        impl Eq for TerminalSession {}
+
+        #[derive(Debug)]
+        pub enum ProcessStdin {
+            Pipe(std::process::ChildStdin),
+            Terminal(std::fs::File),
+        }
+
+        #[derive(Debug)]
+        pub enum ProcessReader {
+            Stdout(std::process::ChildStdout),
+            Stderr(std::process::ChildStderr),
+            Terminal(std::fs::File),
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct Duration {
+            pub ns: i64,
+        }
+
+        impl Duration {
+            pub fn as_millis(self) -> i64 {
+                self.ns / 1_000_000
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct ProcessSpec {
+            pub cmd: Vec<String>,
+            pub cwd: Option<String>,
+            pub env_clear: bool,
+            pub env_set: Vec<(String, String)>,
+            pub env_remove: Vec<String>,
+            pub stdin: Option<ProcessStreamMode>,
+            pub stdout: ProcessStreamMode,
+            pub stderr: ProcessStreamMode,
+            pub timeout_ms: Option<i64>,
+            pub output_limit: Option<i64>,
+            pub detached: bool,
+            pub terminal: Option<TerminalPolicy>,
+        }
+
+        #[derive(Clone, Debug)]
+        pub struct ProcessChild {
+            pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
+            pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
+            pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
+            pub stdout:
+                std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+            pub stderr:
+                std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+            pub terminal: JetOutcome<TerminalSession, JetAbsent>,
+            pub timeout_ms: Option<i64>,
+            pub started: std::time::Instant,
+        }
+
+        impl PartialEq for ProcessChild {
+            fn eq(&self, other: &Self) -> bool {
+                std::rc::Rc::ptr_eq(&self.inner, &other.inner)
+            }
+        }
+    }
+
+    type JetEnvEntries = Vec<(OsString, OsString)>;
+
+    fn jet_std_env_snapshot_raw() -> JetEnvEntries {
+        crate::CoreHost::jit_env_snapshot_raw()
+    }
+
+    fn jet_env_key_eq(left: &OsStr, right: &OsStr) -> bool {
+        crate::CoreHost::jit_env_key_eq(left, right)
+    }
+
+    fn jet_env_validate_name(name: &str) -> Result<(), jet_std::EnvError> {
+        crate::CoreHost::jit_env_validate_name(name)
+            .map_err(|_| jet_std::EnvError::InvalidName)
+    }
+
+    fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
+        crate::CoreHost::jit_env_validate_value(value)
+            .map_err(|_| jet_std::EnvError::InvalidValue)
+    }
+
+    fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
+        jet_codegen::scheduler::jet_scheduler_park_ms(wait_kind, millis);
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSpec.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
+
+    pub(crate) use jet_std::{
+        Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessReader, ProcessResult,
+        ProcessSpec, ProcessStdin, ProcessStreamMode, TerminalMode, TerminalPolicy,
+        TerminalSession, TerminalSize,
+    };
+
+    pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
+        jet_std_process_cmd(&cmd)
+    }
+
+    pub(crate) fn spec_cwd(spec: ProcessSpec, cwd: &String) -> ProcessSpec {
+        jet_process_spec_cwd(spec, cwd)
+    }
+
+    pub(crate) fn spec_env(spec: ProcessSpec, name: &String, value: &String) -> ProcessSpec {
+        jet_process_spec_env(spec, name, value)
+    }
+
+    pub(crate) fn spec_env_remove(spec: ProcessSpec, name: &String) -> ProcessSpec {
+        jet_process_spec_env_remove(spec, name)
+    }
+
+    pub(crate) fn spec_env_clear(spec: ProcessSpec) -> ProcessSpec {
+        jet_process_spec_env_clear(spec)
+    }
+
+    pub(crate) fn spec_stdin(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+        jet_process_spec_stdin(spec, mode)
+    }
+
+    pub(crate) fn spec_stdout(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+        jet_process_spec_stdout(spec, mode)
+    }
+
+    pub(crate) fn spec_stderr(spec: ProcessSpec, mode: &ProcessStreamMode) -> ProcessSpec {
+        jet_process_spec_stderr(spec, mode)
+    }
+
+    pub(crate) fn spec_timeout(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
+        jet_process_spec_timeout(spec, timeout)
+    }
+
+    pub(crate) fn spec_output_limit(spec: ProcessSpec, output_limit: i64) -> ProcessSpec {
+        jet_process_spec_output_limit(spec, output_limit)
+    }
+
+    pub(crate) fn spec_detached(spec: ProcessSpec) -> ProcessSpec {
+        jet_process_spec_detached(spec)
+    }
+
+    pub(crate) fn spec_terminal(spec: ProcessSpec) -> ProcessSpec {
+        jet_process_spec_terminal(spec)
+    }
+
+    pub(crate) fn spec_terminal_with_policy(
+        spec: ProcessSpec,
+        policy: &TerminalPolicy,
+    ) -> ProcessSpec {
+        jet_process_spec_terminal_with_policy(spec, policy)
+    }
+
+    pub(crate) fn spec_capabilities(spec: &ProcessSpec) -> std::collections::HashSet<String> {
+        jet_process_spec_capabilities(spec)
+    }
+
+    pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
+        jet_process_spec_run(spec)
+    }
+
+    pub(crate) fn spec_run_checked(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
+        jet_process_spec_run_checked(spec)
+    }
+
+    pub(crate) fn spec_pipeline(specs: &Vec<ProcessSpec>) -> Result<ProcessResult, IOError> {
+        jet_process_spec_pipeline(specs)
+    }
+
+    pub(crate) fn spec_spawn(spec: &ProcessSpec) -> Result<ProcessChild, IOError> {
+        jet_process_spec_spawn(spec)
+    }
+
+    pub(crate) fn child_id(child: &ProcessChild) -> i64 {
+        jet_process_child_id(child)
+    }
+
+    pub(crate) fn child_wait(child: &ProcessChild) -> Result<ProcessResult, IOError> {
+        jet_process_child_wait(child)
+    }
+
+    pub(crate) fn child_exited(child: &ProcessChild) -> Result<bool, IOError> {
+        jet_process_child_exited(child)
+    }
+
+    pub(crate) fn child_kill(child: &ProcessChild) -> Result<(), IOError> {
+        jet_process_child_kill(child)
+    }
+
+    pub(crate) fn child_terminate(child: &ProcessChild) -> Result<(), IOError> {
+        jet_process_child_terminate(child)
+    }
+
+    pub(crate) fn child_interrupt(child: &ProcessChild) -> Result<(), IOError> {
+        jet_process_child_interrupt(child)
+    }
+
+    pub(crate) fn stream_next_line(
+        reader: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+    ) -> Result<Option<String>, IOError> {
+        jet_process_stream_next_line(reader)
+    }
+
+    pub(crate) fn terminal_session_resize(
+        session: &TerminalSession,
+        size: &TerminalSize,
+    ) -> Result<(), IOError> {
+        jet_terminal_session_resize(session, size)
+    }
+
+}
+
+fn interpreter_process_spec(cmd: Vec<CtValue>) -> CtValue {
+    let words = cmd
+        .into_iter()
+        .filter_map(|value| match value {
+            CtValue::Str(value) => Some(value),
+            _ => None,
+        })
+        .collect();
+    process_spec_value(&process_prelude::spec_new(words))
 }
 
 fn process_spec_field<'a>(recv: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
@@ -54,51 +435,585 @@ fn process_spec_field<'a>(recv: &'a CtValue, wanted: &str) -> Option<&'a CtValue
         .flatten()
 }
 
-fn process_spec_with_terminal(recv: &CtValue) -> Option<CtValue> {
-    let CtValue::Struct { type_name, fields } = recv else {
+fn process_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { fields, .. } = value else {
         return None;
     };
-    if type_name != "ProcessSpec" {
-        return None;
+    fields
+        .iter()
+        .find_map(|(name, value)| (name == wanted).then_some(value))
+}
+
+fn process_optional(
+    value: Option<&CtValue>,
+    what: &str,
+    span: Span,
+) -> Result<Option<CtValue>, Diagnostic> {
+    match value {
+        None => Ok(None),
+        Some(value) if value.is_clean_stop() => Ok(None),
+        Some(CtValue::Present(value)) => Ok(Some((**value).clone())),
+        Some(_) => Err(unsupported(what, span)),
     }
-    let mut fields = fields.clone();
-    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "terminal") {
-        *value = CtValue::Bool(true);
-    } else {
-        fields.push(("terminal".to_string(), CtValue::Bool(true)));
+}
+
+fn process_string(value: &CtValue, what: &str, span: Span) -> Result<String, Diagnostic> {
+    match value {
+        CtValue::Str(value) => Ok(value.clone()),
+        _ => Err(unsupported(what, span)),
     }
-    Some(CtValue::Struct {
-        type_name: type_name.clone(),
-        fields,
+}
+
+fn process_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        CtValue::Int(value) => Ok(*value),
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn process_bool(value: Option<&CtValue>, default: bool, what: &str, span: Span) -> Result<bool, Diagnostic> {
+    match value {
+        None => Ok(default),
+        Some(CtValue::Bool(value)) => Ok(*value),
+        Some(_) => Err(unsupported(what, span)),
+    }
+}
+
+fn process_stream_mode(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<process_prelude::ProcessStreamMode, Diagnostic> {
+    let CtValue::Enum { variant, .. } = value else {
+        return Err(unsupported(what, span));
+    };
+    match variant.as_str() {
+        "Stream" => Ok(process_prelude::ProcessStreamMode::Stream),
+        "Inherit" => Ok(process_prelude::ProcessStreamMode::Inherit),
+        "Capture" => Ok(process_prelude::ProcessStreamMode::Capture),
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn process_stream_mode_value(mode: &process_prelude::ProcessStreamMode) -> CtValue {
+    let variant = match mode {
+        process_prelude::ProcessStreamMode::Stream => "Stream",
+        process_prelude::ProcessStreamMode::Inherit => "Inherit",
+        process_prelude::ProcessStreamMode::Capture => "Capture",
+    };
+    CtValue::Enum {
+        type_name: "ProcessStreamMode".to_string(),
+        variant: variant.to_string(),
+        args: vec![],
+    }
+}
+
+fn process_duration(value: &CtValue, what: &str, span: Span) -> Result<process_prelude::Duration, Diagnostic> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return Err(unsupported(what, span));
+    };
+    if type_name != "Duration" {
+        return Err(unsupported(what, span));
+    }
+    let ns = process_int(
+        process_field(value, "ns").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    Ok(process_prelude::Duration { ns })
+}
+
+fn process_duration_value(duration: process_prelude::Duration) -> CtValue {
+    CtValue::Struct {
+        type_name: "Duration".to_string(),
+        fields: vec![("ns".to_string(), CtValue::Int(duration.ns))],
+    }
+}
+
+fn process_terminal_mode(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<process_prelude::TerminalMode, Diagnostic> {
+    let CtValue::Enum { variant, .. } = value else {
+        return Err(unsupported(what, span));
+    };
+    match variant.as_str() {
+        "Raw" => Ok(process_prelude::TerminalMode::Raw),
+        "Cooked" => Ok(process_prelude::TerminalMode::Cooked),
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn process_terminal_mode_value(mode: &process_prelude::TerminalMode) -> CtValue {
+    let variant = match mode {
+        process_prelude::TerminalMode::Raw => "Raw",
+        process_prelude::TerminalMode::Cooked => "Cooked",
+    };
+    CtValue::Enum {
+        type_name: "TerminalMode".to_string(),
+        variant: variant.to_string(),
+        args: vec![],
+    }
+}
+
+fn process_terminal_policy(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<process_prelude::TerminalPolicy, Diagnostic> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return Err(unsupported(what, span));
+    };
+    if type_name != "TerminalPolicy" {
+        return Err(unsupported(what, span));
+    }
+    let size = process_field(value, "size").ok_or_else(|| unsupported(what, span))?;
+    let CtValue::Struct { type_name, .. } = size else {
+        return Err(unsupported(what, span));
+    };
+    if type_name != "TerminalSize" {
+        return Err(unsupported(what, span));
+    }
+    let cols = process_int(
+        process_field(size, "cols").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    let rows = process_int(
+        process_field(size, "rows").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    let mode = process_terminal_mode(
+        process_field(value, "mode").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    Ok(process_prelude::TerminalPolicy {
+        size: process_prelude::TerminalSize { cols, rows },
+        mode,
     })
 }
 
-fn process_spec_capabilities(recv: &CtValue) -> Option<CtValue> {
-    process_spec_field(recv, "terminal")?;
-    let items = jet_process_policy::terminal_facts(jet_codegen::process_pty::supported())
+fn process_terminal_policy_value(policy: &process_prelude::TerminalPolicy) -> CtValue {
+    CtValue::Struct {
+        type_name: "TerminalPolicy".to_string(),
+        fields: vec![
+            (
+                "size".to_string(),
+                CtValue::Struct {
+                    type_name: "TerminalSize".to_string(),
+                    fields: vec![
+                        ("cols".to_string(), CtValue::Int(policy.size.cols)),
+                        ("rows".to_string(), CtValue::Int(policy.size.rows)),
+                    ],
+                },
+            ),
+            ("mode".to_string(), process_terminal_mode_value(&policy.mode)),
+        ],
+    }
+}
+
+fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude::ProcessSpec, Diagnostic> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return Err(unsupported("ProcessSpec receiver", span));
+    };
+    if type_name != "ProcessSpec" {
+        return Err(unsupported("ProcessSpec receiver", span));
+    }
+    let CtValue::List(command) = process_spec_field(recv, "cmd")
+        .ok_or_else(|| unsupported("ProcessSpec.cmd", span))?
+    else {
+        return Err(unsupported("ProcessSpec.cmd", span));
+    };
+    let mut words = Vec::with_capacity(command.len());
+    for value in command {
+        words.push(process_string(value, "ProcessSpec.cmd", span)?);
+    }
+    let mut spec = process_prelude::spec_new(words);
+    spec.cwd = process_optional(process_spec_field(recv, "cwd"), "ProcessSpec.cwd", span)?
+        .map(|value| process_string(&value, "ProcessSpec.cwd", span))
+        .transpose()?;
+    spec.env_clear = process_bool(
+        process_spec_field(recv, "env_clear"),
+        false,
+        "ProcessSpec.env_clear",
+        span,
+    )?;
+    if let Some(value) = process_spec_field(recv, "env_set") {
+        let CtValue::List(entries) = value else {
+            return Err(unsupported("ProcessSpec.env_set", span));
+        };
+        for entry in entries {
+            let CtValue::List(pair) = entry else {
+                return Err(unsupported("ProcessSpec.env_set", span));
+            };
+            let [name, value] = pair.as_slice() else {
+                return Err(unsupported("ProcessSpec.env_set", span));
+            };
+            spec.env_set.push((
+                process_string(name, "ProcessSpec.env_set", span)?,
+                process_string(value, "ProcessSpec.env_set", span)?,
+            ));
+        }
+    }
+    if let Some(value) = process_spec_field(recv, "env_remove") {
+        let CtValue::List(names) = value else {
+            return Err(unsupported("ProcessSpec.env_remove", span));
+        };
+        for name in names {
+            spec.env_remove
+                .push(process_string(name, "ProcessSpec.env_remove", span)?);
+        }
+    }
+    spec.stdin = process_optional(process_spec_field(recv, "stdin"), "ProcessSpec.stdin", span)?
+        .map(|value| process_stream_mode(&value, "ProcessSpec.stdin", span))
+        .transpose()?;
+    spec.stdout = match process_spec_field(recv, "stdout") {
+        Some(value) => process_stream_mode(value, "ProcessSpec.stdout", span)?,
+        None => process_prelude::ProcessStreamMode::Capture,
+    };
+    spec.stderr = match process_spec_field(recv, "stderr") {
+        Some(value) => process_stream_mode(value, "ProcessSpec.stderr", span)?,
+        None => process_prelude::ProcessStreamMode::Capture,
+    };
+    spec.timeout_ms = process_optional(process_spec_field(recv, "timeout"), "ProcessSpec.timeout", span)?
+        .map(|value| process_duration(&value, "ProcessSpec.timeout", span).map(|duration| duration.as_millis()))
+        .transpose()?;
+    spec.output_limit = process_optional(
+        process_spec_field(recv, "output_limit"),
+        "ProcessSpec.output_limit",
+        span,
+    )?
+    .map(|value| process_int(&value, "ProcessSpec.output_limit", span))
+    .transpose()?;
+    spec.detached = process_bool(
+        process_spec_field(recv, "detached"),
+        false,
+        "ProcessSpec.detached",
+        span,
+    )?;
+    spec.terminal = process_optional(
+        process_spec_field(recv, "terminal"),
+        "ProcessSpec.terminal",
+        span,
+    )?
+    .map(|value| process_terminal_policy(&value, "ProcessSpec.terminal", span))
+    .transpose()?;
+    Ok(spec)
+}
+
+fn process_spec_value(spec: &process_prelude::ProcessSpec) -> CtValue {
+    let optional = |value: Option<CtValue>, ty: Type| match value {
+        Some(value) => CtValue::Present(Box::new(value)),
+        None => CtValue::absent(ty),
+    };
+    let env_set = spec
+        .env_set
         .iter()
-        .map(|fact| CtValue::Str((*fact).to_string()))
+        .map(|(name, value)| {
+            CtValue::List(vec![CtValue::Str(name.clone()), CtValue::Str(value.clone())])
+        })
         .collect();
-    Some(CtValue::Struct {
+    CtValue::Struct {
+        type_name: "ProcessSpec".to_string(),
+        fields: vec![
+            (
+                "cmd".to_string(),
+                CtValue::List(spec.cmd.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "cwd".to_string(),
+                optional(spec.cwd.clone().map(CtValue::Str), Type::String),
+            ),
+            ("env_clear".to_string(), CtValue::Bool(spec.env_clear)),
+            ("env_set".to_string(), CtValue::List(env_set)),
+            (
+                "env_remove".to_string(),
+                CtValue::List(spec.env_remove.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "stdin".to_string(),
+                optional(
+                    spec.stdin.as_ref().map(process_stream_mode_value),
+                    Type::Named("ProcessStreamMode".to_string()),
+                ),
+            ),
+            ("stdout".to_string(), process_stream_mode_value(&spec.stdout)),
+            ("stderr".to_string(), process_stream_mode_value(&spec.stderr)),
+            (
+                "timeout".to_string(),
+                optional(
+                    spec.timeout_ms.map(|ms| {
+                        process_duration_value(process_prelude::Duration {
+                            ns: ms.saturating_mul(1_000_000),
+                        })
+                    }),
+                    Type::Named("Duration".to_string()),
+                ),
+            ),
+            (
+                "output_limit".to_string(),
+                optional(spec.output_limit.map(CtValue::Int), Type::Int),
+            ),
+            ("detached".to_string(), CtValue::Bool(spec.detached)),
+            (
+                "terminal".to_string(),
+                optional(
+                    spec.terminal.as_ref().map(process_terminal_policy_value),
+                    Type::Named("TerminalPolicy".to_string()),
+                ),
+            ),
+        ],
+    }
+}
+
+fn process_set_value(mut facts: Vec<String>) -> CtValue {
+    facts.sort();
+    CtValue::Struct {
         type_name: "Set".to_string(),
-        fields: vec![("items".to_string(), CtValue::List(items))],
-    })
+        fields: vec![(
+            "items".to_string(),
+            CtValue::List(facts.into_iter().map(CtValue::Str).collect()),
+        )],
+    }
+}
+
+fn process_result_value(result: process_prelude::ProcessResult) -> CtValue {
+    CtValue::Struct {
+        type_name: "ProcessResult".to_string(),
+        fields: vec![
+            ("code".to_string(), CtValue::Int(result.code)),
+            ("output".to_string(), CtValue::Str(result.output)),
+            ("errors".to_string(), CtValue::Str(result.errors)),
+            ("success".to_string(), CtValue::Bool(result.success)),
+            (
+                "signal".to_string(),
+                result
+                    .signal
+                    .map(|signal| CtValue::Present(Box::new(CtValue::Int(signal))))
+                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+            ),
+            ("timed_out".to_string(), CtValue::Bool(result.timed_out)),
+        ],
+    }
+}
+
+fn process_io_operation(operation: process_prelude::IOOperation) -> CtValue {
+    let variant = match operation {
+        process_prelude::IOOperation::Read => "Read",
+        process_prelude::IOOperation::Write => "Write",
+        process_prelude::IOOperation::Flush => "Flush",
+        process_prelude::IOOperation::Connect => "Connect",
+        process_prelude::IOOperation::Accept => "Accept",
+        process_prelude::IOOperation::Close => "Close",
+        process_prelude::IOOperation::Resolve => "Resolve",
+        process_prelude::IOOperation::Codec => "Codec",
+    };
+    CtValue::Enum {
+        type_name: "IOOperation".to_string(),
+        variant: variant.to_string(),
+        args: vec![],
+    }
+}
+
+fn process_io_context(context: process_prelude::IOContext) -> CtValue {
+    let outcome_string = |value: Result<String, jet_foundation::Outcome::JetAbsent>| match value {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        Err(_) => CtValue::absent(Type::String),
+    };
+    let outcome_int = |value: Result<i64, jet_foundation::Outcome::JetAbsent>| match value {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        Err(_) => CtValue::absent(Type::Int),
+    };
+    CtValue::Struct {
+        type_name: "IOContext".to_string(),
+        fields: vec![
+            ("operation".to_string(), process_io_operation(context.operation)),
+            ("resource".to_string(), outcome_string(context.resource)),
+            ("os_code".to_string(), outcome_int(context.os_code)),
+            ("cause".to_string(), outcome_string(context.cause)),
+        ],
+    }
+}
+
+fn process_io_error(error: process_prelude::IOError) -> CtValue {
+    let (variant, context) = match error {
+        process_prelude::IOError::InvalidInput(context) => ("InvalidInput", context),
+        process_prelude::IOError::NotFound(context) => ("NotFound", context),
+        process_prelude::IOError::PermissionDenied(context) => ("PermissionDenied", context),
+        process_prelude::IOError::TimedOut(context) => ("TimedOut", context),
+        process_prelude::IOError::Cancelled(context) => ("Cancelled", context),
+        process_prelude::IOError::Closed(context) => ("Closed", context),
+        process_prelude::IOError::Protocol(context) => ("Protocol", context),
+        process_prelude::IOError::Other(context) => ("Other", context),
+    };
+    CtValue::Enum {
+        type_name: "IOError".to_string(),
+        variant: variant.to_string(),
+        args: vec![(None, process_io_context(context))],
+    }
+}
+
+fn process_result_outcome(
+    result: Result<process_prelude::ProcessResult, process_prelude::IOError>,
+) -> CtValue {
+    match result {
+        Ok(result) => CtValue::Present(Box::new(process_result_value(result))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    }
+}
+
+fn process_unit_outcome(result: Result<(), process_prelude::IOError>) -> CtValue {
+    match result {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    }
+}
+
+thread_local! {
+    static INTERP_PROCESS_CHILDREN: RefCell<Vec<process_prelude::ProcessChild>> = RefCell::new(Vec::new());
+}
+
+fn process_child_value(child: process_prelude::ProcessChild) -> CtValue {
+    let handle = INTERP_PROCESS_CHILDREN.with(|children| {
+        let mut children = children.borrow_mut();
+        let handle = children.len() as i64;
+        children.push(child);
+        handle
+    });
+    CtValue::Struct {
+        type_name: "ProcessChild".to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    }
+}
+
+fn with_process_child<T>(value: &CtValue, f: impl FnOnce(&process_prelude::ProcessChild) -> T) -> Option<T> {
+    let handle = match process_field(value, "handle") {
+        Some(CtValue::Int(handle)) if *handle >= 0 => *handle as usize,
+        _ => return None,
+    };
+    INTERP_PROCESS_CHILDREN.with(|children| children.borrow().get(handle).map(f))
 }
 
 fn ambient_process_handle(
     op: &str,
     recv: &mut CtValue,
-    _args: &mut [CtValue],
+    args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let method = op.strip_prefix("ProcessSpec:")?;
-    Some(match method {
-        "terminal" => process_spec_with_terminal(recv)
-            .ok_or_else(|| unsupported("ProcessSpec.terminal receiver", span)),
-        "capabilities" => process_spec_capabilities(recv)
-            .ok_or_else(|| unsupported("ProcessSpec.capabilities receiver", span)),
-        _ => return None,
-    })
+    if !matches!(
+        method,
+        "cwd"
+            | "env"
+            | "env_remove"
+            | "env_clear"
+            | "stdin"
+            | "stdout"
+            | "stderr"
+            | "timeout"
+            | "output_limit"
+            | "detached"
+            | "terminal"
+            | "capabilities"
+            | "run"
+            | "run_checked"
+            | "spawn"
+    ) {
+        return None;
+    }
+    Some((|| {
+        let spec = process_spec_from_value(recv, span)?;
+        match method {
+            "cwd" => {
+                let cwd = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.cwd argument", span))?, "ProcessSpec.cwd argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_cwd(spec, &cwd)))
+            }
+            "env" => {
+                let name = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.env name", span))?, "ProcessSpec.env name", span)?;
+                let value = process_string(args.get(1).ok_or_else(|| unsupported("ProcessSpec.env value", span))?, "ProcessSpec.env value", span)?;
+                Ok(process_spec_value(&process_prelude::spec_env(spec, &name, &value)))
+            }
+            "env_remove" => {
+                let name = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.env_remove argument", span))?, "ProcessSpec.env_remove argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_env_remove(spec, &name)))
+            }
+            "env_clear" => Ok(process_spec_value(&process_prelude::spec_env_clear(spec))),
+            "stdin" => {
+                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stdin argument", span))?, "ProcessSpec.stdin argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_stdin(spec, &mode)))
+            }
+            "stdout" => {
+                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stdout argument", span))?, "ProcessSpec.stdout argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_stdout(spec, &mode)))
+            }
+            "stderr" => {
+                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stderr argument", span))?, "ProcessSpec.stderr argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_stderr(spec, &mode)))
+            }
+            "timeout" => {
+                let timeout = process_duration(args.first().ok_or_else(|| unsupported("ProcessSpec.timeout argument", span))?, "ProcessSpec.timeout argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_timeout(spec, &timeout)))
+            }
+            "output_limit" => {
+                let output_limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.output_limit argument", span))?, "ProcessSpec.output_limit argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_output_limit(spec, output_limit)))
+            }
+            "detached" => Ok(process_spec_value(&process_prelude::spec_detached(spec))),
+            "terminal" => match args {
+                [] => Ok(process_spec_value(&process_prelude::spec_terminal(spec))),
+                [policy] => {
+                    let policy = process_terminal_policy(policy, "ProcessSpec.terminal policy", span)?;
+                    Ok(process_spec_value(&process_prelude::spec_terminal_with_policy(spec, &policy)))
+                }
+                _ => Err(unsupported("ProcessSpec.terminal arguments", span)),
+            },
+            "capabilities" => Ok(process_set_value(
+                process_prelude::spec_capabilities(&spec).into_iter().collect(),
+            )),
+            "run" => Ok(process_result_outcome(process_prelude::spec_run(&spec))),
+            "run_checked" => Ok(process_result_outcome(process_prelude::spec_run_checked(&spec))),
+            "spawn" => match process_prelude::spec_spawn(&spec) {
+                Ok(child) => Ok(CtValue::Present(Box::new(process_child_value(child)))),
+                Err(error) => Ok(CtValue::failed(Box::new(process_io_error(error)))),
+            },
+            _ => unreachable!(),
+        }
+    })())
+}
+
+fn ambient_process_child_handle(
+    op: &str,
+    recv: &mut CtValue,
+    _args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let method = op.strip_prefix("ProcessChild:")?;
+    if !matches!(method, "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt") {
+        return None;
+    }
+    let result = match method {
+        "id" => with_process_child(recv, process_prelude::child_id)
+            .map(CtValue::Int)
+            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "wait" => with_process_child(recv, |child| process_result_outcome(process_prelude::child_wait(child)))
+            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "exited" => with_process_child(recv, |child| match process_prelude::child_exited(child) {
+            Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+            Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+        })
+        .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "kill" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_kill(child)))
+            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "terminate" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_terminate(child)))
+            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "interrupt" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_interrupt(child)))
+            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        _ => unreachable!(),
+    };
+    Some(result)
 }
 
 fn crypto_err(msg: impl Into<String>) -> CtValue {
@@ -1312,6 +2227,161 @@ pub fn ambient_core_call(
         }
     }
     match (module, method) {
+        ("core.net", "socket_addr") => {
+            let (Some(CtValue::Str(host)), Some(CtValue::Int(port))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("core.net.socket_addr arguments", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_net_socket_addr(
+                host.clone(),
+                *port,
+            )))
+        }
+        ("core.net", "udp_bind") => {
+            let Some(CtValue::Str(address)) = args.first() else {
+                return Some(Err(unsupported("core.net.udp_bind address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_bind(address.clone())))
+        }
+        ("core.net", "udp_bind_addr") => {
+            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.udp_bind_addr address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_bind_addr(address)))
+        }
+        ("core.net", "udp_local_addr") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_local_addr receiver", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_local_addr(socket)))
+        }
+        ("core.net", "udp_set_timeout") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_set_timeout receiver", span)));
+            };
+            let Some(CtValue::Int(timeout_ms)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.udp_set_timeout timeout", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_set_timeout(
+                socket,
+                *timeout_ms,
+            )))
+        }
+        ("core.net", "udp_send_to") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_send_to receiver", span)));
+            };
+            let Some(CtValue::Str(data)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.udp_send_to data", span)));
+            };
+            let Some(address) = args.get(2).and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.udp_send_to address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_send_to(
+                socket,
+                data.clone(),
+                address,
+            )))
+        }
+        ("core.net", "udp_recv_from") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_recv_from receiver", span)));
+            };
+            let Some(CtValue::Int(limit)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.udp_recv_from limit", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_recv_from(socket, *limit)))
+        }
+        ("core.net", "udp_send_bytes_to") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_send_bytes_to receiver", span)));
+            };
+            let Some(data) = args.get(1).and_then(net_bytes_value) else {
+                return Some(Err(unsupported("core.net.udp_send_bytes_to data", span)));
+            };
+            let Some(address) = args.get(2).and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.udp_send_bytes_to address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_send_bytes_to(
+                socket,
+                data,
+                address,
+            )))
+        }
+        ("core.net", "udp_receive") => {
+            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_receive receiver", span)));
+            };
+            let Some(CtValue::Int(limit)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.udp_receive limit", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_receive(socket, *limit)))
+        }
+        ("core.net", "udp_packet_data") => {
+            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_packet_data packet", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_packet_data(packet)))
+        }
+        ("core.net", "udp_packet_addr") => {
+            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_packet_addr packet", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_packet_addr(packet)))
+        }
+        ("core.net", "udp_packet_bytes") => {
+            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            else {
+                return Some(Err(unsupported("core.net.udp_packet_bytes packet", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_packet_bytes(packet)))
+        }
+        ("core.net", "udp_packet_original_len") => {
+            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            else {
+                return Some(Err(unsupported(
+                    "core.net.udp_packet_original_len packet",
+                    span,
+                )));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_packet_original_len(
+                packet,
+            )))
+        }
+        ("core.net", "udp_packet_truncated") => {
+            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            else {
+                return Some(Err(unsupported(
+                    "core.net.udp_packet_truncated packet",
+                    span,
+                )));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_packet_truncated(packet)))
+        }
+        ("core.net", "ready_readable" | "ready_writable") => {
+            let Some(ready) = args.first().and_then(|value| http_handle_id(value, "NetReady"))
+            else {
+                return Some(Err(unsupported("core.net.ready receiver", span)));
+            };
+            let value = if method == "ready_readable" {
+                crate::net_http_rt::runtime_net_ready_readable(ready)
+            } else {
+                crate::net_http_rt::runtime_net_ready_writable(ready)
+            };
+            Some(Ok(value))
+        }
         ("core.process", "cmd") => {
             let Some(CtValue::List(items)) = args.into_iter().next() else {
                 return Some(Err(unsupported("core.process.cmd arguments", span)));
@@ -2055,6 +3125,12 @@ pub fn ambient_handle(
     if let Some(result) = ambient_process_handle(op, recv, args, span) {
         return Some(result);
     }
+    if let Some(result) = ambient_process_child_handle(op, recv, args, span) {
+        return Some(result);
+    }
+    if let Some(result) = ambient_net_handle(op, recv, args, span) {
+        return Some(result);
+    }
     if let Some(result) = ambient_webapp_handle(op, recv, args, span) {
         return Some(result);
     }
@@ -2308,6 +3384,123 @@ fn http_handle_id(recv: &CtValue, type_name: &str) -> Option<i64> {
             ("handle", CtValue::Int(h)) if *h > 0 => Some(*h),
             _ => None,
         }),
+        _ => None,
+    }
+}
+
+fn net_ready_interest_value(value: &CtValue) -> Option<i64> {
+    match value {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "NetReadyInterest" && args.is_empty() => match variant.as_str() {
+            "Read" => Some(0),
+            "Write" => Some(1),
+            "ReadWrite" => Some(2),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn duration_ns(value: &CtValue) -> Option<i64> {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "ns").then_some(value))
+            .and_then(|value| match value {
+                CtValue::Int(ns) => Some(*ns),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn net_bytes_value(value: &CtValue) -> Option<Vec<u8>> {
+    match value {
+        CtValue::Bytes(bytes) => Some(bytes.clone()),
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Int(byte) if (0..=255).contains(byte) => Some(*byte as u8),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+fn ambient_net_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        op,
+        "UdpSocketReady"
+            | "UdpSocketReceiveDeadline"
+            | "UdpSocketSendToDeadline"
+            | "UdpSocketClose"
+    ) {
+        return None;
+    }
+    let Some(socket) = http_handle_id(recv, "UdpSocket") else {
+        return Some(Err(unsupported("UdpSocket receiver", span)));
+    };
+    match op {
+        "UdpSocketReady" => {
+            if args.len() != 2 {
+                return Some(Err(unsupported("UdpSocket.ready arguments", span)));
+            }
+            let Some(interest) = net_ready_interest_value(&args[0]) else {
+                return Some(Err(unsupported("UdpSocket.ready interest", span)));
+            };
+            let Some(deadline) = duration_ns(&args[1]) else {
+                return Some(Err(unsupported("UdpSocket.ready deadline", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_ready(
+                socket, interest, deadline,
+            )))
+        }
+        "UdpSocketReceiveDeadline" => {
+            if args.len() != 2 {
+                return Some(Err(unsupported("UdpSocket.receive arguments", span)));
+            }
+            let Some(CtValue::Int(limit)) = args.first() else {
+                return Some(Err(unsupported("UdpSocket.receive limit", span)));
+            };
+            let Some(deadline) = duration_ns(&args[1]) else {
+                return Some(Err(unsupported("UdpSocket.receive deadline", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_receive_deadline(
+                socket, *limit, deadline,
+            )))
+        }
+        "UdpSocketSendToDeadline" => {
+            if args.len() != 3 {
+                return Some(Err(unsupported("UdpSocket.send_to arguments", span)));
+            }
+            let Some(data) = net_bytes_value(&args[0]) else {
+                return Some(Err(unsupported("UdpSocket.send_to bytes", span)));
+            };
+            let Some(addr) = http_handle_id(&args[1], "SocketAddr") else {
+                return Some(Err(unsupported("UdpSocket.send_to address", span)));
+            };
+            let Some(deadline) = duration_ns(&args[2]) else {
+                return Some(Err(unsupported("UdpSocket.send_to deadline", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_udp_send_to_deadline(
+                socket, data, addr, deadline,
+            )))
+        }
+        "UdpSocketClose" => {
+            if !args.is_empty() {
+                return Some(Err(unsupported("UdpSocket.close arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_udp_close(socket)))
+        }
         _ => None,
     }
 }

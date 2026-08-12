@@ -41,6 +41,26 @@ fn resident_safe_compute_call(
     }
 }
 
+pub(crate) fn is_packed_process_signal(expr: &TExpr) -> bool {
+    // Sema inserts `Expr::Copy` for this non-scalar field when it is used as
+    // an owning pattern subject. TIR represents that copy as `Clone`; it is a
+    // bitwise copy because the field's erased TIR type is Int. Keep the
+    // unwrap exact so no other cloned field becomes a packed Option carrier.
+    let field = match &expr.kind {
+        TExprKind::Clone(inner) => inner,
+        _ => expr,
+    };
+    match &field.kind {
+        TExprKind::Field {
+            recv,
+            field,
+            boxed: false,
+        } if field == "signal"
+            && matches!(&recv.ty, Type::Named(name) if name == "ProcessResult") => true,
+        _ => false,
+    }
+}
+
 fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
     use jet_foundation::AST::{CtReport, CtValue};
     match value {
@@ -1631,6 +1651,21 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && matches!(&rhs.ty, Type::Bool)
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
+            }
+            // ProcessResult.signal is the one packed Option<Int> comparison
+            // resident lowering supports. TIR may erase this CORE field to
+            // Int, so key the admission on the exact field shape, not its
+            // reported type. Other Option producers use mixed packed/result-
+            // arena carriers, so do not admit them here.
+            if is_packed_process_signal(lhs) || is_packed_process_signal(rhs) {
+                return matches!(op, BinOp::Eq | BinOp::Ne)
+                    && is_packed_process_signal(lhs)
+                    && is_packed_process_signal(rhs)
+                    && resident_safe_expr(lhs, callees)
+                    && resident_safe_expr(rhs, callees);
+            }
+            if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
+                return false;
             }
             if *overflow {
                 let lhs_int = intish_ty(&lhs.ty) || reactive_get_intish(lhs);
@@ -3595,7 +3630,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             else_body,
             ..
         } => {
-            resident_safe_expr(scrutinee, callees)
+            let scrutinee_ok = resident_safe_expr(scrutinee, callees)
+                && (is_packed_process_signal(scrutinee)
+                    || matches!(&scrutinee.ty, Type::Option(_) | Type::Result { .. })
+                    || jit_enum_type(&scrutinee.ty));
+            scrutinee_ok
                 && arms
                     .iter()
                     .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
@@ -5012,8 +5051,12 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         },
         THandleOp::TcpListenerAccept
         | THandleOp::TcpListenerLocalAddr
-        | THandleOp::TcpStreamClose => args.is_empty(),
+        | THandleOp::TcpStreamClose
+        | THandleOp::UdpSocketClose => args.is_empty(),
         THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => true,
+        THandleOp::TcpStreamReady | THandleOp::UdpSocketReady if args.len() == 2 => true,
+        THandleOp::UdpSocketReceiveDeadline if args.len() == 2 => true,
+        THandleOp::UdpSocketSendToDeadline if args.len() == 3 => true,
         THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,
