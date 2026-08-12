@@ -31,6 +31,72 @@ fn write(path: &Path, body: &str) {
     fs::write(path, body).unwrap();
 }
 
+#[test]
+fn ffi_selective_import_aliases_resolve() {
+    use jet::AST::{ForeignNamespace, ImportKind};
+    use jet::Foreign::{BinderStatus, BinderSurface};
+
+    for binder in jet::Foreign::BINDERS.iter().filter(|binder| {
+        binder.status == BinderStatus::Active && binder.surface == BinderSurface::Namespace
+    }) {
+        let root = binder.language.root();
+        let source = format!(
+            "use {}.[lib1 as first, lib2]\nfn run() {{ }}\n",
+            root
+        );
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+        assert!(lex_diagnostics.is_empty(), "{root}: {lex_diagnostics:?}");
+        let program = jet::Parser::parse(&tokens)
+            .unwrap_or_else(|diagnostics| panic!("{root}: {diagnostics:?}"));
+        let import = &program.imports[0];
+        let ImportKind::Unqualified { .. } = &import.kind else {
+            panic!("{root} list took a foreign-only parser branch");
+        };
+        assert_eq!(
+            import.foreign_imports().unwrap(),
+            vec![
+                (
+                    ForeignNamespace {
+                        language: binder.language,
+                        lib: "lib1".to_string(),
+                    },
+                    "first".to_string(),
+                ),
+                (
+                    ForeignNamespace {
+                        language: binder.language,
+                        lib: "lib2".to_string(),
+                    },
+                    "lib2".to_string(),
+                ),
+            ]
+        );
+
+        let single_source = format!("use {root}.single as alias\nfn run() {{ }}\n");
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&single_source);
+        assert!(lex_diagnostics.is_empty(), "{root}: {lex_diagnostics:?}");
+        let program = jet::Parser::parse(&tokens)
+            .unwrap_or_else(|diagnostics| panic!("{root}: {diagnostics:?}"));
+        let import = &program.imports[0];
+        let ImportKind::Module(path, _) = &import.kind else {
+            panic!("{root} single import changed parser shape");
+        };
+        assert_eq!(path, &format!("{root}.single"));
+        assert_eq!(
+            import.foreign_imports().unwrap(),
+            vec![
+                (
+                    ForeignNamespace {
+                        language: binder.language,
+                        lib: "single".to_string(),
+                    },
+                    "alias".to_string(),
+                ),
+            ]
+        );
+    }
+}
+
 /// Realize a `core` package from a local `path:` source repo into `hangar`,
 /// recording it in the store exactly as `jetpack build` would. Offline; no Nix.
 fn realize_into_hangar(
