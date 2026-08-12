@@ -2041,7 +2041,7 @@ fn resolve_file_import(
                 path_str
             ),
             Some(span),
-        ));
+        )
     })?;
     resolver.revalidate_file(&checked).map_err(|error| {
         Diagnostic::error(

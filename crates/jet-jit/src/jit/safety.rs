@@ -337,6 +337,15 @@ pub(crate) fn jit_list_task_type(ty: &Type) -> bool {
     false
 }
 
+pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
+    if let Type::List(inner) = ty {
+        if let Type::Apply { name, args } = inner.as_ref() {
+            return name == "Task" && args.len() == 1 && matches!(&args[0], Type::Int);
+        }
+    }
+    false
+}
+
 pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
     // Option carrier ABI: IntN uses result-arena handles; other scalars and
     // named enums use the legacy packed carrier. Nested Option stays out to avoid
@@ -1681,6 +1690,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && match &lambda.executable {
                         TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
                         TIR::TLambdaBody::Block(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
+                        TIR::TLambdaBody::SharedBlock(stmts) => {
                             stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                         }
                     }
@@ -3939,6 +3951,9 @@ pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
                     count_spawn_sites_expr(tail, &mut n);
                 }
             }
+            TJitSpawnBody::SharedBlock { body, .. } => {
+                count_spawn_sites_stmts(body, &mut n);
+            }
         }
     }
     n
@@ -4249,6 +4264,7 @@ pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
         TJitSpawnBody::Block { prefix, tail } => {
             find_stmts(prefix).or_else(|| tail.as_deref().and_then(find_expr))
         }
+        TJitSpawnBody::SharedBlock { body, .. } => find_stmts(body),
     }
 }
 

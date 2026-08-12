@@ -1046,7 +1046,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
             resolver
                 .revalidate_source(&source)
                 .map_err(|error| vec![error.diagnostic()])?;
-            Ok((resolver, source))
+            Ok::<_, Vec<Diagnostic>>((resolver, source))
         })
         .transpose()?;
     let workspace_policy = workspace_checked

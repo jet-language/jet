@@ -43,7 +43,7 @@ pub use jet_pkg_model::{Merge, Package, Recipe, RefSpec};
 // Re-export the L1 Overlay module and WorkspacePlan types under `crate::`
 // paths so `WorkspaceFile.rs` (one level down) can reference them as
 // `crate::Overlay::…` / `crate::WorkspacePlan::…` unchanged.
-pub use jet_pkg_model::{Overlay, WorkspaceLock, WorkspacePlan};
+pub use jet_pkg_model::{Authority, Overlay, WorkspaceLock, WorkspacePlan};
 
 pub mod ModuleEval;
 pub mod WorkspaceFile;

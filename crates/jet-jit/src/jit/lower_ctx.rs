@@ -46,7 +46,7 @@ pub(crate) struct LoopTargets {
     shield_depth: u32,
     shared_transaction_depth: u32,
     compute_resource_depth: usize,
-    compute_preserve_names: Vec<String>,
+    compute_preserve_names: HashSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -4569,7 +4569,7 @@ impl LowerCtx<'_, '_> {
                         };
                         let item_var = self.fresh_var(elem_clif);
                         self.b.def_var(item_var, elem);
-                        self.track_compute_value(elem, elem_ty)?;
+                        self.track_compute_value(elem, &elem_ty)?;
                         self.vars.insert(TIR::local_place(value_name), item_var);
                         self.var_tys
                             .insert(TIR::local_place(value_name), elem_ty);
@@ -5411,7 +5411,7 @@ impl LowerCtx<'_, '_> {
         self.b.def_var(loop_var, value);
         self.vars.insert(TIR::local_place(var), loop_var);
         self.var_tys
-            .insert(TIR::local_place(var), item_type);
+            .insert(TIR::local_place(var), item_type.clone());
         self.loop_stack.push(LoopTargets {
             label: label.clone(),
             continue_block: step_block,

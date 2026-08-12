@@ -1500,6 +1500,7 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "fn run() { task.group g { x :: task { work() } } }\n",
             "fn run() { task.group g { x :: task { other() } } }\n",
         ),
+        (
             "enum-group comma rule preserves variant order",
             "enum E { G { A, B } }\n",
             "enum E { G { B A } }\n",

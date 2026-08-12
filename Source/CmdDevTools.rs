@@ -48,7 +48,16 @@ pub(crate) fn run_dev(
     // diffed against it for type stability (D-HOTSWAP1).
     let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
-    let mut watch = jet_devserver::WatchSession::open(path);
+    let mut watch = match jet_devserver::WatchSession::open(path) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     // D-SCHEDULE1 (card #505): due `#Job #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = TaskClock::new();
@@ -102,7 +111,13 @@ pub(crate) fn run_dev(
                     let _ = txn.commit();
                 }
             }
-            watch.acknowledge(&receipt);
+            if let Err(diagnostic) = watch.acknowledge(&receipt) {
+                eprint!(
+                    "{}",
+                    jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
             if let Some(ms) = receipt.edit_to_visible_ms {
                 if !jet_devserver::within_budget(&receipt) {
                     eprintln!(

@@ -27,6 +27,7 @@ mod CModule;
 mod Context;
 mod Imports;
 mod Items;
+pub use crate::task_group;
 pub mod Library;
 pub mod Plugin;
 mod Statement;

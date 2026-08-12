@@ -568,7 +568,6 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
                 0.0
             }
         }
-        }
     })
 }
 
@@ -578,7 +577,7 @@ extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
             .heap
             .list_len(list)
             .expect("jit fixed-list index: bad handle");
-        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |position| {
+        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
             rt.heap.list_get_int(list, position as i64).unwrap_or_default()
         }) {
             Ok(value) => value,
@@ -596,7 +595,7 @@ extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64
             .heap
             .list_len(list)
             .expect("jit fixed-list index f64: bad handle");
-        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |position| {
+        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
             rt.heap
                 .list_get_float(list, position as i64)
                 .unwrap_or_default()

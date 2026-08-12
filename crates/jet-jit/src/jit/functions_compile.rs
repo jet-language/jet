@@ -110,7 +110,7 @@ pub(crate) fn lower_option_lift2_adapter(
             return Err("jit OptionLift2 callable arity unsupported".to_string());
         }
         let callable = values[0];
-        let raw_arg = |b: &mut FunctionBuilder<'_, '_>, bits: Value, ty: &Type| {
+        let raw_arg = |b: &mut FunctionBuilder<'_>, bits: Value, ty: &Type| {
             match meta
                 .clif_ty(ty)
                 .ok_or_else(|| format!("jit OptionLift2 callable parameter unsupported: {ty:?}"))?
@@ -147,7 +147,7 @@ pub(crate) fn lower_option_lift2_adapter(
         b.append_block_param(merge, types::I64);
         b.ins().brif(is_captured, captured, &[], plain, &[]);
 
-        let pack_result = |b: &mut FunctionBuilder<'_, '_>, value: Value| {
+        let pack_result = |b: &mut FunctionBuilder<'_>, value: Value| {
             match fn_ty_return(fn_ty) {
                 Some(ret) => match meta.clif_ty(ret) {
                     Some(clif) if clif == types::F64 => Ok(b.ins().bitcast(
@@ -779,6 +779,7 @@ pub(crate) fn lower_option_lift2_factory(
         ret: Some(Box::new(body.ty.clone())),
         effect_bound: None,
         param_contract: None,
+        call_metadata: None,
         return_view_provenance: None,
     };
     // The factory always receives one opaque environment word. Empty-capture
@@ -816,6 +817,10 @@ pub(crate) fn lower_option_lift2_factory(
             spawn_func_ids,
             spawn_lambdas,
             loop_stack: Vec::new(),
+            reachable_break_exits: HashSet::new(),
+            reachable_continue_blocks: HashSet::new(),
+            compute_resources: Vec::new(),
+            compute_retrack_names: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct: None,

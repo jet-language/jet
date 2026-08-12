@@ -1101,7 +1101,7 @@ fn checked_project_entry(
     }
 }
 
-fn report_entry_authority_error(diagnostic: jet_driver::Diagnostics::Diagnostic) -> ! {
+fn report_entry_authority_error(diagnostic: crate::Diagnostics::Diagnostic) -> ! {
     let theme = Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto);
     theme.error_coded(&diagnostic.code, &diagnostic.what, &diagnostic.why, &diagnostic.fix);
     std::process::exit(jet_foundation::ExitCodes::USER_ERROR);

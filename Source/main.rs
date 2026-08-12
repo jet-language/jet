@@ -2642,7 +2642,7 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
                     Ok(file) => {
                         resolver
                             .revalidate_file(&file)
-                            .unwrap_or_else(report_entry_authority_error);
+                            .unwrap_or_else(|diagnostic| report_entry_authority_error(diagnostic));
                         return file.path.to_string_lossy().into_owned();
                     }
                     Err(error) if error.is_missing() => {}
@@ -2836,7 +2836,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     // authority. Member selection (`-p`) remains an explicit escape to one
     // package and therefore bypasses this root orchestration path.
     if cmd == "build" && member_flag.is_none() {
-        if let Some(Ok(source)) = workspace_source.as_ref() {
+        if let Some(Ok(Some(source))) = workspace_source.as_ref() {
             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
                 && jetpack::WorkspaceFile::has_build_entry(&source.source)
             {
@@ -2845,7 +2845,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
         }
     }
     let workspace = match (workspace_resolver.as_ref(), workspace_source.as_ref()) {
-        (Some(resolver), Some(Ok(source)))
+        (Some(resolver), Some(Ok(Some(source))))
             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index => Some(
                 jetpack::WorkspaceFile::evaluate_checked_source(source, resolver),
             ),
@@ -2855,7 +2855,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     let canonical_workspace = workspace_source.as_ref().is_some_and(|source| {
         matches!(
             source,
-            Ok(source)
+            Ok(Some(source))
                 if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
         )
     });
@@ -2878,7 +2878,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             Ok(plan) => plan,
             Err(diagnostic) => {
                 if cmd == "build" && member_flag.is_none() {
-                    if let Some(Ok(source)) = workspace_source.as_ref() {
+                    if let Some(Ok(Some(source))) = workspace_source.as_ref() {
                         if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
                             return Some(source.path.clone());
                         }

@@ -1088,7 +1088,3 @@ fn run() {
     );
 }
 
-/// c136 / D-SERDE9-12: generic `#[Codable]` is first-class. The derive injects
-/// `T: Encode`/`T: Decode` on exactly the wire-reaching params (D-SERDE9/10); a
-/// phantom/skip-only param gets no serde bound (it still gets structural Clone).
-/// E2413 is retired (D-SERDE12).

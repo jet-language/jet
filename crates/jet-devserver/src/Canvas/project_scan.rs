@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::SHA256;
-use jet_pkg_model::Authority::AuthorityResolver;
+use jet_env_model::Authority::AuthorityResolver;
 
 use super::graph_projection::project_checked;
 use super::project_transactions::{diagnostic_json, rel_path};
@@ -33,14 +33,14 @@ fn project_file_with_runtime_on_compiler_stack(
     let resolver = AuthorityResolver::open(root)
         .map_err(|error| vec![error.diagnostic()])?;
     let Some(file_name) = path.file_name() else {
-        return Err(vec![jet_pkg_model::Authority::AuthorityError::Invalid {
+        return Err(vec![jet_env_model::Authority::AuthorityError::Invalid {
             path: path.to_path_buf(),
             detail: "source entry has no file name".to_string(),
         }
         .diagnostic()]);
     };
     let checked = resolver
-        .checked_file(file_name)
+        .checked_file(std::path::Path::new(file_name))
         .map_err(|error| vec![error.diagnostic()])?;
     resolver
         .revalidate_file(&checked)
@@ -148,7 +148,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         }
     });
     let (workspace_ecosystem_root, ecosystem_diagnostic) = match workspace_root {
-        Some(root) => match AuthorityResolver::open(root) {
+        Some(ref root) => match AuthorityResolver::open(root) {
             Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
                 Ok(manifest) => match resolver.revalidate_file(&manifest.file) {
                     Ok(()) => (Some(root.to_path_buf()), None),
@@ -401,7 +401,7 @@ fn collect_project_files(
         // A failed source resolution is already an authority diagnostic. Do
         // not reopen `workspace.jet` as a fallback authority path.
         if let Some((source_resolver, source)) = workspace_source.as_ref() {
-            if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index {
+            if source.role == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index {
                 match workspace_snapshot_for_source(source_resolver, source) {
                     Ok(snapshot) => {
                         for member in snapshot.plan.members {
@@ -423,7 +423,9 @@ fn collect_project_files(
                     });
                 (!is_fallback_workspace).then_some(file.path)
             })),
-            Err(error) => authority_diagnostic.get_or_insert_with(|| error.diagnostic()),
+            Err(error) => {
+                authority_diagnostic.get_or_insert_with(|| error.diagnostic());
+            }
         }
     }
     let authority_root = resolver
@@ -441,7 +443,7 @@ fn collect_project_files(
             Ok(relative) => relative,
             Err(_) => {
                 authority_diagnostic.get_or_insert_with(|| {
-                    jet_pkg_model::Authority::AuthorityError::Escapes(path.clone()).diagnostic()
+                    jet_env_model::Authority::AuthorityError::Escapes(path.clone()).diagnostic()
                 });
                 continue;
             }
@@ -490,7 +492,7 @@ fn workspace_source_path(
 ) -> Result<
     Option<(
         AuthorityResolver,
-        jet_pkg_model::WorkspacePlan::WorkspaceSource,
+        jet_env_model::WorkspacePlan::WorkspaceSource,
     )>,
     Diagnostic,
 > {
@@ -506,7 +508,7 @@ fn workspace_source_path(
 
 fn workspace_snapshot_for_source(
     resolver: &AuthorityResolver,
-    source: &jet_pkg_model::WorkspacePlan::WorkspaceSource,
+    source: &jet_env_model::WorkspacePlan::WorkspaceSource,
 ) -> Result<jet_env_model::WorkspaceFile::WorkspaceSnapshot, Diagnostic> {
     jet_env_model::WorkspaceFile::load_checked_source(resolver, source.clone())
 }
@@ -552,7 +554,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     let members = match source.as_ref() {
         Some((resolver, source))
             if source.role
-                == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index => {
+                == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index => {
             match workspace_snapshot_for_source(resolver, source) {
                 Ok(snapshot) => snapshot
                     .plan
@@ -617,7 +619,7 @@ fn package_dirs(
     }
     if let Some(root) = workspace_root {
         if let Some((resolver, source)) = workspace_source_path(root)? {
-            if source.role == jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index {
+            if source.role == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index {
                 let snapshot = workspace_snapshot_for_source(&resolver, &source)?;
                 for member in snapshot.plan.members {
                     dirs.push(root.join(member.path));
@@ -1144,28 +1146,4 @@ pub(super) fn lock_project_json(project_root: &Path) -> String {
     )
 }
 
-fn dep_source_label(source: &jet_driver::Package::DepSource) -> String {
-    match source {
-        jet_driver::Package::DepSource::Version(v) => format!("version:{v}"),
-        jet_driver::Package::DepSource::Provider { provider, target } => {
-            format!("{provider:?}@{target}")
-        }
-        jet_driver::Package::DepSource::Git { url, selector } => {
-            format!("git:{url}@{selector:?}")
-        }
-        jet_driver::Package::DepSource::CLib { target } => {
-            format!("c:{target}")
-        }
-    }
-}
 
-fn target_label(target: &jet_driver::Package::Target) -> String {
-    match target {
-        jet_driver::Package::Target::Library => "library".to_string(),
-        jet_driver::Package::Target::Executable => "executable".to_string(),
-        jet_driver::Package::Target::Test => "test".to_string(),
-        jet_driver::Package::Target::Example => "example".to_string(),
-        jet_driver::Package::Target::Benchmark => "benchmark".to_string(),
-        jet_driver::Package::Target::Plugin { .. } => "plugin".to_string(),
-    }
-}

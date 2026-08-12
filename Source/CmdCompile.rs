@@ -2852,7 +2852,16 @@ pub(crate) fn run_dev_web(
     host.start();
 
     // #439 / E3-UL6: same WatchSession engine as native `jet dev` / `jet run --watch`.
-    let mut watch = jet_devserver::WatchSession::open(path);
+    let mut watch = match jet_devserver::WatchSession::open(path) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     loop {
         thread::sleep(Duration::from_millis(120));
         if let Some(code) = host.exit_code() {
@@ -2876,7 +2885,13 @@ pub(crate) fn run_dev_web(
                 txn.fail("web rebuild failed; prior session kept");
                 let _ = txn.commit();
             }
-            watch.acknowledge(&receipt);
+            if let Err(diagnostic) = watch.acknowledge(&receipt) {
+                eprint!(
+                    "{}",
+                    jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
         }
     }
 }

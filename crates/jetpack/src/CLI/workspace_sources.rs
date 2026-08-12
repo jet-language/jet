@@ -1,12 +1,12 @@
 use super::parse::Flags;
-use crate::EnvFile;
+use crate::EnvFile::EnvFile;
 use crate::ManifestTOML;
 use crate::Provider;
 use crate::RefSpec::{self, ProviderKind};
 use crate::Syntax;
 use crate::WorkspaceFile;
 use crate::WorkspaceLock;
-use jet_driver::Diagnostics::Diagnostic;
+use crate::Diagnostics::Diagnostic;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 use std::path::{Path, PathBuf};
@@ -146,7 +146,7 @@ fn checked_env_file(dir: &Path) -> Result<Option<EnvFile>, Diagnostic> {
     resolver
         .revalidate_file(&file)
         .map_err(|error| error.diagnostic())?;
-    Ok(Some(EnvFile::parse(&source)))
+    Ok(Some(crate::EnvFile::parse(&source)))
 }
 
 fn nearest_workspace_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
@@ -187,7 +187,7 @@ pub(super) fn workspace_root_snapshot(
 pub(super) fn workspace_root_snapshot_or_exit(
     start: &Path,
 ) -> (PathBuf, Option<CheckedWorkspaceSource>) {
-    workspace_root_snapshot(start).unwrap_or_else(report_authority_error)
+    workspace_root_snapshot(start).unwrap_or_else(|diagnostic| report_authority_error(diagnostic))
 }
 
 pub(super) fn workspace_index_required_diagnostic() -> Diagnostic {
@@ -207,6 +207,7 @@ fn workspace_snapshot_from_source(
     WorkspaceFile::load_checked_source(resolver, expected.clone())
 }
 
+#[cfg(test)]
 fn load_workspace_snapshot(
     dir: &Path,
 ) -> Result<Option<WorkspaceFile::WorkspaceSnapshot>, Diagnostic> {
@@ -223,7 +224,8 @@ fn load_workspace_snapshot(
 /// emit workspace entries into `.jet/lock`, and return the `WorkspacePlan`.
 /// Returns `None` when no source declares a workspace. Prints the diagnostic to
 /// stderr and returns `Err(2)` when discovery or evaluation fails.
-pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+#[cfg(test)]
+fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
     finish_workspace_load(dir, load_workspace_snapshot(dir))
 }
 
@@ -249,7 +251,7 @@ pub(super) fn load_workspace_for_source(
 
 fn finish_workspace_load(
     dir: &Path,
-    result: Result<Option<WorkspaceFile::WorkspaceSnapshot, Diagnostic>, Diagnostic>,
+    result: Result<Option<WorkspaceFile::WorkspaceSnapshot>, Diagnostic>,
 ) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
     let result = match result {
         Ok(Some(snapshot)) => Ok(snapshot.plan),
@@ -352,11 +354,11 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
 /// (`packages/logging`) refs resolve against workspace members.
 pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
     let (dir, source) = workspace_root_snapshot(&std::env::current_dir().unwrap_or_default())
-        .unwrap_or_else(report_authority_error);
+        .unwrap_or_else(|diagnostic| report_authority_error(diagnostic));
     let (plan, allow_lock) = match source {
         Some((resolver, source)) if source.role == WorkspaceSourceRole::Index => {
             let snapshot = workspace_snapshot_from_source(&resolver, &source)
-                .unwrap_or_else(report_authority_error);
+                .unwrap_or_else(|diagnostic| report_authority_error(diagnostic));
             (Some(snapshot.plan), false)
         }
         // An authority source is a boundary, not an index. Do not fall
@@ -414,6 +416,7 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
 #[cfg(test)]
 mod tests {
     use super::{load_workspace, project_root, workspace_root};
+    use crate::WorkspaceFile;
     use crate::Syntax;
     use std::fs;
 

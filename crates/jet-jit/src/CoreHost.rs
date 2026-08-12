@@ -85,7 +85,7 @@ extern "C" fn jet_jit_os_hostname() -> i64 {
 // environment handle. This adapter owns only the raw-code invocation boundary;
 // pending counts and additive ordering come from the shared Prelude queue.
 mod jit_os_interrupt {
-    use super::{interrupt_queue::JetInterruptQueue, mpsc, Concurrency, OnceLock};
+    use super::{interrupt_queue::{self, JetInterruptQueue}, mpsc, Concurrency, OnceLock};
 
     static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<DispatchCommand>, String>> = OnceLock::new();
