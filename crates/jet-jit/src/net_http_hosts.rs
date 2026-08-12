@@ -350,6 +350,62 @@ fn net_error_value(error: JetNetError) -> CtValue {
     marshal_net_error(error).1
 }
 
+fn net_io_operation_value(operation: jet_std::IOOperation) -> CtValue {
+    let variant = match operation {
+        jet_std::IOOperation::Read => "Read",
+        jet_std::IOOperation::Write => "Write",
+        jet_std::IOOperation::Flush => "Flush",
+        jet_std::IOOperation::Connect => "Connect",
+        jet_std::IOOperation::Accept => "Accept",
+        jet_std::IOOperation::Close => "Close",
+        jet_std::IOOperation::Resolve => "Resolve",
+        jet_std::IOOperation::Codec => "Codec",
+    };
+    CtValue::Enum {
+        type_name: "IOOperation".to_string(),
+        variant: variant.to_string(),
+        args: vec![],
+    }
+}
+
+fn net_io_context_value(context: jet_std::IOContext) -> CtValue {
+    let optional_string = |value: Option<String>| match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        None => CtValue::absent(Type::String),
+    };
+    let optional_int = |value: Option<i64>| match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        None => CtValue::absent(Type::Int),
+    };
+    CtValue::Struct {
+        type_name: "IOContext".to_string(),
+        fields: vec![
+            ("operation".to_string(), net_io_operation_value(context.operation)),
+            ("resource".to_string(), optional_string(context.resource)),
+            ("os_code".to_string(), optional_int(context.os_code)),
+            ("cause".to_string(), optional_string(context.cause)),
+        ],
+    }
+}
+
+fn net_io_error_value(error: jet_std::IOError) -> CtValue {
+    let (variant, context) = match error {
+        jet_std::IOError::InvalidInput(context) => ("InvalidInput", context),
+        jet_std::IOError::NotFound(context) => ("NotFound", context),
+        jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", context),
+        jet_std::IOError::TimedOut(context) => ("TimedOut", context),
+        jet_std::IOError::Cancelled(context) => ("Cancelled", context),
+        jet_std::IOError::Closed(context) => ("Closed", context),
+        jet_std::IOError::Protocol(context) => ("Protocol", context),
+        jet_std::IOError::Other(context) => ("Other", context),
+    };
+    CtValue::Enum {
+        type_name: "IOError".to_string(),
+        variant: variant.to_string(),
+        args: vec![(None, net_io_context_value(context))],
+    }
+}
+
 fn decode_result(handle: i64) -> Option<(bool, u64)> {
     if handle <= 0 {
         return None;
@@ -2274,9 +2330,25 @@ pub(crate) fn runtime_http_mux() -> i64 {
 // ── I9 UDP ambient adapters ───────────────────────────────────────────────
 
 fn net_ct_handle(type_name: &str, handle: i64) -> CtValue {
+    let fields = if type_name == "SocketAddr" {
+        with_handle(handle, |value| match value {
+            NetHttpHandle::SocketAddr(address) => Some(vec![
+                ("handle".to_string(), CtValue::Int(handle)),
+                ("host".to_string(), CtValue::Str(jet_net_socket_host(address))),
+                ("port".to_string(), CtValue::Int(jet_net_socket_port(address))),
+                (
+                    "text".to_string(),
+                    CtValue::Str(jet_net_socket_to_string(address)),
+                ),
+            ]),
+            _ => None,
+        })
+    } else {
+        None
+    };
     CtValue::Struct {
         type_name: type_name.to_string(),
-        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+        fields: fields.unwrap_or_else(|| vec![("handle".to_string(), CtValue::Int(handle))]),
     }
 }
 
@@ -2286,6 +2358,449 @@ pub(crate) fn runtime_net_socket_addr(host: String, port: i64) -> CtValue {
             "SocketAddr",
             push_handle(NetHttpHandle::SocketAddr(addr)),
         ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_net_socket_to_string(address: i64) -> CtValue {
+    CtValue::Str(
+        with_handle(address, |handle| match handle {
+            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_to_string(address)),
+            _ => None,
+        })
+        .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn runtime_net_socket_host(address: i64) -> CtValue {
+    CtValue::Str(
+        with_handle(address, |handle| match handle {
+            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_host(address)),
+            _ => None,
+        })
+        .unwrap_or_default(),
+    )
+}
+
+pub(crate) fn runtime_net_socket_port(address: i64) -> CtValue {
+    CtValue::Int(
+        with_handle(address, |handle| match handle {
+            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_port(address)),
+            _ => None,
+        })
+        .unwrap_or(0),
+    )
+}
+
+fn tcp_listener_result(listener: JetTCPListener) -> CtValue {
+    CtValue::Present(Box::new(net_ct_handle(
+        "TcpListener",
+        push_handle(NetHttpHandle::TcpListener(Arc::new(listener))),
+    )))
+}
+
+fn tcp_stream_result(stream: JetTCPStream) -> CtValue {
+    CtValue::Present(Box::new(net_ct_handle(
+        "TcpStream",
+        push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream)))),
+    )))
+}
+
+pub(crate) fn runtime_tcp_listen(address: String) -> CtValue {
+    match jet_net_tcp_listen(&address) {
+        Ok(listener) => tcp_listener_result(listener),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_listen_addr(address: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp listen",
+            "SocketAddr",
+        ))));
+    };
+    match jet_net_tcp_listen_addr(&address) {
+        Ok(listener) => tcp_listener_result(listener),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_listener_accept(listener: i64, deadline: Option<i64>) -> CtValue {
+    let Some(listener) = tcp_listener(listener) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp accept",
+            "TcpListener",
+        ))));
+    };
+    let result = match deadline {
+        Some(ns) => {
+            let deadline = jet_std::Duration { ns };
+            jet_net_tcp_accept_deadline(&listener, &deadline)
+        }
+        None => jet_net_tcp_accept(&listener),
+    };
+    match result {
+        Ok(stream) => tcp_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_connect(address: String) -> CtValue {
+    match jet_net_tcp_connect(&address) {
+        Ok(stream) => tcp_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_connect_addr(address: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp connect",
+            "SocketAddr",
+        ))));
+    };
+    match jet_net_tcp_connect_addr(&address) {
+        Ok(stream) => tcp_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_connect_timeout(address: i64, timeout_ms: i64) -> CtValue {
+    let Some(address) = with_handle(address, |handle| match handle {
+        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp connect",
+            "SocketAddr",
+        ))));
+    };
+    match jet_net_tcp_connect_timeout(&address, timeout_ms) {
+        Ok(stream) => tcp_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_connect_happy(host: String, port: i64, timeout_ms: i64) -> CtValue {
+    match jet_net_tcp_connect_happy(&host, port, timeout_ms) {
+        Ok(stream) => tcp_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_listener_local_addr(listener: i64) -> CtValue {
+    let Some(listener) = tcp_listener(listener) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp listener local address",
+            "TcpListener",
+        ))));
+    };
+    match jet_net_listener_local_addr(&listener) {
+        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_listener_local_socket_addr(listener: i64) -> CtValue {
+    let Some(listener) = tcp_listener(listener) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp listener local address",
+            "TcpListener",
+        ))));
+    };
+    match jet_net_listener_local_socket_addr(&listener) {
+        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
+            "SocketAddr",
+            push_handle(NetHttpHandle::SocketAddr(address)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_read(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp read",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_read(&mut stream) {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_read_bytes(
+    stream: i64,
+    limit: i64,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp read",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => {
+            let deadline = jet_std::Duration { ns };
+            jet_net_tcp_read_bytes_deadline(&mut stream, limit, &deadline)
+        }
+        None => jet_net_tcp_read_bytes(&mut stream, limit),
+    };
+    match result {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_read_io(stream: i64, limit: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
+            jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some("TcpStream".to_string()),
+                None,
+                Some("invalid TcpStream handle".to_string()),
+            ),
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match JetIOReader::read(&mut *stream, limit) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_read_text(
+    stream: i64,
+    limit: i64,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp read text",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => {
+            let deadline = jet_std::Duration { ns };
+            jet_net_tcp_read_text_deadline(&mut stream, limit, &deadline)
+        }
+        None => jet_net_tcp_read_text(&mut stream, limit),
+    };
+    match result {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write(stream: i64, data: String) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp write",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_write(&mut stream, &data) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write_bytes(
+    stream: i64,
+    data: Vec<u8>,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp write",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => {
+            let deadline = jet_std::Duration { ns };
+            jet_net_tcp_write_bytes_deadline(&mut stream, &data, &deadline)
+        }
+        None => jet_net_tcp_write_bytes(&mut stream, &data),
+    };
+    match result {
+        Ok(written) => CtValue::Present(Box::new(CtValue::Int(written))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write_io(stream: i64, data: Vec<u8>) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
+            jet_std::IOContext::new(
+                jet_std::IOOperation::Write,
+                Some("TcpStream".to_string()),
+                None,
+                Some("invalid TcpStream handle".to_string()),
+            ),
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match JetIOWriter::write(&mut *stream, &data) {
+        Ok(written) => CtValue::Present(Box::new(CtValue::Int(written))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write_all_bytes(
+    stream: i64,
+    data: Vec<u8>,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp write all",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => {
+            let deadline = jet_std::Duration { ns };
+            jet_net_tcp_write_all_bytes_deadline(&mut stream, &data, &deadline)
+        }
+        None => jet_net_tcp_write_all_bytes(&mut stream, &data),
+    };
+    match result {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write_all_io(stream: i64, data: Vec<u8>) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
+            jet_std::IOContext::new(
+                jet_std::IOOperation::Write,
+                Some("TcpStream".to_string()),
+                None,
+                Some("invalid TcpStream handle".to_string()),
+            ),
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match JetIOWriter::write_all(&mut *stream, &data) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_write_text(
+    stream: i64,
+    data: String,
+    deadline: Option<i64>,
+) -> CtValue {
+    runtime_tcp_stream_write_all_bytes(stream, data.into_bytes(), deadline)
+}
+
+pub(crate) fn runtime_tcp_stream_shutdown(stream: i64, how: i64) -> CtValue {
+    let Some(how) = (match how {
+        0 => Some(JetNetShutdown::Read),
+        1 => Some(JetNetShutdown::Write),
+        2 => Some(JetNetShutdown::Both),
+        _ => None,
+    }) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp shutdown",
+            "NetShutdown",
+        ))));
+    };
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp shutdown",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_shutdown(&mut stream, how) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_close(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp close",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_close(&mut stream) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> CtValue {
+    let Some(interest) = net_ready_interest(interest) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp ready",
+            "NetReadyInterest",
+        ))));
+    };
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp ready",
+            "TcpStream",
+        ))));
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_ready_deadline(&mut stream, interest, &deadline) {
+        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
+            "NetReady",
+            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_local_addr(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp local address",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_local_addr(&stream) {
+        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_peer_addr(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "tcp peer address",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tcp_peer_addr(&stream) {
+        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
         Err(error) => CtValue::failed(Box::new(net_error_value(error))),
     }
 }

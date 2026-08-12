@@ -9,6 +9,7 @@ use super::super::Diagnostics::unsupported;
 use crate::AST::{as_bytes, CtReport, CtValue};
 
 use super::time_deadline_kernel;
+pub(super) use super::super::TextLite::IoErrorOperation;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
@@ -691,26 +692,12 @@ fn repl_native_module_diag(module: &str, method: &str, span: Span) -> Diagnostic
     )
 }
 
-pub(super) fn io_error_value(path: &str, e: std::io::Error) -> CtValue {
-    let kind = match e.kind() {
-        std::io::ErrorKind::NotFound => "NotFound",
-        std::io::ErrorKind::PermissionDenied => "PermissionDenied",
-        _ => "Other",
-    };
-    CtValue::Struct {
-        type_name: "IOError".to_string(),
-        fields: if kind == "Other" {
-            vec![
-                ("kind".to_string(), CtValue::Str(kind.to_string())),
-                ("message".to_string(), CtValue::Str(e.to_string())),
-            ]
-        } else {
-            vec![
-                ("kind".to_string(), CtValue::Str(kind.to_string())),
-                ("path".to_string(), CtValue::Str(path.to_string())),
-            ]
-        },
-    }
+pub(super) fn io_error_value(
+    operation: super::super::TextLite::IoErrorOperation,
+    path: &str,
+    e: std::io::Error,
+) -> CtValue {
+    super::super::TextLite::io_error_value(operation, path, e)
 }
 
 // D-DET1 / I9: ambient random behavior is the runtime Prelude kernel. These

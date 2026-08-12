@@ -85,22 +85,24 @@ pub fn apply_impure_core_call_with_type(
     match (module, method) {
         ("core.files", "read") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             match std::fs::read_to_string(&path) {
                 Ok(s) => Ok(CtValue::Present(Box::new(CtValue::Str(s)))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Read,
+                    &path_str,
                     e,
                 )))),
             }
         }
         ("core.files", "read_bytes") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             match std::fs::read(&path) {
                 Ok(bs) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bs)))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Read,
+                    &path_str,
                     e,
                 )))),
             }
@@ -110,7 +112,7 @@ pub fn apply_impure_core_call_with_type(
         ("core.files", "write" | "append_all") => {
             let path_str = as_string(one(0)?, span)?;
             let content = as_string(one(1)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             let result = if method == "append_all" {
                 use std::io::Write;
                 std::fs::OpenOptions::new()
@@ -124,14 +126,15 @@ pub fn apply_impure_core_call_with_type(
             match result {
                 Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Write,
+                    &path_str,
                     e,
                 )))),
             }
         }
         ("core.files", "exists" | "is_dir") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             let meta = std::fs::metadata(&path);
             Ok(CtValue::Bool(match (method, meta) {
                 ("exists", Ok(_)) => true,
@@ -143,11 +146,12 @@ pub fn apply_impure_core_call_with_type(
         }
         ("core.files", "create_dir") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             match std::fs::create_dir_all(&path) {
                 Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Write,
+                    &path_str,
                     e,
                 )))),
             }
@@ -155,7 +159,7 @@ pub fn apply_impure_core_call_with_type(
         // D-LSDIR1: mirror AOT jet_std_fs_list_dir (sorted by name).
         ("core.files", "list_dir") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             match std::fs::read_dir(&path) {
                 Ok(rd) => {
                     let mut entries = Vec::new();
@@ -180,7 +184,8 @@ pub fn apply_impure_core_call_with_type(
                     }
                     if let Some(e) = err {
                         Ok(CtValue::failed(Box::new(io_error_value(
-                            &path.to_string_lossy(),
+                            IoErrorOperation::Read,
+                            &path_str,
                             e,
                         ))))
                     } else {
@@ -201,14 +206,15 @@ pub fn apply_impure_core_call_with_type(
                     }
                 }
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Read,
+                    &path_str,
                     e,
                 )))),
             }
         }
         ("core.files", "remove") => {
             let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(path_str);
+            let path = base_dir.join(&path_str);
             let result = if path.is_dir() {
                 std::fs::remove_dir_all(&path)
             } else {
@@ -217,7 +223,8 @@ pub fn apply_impure_core_call_with_type(
             match result {
                 Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    &path.to_string_lossy(),
+                    IoErrorOperation::Write,
+                    &path_str,
                     e,
                 )))),
             }
@@ -239,7 +246,11 @@ pub fn apply_impure_core_call_with_type(
             Ok(p) => Ok(CtValue::Present(Box::new(CtValue::Str(
                 p.to_string_lossy().into_owned(),
             )))),
-            Err(e) => Ok(CtValue::failed(Box::new(io_error_value(".", e)))),
+            Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
+                IoErrorOperation::Resolve,
+                ".",
+                e,
+            )))),
         },
         ("core.env", "home_dir") => Ok(
             match std::env::var("HOME")
@@ -414,7 +425,11 @@ pub fn apply_impure_core_call_with_type(
                         ),
                     ],
                 }))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(&cmd[0], e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
+                    IoErrorOperation::Resolve,
+                    &cmd[0],
+                    e,
+                )))),
             }
         }
         ("core.tls", _) => Err(Diagnostic::error(

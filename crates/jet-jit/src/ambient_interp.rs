@@ -2238,6 +2238,90 @@ pub fn ambient_core_call(
                 *port,
             )))
         }
+        ("core.net", "socket_to_string" | "socket_host" | "socket_port") => {
+            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net socket address", span)));
+            };
+            Some(Ok(match method {
+                "socket_to_string" => crate::net_http_rt::runtime_net_socket_to_string(address),
+                "socket_host" => crate::net_http_rt::runtime_net_socket_host(address),
+                "socket_port" => crate::net_http_rt::runtime_net_socket_port(address),
+                _ => unreachable!(),
+            }))
+        }
+        ("core.net", "tcp_listen") => {
+            let Some(CtValue::Str(address)) = args.first() else {
+                return Some(Err(unsupported("core.net.tcp_listen address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_listen(address.clone())))
+        }
+        ("core.net", "tcp_listen_addr") => {
+            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.tcp_listen_addr address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_listen_addr(address)))
+        }
+        ("core.net", "tcp_accept") => {
+            let Some(listener) = args.first().and_then(|value| http_handle_id(value, "TcpListener"))
+            else {
+                return Some(Err(unsupported("core.net.tcp_accept listener", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_listener_accept(
+                listener, None,
+            )))
+        }
+        ("core.net", "tcp_connect") => {
+            let Some(CtValue::Str(address)) = args.first() else {
+                return Some(Err(unsupported("core.net.tcp_connect address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_connect(address.clone())))
+        }
+        ("core.net", "tcp_connect_addr") => {
+            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.tcp_connect_addr address", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_connect_addr(address)))
+        }
+        ("core.net", "tcp_connect_timeout") => {
+            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            else {
+                return Some(Err(unsupported("core.net.tcp_connect_timeout address", span)));
+            };
+            let Some(CtValue::Int(timeout_ms)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.tcp_connect_timeout timeout", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_connect_timeout(
+                address,
+                *timeout_ms,
+            )))
+        }
+        ("core.net", "tcp_connect_happy") => {
+            let (Some(CtValue::Str(host)), Some(CtValue::Int(port)), Some(CtValue::Int(timeout_ms))) =
+                (args.first(), args.get(1), args.get(2))
+            else {
+                return Some(Err(unsupported("core.net.tcp_connect_happy arguments", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_connect_happy(
+                host.clone(),
+                *port,
+                *timeout_ms,
+            )))
+        }
+        ("core.net", "listener_local_socket_addr") => {
+            let Some(listener) = args.first().and_then(|value| http_handle_id(value, "TcpListener"))
+            else {
+                return Some(Err(unsupported(
+                    "core.net.listener_local_socket_addr listener",
+                    span,
+                )));
+            };
+            Some(Ok(
+                crate::net_http_rt::runtime_tcp_listener_local_socket_addr(listener),
+            ))
+        }
         ("core.net", "udp_bind") => {
             let Some(CtValue::Str(address)) = args.first() else {
                 return Some(Err(unsupported("core.net.udp_bind address", span)));
@@ -2393,6 +2477,19 @@ pub fn ambient_core_call(
                 )));
             }
             Some(Ok(interpreter_process_spec(items)))
+        }
+        ("core.process", "pipeline") => {
+            let Some(CtValue::List(items)) = args.first() else {
+                return Some(Err(unsupported("core.process.pipeline arguments", span)));
+            };
+            let mut specs = Vec::with_capacity(items.len());
+            for item in items {
+                match process_spec_from_value(item, span) {
+                    Ok(spec) => specs.push(spec),
+                    Err(error) => return Some(Err(error)),
+                }
+            }
+            Some(Ok(process_result_outcome(process_prelude::spec_pipeline(&specs))))
         }
         ("core.testing", "temp_dir") => {
             let Some(CtValue::Str(prefix)) = args.first() else {
@@ -3404,6 +3501,22 @@ fn net_ready_interest_value(value: &CtValue) -> Option<i64> {
     }
 }
 
+fn net_shutdown_value(value: &CtValue) -> Option<i64> {
+    match value {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "NetShutdown" && args.is_empty() => match variant.as_str() {
+            "Read" => Some(0),
+            "Write" => Some(1),
+            "Both" => Some(2),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn duration_ns(value: &CtValue) -> Option<i64> {
     match value {
         CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
@@ -3437,6 +3550,207 @@ fn ambient_net_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if matches!(
+        op,
+        "TcpListenerAccept"
+            | "TcpListenerLocalAddr"
+            | "TcpStreamRead"
+            | "TcpStreamWrite"
+            | "TcpStreamPeerAddr"
+            | "TcpStreamLocalAddr"
+            | "TcpStreamClose"
+            | "TcpStreamReadBytes"
+            | "TcpStreamReadBytesIO"
+            | "TcpStreamReadText"
+            | "TcpStreamWriteBytes"
+            | "TcpStreamWriteBytesIO"
+            | "TcpStreamWriteAllBytes"
+            | "TcpStreamWriteAllBytesIO"
+            | "TcpStreamWriteText"
+            | "TcpStreamShutdown"
+            | "TcpStreamReady"
+    ) {
+        if op == "TcpListenerAccept" || op == "TcpListenerLocalAddr" {
+            let Some(listener) = http_handle_id(recv, "TcpListener") else {
+                return Some(Err(unsupported("TcpListener receiver", span)));
+            };
+            return Some(match op {
+                "TcpListenerAccept" => {
+                    let deadline = match args {
+                        [] => Ok(None),
+                        [deadline] => duration_ns(deadline)
+                            .map(Some)
+                            .ok_or_else(|| unsupported("TcpListener.accept deadline", span)),
+                        _ => Err(unsupported("TcpListener.accept arguments", span)),
+                    };
+                    deadline.map(|deadline| {
+                        crate::net_http_rt::runtime_tcp_listener_accept(listener, deadline)
+                    })
+                }
+                "TcpListenerLocalAddr" => {
+                    if !args.is_empty() {
+                        Err(unsupported("TcpListener.local_addr arguments", span))
+                    } else {
+                        Ok(crate::net_http_rt::runtime_tcp_listener_local_addr(listener))
+                    }
+                }
+                _ => unreachable!(),
+            });
+        }
+        let Some(stream) = http_handle_id(recv, "TcpStream") else {
+            return Some(Err(unsupported("TcpStream receiver", span)));
+        };
+        return Some(match op {
+            "TcpStreamRead" => {
+                if !args.is_empty() {
+                    Err(unsupported("TcpStream.read arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_read(stream))
+                }
+            }
+            "TcpStreamWrite" => {
+                let Some(CtValue::Str(data)) = args.first() else {
+                    return Some(Err(unsupported("TcpStream.write data", span)));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("TcpStream.write arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_write(stream, data.clone()))
+                }
+            }
+            "TcpStreamPeerAddr" => {
+                if !args.is_empty() {
+                    Err(unsupported("TcpStream.peer_addr arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_peer_addr(stream))
+                }
+            }
+            "TcpStreamLocalAddr" => {
+                if !args.is_empty() {
+                    Err(unsupported("TcpStream.local_addr arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_local_addr(stream))
+                }
+            }
+            "TcpStreamClose" => {
+                if !args.is_empty() {
+                    Err(unsupported("TcpStream.close arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_close(stream))
+                }
+            }
+            "TcpStreamReadBytes" | "TcpStreamReadBytesIO" => {
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Some(Err(unsupported("TcpStream.read limit", span)));
+                };
+                let deadline = match args.get(1) {
+                    None => Ok(None),
+                    Some(value) => duration_ns(value)
+                        .map(Some)
+                        .ok_or_else(|| unsupported("TcpStream.read deadline", span)),
+                };
+                deadline.map(|deadline| {
+                    if op == "TcpStreamReadBytesIO" {
+                        crate::net_http_rt::runtime_tcp_stream_read_io(stream, *limit)
+                    } else {
+                        crate::net_http_rt::runtime_tcp_stream_read_bytes(stream, *limit, deadline)
+                    }
+                })
+            }
+            "TcpStreamReadText" => {
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Some(Err(unsupported("TcpStream.read_text limit", span)));
+                };
+                let deadline = match args.get(1) {
+                    None => Ok(None),
+                    Some(value) => duration_ns(value)
+                        .map(Some)
+                        .ok_or_else(|| unsupported("TcpStream.read_text deadline", span)),
+                };
+                deadline.map(|deadline| {
+                    crate::net_http_rt::runtime_tcp_stream_read_text(stream, *limit, deadline)
+                })
+            }
+            "TcpStreamWriteBytes" | "TcpStreamWriteBytesIO" => {
+                let Some(data) = args.first().and_then(net_bytes_value) else {
+                    return Some(Err(unsupported("TcpStream.write bytes", span)));
+                };
+                let deadline = match args.get(1) {
+                    None => Ok(None),
+                    Some(value) => duration_ns(value)
+                        .map(Some)
+                        .ok_or_else(|| unsupported("TcpStream.write deadline", span)),
+                };
+                deadline.map(|deadline| {
+                    if op == "TcpStreamWriteBytesIO" {
+                        crate::net_http_rt::runtime_tcp_stream_write_io(stream, data)
+                    } else {
+                        crate::net_http_rt::runtime_tcp_stream_write_bytes(stream, data, deadline)
+                    }
+                })
+            }
+            "TcpStreamWriteAllBytes" | "TcpStreamWriteAllBytesIO" => {
+                let Some(data) = args.first().and_then(net_bytes_value) else {
+                    return Some(Err(unsupported("TcpStream.write_all bytes", span)));
+                };
+                let deadline = match args.get(1) {
+                    None => Ok(None),
+                    Some(value) => duration_ns(value)
+                        .map(Some)
+                        .ok_or_else(|| unsupported("TcpStream.write_all deadline", span)),
+                };
+                deadline.map(|deadline| {
+                    if op == "TcpStreamWriteAllBytesIO" {
+                        crate::net_http_rt::runtime_tcp_stream_write_all_io(stream, data)
+                    } else {
+                        crate::net_http_rt::runtime_tcp_stream_write_all_bytes(
+                            stream, data, deadline,
+                        )
+                    }
+                })
+            }
+            "TcpStreamWriteText" => {
+                let Some(CtValue::Str(data)) = args.first() else {
+                    return Some(Err(unsupported("TcpStream.write_text data", span)));
+                };
+                let deadline = match args.get(1) {
+                    None => Ok(None),
+                    Some(value) => duration_ns(value)
+                        .map(Some)
+                        .ok_or_else(|| unsupported("TcpStream.write_text deadline", span)),
+                };
+                deadline.map(|deadline| {
+                    crate::net_http_rt::runtime_tcp_stream_write_text(stream, data.clone(), deadline)
+                })
+            }
+            "TcpStreamShutdown" => {
+                let Some(how) = args.first().and_then(net_shutdown_value) else {
+                    return Some(Err(unsupported("TcpStream.shutdown mode", span)));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("TcpStream.shutdown arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tcp_stream_shutdown(stream, how))
+                }
+            }
+            "TcpStreamReady" => {
+                if args.len() != 2 {
+                    Err(unsupported("TcpStream.ready arguments", span))
+                } else {
+                    let Some(interest) = net_ready_interest_value(&args[0]) else {
+                        return Some(Err(unsupported("TcpStream.ready interest", span)));
+                    };
+                    let Some(deadline) = duration_ns(&args[1]) else {
+                        return Some(Err(unsupported("TcpStream.ready deadline", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tcp_stream_ready(
+                        stream, interest, deadline,
+                    ))
+                }
+            }
+            _ => unreachable!(),
+        });
+    }
     if !matches!(
         op,
         "UdpSocketReady"

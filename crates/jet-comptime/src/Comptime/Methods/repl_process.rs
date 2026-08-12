@@ -6,6 +6,7 @@ use crate::AST::{CtValue, Type};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
+    IoErrorOperation,
 };
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
@@ -60,7 +61,16 @@ pub(super) fn apply_repl_fs_call(
             .ok_or_else(|| unsupported("core.files call has the wrong number of arguments", span))
     };
     let path = as_string(one(0)?, span)?;
-    let io_error = |error| CtValue::failed(Box::new(io_error_value(&path, error)));
+    let io_operation = match method {
+        "read" | "read_bytes" => IoErrorOperation::Read,
+        "write" | "append_all" | "create_dir" | "remove" => IoErrorOperation::Write,
+        _ => IoErrorOperation::Read,
+    };
+    let io_error = |error| CtValue::failed(Box::new(io_error_value(
+        io_operation,
+        &path,
+        error,
+    )));
     match method {
         "read" => Ok(match authorizer.fs_read(&path) {
             Ok(bytes) => match String::from_utf8(bytes) {
