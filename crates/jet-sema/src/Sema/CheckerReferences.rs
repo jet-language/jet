@@ -172,3 +172,4 @@ impl<'a> Checker<'a> {
         }
     }
 }
+

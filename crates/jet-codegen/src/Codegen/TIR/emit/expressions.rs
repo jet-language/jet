@@ -2812,7 +2812,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             index,
             line,
         } => {
-            let ty = user_type_rust(type_name);
+            let ty = cx.rust_type(&Type::Named(type_name.clone()));
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(

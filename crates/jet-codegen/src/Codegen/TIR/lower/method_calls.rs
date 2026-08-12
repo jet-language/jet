@@ -5480,9 +5480,12 @@ fn lower_method_call_impl(
                 };
             }
         }
+        let lookup_type_name = type_name
+            .rsplit_once('.')
+            .map_or(type_name.as_str(), |(_, leaf)| leaf);
         let sig = cx
             .method_sigs
-            .get(&(type_name.clone(), method.to_string()))
+            .get(&(lookup_type_name.to_string(), method.to_string()))
             .cloned()
             .unwrap_or_default();
         let sig = instantiated_sig
@@ -5500,7 +5503,7 @@ fn lower_method_call_impl(
         let targs = lower_method_args(args, &sig, env, cx);
         let resolved_type_args = resolved_method_type_args(
             cx,
-            &type_name,
+            lookup_type_name,
             method,
             &sig,
             owner_type_args,
@@ -5510,7 +5513,7 @@ fn lower_method_call_impl(
         );
         let ret_ty = instantiate_method_ret(
             cx,
-            &type_name,
+            lookup_type_name,
             method,
             owner_type_args,
             &resolved_type_args,
@@ -5678,13 +5681,19 @@ fn lower_method_call_impl(
             },
         };
     };
+    // Sema preserves a qualified nominal name for imported receivers so type
+    // identity and Rust lowering stay collision-safe.  Imported method facts
+    // are registered by their declaration's bare owner name; use that key only
+    // for metadata lookup while retaining `ty_name` in the lowered receiver.
+    let lookup_ty_name = ty_name.rsplit_once('.').map_or(ty_name.as_str(), |(_, leaf)| leaf);
     let sig = cx
         .method_sigs
-        .get(&(ty_name.clone(), method.to_string()))
+        .get(&(lookup_ty_name.to_string(), method.to_string()))
         .cloned()
         .unwrap_or_default();
     let recv = if matches!(
-        cx.method_self_convs.get(&(ty_name.clone(), method.to_string())),
+        cx.method_self_convs
+            .get(&(lookup_ty_name.to_string(), method.to_string())),
         Some(AccessConvention::Move)
     )
         && matches!(receiver, Expr::Ident(name, _) if env.is_resource(name))
@@ -5694,7 +5703,8 @@ fn lower_method_call_impl(
         lower_expr(receiver, cx, env)
     };
     let owner_type_args = match &recv.ty {
-        Type::Apply { name, args } if name == &ty_name => args.as_slice(),
+        Type::Apply { name, args }
+            if name == &ty_name || name.as_str() == lookup_ty_name => args.as_slice(),
         _ => &[][..],
     };
     let sig = instantiated_sig
@@ -5731,7 +5741,7 @@ fn lower_method_call_impl(
     let targs = lower_method_args(args, &sig, env, cx);
     let resolved_type_args = resolved_method_type_args(
         cx,
-        &ty_name,
+        lookup_ty_name,
         method,
         &sig,
         owner_type_args,
@@ -5754,7 +5764,7 @@ fn lower_method_call_impl(
     // `trait_methods` check exactly — decided here, total, never re-derived in emit.
     let method_ref = if cx
         .trait_methods
-        .contains(&(ty_name.clone(), method.to_string()))
+        .contains(&(lookup_ty_name.to_string(), method.to_string()))
     {
         TMethodRef::bare(method)
     } else {
@@ -5766,7 +5776,7 @@ fn lower_method_call_impl(
     // but the TIR keeps it total per the design principle.
     let ret_ty = instantiate_method_ret(
         cx,
-        &ty_name,
+        lookup_ty_name,
         method,
         owner_type_args,
         &resolved_type_args,

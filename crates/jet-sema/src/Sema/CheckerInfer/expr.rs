@@ -3606,17 +3606,17 @@ impl<'a> Checker<'a> {
                 if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
-                            if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, lookup_name, member)
-                            {
-                                self.diags.push(private_item(member, span));
-                                return None;
-                            } else if owner_mod != self.module_idx
-                                && Syntax::classify_identifier(member)
-                                    == Syntax::IdentifierClass::SoftPublic
-                            {
-                                self.diags.push(soft_public_use(member, span));
-                            }
+                        if owner_mod != self.module_idx
+                            && !self.field_is_pub_in(owner_mod, lookup_name, member)
+                        {
+                            self.diags.push(private_item(member, span));
+                            return None;
+                        } else if owner_mod != self.module_idx
+                            && Syntax::classify_identifier(member)
+                                == Syntax::IdentifierClass::SoftPublic
+                        {
+                            self.diags.push(soft_public_use(member, span));
+                        }
                         self.record_field_reference(owner_mod, lookup_name, member, span);
                         return Some(fty);
                     }
@@ -3691,12 +3691,14 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-            } else if let Some(fty) = core_generic_struct_field(name, member, args) {
-                // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
-                // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
-                // precedent: `Reader`/`Cursor`) means this fallback only runs when
-                // no user struct claimed the name above.
-                return Some(fty);
+            } else if owner_import_ns.is_none() {
+                if let Some(fty) = core_generic_struct_field(lookup_name, member, args) {
+                    // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
+                    // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
+                    // precedent: `Reader`/`Cursor`) means this fallback only runs when
+                    // no user struct claimed the name above.
+                    return Some(fty);
+                }
             }
         }
         if let Type::Tuple(fields) = t {

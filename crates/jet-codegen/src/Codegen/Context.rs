@@ -2369,6 +2369,17 @@ impl Cx {
     }
 
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
+        if let Some(rust_mod) = self.foreign_types.get(type_name) {
+            let leaf = type_name
+                .rsplit_once('.')
+                .map_or(type_name, |(_, leaf)| leaf);
+            return format!(
+                "{}{}::{}",
+                self.root_prefix,
+                rust_mod,
+                user_type_rust(leaf)
+            );
+        }
         user_type_rust(type_name)
     }
 }

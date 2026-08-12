@@ -718,7 +718,7 @@ impl<'a> Checker<'a> {
             // the ordinary mismatch diagnostics run. The helper is deliberately
             // limited to registered structs and their type arguments; enum,
             // trait, and tagged nominal identity remain distinct mechanisms.
-            if self.same_struct_type_identity(want, got) {
+            if self.nominal_type_identity(want, got) {
                 return true;
             }
             if Type::compute_tensor_compatible(want, got) {
@@ -820,7 +820,7 @@ impl<'a> Checker<'a> {
             false
         }
 
-        fn same_struct_type_identity(&self, want: &Type, got: &Type) -> bool {
+        pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
             if want == got {
                 return true;
             }
@@ -843,12 +843,12 @@ impl<'a> Checker<'a> {
                         && want_args
                             .iter()
                             .zip(got_args)
-                            .all(|(want, got)| self.same_struct_type_identity(want, got))
+                            .all(|(want, got)| self.nominal_type_identity(want, got))
                 }
                 (Type::List(want), Type::List(got))
                 | (Type::Shared(want), Type::Shared(got))
                 | (Type::Option(want), Type::Option(got)) => {
-                    self.same_struct_type_identity(want, got)
+                    self.nominal_type_identity(want, got)
                 }
                 (
                     Type::Result {
@@ -860,8 +860,8 @@ impl<'a> Checker<'a> {
                         err: got_err,
                     },
                 ) => {
-                    self.same_struct_type_identity(want_ok, got_ok)
-                        && self.same_struct_type_identity(want_err, got_err)
+                    self.nominal_type_identity(want_ok, got_ok)
+                        && self.nominal_type_identity(want_err, got_err)
                 }
                 (
                     Type::Map {
@@ -875,8 +875,8 @@ impl<'a> Checker<'a> {
                         ..
                     },
                 ) => {
-                    self.same_struct_type_identity(want_key, got_key)
-                        && self.same_struct_type_identity(want_value, got_value)
+                    self.nominal_type_identity(want_key, got_key)
+                        && self.nominal_type_identity(want_value, got_value)
                 }
                 (
                     Type::FixedList {
@@ -892,14 +892,14 @@ impl<'a> Checker<'a> {
                 ) => {
                     want_len == got_len
                         && want_symbol == got_symbol
-                        && self.same_struct_type_identity(want_elem, got_elem)
+                        && self.nominal_type_identity(want_elem, got_elem)
                 }
                 (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
                     want_fields.len() == got_fields.len()
                         && want_fields.iter().zip(got_fields).all(
                             |((want_name, want), (got_name, got))| {
                                 want_name == got_name
-                                && self.same_struct_type_identity(want, got)
+                                && self.nominal_type_identity(want, got)
                             },
                         )
                 }
@@ -912,7 +912,7 @@ impl<'a> Checker<'a> {
                         let Some(index) = got_members.iter().enumerate().position(
                             |(index, got_member)| {
                                 !matched[index]
-                                    && self.same_struct_type_identity(want_member, got_member)
+                                    && self.nominal_type_identity(want_member, got_member)
                             },
                         ) else {
                             return false;
@@ -931,7 +931,7 @@ impl<'a> Checker<'a> {
                         inner: got_inner,
                     },
                 ) if want_marker == got_marker => {
-                    self.same_struct_type_identity(want_inner, got_inner)
+                    self.nominal_type_identity(want_inner, got_inner)
                 }
                 (
                     Type::Quantity {
@@ -943,7 +943,7 @@ impl<'a> Checker<'a> {
                         dimension: got_dimension,
                     },
                 ) if want_dimension == got_dimension => {
-                    self.same_struct_type_identity(want_base, got_base)
+                    self.nominal_type_identity(want_base, got_base)
                 }
                 _ => false,
             }

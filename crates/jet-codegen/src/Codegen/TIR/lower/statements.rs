@@ -1315,7 +1315,7 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
             elem.ty = Type::TraitObject(vec![trait_name.clone()]);
         }
     }
-    expr.ty = Type::List(Box::new(Type::TraitObject(vec![trait_name.clone()])));
+    expr.ty = expected.clone();
     expr
 }
 

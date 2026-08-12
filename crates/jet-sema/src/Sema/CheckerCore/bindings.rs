@@ -949,8 +949,9 @@ impl<'a> Checker<'a> {
                         _ => None,
                     };
                     let is_struct = actual.as_deref().is_some_and(|n| {
-                        self.struct_owner_module(n, None)
-                            .and_then(|m| self.struct_fields_of(m, n))
+                        let (import_ns, lookup_name) = self.struct_type_name_parts(n);
+                        self.struct_owner_module(lookup_name, import_ns)
+                            .and_then(|m| self.struct_fields_of(m, lookup_name))
                             .is_some()
                     });
                     if !is_struct {
@@ -975,7 +976,28 @@ impl<'a> Checker<'a> {
                         return;
                     }
                     let actual = actual.unwrap();
-                    if actual != *type_name {
+                    let pattern_matches = match &it {
+                        Type::Apply { name: actual_name, .. } => {
+                            let (pattern_ns, pattern_name) =
+                                self.struct_type_name_parts(type_name);
+                            let (actual_ns, actual_name) =
+                                self.struct_type_name_parts(actual_name);
+                            pattern_name == actual_name
+                                && matches!(
+                                    (
+                                        self.struct_owner_module(pattern_name, pattern_ns),
+                                        self.struct_owner_module(actual_name, actual_ns),
+                                    ),
+                                    (Some(pattern_owner), Some(actual_owner))
+                                        if pattern_owner == actual_owner
+                                )
+                        }
+                        _ => self.nominal_type_identity(
+                            &Type::Named(type_name.clone()),
+                            &it,
+                        ),
+                    };
+                    if !pattern_matches {
                         self.diags.push(Diagnostic::error(
                             "E0313",
                             format!("this value is a `{}`, not a `{}`", actual, type_name),
@@ -997,9 +1019,10 @@ impl<'a> Checker<'a> {
                     }
                     // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
                     // name every field, and redundant when it already does.
+                    let (import_ns, lookup_name) = self.struct_type_name_parts(&actual);
                     let total_fields = self
-                        .struct_owner_module(&actual, None)
-                        .and_then(|m| self.struct_fields_of(m, &actual))
+                        .struct_owner_module(lookup_name, import_ns)
+                        .and_then(|m| self.struct_fields_of(m, lookup_name))
                         .map(|fs| fs.len());
                     if let Some(total) = total_fields {
                         let partial = fields.len() < total;

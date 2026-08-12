@@ -2717,9 +2717,10 @@ impl<'a> Checker<'a> {
                 },
                 Pattern::Struct { fields, rest, .. },
             ) => {
+                let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
                 let all_fields: Option<Vec<String>> = self
-                    .struct_owner_module(type_name, None)
-                    .and_then(|m| self.struct_fields_of(m, type_name))
+                    .struct_owner_module(lookup_name, import_ns)
+                    .and_then(|m| self.struct_fields_of(m, lookup_name))
                     .map(|fs| fs.iter().map(|(name, ..)| name.clone()).collect());
                 let Some(all_fields) = all_fields else {
                     self.diags.push(Diagnostic::error(

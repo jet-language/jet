@@ -810,6 +810,76 @@ fn run() {
 }
 
 #[test]
+fn task_join_all_consumes_handles_once() {
+    let valid = "\
+use core.tasks as tasks
+fn run() {
+    task.group g {
+        first :: task { return 10 }
+        second :: task { return 20 }
+        handles :: [first, second]
+        results :: tasks.join_all(^handles)
+        print(results.len())
+    }
+}
+";
+    let compiled = jet::compile(valid).expect("join_all should consume the handle list");
+    assert!(
+        compiled.lints.iter().all(|lint| lint.code != "L1101"),
+        "joined handles must not trigger L1101: {:?}",
+        compiled.lints
+    );
+
+    let duplicate = "\
+use core.tasks as tasks
+fn run() {
+    task.group g {
+        handle :: task { return 10 }
+        tasks.join_all([handle, handle])
+    }
+}
+";
+    let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
+        "expected E0121 for duplicate handle consumption, got {diagnostics:?}"
+    );
+
+    let reused = "\
+use core.tasks as tasks
+fn run() {
+    task.group g {
+        handle :: task { return 10 }
+        tasks.join_all([handle])
+        handle.join()
+    }
+}
+";
+    let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
+        "expected E0121 after join_all consumption, got {diagnostics:?}"
+    );
+
+    let borrowed_list = "\
+use core.tasks as tasks
+fn run() {
+    task.group g {
+        handle :: task { return 10 }
+        handles :: [handle]
+        tasks.join_all(handles)
+    }
+}
+";
+    let diagnostics =
+        jet::compile(borrowed_list).expect_err("named handle lists need an ownership transfer");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"),
+        "expected E0201 for a borrowed handle list, got {diagnostics:?}"
+    );
+}
+
+#[test]
 fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
     if !have_rustc() {
         return;
