@@ -229,6 +229,18 @@ impl LowerCtx<'_, '_> {
         if !row.jit_direct {
             return Ok(None);
         }
+        // Whole-value CBOR has two canonical ABI shapes: DataTree is a direct
+        // host handle; a Codable value must first cross the shared serde tree
+        // seam. Keep typed calls on the typed lowering below instead of passing
+        // a user-record handle to the DataTree adapter.
+        if row.module == "core.encoding.cbor"
+            && matches!(row.member, "to_bytes" | "to_bytes_canonical")
+            && args
+                .first()
+                .is_some_and(|arg| !Self::is_datatree_value_ty(&arg.ty))
+        {
+            return Ok(None);
+        }
         let Some(host_id) = row
             .jit_symbol_candidates()
             .into_iter()

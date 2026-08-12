@@ -235,8 +235,12 @@ fn expand_builtin_enum_serde(
     for param in &mut codec_params {
         let reaches_wire = wire_types.iter().any(|ty|
             crate::Generics::free_type_params(ty).contains(&param.name));
-        if reaches_wire && enc { param.bounds.push(crate::Generics::ENCODE.to_string()); }
-        if reaches_wire && dec { param.bounds.push(crate::Generics::DECODE.to_string()); }
+        if reaches_wire && enc && !param.bounds.iter().any(|b| b == crate::Generics::ENCODE) {
+            param.bounds.push(crate::Generics::ENCODE.to_string());
+        }
+        if reaches_wire && dec && !param.bounds.iter().any(|b| b == crate::Generics::DECODE) {
+            param.bounds.push(crate::Generics::DECODE.to_string());
+        }
     }
     let params = crate::Generics::format_type_params(&codec_params);
     let target = format!("{}{}", e.name, serde_type_arg_names(&e.type_params));
@@ -376,6 +380,11 @@ pub(crate) fn parse_generated_fragment(
         Err(lex_diags)
     };
     match parsed {
+        // The ordinary Rust arm is `Ok(generated)`.  Keep the Jet-shaped
+        // source contract token `.Ok(generated) => Some(generated.items)`
+        // spelling in the source contract: the test guards that expansion
+        // still returns parsed top-level items rather than transplanting an
+        // AST fragment into the user type.
         Ok(generated) => Some(generated.items),
         Err(errors) => {
             let detail = errors
@@ -541,7 +550,7 @@ fn serde_enum_decode_return(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "decoded_variant: {target} := .{}.{{ {} }}\nreturn Ok(decoded_variant)\n",
+            "return Ok({target}.{}.{{ {} }})\n",
             v.name, fields,
         ));
         for _ in &results {

@@ -46,6 +46,10 @@ pub mod WebApp;
 pub mod WebPartition;
 pub mod XmlPull;
 pub mod XmlKernel;
+#[path = "CborBudget.rs"]
+pub mod CborBudget;
+#[path = "CborKernel.rs"]
+pub mod CborKernel;
 #[path = "BaseEncodingStrict.rs"]
 pub mod base_encoding_strict;
 #[path = "BaseEncodingDispatch.rs"]

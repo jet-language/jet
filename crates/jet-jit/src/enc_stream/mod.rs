@@ -274,7 +274,8 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) eof: bool,
             pub(crate) record_mode: bool,
-            pub(crate) allocation_budget: Option<super::JetJSONAllocationBudget>,
+            pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
+            pub(crate) output_heap: usize,
         }
         pub struct JSONWriter {
             pub(crate) output: super::JetFileWriter,
@@ -327,7 +328,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) eof: bool,
-            pub(crate) allocation: super::JetJSONAllocationBudget,
+            pub(crate) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct XMLWriter {
             pub(crate) output: super::JetFileWriter,
@@ -337,6 +338,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) finished: bool,
+            pub(crate) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct CBORReader {
             pub(crate) input: super::JetFileReader,
@@ -349,7 +351,7 @@ pub(crate) mod runtime {
             pub(crate) frames: Vec<super::JetCBORReadFrame>,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetJSONAllocationBudget,
+            pub(crate) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct CBORWriter {
             pub(crate) output: super::JetFileWriter,
@@ -361,7 +363,7 @@ pub(crate) mod runtime {
             pub(crate) finished: bool,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetJSONAllocationBudget,
+            pub(crate) allocation: super::JetEncodingAllocationBudget,
         }
     }
 
@@ -1863,6 +1865,27 @@ fn result_err_encoding(error: &runtime::jet_std::EncodingError) -> i64 {
             runtime::jet_std::EncodingErrorKind::IO => 4,
             runtime::jet_std::EncodingErrorKind::State => 5,
         };
+        let cause = match &error.cause {
+            Ok(cause) => {
+                let cause_record = rt.heap.alloc_record(3);
+                let cause_kind = rt.heap.alloc_string(cause.kind.clone());
+                let cause_message = rt.heap.alloc_string(cause.message.clone());
+                let _ = rt.heap.record_set_string(cause_record, 0, cause_kind);
+                let _ = rt.heap.record_set_int(
+                    cause_record,
+                    1,
+                    cause
+                        .os_code
+                        .map(|code| code.wrapping_add(1))
+                        .unwrap_or(0),
+                );
+                let _ = rt
+                    .heap
+                    .record_set_string(cause_record, 2, cause_message);
+                cause_record.wrapping_add(1)
+            }
+            Err(JetAbsent) => 0,
+        };
         let h = rt.heap.alloc_record(8);
         let _ = rt.heap.record_set_int(h, 0, format);
         let _ = rt.heap.record_set_int(h, 1, kind);
@@ -1877,7 +1900,7 @@ fn result_err_encoding(error: &runtime::jet_std::EncodingError) -> i64 {
         let _ = rt.heap.record_set_string(h, 5, path);
         let reason = rt.heap.alloc_string(error.reason.clone());
         let _ = rt.heap.record_set_string(h, 6, reason);
-        let _ = rt.heap.record_set_int(h, 7, 0);
+        let _ = rt.heap.record_set_int(h, 7, cause);
         rt.results.push(super::JitResultValue {
             ok: false,
             bits: h as u64,
@@ -2083,7 +2106,7 @@ pub(crate) extern "C" fn jet_jit_json_writer(file: i64, limits: i64, canonical: 
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2104,7 +2127,7 @@ pub(crate) extern "C" fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2125,7 +2148,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2146,7 +2169,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_reader(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2167,7 +2190,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2188,7 +2211,7 @@ pub(crate) extern "C" fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2209,7 +2232,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2230,7 +2253,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2252,7 +2275,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2274,7 +2297,7 @@ pub(crate) extern "C" fn jet_jit_xml_reader(file: i64, limits: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&e.to_string()),
+        Err(e) => result_err_encoding(&e),
     }
 }
 
@@ -2301,7 +2324,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_write(handle: i64, event: i64) -> i
         runtime::enc_json_writer_write(w, ev.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONWriter"),
     }
 }
@@ -2311,7 +2334,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_flush(handle: i64) -> i64 {
         runtime::enc_json_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONWriter"),
     }
 }
@@ -2321,7 +2344,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_finish(handle: i64) -> i64 {
         runtime::enc_json_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONWriter"),
     }
 }
@@ -2335,7 +2358,7 @@ pub(crate) extern "C" fn jet_jit_json_reader_next(handle: i64) -> i64 {
             let bits = pack_data_event(ev);
             push_ok_handle(option_bits(Some(bits)) as i64)
         }
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONReader"),
     }
 }
@@ -2349,7 +2372,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_write(handle: i64, tree: i64) -> i
         runtime::enc_jsonl_writer_write(w, st.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONLWriter"),
     }
 }
@@ -2359,7 +2382,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_flush(handle: i64) -> i64 {
         runtime::enc_jsonl_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONLWriter"),
     }
 }
@@ -2369,7 +2392,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_finish(handle: i64) -> i64 {
         runtime::enc_jsonl_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONLWriter"),
     }
 }
@@ -2383,7 +2406,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_reader_next(handle: i64) -> i64 {
             let h = alloc_datatree(&from_stream_tree(&tree));
             push_ok_handle(option_bits(Some(h)) as i64)
         }
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad JSONLReader"),
     }
 }
@@ -2402,7 +2425,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 
         runtime::enc_csv_writer_write(w, cells.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CSVWriter"),
     }
 }
@@ -2412,7 +2435,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
         runtime::enc_csv_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CSVWriter"),
     }
 }
@@ -2422,7 +2445,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
         runtime::enc_csv_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CSVWriter"),
     }
 }
@@ -2443,7 +2466,7 @@ pub(crate) extern "C" fn jet_jit_csv_reader_next(handle: i64) -> i64 {
             });
             push_ok_handle(option_bits(Some(list)) as i64)
         }
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CSVReader"),
     }
 }
@@ -2457,7 +2480,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i
         runtime::enc_cbor_writer_write(w, ev.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CBORWriter"),
     }
 }
@@ -2467,7 +2490,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
         runtime::enc_cbor_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CBORWriter"),
     }
 }
@@ -2477,7 +2500,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
         runtime::enc_cbor_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CBORWriter"),
     }
 }
@@ -2491,7 +2514,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
             let bits = pack_data_event(ev);
             push_ok_handle(option_bits(Some(bits)) as i64)
         }
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad CBORReader"),
     }
 }
@@ -2505,7 +2528,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64
         runtime::enc_xml_writer_write(w, st.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad XMLWriter"),
     }
 }
@@ -2515,7 +2538,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_flush(handle: i64) -> i64 {
         runtime::enc_xml_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad XMLWriter"),
     }
 }
@@ -2525,7 +2548,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_finish(handle: i64) -> i64 {
         runtime::enc_xml_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad XMLWriter"),
     }
 }
@@ -2539,7 +2562,7 @@ pub(crate) extern "C" fn jet_jit_xml_reader_next(handle: i64) -> i64 {
             let h = alloc_datatree(&from_stream_tree(&tree));
             push_ok_handle(option_bits(Some(h)) as i64)
         }
-        Some(Err(e)) => result_err_msg(&e.to_string()),
+        Some(Err(e)) => result_err_encoding(&e),
         None => result_err_msg("bad XMLReader"),
     }
 }
