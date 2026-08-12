@@ -5949,7 +5949,7 @@ impl<'a> EvalCtx<'a> {
                         | TTypedTextInterpKind::Path
                         | TTypedTextInterpKind::DateTime => {
                             crate::Comptime::evaluate_typed_head(
-                                kind,
+                                *kind,
                                 literals,
                                 &values,
                                 self.span(),

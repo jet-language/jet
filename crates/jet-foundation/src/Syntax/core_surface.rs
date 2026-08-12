@@ -494,7 +494,7 @@ impl TypedHeadKind {
     }
 }
 
-pub const fn typed_head_kind(name: &str) -> Option<TypedHeadKind> {
+pub fn typed_head_kind(name: &str) -> Option<TypedHeadKind> {
     match name {
         DSL_BLOCK_SQL => Some(TypedHeadKind::SQL),
         MARKER_HTML => Some(TypedHeadKind::HTML),

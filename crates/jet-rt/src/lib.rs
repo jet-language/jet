@@ -622,6 +622,13 @@ impl JetArena {
         }
     }
 
+    pub fn record_clone_string(&self, record: i64, index: i64) -> Option<String> {
+        match self.record_get(record, index) {
+            Some(JetVal::String(value)) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
     pub fn record_get_string(&mut self, record: i64, index: i64) -> Option<i64> {
         let value = match self.record_get(record, index)? {
             JetVal::String(value) => value.clone(),

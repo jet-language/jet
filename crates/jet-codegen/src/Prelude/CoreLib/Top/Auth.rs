@@ -646,7 +646,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod auth_tests {
     use super::*;
 
     #[test]

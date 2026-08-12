@@ -94,13 +94,6 @@ fn foreign_target(
 /// Resolve the targets named by any foreign import. The parser and AST keep
 /// member lists in `ImportKind::Unqualified`; single-library imports remain
 /// `Module` imports and share this resolver at inline scope.
-pub(crate) fn foreign_import_targets(
-    bundle: &ProgramBundle,
-    module_idx: usize,
-    imp: &ImportDecl,
-) -> Vec<(String, usize)> {
-    foreign_import_targets_in_scope(bundle, module_idx, imp, None)
-}
 
 pub(crate) fn foreign_import_targets_in_scope(
     bundle: &ProgramBundle,

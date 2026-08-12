@@ -9,7 +9,7 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, ImportKind, Item, ProgramBundle,
+    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle,
     StructDef, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};

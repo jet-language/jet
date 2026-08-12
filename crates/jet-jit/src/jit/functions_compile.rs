@@ -823,6 +823,7 @@ pub(crate) fn lower_option_lift2_factory(
             reachable_continue_blocks: HashSet::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            result_option_vars: HashSet::new(),
             dead: false,
             next_var: 0,
             method_struct: None,

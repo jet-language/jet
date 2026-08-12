@@ -580,6 +580,7 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
 #[cfg(test)]
 mod generated_name_tests {
     use super::{generated_name, generated_path, generated_suffix, is_reserved_generated_name};
+    use crate::Syntax::{classify_identifier, IdentifierClass};
 
     #[test]
     fn generated_names_have_one_machine_prefix() {

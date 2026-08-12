@@ -1062,7 +1062,6 @@ fn check_bundle_opts_for_output_inner(
                 continue;
             }
             let bindings = imp.walk_bindings();
-            let st = &mut states[idx];
             let group_diagnostics = diags.len();
             let mut inserted_unqualified = Vec::new();
             let mut inserted_reexports = Vec::new();
@@ -1070,14 +1069,15 @@ fn check_bundle_opts_for_output_inner(
             let mut inserted_core_items = Vec::new();
             let mut inserted_file = Vec::new();
             let mut inserted_imports = Vec::new();
-            if let Some(canonical) = st.code_modules.get(module_alias.as_str()) {
+            if let Some(canonical) = states[idx].code_modules.get(module_alias.as_str()).cloned() {
                 // Inline module: items are mangled as `__jet_{alias}__{item}`.
+                let st = &mut states[idx];
                 for binding in &bindings {
                     let orig = binding
                         .original
                         .expect("member walker returned a binding without a member");
                     let local = binding.local.clone();
-                    let mangled = jet_foundation::Names::member_name(canonical, orig);
+                    let mangled = jet_foundation::Names::member_name(&canonical, orig);
                     if st.unqualified.contains_key(&local)
                         || st.unqualified_file.contains_key(&local)
                         || st.core_imports.contains_key(&local)
@@ -1195,9 +1195,9 @@ fn check_bundle_opts_for_output_inner(
                         }
                     }
                 }
-            } else if st.imports.contains_key(module_alias.as_str()) {
+            } else if states[idx].imports.contains_key(module_alias.as_str()) {
                 // File module: look up items in the target module's state.
-                let target_idx = st.imports[module_alias.as_str()];
+                let target_idx = states[idx].imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
                 for binding in &bindings {
                     let orig = binding
@@ -1207,16 +1207,16 @@ fn check_bundle_opts_for_output_inner(
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
                     let file_module_target = states[target_idx]
                         .imports
-                        .get(orig.as_str())
+                        .get(orig)
                         .copied()
                         .filter(|_| {
                             name_ledger
                                 .declaration(target_idx, orig)
                                 .is_some_and(|declaration| declaration.kind == "file_module")
                         });
-                    if st.unqualified.contains_key(&local)
-                        || st.unqualified_file.contains_key(&local)
-                        || st.core_imports.contains_key(&local)
+                    if states[idx].unqualified.contains_key(&local)
+                        || states[idx].unqualified_file.contains_key(&local)
+                        || states[idx].core_imports.contains_key(&local)
                     {
                         diags.push(Diagnostic::error(
                             "E0105",
@@ -1240,7 +1240,7 @@ fn check_bundle_opts_for_output_inner(
                         }
                         continue;
                     }
-                    let exists = states[target_idx].funcs.contains_key(orig.as_str());
+                    let exists = states[target_idx].funcs.contains_key(orig);
                     if !exists {
                         diags.push(Diagnostic::error(
                             "E0611",
@@ -1281,6 +1281,7 @@ fn check_bundle_opts_for_output_inner(
                 ));
             }
             if diags.len() != group_diagnostics {
+                let st = &mut states[idx];
                 for name in inserted_unqualified {
                     st.unqualified.remove(&name);
                 }
@@ -1479,7 +1480,7 @@ fn check_bundle_opts_for_output_inner(
                     }
                     let resolved = {
                         let st = &states[idx];
-                        if let Some(canonical) = st.code_modules.get(&module_alias) {
+                        if let Some(canonical) = st.code_modules.get(module_alias) {
                             let mangled =
                                 jet_foundation::Names::member_name(canonical, &orig);
                             if !st.funcs.contains_key(&mangled) {
@@ -1546,10 +1547,10 @@ fn check_bundle_opts_for_output_inner(
                                     None
                                 }
                             }
-                        } else if let Some(&target_idx) = st.imports.get(&module_alias) {
+                        } else if let Some(&target_idx) = st.imports.get(module_alias) {
                             let target = &states[target_idx];
                             let visible = name_ledger.visible(idx, target_idx, &orig);
-                            if !target.funcs.contains_key(&orig) {
+                            if !target.funcs.contains_key(orig) {
                                 diags.push(Diagnostic::error(
                                     "E0611",
                                     format!("{orig} is not defined in module {module_alias}"),

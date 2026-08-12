@@ -13,4 +13,13 @@ pub(crate) trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+/// Display/debug seams for included Prelude fragments (`impl crate::JetDisplay`).
+pub(crate) trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
+pub(crate) trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
 pub mod Comptime;

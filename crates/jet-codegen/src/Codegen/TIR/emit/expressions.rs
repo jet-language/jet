@@ -1,5 +1,4 @@
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
-use crate::Generics;
 use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;

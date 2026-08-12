@@ -169,7 +169,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let old = std::mem::replace(e, Expr::Absent(span));
-        let Expr::Str(parts, _) = old else {
+        let Expr::Str(mut parts, _) = old else {
             *e = old;
             self.diags.push(Diagnostic::error(
                 "E0112",
@@ -3602,6 +3602,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Named(type_name) = t {
+            let display_type_name = self.display_type_name(type_name, None);
             // D-LAYOUT-FACTS1=B: `None(Int)` preserves the ratified wall, but
             // reading a byte fact must identify the missing canonical target
             // layout engine instead of becoming a silent absent value.

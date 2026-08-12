@@ -457,6 +457,7 @@ impl LowerCtx<'_, '_> {
         subject: Value,
         pattern: &Pattern,
         enum_name: Option<&str>,
+        heap: bool,
     ) -> Result<Value, String> {
         match pattern {
             Pattern::Range { lo, hi, .. } => {
@@ -469,7 +470,8 @@ impl LowerCtx<'_, '_> {
             Pattern::Or(alternatives, _) => {
                 let mut result = self.b.ins().iconst(types::I8, 0);
                 for alternative in alternatives {
-                    let condition = self.lower_pattern_condition(subject, alternative, enum_name)?;
+                    let condition =
+                        self.lower_pattern_condition(subject, alternative, enum_name, heap)?;
                     result = self.b.ins().bor(result, condition);
                 }
                 Ok(result)
@@ -482,7 +484,6 @@ impl LowerCtx<'_, '_> {
                 if indices.is_empty() {
                     return Err(format!("jit enum `{enum_name}::{variant}`"));
                 }
-                let heap = self.enum_variant_uses_heap(enum_name, variant);
                 let actual = self.enum_discriminant(subject, heap);
                 let mut matches_variant = self.b.ins().iconst(types::I8, 0);
                 for index in indices {
@@ -500,7 +501,7 @@ impl LowerCtx<'_, '_> {
                     .cloned()
                     .unwrap_or(Type::Int);
                 let payload = if heap {
-                    self.unpack_enum_heap_payload(subject, &payload_ty, 0)?
+                    self.unpack_enum_heap_payload(subject, &payload_ty)?
                 } else {
                     self.unpack_enum_scalar(subject, &payload_ty)?
                 };
@@ -552,7 +553,7 @@ impl LowerCtx<'_, '_> {
                 )
             })?;
             let payload = if heap {
-                self.unpack_enum_heap_payload(subject, &payload_ty, field_index)?
+                self.unpack_enum_heap_payload_at(subject, &payload_ty, field_index)?
             } else {
                 self.unpack_enum_scalar(subject, &payload_ty)?
             };
@@ -4353,7 +4354,7 @@ impl LowerCtx<'_, '_> {
                             .enum_type
                             .as_deref()
                             .or_else(|| user_type_name(&subj.ty));
-                        self.lower_pattern_condition(value, &pattern.pattern, enum_name)?
+                        self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)?
                     }
                 };
                 if self.dead {
@@ -8215,14 +8216,12 @@ impl LowerCtx<'_, '_> {
             .struct_type_params(type_name)
             .is_some_and(|params| !params.is_empty());
         let buf = self.call_host(self.host.str_begin, &[]);
-        self.push_str_lit(
-            buf,
-            if generic {
-                &format!("{type_name}(")
-            } else {
-                &format!("{type_name} {{ ")
-            },
-        )?;
+        let open = if generic {
+            format!("{type_name}(")
+        } else {
+            format!("{type_name} {{ ")
+        };
+        self.push_str_lit(buf, &open)?;
         for (index, (field_name, declared_ty)) in
             field_names.iter().zip(field_tys.iter()).enumerate()
         {
@@ -16680,7 +16679,7 @@ impl LowerCtx<'_, '_> {
                     .enum_type
                     .as_deref()
                     .or_else(|| user_type_name(&subj.ty));
-                self.lower_pattern_condition(value, &pattern.pattern, enum_name)
+                self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)
             }
             TExprKind::OptionLift2 { f, a, b } => {
                 self.lower_option_lift2(f, a, b, &expr.ty)
@@ -24555,7 +24554,7 @@ impl LowerCtx<'_, '_> {
                 let entries_ty = payload_ty
                     .clone()
                     .unwrap_or(Type::List(Box::new(Type::Int)));
-                let payload = self.unpack_enum_heap_payload(subject, &entries_ty, 0)?;
+                let payload = self.unpack_enum_heap_payload_at(subject, &entries_ty, 0)?;
                 let place = temp.clone();
                 old_var = self.vars.remove(&place);
                 old_ty = self.var_tys.remove(&place);
@@ -24569,7 +24568,7 @@ impl LowerCtx<'_, '_> {
                 if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                     if name != "_" {
                         let pty = payload_ty.clone().unwrap_or(Type::Int);
-                        let payload = self.unpack_enum_heap_payload(subject, &pty, 0)?;
+                        let payload = self.unpack_enum_heap_payload_at(subject, &pty, 0)?;
                         let place = TIR::local_place(name);
                         old_var = self.vars.remove(&place);
                         old_ty = self.var_tys.remove(&place);
@@ -25110,7 +25109,7 @@ impl LowerCtx<'_, '_> {
                 let entries_ty = payload_ty
                     .clone()
                     .unwrap_or(Type::List(Box::new(Type::Int)));
-                let payload = self.unpack_enum_heap_payload(handle, &entries_ty, 0)?;
+                let payload = self.unpack_enum_heap_payload_at(handle, &entries_ty, 0)?;
                 let place = temp.clone();
                 old_var = self.vars.remove(&place);
                 old_ty = self.var_tys.remove(&place);
@@ -25125,7 +25124,7 @@ impl LowerCtx<'_, '_> {
                 if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                     if name != "_" {
                         let pty = payload_ty.clone().unwrap_or(Type::Int);
-                        let payload = self.unpack_enum_heap_payload(handle, &pty, 0)?;
+                        let payload = self.unpack_enum_heap_payload_at(handle, &pty, 0)?;
                         let place = TIR::local_place(name);
                         old_var = self.vars.remove(&place);
                         old_ty = self.var_tys.remove(&place);

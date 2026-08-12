@@ -4297,6 +4297,7 @@ impl<'a> Checker<'a> {
                 }
             };
             let (_, dispatch_type_name) = Self::split_type_name(&type_name);
+            let display_type_name = self.display_type_name(&type_name, None);
             if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
                 if let Some((_, _, field_ty)) =
                     fields.iter().find(|(fname, _, _)| fname == method)

@@ -90,6 +90,13 @@ static INTERPRETER_INTERRUPT_QUEUE: interrupt_queue::JetInterruptQueue =
     interrupt_queue::JetInterruptQueue::new();
 static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
+fn wall_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
 fn note_interpreter_interrupt() {
     INTERPRETER_INTERRUPT_QUEUE.note();
 }

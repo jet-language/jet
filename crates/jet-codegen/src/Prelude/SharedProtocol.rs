@@ -166,7 +166,7 @@ impl JetSharedTransaction {
         }
     }
 
-    pub fn commit(mut self) {
+    pub fn commit(self) {
         let _ = self.commit_with(|| ());
     }
 

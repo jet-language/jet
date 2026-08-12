@@ -357,8 +357,8 @@ extern "C" fn jet_jit_url_parse(s: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
-    let literals = list_strings(literals);
-    let holes = list_strings(holes);
+    let literals = list_strings(literals).unwrap_or_default();
+    let holes = list_strings(holes).unwrap_or_default();
     push(NetValue::Url(runtime::url_typed_literal(&literals, &holes)))
 }
 
