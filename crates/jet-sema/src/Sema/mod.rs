@@ -1940,7 +1940,7 @@ mod CheckerSchedule;
 mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
-mod Diagnostics;
+pub mod Diagnostics;
 mod Edition;
 mod Effects;
 mod FlowFacts;

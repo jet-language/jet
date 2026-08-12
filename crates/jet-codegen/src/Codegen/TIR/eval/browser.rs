@@ -50,12 +50,9 @@ pub(super) fn handle(
     ) {
         crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {
             value.ok_or_else(|| {
-                Diagnostic::error(
-                    "E0956",
-                    format!("Browser method `{method}` can't run in tier 0"),
-                    "the Browser value does not support this method".to_string(),
-                    "use a method defined for this Browser value".to_string(),
-                    Some(span),
+                crate::Sema::Diagnostics::browser_tier0_unsupported(
+                    &format!("method `{method}`"),
+                    span,
                 )
             })
         })

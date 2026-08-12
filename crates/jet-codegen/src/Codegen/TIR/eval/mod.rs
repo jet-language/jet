@@ -2810,7 +2810,7 @@ pub fn lower_expr_for_eval(
     let mut diagnostic = None;
     crate::Comptime::walk_expr_nodes_for_validation(expr, &mut |node| {
         if diagnostic.is_none() {
-            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(node);
+            diagnostic = crate::Sema::Diagnostics::validate_typed_boundary_before_lowering(node);
         }
     });
     if let Some(diagnostic) = diagnostic {
@@ -2855,7 +2855,7 @@ pub fn lower_stmts_for_eval(
     let mut diagnostic = None;
     crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
         if diagnostic.is_none() {
-            diagnostic = crate::Codegen::TIR::validate_typed_boundary_before_lowering(expr);
+            diagnostic = crate::Sema::Diagnostics::validate_typed_boundary_before_lowering(expr);
         }
     });
     if let Some(diagnostic) = diagnostic {

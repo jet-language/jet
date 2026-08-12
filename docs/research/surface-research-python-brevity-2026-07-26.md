@@ -275,7 +275,7 @@ This revision changes:
 - `examples/features/basics/named_args.jet`;
 - `examples/features/text/string_parse.jet`;
 - `examples/features/collections/iter_tools_audit.jet`;
-- `examples/features/concurrency/taskgroup.jet`.
+- `examples/features/concurrency/task_group.jet`.
 
 The examples now show:
 

@@ -129,6 +129,16 @@ fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     })
 }
 
+/// Run a compiler-facing test or tooling operation on the canonical worker.
+///
+/// Coverage and other integration probes use the same worker boundary when
+/// they call lower seams directly. Ambient compiler callbacks are installed
+/// by the full frontend entry points, not by this raw worker adapter.
+#[doc(hidden)]
+pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    jet_driver::run_compiler_work(work)
+}
+
 /// Run the full front end on source text. All lex errors (then all parse
 /// errors) surface in one run — M1 error recovery.
 pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {

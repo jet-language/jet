@@ -633,6 +633,22 @@ fn lower_if_cond_atom(
                 );
             }
         }
+        if is_binding_free_user_variant_pattern_test(pattern, cx) {
+            let enum_type = match pattern {
+                Pattern::Variant { variant, .. } => {
+                    cx.variant_owner.get(variant).map(String::as_str)
+                }
+                _ => None,
+            };
+            return (
+                TIfCond::Matches {
+                    pattern: TPattern::arm(pattern.clone(), enum_type.map(str::to_string)),
+                    subj,
+                },
+                None,
+                Vec::new(),
+            );
+        }
     }
     // D-PATR / D-IFDIST1: expression-position range arm → `subject >= lo && subject <= hi`.
     if let Expr::PatternTest {
@@ -759,28 +775,6 @@ fn lower_if_cond_atom(
                     subj,
                 },
                 Some((name, place, ty)),
-                Vec::new(),
-            );
-        }
-    }
-    if let Expr::PatternTest {
-        subject, pattern, ..
-    } = cond
-    {
-        if is_binding_free_user_variant_pattern_test(pattern, cx) {
-            let subj = lower_if_expr(subject, cx, env, cached);
-            let enum_type = match pattern {
-                Pattern::Variant { variant, .. } => {
-                    cx.variant_owner.get(variant).map(String::as_str)
-                }
-                _ => None,
-            };
-            return (
-                TIfCond::Matches {
-                    pattern: TPattern::arm(pattern.clone(), enum_type.map(str::to_string)),
-                    subj,
-                },
-                None,
                 Vec::new(),
             );
         }

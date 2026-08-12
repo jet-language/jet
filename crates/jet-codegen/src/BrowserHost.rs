@@ -120,13 +120,7 @@ fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtVa
 }
 
 fn host_error(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("Browser {what} can't run in tier 0"),
-        "the Browser value did not come from the active tier-0 session".to_string(),
-        "create and use the Browser value in one `jet dev` iteration".to_string(),
-        Some(span),
-    )
+    crate::Sema::Diagnostics::browser_tier0_unsupported(what, span)
 }
 
 fn int_arg(args: &[CtValue], index: usize, span: Span) -> Result<i64, Diagnostic> {

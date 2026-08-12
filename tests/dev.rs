@@ -66,10 +66,15 @@ where
 {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     jet_jit::reset_jit_trace_for_test();
-    jet_jit::set_trace_tiers(trace_tiers);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    let flags = jet_jit::jit_trace_flags_for_test();
-    let trace = jet_jit::take_last_trace();
+    let (result, flags, trace) = jet::run_compiler_work(|| {
+        // Trace state is thread-local. Install it inside the canonical
+        // compiler worker, alongside the coverage compile path it protects.
+        jet_jit::set_trace_tiers(trace_tiers);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        let flags = jet_jit::jit_trace_flags_for_test();
+        let trace = jet_jit::take_last_trace();
+        (result, flags, trace)
+    });
     jet_jit::merge_jit_trace_flags_for_test(flags);
     jet_jit::publish_trace(trace);
     result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
@@ -7629,7 +7634,12 @@ fn jit_coverage_audit_inner() {
         }
         return;
     }
-    let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
+    let (expected_covered, expected_gaps, run_gaps, _) = parse_jit_gap_manifest_full();
+    eprintln!(
+        "jit gap ledger: gaps: {}, run_gaps: {}",
+        expected_gaps.len(),
+        run_gaps.len()
+    );
     eprintln!("jit compile-covered ({}):", covered.len());
     for s in &covered {
         eprintln!("  {s}");

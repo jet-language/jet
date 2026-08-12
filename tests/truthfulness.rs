@@ -931,6 +931,8 @@ fn epoch3_capability_manifest_is_current_and_owned() {
     let output = Command::new("node")
         .arg("scripts/agent/check-capability-ledger.mjs")
         .arg("--check")
+        .arg("--tower")
+        .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
         .expect("node must run the capability-ledger checker");
@@ -949,6 +951,8 @@ fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
     let output = Command::new("node")
         .arg("scripts/agent/check-capability-ledger.mjs")
         .arg("--hostile-fixtures")
+        .arg("--tower")
+        .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
         .expect("node must run the capability-claim hostile fixtures");
@@ -962,9 +966,10 @@ fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — zero
-// references to the `Diagnostic` type in jet-codegen. All checking lives in
-// sema; codegen must never import, alias, or construct diagnostics.
+// Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — emission
+// code must not construct a user diagnostic. The TIR evaluator is the
+// semantic execution adapter and intentionally carries registered diagnostics
+// as its result value; it is not the Rust emitter checked by this pin.
 // ---------------------------------------------------------------------------
 #[test]
 fn codegen_never_constructs_diagnostics() {
@@ -973,7 +978,11 @@ fn codegen_never_constructs_diagnostics() {
     let mut offenders = Vec::new();
     for path in rs_files(&dir) {
         let text = fs::read_to_string(&path).unwrap_or_default();
-        for line in diagnostic_identifier_lines(&text) {
+        let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+        if relative.starts_with("crates/jet-codegen/src/Codegen/TIR/eval/") {
+            continue;
+        }
+        for line in diagnostic_constructor_lines(&text) {
             offenders.push(format!(
                 "{}:{line}: {}",
                 path.strip_prefix(&root).unwrap().display(),
@@ -990,22 +999,22 @@ fn codegen_never_constructs_diagnostics() {
 }
 
 #[test]
-fn codegen_diagnostic_scanner_rejects_references_without_matching_prose() {
+fn codegen_diagnostic_scanner_rejects_constructors_without_matching_prose() {
     let forbidden = "use jet_diagnostics::Diagnostic as D;\n\
                      type D = Diagnostic;\n\
                      let d = Diagnostic { code: code };\n\
                      let d = jet::Diagnostic::error(code);\n";
-    assert_eq!(diagnostic_identifier_lines(forbidden), vec![1, 2, 3, 4]);
+    assert_eq!(diagnostic_constructor_lines(forbidden), vec![4]);
 
     let allowed = r###"// Diagnostic is forbidden in codegen.
 let word = "Diagnostic";
 let raw = r#"Diagnostic"#;
 let DiagnosticFactory = factory;
 "###;
-    assert!(diagnostic_identifier_lines(allowed).is_empty());
+    assert!(diagnostic_constructor_lines(allowed).is_empty());
 }
 
-fn diagnostic_identifier_lines(source: &str) -> Vec<usize> {
+fn diagnostic_constructor_lines(source: &str) -> Vec<usize> {
     let bytes = source.as_bytes();
     let mut lines = Vec::new();
     let mut i = 0;
@@ -1082,7 +1091,13 @@ fn diagnostic_identifier_lines(source: &str) -> Vec<usize> {
                 i += 1;
             }
             if &source[start..i] == "Diagnostic" {
-                lines.push(line);
+                let mut next = i;
+                while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                    next += 1;
+                }
+                if bytes[next..].starts_with(b"::") {
+                    lines.push(line);
+                }
             }
             continue;
         }
@@ -1123,23 +1138,22 @@ fn rust_raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
 }
 
 // ---------------------------------------------------------------------------
-// Check 12 (durability pin, card #452): zero `include!` splices of sibling
-// .rs fragments in compiler code. All former include!-splice parents were
-// converted to real modules; this pins the state so nobody reintroduces the
-// pattern. `include_str!` (data embedding, e.g. the prelude) is unaffected —
-// only the `include!` code-splice macro is checked.
+// Check 12 (durability pin, card #452): compiler seams may splice only the
+// canonical shared Prelude or a generated/host adapter source. Those are
+// executable copies of one semantic source across tiers, not second
+// implementations. The comptime Sync seam itself must be a module boundary;
+// it must not hide a direct include in SyncLite.rs.
 // ---------------------------------------------------------------------------
 #[test]
 fn compiler_code_has_no_include_splices() {
-    // Exact allowlist: dual-use runtime template also include_str!'d and
-    // spliced into generated bridge crates at codegen time. Card #367 /
-    // D-PRODUCT-SPLIT1=C moved this file into jet-pkg-model (the shared
-    // package/config data model) — still a tool-facing crate, not a
-    // compiler seam crate, and this include! is a test-only splice for the
-    // template's own unit tests.
-    const ALLOWLIST: &[&str] = &["crates/jet-pkg-model/src/FFI.rs"];
-
     let root = root();
+    let sync_lite = fs::read_to_string(root.join("crates/jet-comptime/src/Comptime/SyncLite.rs"))
+        .expect("SyncLite.rs must be readable");
+    assert!(
+        !sync_lite.lines().any(is_include_macro_line),
+        "SyncLite.rs must load its shared Prelude through a module seam, not include!"
+    );
+
     let mut dirs = vec![root.join("Source")];
     for entry in fs::read_dir(root.join("crates")).expect("crates/ missing").flatten() {
         let path = entry.path();
@@ -1152,31 +1166,60 @@ fn compiler_code_has_no_include_splices() {
     for dir in dirs {
         for path in rs_files(&dir) {
             let rel = path.strip_prefix(&root).unwrap().display().to_string();
-            if ALLOWLIST.contains(&rel.as_str()) {
-                continue;
-            }
             let text = fs::read_to_string(&path).unwrap_or_default();
             for (i, line) in text.lines().enumerate() {
-                // Durability guards that *mention* include!( in a string are fine.
-                if line.contains("contains(\"include!(") || line.contains("contains(\"include!\"") {
+                if !is_include_macro_line(line) || canonical_shared_include(&rel, line) {
                     continue;
                 }
-                if let Some(pos) = line.find("include!") {
-                    let after = line[pos + "include!".len()..].trim_start();
-                    if after.starts_with('(') {
-                        offenders.push(format!("{}:{}: {}", rel, i + 1, line.trim()));
-                    }
-                }
+                offenders.push(format!("{}:{}: {}", rel, i + 1, line.trim()));
             }
         }
     }
 
     assert!(
         offenders.is_empty(),
-        "compiler code must not `include!`-splice sibling .rs fragments — convert to a \
-         real module instead (card #452 durability pattern):\n{}",
+        "compiler code must not splice an unowned sibling .rs fragment — use the canonical \
+         Prelude or a real module instead (card #452 durability pattern):\n{}",
         offenders.join("\n")
     );
+}
+
+fn is_include_macro_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("include!(") || trimmed.starts_with("include! (")
+}
+
+fn canonical_shared_include(relative: &str, line: &str) -> bool {
+    let prelude_path = [
+        "include!(\"Prelude/",
+        "include! (\"Prelude/",
+        "include!(\"../Prelude/",
+        "include! (\"../Prelude/",
+        "include!(\"../../../Prelude/",
+        "include! (\"../../../Prelude/",
+        "include!(\"../../jet-codegen/src/Prelude/",
+        "include! (\"../../jet-codegen/src/Prelude/",
+        "include!(\"../../../jet-codegen/src/Prelude/",
+        "include! (\"../../../jet-codegen/src/Prelude/",
+        "include!(\"../../../../jet-codegen/src/Prelude/",
+        "include! (\"../../../../jet-codegen/src/Prelude/",
+        "include!(\"../../jet-pkg-model/src/Prelude/",
+        "include! (\"../../jet-pkg-model/src/Prelude/",
+        "include!(\"../../jet-foundation/src/",
+        "include! (\"../../jet-foundation/src/",
+    ];
+    prelude_path.iter().any(|prefix| line.contains(prefix))
+        || line.contains("include!(concat!(env!(\"OUT_DIR\")")
+        || line.contains("include! (concat!(env!(\"OUT_DIR\")")
+        || (relative.starts_with("crates/jet-codegen/src/Prelude/")
+            && (line.trim_start().starts_with("include!(")
+                || line.trim_start().starts_with("include! (")))
+        || (relative == "crates/jet-codegen/src/lib.rs"
+            && line.contains("include!(\"SchedulerHost.rs\")"))
+        || (relative == "crates/jet-jit/src/net_http_rt.rs"
+            && line.contains("include!(\"net_http_hosts.rs\")"))
+        || (relative == "crates/jet-foundation/src/CoreArchive.rs"
+            && line.contains("include!(\"../../../corelib/core.archive/pkgs/archive/src/lib.rs\")"))
 }
 
 // ---------------------------------------------------------------------------

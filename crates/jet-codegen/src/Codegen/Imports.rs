@@ -898,7 +898,9 @@ pub(crate) fn inline_import_maps(
                         );
                     }
                 }
-            } else if crate::AST::core_list_prefix(module_alias).is_none() {
+            } else if imp.core_module_path().is_none()
+                && crate::AST::core_list_prefix(module_alias).is_none()
+            {
                 let target = file_import_target(bundle, module_idx, module_alias);
                 let target = target.unwrap_or_else(|| {
                     unreachable!(
@@ -1280,6 +1282,20 @@ fn unqualified_file_function_entries(
         else {
             continue;
         };
+        if imp.core_module_path().is_some() {
+            continue;
+        }
+        // Inline code modules have no file import edge. Their selective
+        // bindings are projected by the inline maps, so they must not enter
+        // the file-module signature resolver below.
+        if bundle.modules[module_idx].items.iter().any(|item| {
+            matches!(
+                item,
+                Item::CodeModule(cm) if cm.body.is_some() && cm.name == module_alias.as_str()
+            )
+        }) {
+            continue;
+        }
         let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
             if is_foreign_member_list(imp)
                 || crate::AST::core_list_prefix(module_alias).is_some()
