@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35628,
+    "rev": 35648,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -117053,20 +117053,20 @@
         {
           "n": 1,
           "text": "T.reflect().path and runtime reflection expose the canonical typeable path while .name remains the leaf.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:18.856Z"
+          "evidence": "T.reflect().path exposes canonical typeable path, .name stays leaf: tests/reflect.rs assertions green (orchestrator re-ran --test reflect: 7 passed 0 failed) at 71339a069",
+          "at": "2026-08-12T21:26:58.260Z"
         },
         {
           "n": 2,
           "text": "Diagnostics use the leaf when unique and the canonical path when ambiguous; hover, project parts, and JSON use the same spelling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:18.857Z"
+          "evidence": "Hover/JSON leaf-when-unique via one span-aware projection (Names.rs:266, Symbols.rs:369); LSP::tests::unique_type_uses_leaf_in_hover_and_json green (orchestrator re-ran)",
+          "at": "2026-08-12T21:26:59.029Z"
         },
         {
           "n": 3,
@@ -117089,8 +117089,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:57.132Z",
-      "updated": "2026-08-12T18:58:12.863Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T21:26:59.029Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c03wyvdx",
@@ -117135,20 +117135,20 @@
         {
           "n": 1,
           "text": "The spec states zero underscores as ordinary names, one underscore as the human-facing discard/internal rung, and two as machine space; dunder and sunder shapes have no user meaning.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:19.313Z"
+          "evidence": "D-NAME-SIGIL1=A section in docs/spec/syntax-decisions.md:5620 states the full ladder: zero underscores ordinary, one human discard/internal, two machine space",
+          "at": "2026-08-12T21:35:08.004Z"
         },
         {
           "n": 2,
           "text": "Generated symbols use one __jet prefix through the canonical mangle path; inline user_ and JIT-private variants are gone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:19.313Z"
+          "evidence": "One __jet prefix through canonical allocator (Names.rs:441, Codegen/mod.rs macros); guard test green on merged master",
+          "at": "2026-08-12T21:34:34.061Z"
         },
         {
           "n": 3,
@@ -117171,8 +117171,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:58.917Z",
-      "updated": "2026-08-12T18:58:13.296Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T21:35:08.004Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c0bxf5m7",
@@ -121152,7 +121152,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Two tests in tests/shared_guards.rs (returned_named_guard_reads_and_releases_on_all_tiers, concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers) panic on the native/JIT tier at tests/shared_guards.rs:266 with 'SharedGuard must deopt until the JIT can marshal the full Prelude protocol.' This is an I9 gap: the JIT host currently has no marshalling path for SharedGuard values and falls back to a deopt-only stub instead of calling the same Prelude protocol AOT uses. Find the SharedGuard Prelude functions (search crates/jet-codegen/src/Prelude for SharedGuard) and the Cranelift JIT marshalling layer, and add the missing marshal-in/marshal-out calls so the JIT invokes the same Prelude symbols as AOT — no new policy in the JIT host itself. Proof: both named tests pass on every tier, and no tests/jit_gaps.txt entry is added for this surface.",
       "blockedBy": [],
@@ -121213,20 +121213,20 @@
         {
           "n": 1,
           "text": "SharedGuard values marshal through the JIT tier by calling the same Prelude protocol AOT uses — no deopt-only path, no policy re-encoded in the JIT host (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "fable-e3-audit",
-          "verifiedBy": null,
-          "evidence": "b312d1c5a (merged to master via 5ae24334f, ancestor of HEAD): crates/jet-jit/src/Memory.rs routes shared lifecycle/STM through the included Prelude SharedProtocol — same symbols AOT embeds. The 'must deopt until the JIT can marshal the full Prelude protocol' panic string is gone from Memory.rs/SharedProtocol/tests (grep clean); tests/shared_guards.rs:219-390 now asserts native-tier behavior with per-case deopt expectations. 10 shared_guards tests recorded passing on the branch and merged master; tests/jit_gaps.txt diff empty (no parking).",
-          "at": "2026-08-12T17:52:01.404Z"
+          "verifiedBy": "orchestrator",
+          "evidence": "Audited: JIT defers Shared edits through Prelude transaction protocol (Memory.rs:908, lower_ctx.rs:7277, functions_compile.rs:553); no policy re-encoded in host",
+          "at": "2026-08-12T20:48:33.577Z"
         },
         {
           "n": 2,
           "text": "shared_guards.rs returned_named_guard_reads_and_releases_on_all_tiers and concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers pass on every tier",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:59:02.287Z"
+          "evidence": "shared_guards 10/10 green incl returned_named_guard_reads_and_releases_on_all_tiers and concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers; orchestrator-verified in m01-jit at 7e0dd6a99, merged 4b8614a5b",
+          "at": "2026-08-12T20:48:32.667Z"
         },
         {
           "n": 3,
@@ -121246,8 +121246,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:38:12.266Z",
-      "updated": "2026-08-12T18:59:02.288Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T20:48:42.908Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T20:48:42.908Z"
     },
     {
       "id": "c0ywsi40",
@@ -121441,56 +121442,56 @@
         {
           "n": 1,
           "text": "use c.[lib1, lib2] parses and resolves through the same .[ ] path as ordinary namespaces — no FFI-only grammar branch",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T15:01:11.711Z"
+          "evidence": "cffi foreign_namespace_selective_imports_reuse_ordinary_parser_path green (orchestrator re-ran); list form goes through ordinary .[ ] parser path, commit 94cf3b954 merged 02ce39487",
+          "at": "2026-08-12T20:49:37.462Z"
         },
         {
           "n": 2,
           "text": "Aliases work in the list form: use c.[raylib as rl, sqlite3]; single-lib use c.lib as alias unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T15:01:12.088Z"
+          "evidence": "lib_use ffi_selective_import_aliases_resolve green (orchestrator re-ran): aliases in list form and single-lib alias unchanged",
+          "at": "2026-08-12T20:49:39.967Z"
         },
         {
           "n": 3,
           "text": "Applies across every foreign namespace S59 generalizes to, not only c",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T15:01:12.440Z"
+          "evidence": "registry-wide test covers every active foreign root, not only c (tests/lib_use.rs:35)",
+          "at": "2026-08-12T20:49:43.209Z"
         },
         {
           "n": 4,
           "text": "One bring-in per lib per file still enforced (E3204 unchanged in meaning); diagnostic text and docs match the shipped forms",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T15:01:12.808Z"
+          "evidence": "E3204 meaning unchanged, copy updated to include list form (CFFI.rs:206), fixture cffi_e3204_two_use_forms.stderr updated and passing in isolation",
+          "at": "2026-08-12T20:49:46.128Z"
         },
         {
           "n": 5,
           "text": "Formatter emits and round-trips the list form (fmt STABILITY green); tree-sitter grammar and examples updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T15:01:13.174Z"
+          "evidence": "fmt_selective_import_d_selimport1_stability green; editor_grammars_match_generated_sections green (orchestrator re-ran both)",
+          "at": "2026-08-12T20:49:49.410Z"
         },
         {
           "n": 6,
           "text": "`scripts/agent/jet-env cargo test --test cffi -- foreign_namespace_selective_imports_reuse_ordinary_parser_path` and `scripts/agent/jet-env cargo test --test lib_use -- ffi_selective_import_aliases_resolve` pass for `c` and every active foreign root in the registry.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:18:12.663Z"
+          "evidence": "cffi and lib_use targeted tests green for c and every active foreign root, orchestrator re-ran in m01-ffi worktree",
+          "at": "2026-08-12T20:49:52.594Z"
         },
         {
           "n": 7,
@@ -121510,8 +121511,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T15:01:01.514Z",
-      "updated": "2026-08-12T18:58:14.142Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T20:49:52.595Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c05bfqja",
@@ -122280,20 +122281,20 @@
         {
           "n": 1,
           "text": "A collision corpus lands in tests/tir_patterns_and_fields.rs and tests/tir_collections_and_methods.rs: user locals named to collide with every emitter temporary compile and run correctly, with generated-Rust inspection proving no duplicate bindings",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:46.055Z"
+          "evidence": "Collision corpus in tir_patterns_and_fields.rs and tir_collections_and_methods.rs; collections 35/35 green, corpus tests green, orchestrator-verified on merged master (merge of 3a171a478)",
+          "at": "2026-08-12T21:34:32.504Z"
         },
         {
           "n": 2,
           "text": "rg over crates/jet-codegen/src/Codegen for hard-coded '__jet_[a-z]' string literals in emitters returns zero hits outside the allocator itself; a guard test seals it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:46.495Z"
+          "evidence": "generated_literals_use_the_canonical_allocator guard green on merged master (orchestrator ran); zero hard-coded __jet literals outside allocator",
+          "at": "2026-08-12T21:34:33.236Z"
         },
         {
           "n": 3,
@@ -122310,8 +122311,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T18:21:33.083Z",
-      "updated": "2026-08-12T18:10:13.533Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T21:34:33.237Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c00zl0f2",
@@ -126578,7 +126579,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -126594,20 +126595,20 @@
         {
           "n": 1,
           "text": "All 24 tests in scripts/agent/jet-env cargo test --test bind pass, with the six *_generated_project_executes_typed_fields tests proving tier1 native execution under default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:55:11.620Z"
+          "evidence": "cargo test --test bind: ok. 24 passed; 0 failed, incl six *_generated_project_executes_typed_fields under default jet run tier1; orchestrator-verified at 7e0dd6a99, merged 4b8614a5b",
+          "at": "2026-08-12T20:48:33.109Z"
         },
         {
           "n": 2,
           "text": "No new tests/jit_gaps.txt row parks the gap (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:55:12.050Z"
+          "evidence": "git diff on tests/jit_gaps.txt across merge: zero rows added",
+          "at": "2026-08-12T20:48:33.990Z"
         }
       ],
       "refs": [],
@@ -126619,8 +126620,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T18:55:11.178Z",
-      "updated": "2026-08-12T18:59:24.768Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T20:48:34.654Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T20:48:34.654Z"
     },
     {
       "id": "c06z57x4",
@@ -126727,7 +126729,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -126743,11 +126745,11 @@
         {
           "n": 1,
           "text": "Every branch in the inventory is dispositioned with a one-line log entry (ported-as-commit-X to card #N, or deleted-as-superseded with reason); git branch lists none of them afterward",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:57:43.564Z"
+          "evidence": "All 28 inventory branches dispositioned: 27 deleted-as-superseded (work integrated on master or stale checkpoints), 1 ported — sweep/bd1547 type-plane rows as commit 98329723b to card 1547, merged to master, type_plane tests 2/2 green orchestrator-verified. git branch now lists only master, builder, m01-* lane branches. Full per-branch one-liners in luna-sliceJ transcript.",
+          "at": "2026-08-12T21:50:05.754Z"
         }
       ],
       "refs": [],
@@ -126758,8 +126760,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T18:57:43.137Z",
-      "updated": "2026-08-12T18:59:26.494Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T21:50:06.600Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-12T21:50:06.600Z"
     }
   ],
   "decisions": [
@@ -170059,6 +170062,146 @@
   ],
   "events": [
     {
+      "at": "2026-08-12T21:50:06.601Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0d1lanw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T21:50:05.755Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d1lanw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T21:35:08.004Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c03wyvdx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T21:34:34.061Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c03wyvdx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T21:34:33.237Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0890oah",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T21:34:32.505Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0890oah",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T21:26:59.029Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ae3pqg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T21:26:58.263Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ae3pqg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T20:49:52.595Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-12T20:49:49.410Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-12T20:49:46.129Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-12T20:49:43.209Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-12T20:49:39.968Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T20:49:37.462Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T20:48:42.908Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c05t5j38",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T20:48:34.655Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0jx18t8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-12T20:48:33.990Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jx18t8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T20:48:33.578Z",
+      "by": "orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c05t5j38",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T20:48:33.109Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jx18t8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T20:48:32.677Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c05t5j38",
+      "note": "#2"
+    },
+    {
       "at": "2026-08-12T19:04:07.286Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -173417,146 +173560,6 @@
       "action": "card.update",
       "ref": "c00jybyb",
       "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:08.331Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c07zh827",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:07.767Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0lzyla1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:07.203Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0shcqzl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:06.656Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c03l61j2",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:06.091Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m18-devloop-testing",
-      "note": "M18 · Dev loop and testing"
-    },
-    {
-      "at": "2026-08-12T18:10:05.660Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m17-agent-diagnostics",
-      "note": "M17 · Diagnostics and the agent loop"
-    },
-    {
-      "at": "2026-08-12T18:10:05.229Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m16-compute",
-      "note": "M16 · CPU compute"
-    },
-    {
-      "at": "2026-08-12T18:10:04.785Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m15-web-ui",
-      "note": "M15 · Web and UI"
-    },
-    {
-      "at": "2026-08-12T18:10:04.341Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m14-services-http",
-      "note": "M14 · Service runtime and HTTP"
-    },
-    {
-      "at": "2026-08-12T18:10:03.842Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m13-jit-parity",
-      "note": "M13 · Tier parity closeout"
-    },
-    {
-      "at": "2026-08-12T18:10:03.316Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m12-authority-boundary",
-      "note": "M12 · Authority and boundary law"
-    },
-    {
-      "at": "2026-08-12T18:10:02.824Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m11-concurrency",
-      "note": "M11 · Structured concurrency"
-    },
-    {
-      "at": "2026-08-12T18:10:02.386Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m10-memory",
-      "note": "M10 · Memory semantics and sentries"
-    },
-    {
-      "at": "2026-08-12T18:10:01.950Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m09-types-numbers",
-      "note": "M09 · Type system v2 and numbers"
-    },
-    {
-      "at": "2026-08-12T18:10:01.512Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m08-surface-coherence",
-      "note": "M08 · Language surface coherence"
-    },
-    {
-      "at": "2026-08-12T18:10:00.822Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m07-entry-cli",
-      "note": "M07 · Entry model and the CLI system"
-    },
-    {
-      "at": "2026-08-12T18:10:00.210Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m06-names-core",
-      "note": "M06 · Names, modules, and the Core tree"
-    },
-    {
-      "at": "2026-08-12T18:09:59.528Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m05-build-facts",
-      "note": "M05 · Build facts and generic modules"
-    },
-    {
-      "at": "2026-08-12T18:09:59.091Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m04-derives",
-      "note": "M04 · User derives and comptime"
-    },
-    {
-      "at": "2026-08-12T18:09:58.664Z",
-      "by": "fable-e3-audit",
-      "action": "milestone.add",
-      "ref": "e3-m03-markers-facts",
-      "note": "M03 · Markers, facts, and the @ mark"
     }
   ],
   "nextNum": 368,
