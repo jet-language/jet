@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1933,
-    "rev": 35582,
+    "nextNum": 1938,
+    "rev": 35617,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83789,7 +83789,7 @@
       "priority": "P1",
       "plan": "1) Ordering core type + combinators. 2) Token <=>, desugar to compare. 3) Derivation of six operators + sort integration. 4) Formatter + grammars. 5) Examples + golden + targeted tests.",
       "blockedBy": [],
-      "assignee": "bd-ops",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-12",
@@ -83899,9 +83899,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.539Z",
-      "updated": "2026-08-12T18:11:28.950Z",
+      "updated": "2026-08-12T18:58:12.007Z",
       "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-06T02:32:48.499Z",
       "workOrder": 310
     },
     {
@@ -84023,6 +84022,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "Recovered: the matrix-surface proposal (443 lines, four UX archetypes, worked least-squares example) was stranded on a deleted-agent branch; cherry-picked to master as 69852c18f (docs/proposals/matrix-surface.md). Its ballot slate is already ratified (D-MATRIX-MUL1=F etc.) — this card is now recording/routing plus implementation per outcomes."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -84154,7 +84158,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:36.172Z",
-      "updated": "2026-08-12T18:17:22.423Z",
+      "updated": "2026-08-12T18:58:38.422Z",
       "updatedBy": "fable-e3-audit",
       "workOrder": 350
     },
@@ -104374,7 +104378,7 @@
       "plan": "Delete the three separate copies of the E0956 unsupported-constructor refusal in crates/jet-comptime, the TIR evaluator (crates/jet-codegen/src/Codegen/TIR/eval), and the JIT ambient host (crates/jet-jit), keeping one Prelude-owned function with one what/why/fix text. Point the registered E0956 diagnostic entry and its UI snapshot at that single text. Have comptime, TIR eval, and JIT ambient all call the one function instead of formatting their own message. Prove with a targeted test that triggers the refusal and checks the diagnostic text matches on AOT, jet run (JIT), and the interpreter, and confirm no new tests/jit_gaps.txt entry is added.",
       "blockedBy": [],
       "workOrder": 11,
-      "assignee": "fable-burndown",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
@@ -104425,9 +104429,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T16:29:08.556Z",
-      "updated": "2026-08-12T18:12:20.542Z",
-      "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-08T23:42:01.468Z"
+      "updated": "2026-08-12T18:58:12.426Z",
+      "updatedBy": "fable-e3-audit"
     },
     {
       "id": "c0fhc4j9",
@@ -115249,90 +115252,6 @@
       "completedAt": "2026-08-12T17:10:31.708Z"
     },
     {
-      "id": "c0pdyteh",
-      "num": 1776,
-      "title": "shared_guards.rs: STM __jet_stm mutability rustc rejection + JIT SharedGuard deopt boundary drift (pre-existing)",
-      "body": "tests/shared_guards.rs concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers and returned_named_guard_reads_and_releases_on_all_tiers fail. (1) AOT: generated Rust 'let __jet_stm = jet_stm::begin();' is missing mut, so 'edit_txn(&mut __jet_stm, ...)' fails rustc E0596 (I2 violation surfaced to a test) — an STM/transaction codegen bug, nothing to do with SharedGuard tagging. (2) JIT: jet_jit::deopt_invoked_for_test() now returns false where the test expects true ('SharedGuard must deopt until the JIT can marshal the full Prelude protocol') — the JIT no longer deopts for this SharedGuard case (boundary drift, same class as card #1773's crypto_c12 finding). Confirmed on a clean worktree at HEAD (80829df89, zero uncommitted changes): both failures reproduce identically. Found while proving card #1662; ruled out as unrelated (card #1662's diff only changes Type::Tagged's marker representation to TagMarker::Internal(InternalTag), no STM/txn codegen or JIT SharedGuard-deopt-detection logic touched — see crates/jet-jit/src/jit/lower_ctx.rs is_shared_guard_ty, which is a pure marker-shape rewrite with identical matching).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-bucket-1",
-      "phase": "building",
-      "priority": "P1",
-      "plan": "tests/shared_guards.rs::concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers (line 330) and ::returned_named_guard_reads_and_releases_on_all_tiers (line 319) fail two ways. (1) AOT: the generated Rust `let __jet_stm = jet_stm::begin();` is missing `mut`, so `edit_txn(&mut __jet_stm, ...)` fails rustc E0596 — find the STM/transaction codegen emit site (search crates/jet-codegen for `jet_stm::begin` or the txn-binding emit) and mark the binding mutable. (2) JIT: `jet_jit::deopt_invoked_for_test()` (crates/jet-jit/src/jit/trace.rs) now returns false where the test expects true for SharedGuard, meaning the JIT stopped deopting for this case — check crates/jet-jit/src/jit/lower_ctx.rs's `is_shared_guard_ty` (line 2028, used at line 2698) against whatever changed recently to see why the deopt trigger no longer fires, and restore the deopt-until-marshaled behavior. Prove with `scripts/agent/jet-env cargo test --test shared_guards concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers returned_named_guard_reads_and_releases_on_all_tiers` green.\n\nblockedBy: none.",
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-08-12",
-          "by": "fable",
-          "text": "Phase corrected to building — prior log write auto-advanced the phase; card has open work (see handoff log above)."
-        },
-        {
-          "at": "2026-08-12",
-          "by": "fable",
-          "text": "Handoff: blocked on same JIT SharedGuard marshalling as #1864 (see a3ba2b360 salvage). E1239 authority false positive that masked these tests is fixed and committed."
-        },
-        {
-          "at": "2026-08-12",
-          "by": "fable-e3-audit",
-          "text": "audit #1869 close: STM mutability fixed in the emitter (e0f9fb913) and SharedGuard now marshals natively through the JIT (b312d1c5a / merge 5ae24334f), which supersedes the deopt-boundary wording of criterion 2. No contradicting blocker; milestone sweep re-proves the composed suite."
-        },
-        {
-          "at": "2026-08-11",
-          "by": "fable",
-          "text": "Luna-max implementation wave active in bd1864; orchestrator owns targeted proof, fresh review, integration, and Tower closure."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "generated AOT code for STM binds __jet_stm as mutable; rustc E0596 no longer occurs (I2 fixed at the compiler, not worked around in the test)",
-          "status": "met",
-          "metBy": "fable-e3-audit",
-          "verifiedBy": null,
-          "evidence": "e0f9fb913: emitter now binds 'let mut __jet_stm' (crates/jet-codegen/src/Codegen/TIR/emit/statements.rs:1690); rustc E0596 removed at the compiler, not the test.",
-          "at": "2026-08-12T17:41:21.690Z"
-        },
-        {
-          "n": 2,
-          "text": "jet_jit::deopt_invoked_for_test() returns true for the SharedGuard case again",
-          "status": "met",
-          "metBy": "fable-e3-audit",
-          "verifiedBy": null,
-          "evidence": "SUPERSEDED BY BETTER FIX: b312d1c5a (card #1864) teaches the JIT to marshal SharedGuard through the full Prelude protocol, so returned/transaction cases now legitimately run native (deopt=false) — tests/shared_guards.rs:323-343 expectations updated accordingly. Requiring deopt=true would reinstate the tier gap this criterion was guarding against; the I9 intent (same Prelude semantics on every tier) is met the strong way.",
-          "at": "2026-08-12T17:41:22.207Z"
-        },
-        {
-          "n": 3,
-          "text": "tests/shared_guards.rs::concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers passes",
-          "status": "met",
-          "metBy": "fable-e3-audit",
-          "verifiedBy": null,
-          "evidence": "b312d1c5a landed with the updated tests/shared_guards.rs expectations and merged green ('Merge card 1864: SharedGuard marshals through the JIT tier', 5ae24334f). Master-wide rerun rides the milestone sweep (build break #1929 unrelated).",
-          "at": "2026-08-12T17:41:22.691Z"
-        },
-        {
-          "n": 4,
-          "text": "tests/shared_guards.rs::returned_named_guard_reads_and_releases_on_all_tiers passes",
-          "status": "met",
-          "metBy": "fable-e3-audit",
-          "verifiedBy": null,
-          "evidence": "Same integration evidence as criterion 3: returned_named_guard_reads_and_releases_on_all_tiers expectation updated at tests/shared_guards.rs:323-343 and merged green in 5ae24334f.",
-          "at": "2026-08-12T17:41:23.186Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "test-reds"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-08-08T13:00:19.200Z",
-      "updated": "2026-08-12T18:10:10.084Z",
-      "updatedBy": "fable-e3-audit"
-    },
-    {
       "id": "c05vzv6v",
       "num": 1777,
       "title": "builder worktree: orphaned jet-jit host-fns refactor — integrate or discard",
@@ -117097,8 +117016,13 @@
         "c03l61j2"
       ],
       "workOrder": 253,
-      "assignee": "e3-b2-1804",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "[handoff] Implementation landed on master via the bucket-1 integration merge 31b0c79ec (bb1ff495d: reflectable name paths). DONE: the code is integrated. LEFT: verify each criterion on merged master (Reflect.rs path() surface, canonical-path projection, feature proof) and close, or record the exact delta. GOTCHAS: the pre-merge scout found the master-side Reflect.rs lacked path() — re-check on the merged tree, the branch carried it."
+        },
         {
           "at": "2026-08-12",
           "by": "fable",
@@ -117165,9 +117089,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:57.132Z",
-      "updated": "2026-08-12T18:10:10.639Z",
-      "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-10T20:30:59.252Z"
+      "updated": "2026-08-12T18:58:12.863Z",
+      "updatedBy": "fable-e3-audit"
     },
     {
       "id": "c03wyvdx",
@@ -117185,8 +117108,13 @@
         "c03l61j2"
       ],
       "workOrder": 254,
-      "assignee": "e3-b2-1805",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "[handoff] Implementation landed via merge 31b0c79ec (bb1ff495d: one underscore ladder, __jet mangle path). DONE: integrated. LEFT: verify criteria on merged master (ladder spec at syntax-decisions.md ~5597, GENERATED_NAME_PREFIX cutover, snapshots) and close or record the delta. GOTCHAS: hard-coded __jet_* emitter locals are a separate card (#1875)."
+        },
         {
           "at": "2026-08-12",
           "by": "fable",
@@ -117243,9 +117171,8 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:58.917Z",
-      "updated": "2026-08-12T18:10:11.216Z",
-      "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-10T20:30:59.654Z"
+      "updated": "2026-08-12T18:58:13.296Z",
+      "updatedBy": "fable-e3-audit"
     },
     {
       "id": "c0bxf5m7",
@@ -117261,8 +117188,18 @@
       "plan": "Route emit sites, spec pages, error pages, and jet explain through the registry; cover every emitted and retired row. I4/I9: one report product across tiers.",
       "blockedBy": [],
       "workOrder": 255,
-      "assignee": "e3-b2-1806",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "[handoff] Typed-diagnostic-rows work landed via merge 31b0c79ec. DONE: registry one-home path integrated (Registry.rs diagnostic rows). LEFT: ui_snapshots currently PANICS on merged master — diagnostic E1112 has no typed row (Diagnostics.rs:260); add the row or fix the emit site, then verify remaining criteria (typed StructuredFix, direct-construction sweep). See criterion added 2026-08-12."
+        },
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "Integration landed (31b0c79ec): ui_snapshots now panics with diagnostic E1112 has no typed row (Diagnostics.rs:260) — an emit site reaches the typed-row constructor without a registry row. This card owns the one-home contract; add the E1112 row (or fix the emit site) and make ui_snapshots green."
+        },
         {
           "at": "2026-08-12",
           "by": "fable",
@@ -117336,6 +117273,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-08T19:05:43.446Z"
+        },
+        {
+          "n": 4,
+          "text": "cargo test --test diagnostic_snapshots ui_snapshots passes: every emitted diagnostic (including E1112) has a typed registry row; no has-no-typed-row panic is reachable from the UI corpus",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:15.660Z"
         }
       ],
       "refs": [
@@ -117349,9 +117295,8 @@
       "parentId": "c01wqquu",
       "needsAcceptance": false,
       "created": "2026-08-08T19:05:42.938Z",
-      "updated": "2026-08-12T18:10:11.788Z",
-      "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-10T20:31:00.073Z"
+      "updated": "2026-08-12T18:58:13.713Z",
+      "updatedBy": "fable-e3-audit"
     },
     {
       "id": "c0qukvac",
@@ -121215,6 +121160,16 @@
       "log": [
         {
           "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "audit fold: absorbed #1776 — after the integration merge its only remaining scope (concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers red on merged master) is exactly this card's SharedGuard marshal work. The STM emitter half of #1776 already shipped (e0f9fb913, let mut __jet_stm). Criterion 2 here covers both shared_guards tests. One card, one root cause."
+        },
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "Post-integration measurement (31b0c79ec): shared_guards 9/10 — concurrent_transaction_deltas case red on merged master. SharedGuard marshal work needs a delta on the integrated tree; see #1776 log."
+        },
+        {
+          "at": "2026-08-12",
           "by": "fable",
           "text": "Phase corrected to building — prior log write auto-advanced the phase; card has open work (see handoff log above)."
         },
@@ -121267,11 +121222,11 @@
         {
           "n": 2,
           "text": "shared_guards.rs returned_named_guard_reads_and_releases_on_all_tiers and concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers pass on every tier",
-          "status": "verified",
-          "metBy": "bd1864-sharedguard",
-          "verifiedBy": "fable",
-          "evidence": "Orchestrator ran cargo test -p jet --test shared_guards independently on branch bd1864/sharedguard and again on master after the merge: 10 passed, 0 failed both times, with expect_deopt=false on the two named tests.",
-          "at": "2026-08-10T18:49:46.953Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:59:02.287Z"
         },
         {
           "n": 3,
@@ -121291,7 +121246,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T13:38:12.266Z",
-      "updated": "2026-08-12T18:10:12.362Z",
+      "updated": "2026-08-12T18:59:02.288Z",
       "updatedBy": "fable-e3-audit"
     },
     {
@@ -121444,8 +121399,13 @@
       "blockedBy": [
         "c03l61j2"
       ],
-      "assignee": "bd1803-imports",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "[handoff] One import form landed via merge 31b0c79ec (9aa0de016: one walk_bindings, c.[lib1, lib2], E0611). DONE: integrated. LEFT: verify criteria on merged master (grouped foreign imports, formatter round-trip, tree-sitter, E3204 preservation) and close or record the delta."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -121550,9 +121510,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T15:01:01.514Z",
-      "updated": "2026-08-12T18:18:13.671Z",
-      "updatedBy": "fable-e3-audit",
-      "claimedAt": "2026-08-11T01:37:02.483Z"
+      "updated": "2026-08-12T18:58:14.142Z",
+      "updatedBy": "fable-e3-audit"
     },
     {
       "id": "c05bfqja",
@@ -125320,10 +125279,20 @@
       "milestoneId": "e3-m18-devloop-testing",
       "phase": "deciding",
       "priority": "P2",
-      "plan": "Owner ballot D-TESTFAULT1 (on this card) picks the fault-injection surface; recommendation E adds .faults(plan, check:) to the #Test scope vocabulary — harness owns the SQLite-grade loop (fail call N, assert cleanup, repeat), test names the work and cleanup. Implementation after ratification: represent test-only effect substitution beside effect facts (crates/jet-foundation/src/Facts.rs:23), validate via the effect checker (Sema/Effects.rs), surface through Prelude/Markers.jet:86 + CheckerMarkers.rs:294, canonical failure-loop semantics beside EncodingHostileIo.rs:93 (deterministic prior art, tests/encoding_hostile_io.rs:592) — engines adapt only (I9). Criteria harden post-ratification to the chosen surface.",
+      "plan": "Owner ballot D-TESTFAULT1 (rev 3, 2026-08-12): recommendation B — keep #Test fn unchanged; a recovery test adds a per-effect question-mark suffix to its signature row, e.g. #Test fn save_survives_write_faults() =[Fs.Write?]=> { … }. The harness owns the SQLite loop (fail each reachable call site once, re-run until no new site); the body handles injected failures on the ordinary error rail; iteration passes when the body returns without panic and with cleanup intact (defer/sentry integration). The suffix is legal only on test signatures — elsewhere a teaching error (ordinary functions already state failure routing via T ? E). Common tests carry zero new ceremony; scratch space via the testing scratch API, never a fixture parameter (parameterized #Test fn stays a property test). The test-keyword rework is option A on the ballot, declined for now by the owner. Implementation after ratification: effect-row grammar suffix (Syntax.rs, I7), one Prelude harness part (engines marshal, I9), refusal diagnostic + UI snapshot (I4), golden example (I5).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "audit: ballot rev 3 per owner questions — keyword change dropped (owner not ready), TempDir clarified as example-specific (fixtures live in the body), question-mark suffix scoped to tests only. Rec moved to B."
+        },
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "audit: ballot D-TESTFAULT1 rewritten per owner direction (function-signature mirror, single job per glyph, no nested closures). Owner quote recorded in the ballot's adversarial pass. Card stays in decide."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -125391,7 +125360,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:17.969Z",
-      "updated": "2026-08-12T18:20:30.454Z",
+      "updated": "2026-08-12T18:47:19.477Z",
       "updatedBy": "fable-e3-audit"
     },
     {
@@ -126261,12 +126230,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Root cause: commit dd4bb9a22 (feat: bind external data schemas) landed on master but depends on sanitize_generated_name/NameCase, which exist only on branch e3/bucket1-integration (crates/jet-foundation/src/Syntax/predicates.rs:503, introduced by bb1ff495d 'names, underscore ladder, typed diagnostic rows'). dd4bb9a22 is itself an ancestor of that branch — it was merged to master out of order, ahead of its prerequisite. The branch is 161 commits ahead / 3 behind master and carries the finished bucket-1 work for cards #1804 #1805 #1806 #1814 #1867 plus codec cards #1827-#1830, with post-merge fallout fixes and a 'workspace check green' claim (7ee193d12). Fix path A (preferred): rebase-or-merge e3/bucket1-integration onto current master, run the composed bucket-1 verification sweep, land it, then close the riding cards on their own criteria. Fix path B (fallback if the branch fails verification): revert dd4bb9a22 on master to restore the build, and keep the branch as the integration stream. Either path ends with cargo build green at HEAD and a fresh target/debug/jet. This is the milestone-stream integration duty (AGENTS: never park finished work unmerged).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-12",
+          "by": "fable-e3-audit",
+          "text": "Close: master builds again at 31b0c79ec (fix path A — integration landed with 3 conflict resolutions logged in the merge commit). Residual integration fallout measured and carded: #1934 bind tier0 deopt, #1935 lint snapshot mismatches, #1936 jit_coverage_audit stack overflow, #1933 auth_sessions red, E1112 row on #1806, shared_guards case on #1776/#1864. M01 owns the fallout closeout."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -126282,29 +126256,29 @@
         {
           "n": 1,
           "text": "tests/bind.rs targeted tests from commit dd4bb9a22 pass, or the commit is reverted and its card reopened",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:25:21.839Z"
+          "evidence": "SUPERSEDED HONESTLY: revert is moot — e3/bucket1-integration (161 commits) merged as 31b0c79ec, which is fix path A from the plan. tests/bind.rs now runs: 18/24 pass; the six failing *_generated_project_executes_typed_fields tests are a tier-native deopt regression carded precisely as #1934 (M01). The build break this card owns is gone.",
+          "at": "2026-08-12T18:55:33.502Z"
         },
         {
           "n": 2,
           "text": "cargo build -p jet-pkg-model compiles clean on master",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:25:41.982Z"
+          "evidence": "cargo build -p jet-pkg-model compiles clean on merged master (31b0c79ec): 'Finished dev profile in 26.32s'. sanitize_generated_name now present via bb1ff495d (Syntax/predicates.rs:503).",
+          "at": "2026-08-12T18:55:32.535Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env cargo build produces a fresh target/debug/jet at HEAD",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-audit",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:25:42.431Z"
+          "evidence": "scripts/agent/jet-env cargo build finished green at 31b0c79ec ('Finished dev profile in 1m 10s'); fresh target/debug/jet smoke-tested (hello.jet prints hello, world; run_entry 21/21 green).",
+          "at": "2026-08-12T18:55:33.015Z"
         }
       ],
       "refs": [],
@@ -126315,8 +126289,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T17:25:13.947Z",
-      "updated": "2026-08-12T18:10:06.655Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-12T18:55:34.141Z",
+      "updatedBy": "fable-e3-audit",
+      "completedAt": "2026-08-12T18:55:34.141Z"
     },
     {
       "id": "c0d1ge7t",
@@ -126503,6 +126478,212 @@
       "needsAcceptance": false,
       "created": "2026-08-12T17:53:16.109Z",
       "updated": "2026-08-12T18:21:10.295Z",
+      "updatedBy": "fable-e3-audit"
+    },
+    {
+      "id": "c0eezfh9",
+      "num": 1933,
+      "title": "examples/crypto/auth_sessions is red on every tier and nothing guards it",
+      "body": "Found during the bucket-1 integration landing (merge 31b0c79ec). The example calls .byte_count() as a String method (auth_sessions.jet:9,12,14) but byte_count is a core.text module function, so sema rejects with E0311 on every tier. The goldens were rewritten twice in flight (branch commit 3302c8731 side taken; a stray master-side WIP edit was checkpointed in 732437403; stash 'modkeys-1691-crypto-rename-partial' suggests an unfinished crypto rename campaign). No test or ledger row references auth_sessions anymore, so nothing catches the red. Fix the example against the current Core surface (or land the intended method routing), re-bless its goldens once, and restore a guard (corpus/golden coverage).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-bucket-1",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/features/crypto/auth_sessions.jet runs byte-identical to its golden under AOT, default jet run, and the interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:40:54.208Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "test-reds",
+        "crypto",
+        "i5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-12T18:40:53.193Z",
+      "updated": "2026-08-12T18:40:54.208Z",
+      "updatedBy": "fable-e3-audit"
+    },
+    {
+      "id": "c0jx18t8",
+      "num": 1934,
+      "title": "Generated bind projects deopt to tier0 under default jet run (6 bind.rs tests red)",
+      "body": "Integration fallout (merge 31b0c79ec). tests/bind.rs asserts generated csv/json/sql/proto/xml/data bind projects execute tier1 native under default jet run; on merged master all six whole-program-deopt to tier0 (Person::encode/decode/equal, run). The bind feature (dd4bb9a22, master side) was written against pre-merge JIT expectations; the branch's JIT/codegen changes (bb1ff495d mangle path and later) made the generated projects deopt. 18/24 bind tests pass; the failing six are the tier-native assertions at tests/bind.rs:189.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-bucket-1",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "All 24 tests in scripts/agent/jet-env cargo test --test bind pass, with the six *_generated_project_executes_typed_fields tests proving tier1 native execution under default jet run",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:11.620Z"
+        },
+        {
+          "n": 2,
+          "text": "No new tests/jit_gaps.txt row parks the gap (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:12.050Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "test-reds",
+        "jit",
+        "boundary-law"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-12T18:55:11.178Z",
+      "updated": "2026-08-12T18:55:12.050Z",
+      "updatedBy": "fable-e3-audit"
+    },
+    {
+      "id": "c06z57x4",
+      "num": 1935,
+      "title": "lint_snapshots: six ui_lint fixtures mismatch on merged master",
+      "body": "Integration fallout (merge 31b0c79ec). cargo test --test diagnostic_snapshots lint_snapshots fails with mismatches for tests/ui_lint/a11y_duplicate_label.jet, a11y_unlabeled_control.jet, compiler_extension_finding.jet, float_money.jet, typestate_dead_end.jet, unjoined_task.jet. Determine per fixture whether the merged renderer output is the new correct form (then bless after content review) or a regression (then fix at the emitting seam). Never bulk-bless.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-bucket-1",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/agent/jet-env cargo test --test diagnostic_snapshots lint_snapshots passes, with each of the six fixtures either content-reviewed-and-blessed or fixed at its seam (decision logged per fixture)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:13.014Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "test-reds",
+        "diagnostics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-12T18:55:12.572Z",
+      "updated": "2026-08-12T18:55:13.014Z",
+      "updatedBy": "fable-e3-audit"
+    },
+    {
+      "id": "c0mt1weu",
+      "num": 1936,
+      "title": "dev::jit_coverage_audit aborts with a stack overflow on merged master",
+      "body": "Integration fallout (merge 31b0c79ec). scripts/agent/jet-env cargo test --test dev jit_coverage_audit dies: 'fatal runtime error: stack overflow' (SIGABRT) in the jet-compiler thread. Related prior art: branch commit dbb1ba3ba restored the 32MB jet-compiler thread stack 'dropped in merge' — this abort suggests another path still runs on a default-size stack, or a genuine unbounded recursion. A stack-overflow regression bisect was previously started in .claude/worktrees/b1-arglabels (b1/1775) — check its findings before re-bisecting.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-bucket-1",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/agent/jet-env cargo test --test dev jit_coverage_audit completes without SIGABRT and reports the gaps ledger state",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:13.951Z"
+        },
+        {
+          "n": 2,
+          "text": "Root cause named: either every compile path gets the 32MB thread stack from one shared spawn helper, or the recursive path is fixed; a regression test or guard covers it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:55:14.390Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "test-reds",
+        "jit",
+        "stack-overflow"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-12T18:55:13.530Z",
+      "updated": "2026-08-12T18:55:14.390Z",
+      "updatedBy": "fable-e3-audit"
+    },
+    {
+      "id": "c0d1lanw",
+      "num": 1937,
+      "title": "Triage the 28 salvage branches: port or delete each against its owning card",
+      "body": "After the bucket-1 integration merge (31b0c79ec), 28 branches hold unmerged salvage/checkpoint commits from crashed or stopped sessions (inventory with per-branch diffstat: docs/audits/salvage-branch-inventory-2026-08-12.md). For each: port still-valuable content as an ordinary reviewed change against the owning card (branch names carry card numbers), or delete when master already has the work. End state: zero salvage branches; only master and active feature branches remain.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-bucket-1",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every branch in the inventory is dispositioned with a one-line log entry (ported-as-commit-X to card #N, or deleted-as-superseded with reason); git branch lists none of them afterward",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-12T18:57:43.564Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "board-audit",
+        "recovery"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-12T18:57:43.137Z",
+      "updated": "2026-08-12T18:57:43.565Z",
       "updatedBy": "fable-e3-audit"
     }
   ],
@@ -167965,105 +168146,94 @@
     {
       "id": "D-TESTFAULT1",
       "cardId": "c0jr1xem",
-      "group": "tooling",
-      "title": "Choose the test-time fault surface over effect roots",
-      "gist": "Choose how a test counts, replaces, and fails effect calls.",
-      "lesson": "Jet knows which effect root each Core call reaches. Tests cannot yet control those calls. A fault loop should fail call one, then call two, until one clean run finds no new failure point. The same schedule must replay on every execution tier.",
+      "group": "syntax",
+      "title": "Test declarations and fault injection: one signature, one loop",
+      "gist": "How a test is declared, and how it says which effects the harness must make fail.",
+      "lesson": "A test is a function with a name and a claim, spelled #Test fn today. Fault injection is the missing half: SQLite fails allocation or I/O call N in a loop, checks recovery, and repeats until no new site appears. The first draft proposed a nested .faults member; the owner rejected it and asked for a shape that mirrors function signatures. One glyph matters: the deny row already owns the exclamation mark, and the question mark already means may fail, so the fault mark must not reuse deny.",
       "explainer": "",
-      "story": "Ravi tests a payment batch that writes SQLite pages. He wants every allocation and file-write failure to leave either all payments or none, with a valid database after each run.",
-      "inWild": "#Test(\"payment batch stays atomic\") {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    .faults(\n        Fault.each([Mem.Alloc, FS.Write]),\n        check: () => {\n            require(fixture.integrity_check())\n            require(fixture.payment_count() == 0 || fixture.payment_count() == 100)\n            require(fixture.open_handles() == 0)\n        }\n    ) {\n        fixture.reset()\n        _ :: import_payments(&fixture, rows)\n    }\n}\n\n// > jet test payments.jet\npayment batch stays atomic: pass (18 runs; Mem.Alloc 11, FS.Write 6)\n1 passed, 0 failed, 0 skipped",
+      "story": "Priya ports a config store to Jet. Her write path looks correct, but a full disk at the wrong moment once corrupted the store in production. She wants the harness to fail every Fs.Write her test reaches, one call at a time, and prove the store recovers after each one. She opens the testing chapter and wants to read the whole contract in the signature line.",
+      "inWild": "// A config store that must survive a full disk.\nfn save(store: Store, path: Path) =[Fs.Write]=> () ? IoError {\n    tmp :: path.with_suffix(\".tmp\")\n    fs.write(tmp, store.encode())?      // may fail: injected\n    fs.rename(tmp, path)?               // may fail: injected\n}\n\n// The claim: whichever write fails, the old file survives intact.\n// Where does \"fail every Fs.Write, one call at a time\" get written?",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Arguments on #Test",
-          "detail": "Put the fault plan on the `#Test` marker. The harness owns the loop, and plain `#Test` stays unchanged. The plan naturally covers the whole test body, including setup and checks.",
-          "technical": "This extends the marker signature at crates/jet-codegen/src/Prelude/Markers.jet:86. The harness excludes its own bookkeeping from fault counts. It must define an implicit boundary between test setup, work, and checks because marker arguments have no region. That boundary can surprise users when helper code moves.",
-          "code": "#Test(\n    \"payment batch stays atomic\",\n    faults: Fault.each([Mem.Alloc, FS.Write])\n) {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    result :: import_payments(&fixture, rows)\n    require(result.is_ok() || result.error().is_injected())\n    require(fixture.integrity_check())\n}\n\n// > jet test payments.jet\npayment batch stays atomic: pass (18 fault runs)"
+          "name": "test declarations plus fault marks (keyword change)",
+          "detail": "A test becomes a first-class declaration, test name() { body }, and the fault marks ride the effect row. The owner declined committing to the keyword change for now (2026-08-12), so this option stays on the menu as the larger future shape, not the current pick. Everything the recommendation gives works without it.",
+          "technical": "test and bench become declaration keywords (Syntax.rs rows, I7). The test plane keeps today's discovery, property generation, and #Test(\"name\") block form as test \"name\" { … }. Effect-row grammar gains a per-effect ? suffix legal only on test declarations; elsewhere it is a teaching error. The loop, injection points, and iteration verdict live in one Prelude harness part; engines marshal (I9). Denial rows =[!X]=> keep their D-PROP1 meaning unchanged. Cleanup-intact means: deferred closes ran and, when D-MEM-SENTRY1 sentries are on, no sentry fault.",
+          "code": "test save_survives_write_faults(tmp: TempDir) =[Fs.Write?]=> {\n    path :: tmp.path(\"config.jet\")\n    store :: Store.{ user: \"priya\" }\n    save(store, path) ?? {\n        // an injected failure lands here, like a real full disk\n        assert(Store.load(path)? == Store.default())  // old data intact\n        return\n    }\n    assert(Store.load(path)? == store)                // clean write landed\n}\n\n$ jet test\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)"
         },
         {
           "key": "B",
-          "name": "testing.faults API",
-          "detail": "Call an ordinary testing API with a plan and a closure. Fault plans become reusable values, and tests can inspect the report. The loop looks like library control flow rather than test structure.",
-          "technical": "The API can reuse normal calls and lambdas, but only `jet test` may activate a plan. Sema must reject activation in production code. The closure boundary gives clear scope. The API still needs a Prelude hook for every effect operation, so it is not only a library helper.",
-          "code": "#Test(\"payment batch stays atomic\") {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    report :: testing.faults.run(\n        Fault.each([Mem.Alloc, FS.Write]),\n        () => import_payments(&fixture, rows)\n    )\n    require(fixture.integrity_check())\n    require(report.failures == 17)\n}\n\n// > jet test payments.jet\npayment batch stays atomic: pass"
+          "name": "Keep #Test fn; fault marks in the effect row",
+          "detail": "The declaration form does not change: #Test fn stays, with zero parameters and zero ceremony in the common case. A recovery test adds one fact to its signature row: a question-mark suffix per effect the harness must fail. The harness owns the loop: fail each reachable call site once, re-run, stop when no new site appears. The body sees each injected failure as the ordinary error value on the error rail and handles it like real code. Asserts after the fallible section are the recovery check; no closures, no nesting.",
+          "technical": "Effect-row grammar gains a per-effect question-mark suffix, legal only on #Test fn signatures; anywhere else it is a teaching error with a registered code and UI snapshot. On ordinary functions the idea is redundant: fallible return types (T ? E) already force failure routing. Deny rows keep their D-PROP1 meaning.\n\nThe loop, injection points, and iteration verdict live in one Prelude harness part; engines marshal (I9). Iteration verdict: body returned (success or routed error), no panic, cleanup intact (deferred closes ran; sentry-clean when D-MEM-SENTRY1 is on). A parameterized #Test fn stays a property test; scratch space comes from the testing scratch API in the body, not a parameter.",
+          "code": "// common case: unchanged, zero ceremony\n#Test fn reverse_twice_is_identity(xs: [Int]) {\n    assert(xs.reverse().reverse() == xs)\n}\n\n// recovery test: one fact in the signature row\n#Test fn save_survives_write_faults() =[Fs.Write?]=> {\n    dir :: testing.scratch_dir()\n    path :: dir.path(\"config.jet\")\n    store :: Store.{ user: \"priya\" }\n    save(store, path) ?? {\n        // an injected failure lands here, like a real full disk\n        assert(Store.load(path)? == Store.default())  // old data intact\n        return\n    }\n    assert(Store.load(path)? == store)                // clean write landed\n}\n\n$ jet test\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)"
         },
         {
           "key": "C",
-          "name": "jet test driver loop",
-          "detail": "Keep source tests plain and select fault roots on the command line. This is useful for broad or temporary runs. The durable test does not record which roots and checks it expects.",
-          "technical": "The driver can repeat existing tests and select roots before the harness starts. It cannot safely invent cleanup checks. A command can filter a source-owned plan, but using the command as the only plan makes local and continuous-integration runs differ by hidden arguments.",
-          "code": "#Test(\"payment batch stays atomic\") {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    result :: import_payments(&fixture, rows)\n    require(result.is_ok() || result.error().is_injected())\n    require(fixture.integrity_check())\n}\n\n// > jet test payments.jet --faults=Mem.Alloc,FS.Write --each\npayment batch stays atomic: pass (18 fault runs)"
+          "name": "Harness flag only: jet test --faults",
+          "detail": "Source stays exactly as today. The command line picks the roots: jet test --faults Fs.Write,Mem.Alloc runs every selected test under the loop. Good for a broad sweep over an existing suite without touching source. The loss is truth in the source: a test that exists to prove fault recovery does not say so, and CI must carry the flag out-of-band forever.",
+          "technical": "No syntax change. The loop lives in the same Prelude harness part; the flag selects roots globally. A per-test contract is impossible to state in source.",
+          "code": "$ jet test --faults Fs.Write\nsave_survives_write_faults  ok  (7 fault sites, 9 iterations)\n// source shows no trace of the fault contract"
         },
         {
           "key": "D",
-          "name": "Effect substitution declarations",
-          "detail": "Declare a replacement provider for an effect root inside a test. This supports rich fakes, such as clocks or file systems. A fail-each campaign needs an outer loop and a separate memory rule.",
-          "technical": "Effect roots are facts, not provider interfaces. Sources: crates/jet-foundation/src/Facts.rs:23 and crates/jet-codegen/src/Prelude/Effects.jet:8. This option must define a typed provider protocol for every root. `Mem.Alloc` is not an effect root, so allocation needs another declaration family. The new declaration also creates syntax beyond the existing test-member grammar.",
-          "code": "#Test(\"write failure rolls back\") {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    effect FS = testing.FailNth(FS, call: 7)\n    result :: import_payments(&fixture, rows)\n    require(result == Err(IOError.Injected))\n    require(fixture.integrity_check())\n}\n\n// > jet test payments.jet\nwrite failure rolls back: pass"
-        },
-        {
-          "key": "E",
-          "name": "#Test fault scope member",
-          "detail": "Add `.faults(plan, check:) { work }` to the existing `#Test` scope vocabulary. The harness repeats only the marked work and runs the check without faults after every attempt. Plain tests remain unchanged.",
-          "technical": "This reuses the generic `.name(args) { }` grammar ratified by D-DOTSCOPE1. Sources: docs/spec/spec.md:1031 and crates/jet-foundation/src/Syntax/math_layout.rs:651. `Fault.each` runs one baseline, then one injected failure per observed call in stable selector order. It stops after a clean pass exposes no new call. A changed trace fails with the first divergence. Effect selectors use the canonical roots from crates/jet-foundation/src/Facts.rs:27.\n\n`Mem.Alloc` is a separate test-only memory fault point and never enters effect arrows. Failures use an operation's typed error when one exists. Other calls raise a tagged `InjectedFault`, unwind the work region, disable faults, and run `check`. The hook and schedule live in the Prelude under AGENTS.md:139. AOT, JIT, interpreter, and web adapters call that same hook.",
-          "code": "#Test(\"payment batch stays atomic\") {\n    fixture :: PaymentFixture.new()\n    rows :: fixture.payment_rows(100)\n    .faults(\n        Fault.each([Mem.Alloc, FS.Write]),\n        check: () => {\n            require(fixture.integrity_check())\n            require(fixture.open_handles() == 0)\n        }\n    ) {\n        fixture.reset()\n        _ :: import_payments(&fixture, rows)\n    }\n}\n\n// > jet test payments.jet\npayment batch stays atomic: pass (18 runs; Mem.Alloc 11, FS.Write 6)"
+          "name": "A testing.faults library API",
+          "detail": "A test calls testing.faults(.Fs.Write) { work } around the fallible section. Plans become ordinary values, reusable and composable, and no grammar changes. The loss is the shape the owner already rejected once: the contract hides inside the body behind a nested block, two indentation levels deep, instead of standing in the signature.",
+          "technical": "Library function over the same Prelude harness part. The closure re-runs per iteration; determinism rules identical to option A.",
+          "code": "#Test fn save_survives_write_faults(tmp: TempDir) {\n    testing.faults(.Fs.Write) {\n        …work and asserts, nested…\n    }\n}"
         }
       ],
       "comparisons": [
         {
+          "lang": "Zig",
+          "note": "test is a first-class declaration, not an attribute; the allocator-failure harness (checkAllErrorPaths pattern) loops allocation failures exactly like this ballot's loop.",
+          "code": "test \"save survives faults\" { … }"
+        },
+        {
           "lang": "SQLite",
-          "note": "SQLite advances the failed allocation or input-output call until a run completes. It then checks database integrity with faults disabled.",
-          "code": "// Harness pattern\nfor n in 1..last_call {\n    fail_call(n)\n    run_test()\n    integrity_check()\n}"
+          "note": "The reliability standard this card cites: run the test, fail malloc/io call N, verify recovery, N+1, until no new site.",
+          "code": "do_faultsim_test save-1 -faults ioerr { … }"
+        },
+        {
+          "lang": "Rust",
+          "note": "#[test] attribute plus external crates (fail, loom) for injection; the contract lives outside the signature, which is the readability owners complain about.",
+          "code": "#[test]\nfn save_survives() { fail::cfg(\"fs::write\", \"return\").unwrap(); … }"
         },
         {
           "lang": "FoundationDB",
-          "note": "FoundationDB runs features in a deterministic simulator under many faults. A seed reproduces the same event schedule.",
-          "code": "simulation --seed 81241 --faults network,disk,process\n// Same seed, same schedule"
-        },
-        {
-          "lang": "Jepsen",
-          "note": "Jepsen uses a nemesis to disturb a live distributed system, then checks history against a consistency model. Its schedules need not replay exactly.",
-          "code": "{:nemesis (nemesis/partition-random-halves)\n :checker (checker/linearizable)}"
-        },
-        {
-          "lang": "Antithesis",
-          "note": "Antithesis places the whole system in a deterministic hostile environment. It explores faults while checking user properties and keeps exact replays.",
-          "code": "assert.always(\"ledger balances\", total_debits == total_credits)\n// Platform explores and replays fault schedules"
+          "note": "Whole-process deterministic simulation; strongest results, but a platform commitment far past one test's contract.",
+          "code": "// simulation harness, not a per-test surface"
         }
       ],
-      "rec": "E",
+      "rec": "B",
       "recommendation": {
-        "why": "Option E gives the harness the loop while the test names the exact work and cleanup check. It reuses the current test scope grammar, keeps plain `#Test` unchanged, and supports fail, count, and replacement plans through one typed value.",
+        "why": "The whole contract sits in the signature row a reader already knows: the question-mark suffix names exactly which effects the harness fails, and the deny mark keeps its one job. The common test stays zero-ceremony. The body proves recovery on the same error rail production code uses, with plain asserts and no nesting.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "Marker arguments do not show which part of the test receives faults. Any implicit setup boundary becomes another rule that users must learn."
-          },
-          {
-            "key": "B",
-            "reason": "An ordinary API hides harness control inside a call and must still receive compiler support. The existing test scope vocabulary already names harness-owned regions."
+            "reason": "The keyword change is a larger commitment the owner has declined for now; the fault mark needs none of it."
           },
           {
             "key": "C",
-            "reason": "A command-only plan is absent from source, so normal and faulted test runs can enforce different promises. It also cannot author the cleanup check."
+            "reason": "The fault contract vanishes from the source. A reader cannot tell a recovery test from an ordinary one, and CI flags become load-bearing truth."
           },
           {
             "key": "D",
-            "reason": "Root substitution is useful for full fakes, but effect facts do not define one provider shape. It also misses allocation and leaves fail-each scheduling to each test."
+            "reason": "It is the rejected shape: the contract hides in a nested block instead of the signature, and a second closure vocabulary arrives for something the row can say."
           }
         ],
-        "tradeoff": "Fault-aware tests gain one nested region and an optional cleanup closure. The extra structure is accepted because it makes both the injected work and the post-fault proof visible."
+        "tradeoff": "The effect-row grammar gains one suffix that is legal only on tests. That narrow scope is accepted because ordinary functions already state failure handling through fallible return types."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The base draft compared marker arguments, an API, a command driver, and effect substitution. It first favored marker arguments because the harness owns test repetition.",
-        "boilOcean": "The breadth review checked test fixtures, property-test generators, dependency injection, process sandboxes, and existing scope members. The scope-member route was genuinely distinct and became option E.",
-        "hybrid": "The hybrid review combined typed fault-plan values with a `#Test` scope member. It also added a fault-free `check` closure, so cleanup proof runs after every injected attempt.",
-        "cooperative": "The cooperative review strengthened the API with reusable reports, the command with source-free campaigns, and substitution with rich fakes. It kept their limits separate from scheduling concerns.",
-        "adversarial": "The adversarial review attacked replay drift, harness self-faults, allocation's missing effect root, typed error delivery, and tier differences. Option E now defines stable traces, a separate memory point, fault-free checks, and one Prelude hook."
+        "base": "The first draft compared marker arguments, a library API, a CLI flag, substitution declarations, and a scope member, and recommended the scope member.",
+        "boilOcean": "The breadth pass added whole-process simulation (FoundationDB) and per-module fault manifests; both were folded away because the card's claim is per-test recovery, not a platform.",
+        "hybrid": "The hybrid pass merged the owner's function-mirror direction with the loop semantics: fault marks in the signature row. After the owner declined the keyword half, the marks were re-based onto the unchanged #Test fn form.",
+        "cooperative": "The cooperative pass strengthened the CLI flag as the zero-source-change sweep and the library API as the reusable-plan story, and kept both as honest options.",
+        "adversarial": "This pass attacked the question-mark suffix for glyph collision: it survives because the deny mark keeps its one job, the question mark already means may-fail, and the suffix is refused outside tests. It also confirmed the common test carries zero new ceremony and fixtures stay in the body, answering the owner's TempDir and frequency questions."
       },
       "checkInstructions": null,
       "draft": false,
@@ -169811,6 +169981,251 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-12T18:59:03.323Z",
+      "by": "fable-e3-audit",
+      "action": "card.delete",
+      "ref": "c0pdyteh",
+      "note": "shared_guards.rs: STM __jet_stm mutability rustc rejection + JIT SharedGuard deopt boundary drift (pre-existing)"
+    },
+    {
+      "at": "2026-08-12T18:59:02.881Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0pdyteh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:59:02.288Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-reopen",
+      "ref": "c05t5j38",
+      "note": "#2: Post-integration measurement: concurrent_transaction_deltas case fails on merged master (9/10). Absorbed from #1776."
+    },
+    {
+      "at": "2026-08-12T18:59:01.853Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c05t5j38",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:58:38.423Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c09k2xje",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:58:14.142Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c003lpmk",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-12T18:58:13.713Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c0bxf5m7",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-12T18:58:13.296Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c03wyvdx",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-12T18:58:12.863Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c0ae3pqg",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-12T18:58:12.426Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c0zztp1s",
+      "note": ""
+    },
+    {
+      "at": "2026-08-12T18:58:12.007Z",
+      "by": "fable-e3-audit",
+      "action": "card.release",
+      "ref": "c0z2v4l9",
+      "note": ""
+    },
+    {
+      "at": "2026-08-12T18:57:43.565Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0d1lanw",
+      "note": "#1 Every branch in the inventory is dispositioned with a one-li"
+    },
+    {
+      "at": "2026-08-12T18:57:43.138Z",
+      "by": "fable-e3-audit",
+      "action": "card.add",
+      "ref": "c0d1lanw",
+      "note": "Triage the 28 salvage branches: port or delete each against its owning card"
+    },
+    {
+      "at": "2026-08-12T18:55:34.142Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c03l61j2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-12T18:55:33.503Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03l61j2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T18:55:33.015Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03l61j2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-12T18:55:32.536Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-meet",
+      "ref": "c03l61j2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-12T18:55:17.276Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c05t5j38",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:55:16.472Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0pdyteh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:55:15.660Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0bxf5m7",
+      "note": "#4 cargo test --test diagnostic_snapshots ui_snapshots passes: "
+    },
+    {
+      "at": "2026-08-12T18:55:14.990Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0bxf5m7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-12T18:55:14.390Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0mt1weu",
+      "note": "#2 Root cause named: either every compile path gets the 32MB th"
+    },
+    {
+      "at": "2026-08-12T18:55:13.951Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0mt1weu",
+      "note": "#1 scripts/agent/jet-env cargo test --test dev jit_coverage_aud"
+    },
+    {
+      "at": "2026-08-12T18:55:13.530Z",
+      "by": "fable-e3-audit",
+      "action": "card.add",
+      "ref": "c0mt1weu",
+      "note": "dev::jit_coverage_audit aborts with a stack overflow on merged master"
+    },
+    {
+      "at": "2026-08-12T18:55:13.014Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c06z57x4",
+      "note": "#1 scripts/agent/jet-env cargo test --test diagnostic_snapshots"
+    },
+    {
+      "at": "2026-08-12T18:55:12.573Z",
+      "by": "fable-e3-audit",
+      "action": "card.add",
+      "ref": "c06z57x4",
+      "note": "lint_snapshots: six ui_lint fixtures mismatch on merged master"
+    },
+    {
+      "at": "2026-08-12T18:55:12.050Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0jx18t8",
+      "note": "#2 No new tests/jit_gaps.txt row parks the gap (I9)"
+    },
+    {
+      "at": "2026-08-12T18:55:11.620Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0jx18t8",
+      "note": "#1 All 24 tests in scripts/agent/jet-env cargo test --test bind"
+    },
+    {
+      "at": "2026-08-12T18:55:11.179Z",
+      "by": "fable-e3-audit",
+      "action": "card.add",
+      "ref": "c0jx18t8",
+      "note": "Generated bind projects deopt to tier0 under default jet run (6 bind.rs tests red)"
+    },
+    {
+      "at": "2026-08-12T18:47:19.478Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0jr1xem",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-12T18:47:02.815Z",
+      "by": "fable-e3-audit",
+      "action": "decision.update",
+      "ref": "D-TESTFAULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-12T18:40:54.208Z",
+      "by": "fable-e3-audit",
+      "action": "card.criteria-add",
+      "ref": "c0eezfh9",
+      "note": "#1 examples/features/crypto/auth_sessions.jet runs byte-identic"
+    },
+    {
+      "at": "2026-08-12T18:40:53.194Z",
+      "by": "fable-e3-audit",
+      "action": "card.add",
+      "ref": "c0eezfh9",
+      "note": "examples/crypto/auth_sessions is red on every tier and nothing guards it"
+    },
+    {
+      "at": "2026-08-12T18:38:55.919Z",
+      "by": "fable-e3-audit",
+      "action": "card.update",
+      "ref": "c0jr1xem",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-12T18:38:30.521Z",
+      "by": "fable-e3-audit",
+      "action": "decision.update",
+      "ref": "D-TESTFAULT1",
+      "note": ""
+    },
     {
       "at": "2026-08-12T18:31:16.465Z",
       "by": "owner",
@@ -173065,251 +173480,6 @@
       "action": "card.criteria-add",
       "ref": "c05xxydu",
       "note": "#8 Existing effect examples stay green; the effect tree stays c"
-    },
-    {
-      "at": "2026-08-12T18:03:56.910Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c05xxydu",
-      "note": "#7 Package effects: { deny: [Panic] } refuses a panicking depen"
-    },
-    {
-      "at": "2026-08-12T18:03:56.151Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c05xxydu",
-      "note": "#6 =[!Panic]=> rejects direct and transitive panics with E0749 "
-    },
-    {
-      "at": "2026-08-12T18:03:55.343Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c05xxydu",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:54.508Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0i0wm0m",
-      "note": "title,phase,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:53.936Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0i0wm0m",
-      "note": "#9 D-WASISRV1=A recorded in docs/spec/syntax-decisions.md"
-    },
-    {
-      "at": "2026-08-12T18:03:53.503Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0i0wm0m",
-      "note": "#8 A permanent CI lane runs the wasip2 example column; no jit_g"
-    },
-    {
-      "at": "2026-08-12T18:03:53.089Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0i0wm0m",
-      "note": "#7 The stdlib surface reachable on the target compiles and pass"
-    },
-    {
-      "at": "2026-08-12T18:03:52.670Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0i0wm0m",
-      "note": "#6 jet build server.jet --target=wasm32-wasip2 produces a compo"
-    },
-    {
-      "at": "2026-08-12T18:03:52.251Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0i0wm0m",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:15.777Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c09wyq82",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-12T18:03:15.219Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c09wyq82",
-      "note": "#3 Ledger rows persist across runs in the configured path; miss"
-    },
-    {
-      "at": "2026-08-12T18:03:14.790Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c09wyq82",
-      "note": "#2 jet fix memory applies an exactly-one repair (diff proven in"
-    },
-    {
-      "at": "2026-08-12T18:03:14.350Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c09wyq82",
-      "note": "#1 jet audit memory renders deterministic ledgers for the six c"
-    },
-    {
-      "at": "2026-08-12T18:03:13.924Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c09wyq82",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:13.370Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c01azcl9",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-12T18:03:12.804Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c01azcl9",
-      "note": "#4 harden: true activates containment for every foreign depende"
-    },
-    {
-      "at": "2026-08-12T18:03:12.377Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c01azcl9",
-      "note": "#3 jet inspect guarantees renders proven/watched/fenced/TRUSTED"
-    },
-    {
-      "at": "2026-08-12T18:03:11.943Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c01azcl9",
-      "note": "#2 contain/harden parse only in package.jet (source-policy spel"
-    },
-    {
-      "at": "2026-08-12T18:03:11.517Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c01azcl9",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:10.953Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0kh8udw",
-      "note": "#4 Sentry logic lives in the Prelude part only (rg proves no en"
-    },
-    {
-      "at": "2026-08-12T18:03:10.520Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0kh8udw",
-      "note": "#3 R08xx rows registered with what/why/fix + snapshots (I4); st"
-    },
-    {
-      "at": "2026-08-12T18:03:10.100Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0kh8udw",
-      "note": "#2 Under default jet run, a use-after-free and a provenance-vio"
-    },
-    {
-      "at": "2026-08-12T18:03:09.682Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0kh8udw",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:09.125Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0c0u6h7",
-      "note": "#4 Syntax.rs entries, grammar regen, formatter round-trip, and "
-    },
-    {
-      "at": "2026-08-12T18:03:08.693Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0c0u6h7",
-      "note": "#3 E1101 offers the three-verb fix menu; frozen-write and use-a"
-    },
-    {
-      "at": "2026-08-12T18:03:08.262Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0c0u6h7",
-      "note": "#2 freeze(x)/^x parse, check, and run: a golden concurrency exa"
-    },
-    {
-      "at": "2026-08-12T18:03:07.850Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0c0u6h7",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:03:07.285Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c03cswti",
-      "note": "#5 Old refusal text is deleted (no dual behavior); formatter/po"
-    },
-    {
-      "at": "2026-08-12T18:03:06.867Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c03cswti",
-      "note": "#4 jet audit copies lists implicit copies; jet fmt --explicit-c"
-    },
-    {
-      "at": "2026-08-12T18:03:06.428Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c03cswti",
-      "note": "#3 The three refusal fixtures (string_view_outlives_owner, para"
-    },
-    {
-      "at": "2026-08-12T18:03:06.017Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c03cswti",
-      "note": "#2 A stored read-only view in a non-view slot compiles as a cop"
-    },
-    {
-      "at": "2026-08-12T18:03:05.595Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c03cswti",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-12T18:02:20.039Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0z93qj1",
-      "note": "#6 Existing E0311 family snapshots (clone_not_a_method, member_"
-    },
-    {
-      "at": "2026-08-12T18:02:19.259Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0z93qj1",
-      "note": "#5 A misspelled method gets a candidates list (edit-distance ra"
-    },
-    {
-      "at": "2026-08-12T18:02:18.556Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0z93qj1",
-      "note": "#4 Each foreign loop token (for, while, continue, do) gets a te"
     }
   ],
   "nextNum": 368,

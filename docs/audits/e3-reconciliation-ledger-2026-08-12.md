@@ -67,3 +67,12 @@ M01 e3-bucket-1 Integration and build truth (17, incl. #1869) → M02 failure-mo
 - Criteria hardened: 133 machine-checkable criteria added across 69 cards + hardened rows on every planned card.
 - Milestones: 18 ordered theme milestones, 100% coverage, dependencies in goals.
 - Lint: remaining findings are explained here — duplicate-suspect rows are deliberate program structure (jit_gaps program #1663 + constituents; #1754/#1758 root-cause split) or benign shared-file mentions; 16 criteria-evidence-conflict rows are historical evidence-prose heuristics on already-closed cards, not live defects; #86/#676 blocker-unpopulated live in e10/e11 (out of e3 scope); #1408/#1828 done-without-evidence received evidence log lines.
+
+## Part 2 — clean-slate handoff (owner-directed, 2026-08-12 later)
+- Landed e3/bucket1-integration into master as merge 31b0c79ec (161 commits; 3 conflict resolutions logged in the commit). Master builds green; jet smoke-tested; run_entry 21/21.
+- #1929 closed (build restored). Integration fallout measured and carded: #1934 bind tier0 deopt (6 tests), #1935 lint-snapshot mismatches (6 fixtures), #1936 jit_coverage_audit stack overflow, #1933 auth_sessions example red, E1112 missing typed row logged+criterioned on #1806, shared_guards concurrent case logged on #1776/#1864 (the other orchestrator's reverts were correct — evidence updated).
+- Deleted 57 fully-merged branches; all worktrees already pruned except builder (now detached at master). 28 salvage branches inventoried (docs/audits/salvage-branch-inventory-2026-08-12.md) with triage card #1937.
+- Recovered the stranded matrix-surface proposal to master (69852c18f, card #1437).
+- Released stale leases on #1435 #1629 and building handoffs on #1804 #1805 #1806 #1867 (implementations landed with the merge; verification deltas recorded per card).
+- D-TESTFAULT1 reworked twice per owner feedback: rec is now B — keep #Test fn; per-effect question-mark suffix in the signature row, test-only; keyword change parked as option A. #1916 plan synced.
+- Stray pre-merge WIP checkpointed as 732437403 (nothing lost).

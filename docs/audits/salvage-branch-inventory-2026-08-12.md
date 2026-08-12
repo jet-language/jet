@@ -1,0 +1,88 @@
+# Salvage-branch inventory — 2026-08-12
+
+After the bucket-1 integration landed (31b0c79ec) and 57 fully-merged branches were deleted, these 28 branches hold unmerged salvage/checkpoint commits. Each line: branch, tip, and what its diff against master touches. Triage rule: port anything still valuable as an ordinary reviewed change against its owning card, then delete the branch; delete outright when master already carries the work in another form. Do not treat any of these as a base to build on.
+
+- **b1/1488-i9** — 682d013bc 2026-08-12 13:59:59 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 16 files changed, 679 insertions(+), 302 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/eval/handles.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs, crates/jet-comptime/src/Comptime/CorePureParity.rs, crates/jet-comptime/src/Comptime/Methods/core_calls.rs, crates/jet-foundation/src/AmbientRandom.rs, crates/jet-foundation/src/AmbientTime.rs
+- **b1/1611** — d49bb2ba9 2026-08-12 14:00:00 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 3 files changed, 47 insertions(+), 29 deletions(-)
+  - files: crates/jet-comptime/src/Comptime/EncodingLite.rs, crates/jet-sema/src/Sema/CheckerInfer/binary.rs, crates/jet-sema/src/Sema/Registration.rs
+- **b1/1615** — e5d95cf2a 2026-08-12 14:00:00 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 6 files changed, 126 insertions(+), 35 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/TIR/lower/fields.rs, crates/jet-jit/src/Collections.rs, crates/jet-jit/src/jit/api_debug.rs, crates/jet-jit/src/jit/safety.rs, crates/jet-rt/src/lib.rs, tools/ci/jit-aot-parity.sh
+- **b1/182x** — 58731b365 2026-08-12 14:00:01 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 4 files changed, 32 insertions(+), 52 deletions(-)
+  - files: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs, crates/jet-sema/src/Sema/Registration/Serde.rs, tests/corelib.rs, tests/ui/serde_flatten_not_struct.stderr
+- **b1/bind** — 64624072b 2026-08-12 14:00:02 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 50 files changed, 2678 insertions(+), 611 deletions(-)
+  - files: Source/CmdDevTools.rs, Source/main.rs, crates/jet-cli/src/CLI.rs, crates/jet-codegen/src/Prelude/Diagnostics.jet, crates/jet-driver/src/Foreign.rs, crates/jet-foundation/src/CoreModuleExports.rs, crates/jet-foundation/src/Syntax/predicates.rs, crates/jet-pkg-model/src/CBind.rs
+- **b1/cli** — ba620745b 2026-08-12 14:00:03 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 85 files changed, 2262 insertions(+), 995 deletions(-)
+  - files: Source/CmdDossier.rs, crates/jet-cli/src/CLI.rs, crates/jet-codegen/src/Codegen/Imports.rs, crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/VariadicBound.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs
+- **b1/corelib-fixtures** — 793178f51 2026-08-12 14:00:03 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 151 files changed, 737 insertions(+), 789 deletions(-)
+  - files: crates/jet-codegen/src/Prelude/Diagnostics.jet, crates/jet-codegen/src/Prelude/Facts.jet, crates/jet-codegen/src/Prelude/Markers.jet, crates/jet-foundation/src/Syntax.rs, crates/jet-foundation/src/Syntax/core_surface.rs, crates/jet-foundation/src/Syntax/effects_surface.rs, crates/jet-foundation/src/Syntax/math_layout.rs, crates/jet-foundation/src/Syntax/package_files.rs
+- **b1/diags** — 9607b3597 2026-08-12 14:00:04 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 16 files changed, 840 insertions(+), 491 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/subset/entry.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, crates/jet-codegen/src/Prelude/Core/Values.rs, crates/jet-codegen/src/Prelude/StructuralDebug.rs, crates/jet-foundation/src/CLISchema.rs
+- **b1/serde** — 4f3fe0065 2026-08-12 14:00:05 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 17 files changed, 933 insertions(+), 842 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs, crates/jet-codegen/src/Codegen/TIR/subset/statements.rs, crates/jet-comptime/src/Comptime/EncodingLite.rs, crates/jet-comptime/src/Comptime/JSONInterp.rs, crates/jet-comptime/src/Comptime/TypedDecode.rs, crates/jet-comptime/src/Comptime/mod.rs
+- **bd1608/crate-reds** — dad8a9f48 2026-08-10 16:33:49 -0400 wip: cards 1608 1609 1611 — manifest typing, build-relative sources, comptime split
+  - 11 files changed, 679 insertions(+), 633 deletions(-)
+  - files: Source/lib.rs, crates/jet-comptime/src/Comptime/Methods.rs, crates/jet-comptime/src/Comptime/Methods/core_calls.rs, crates/jet-comptime/src/Comptime/Methods/core_calls/impure.rs, crates/jet-comptime/src/Comptime/Methods/core_calls/random.rs, crates/jet-driver/src/Driver/mod.rs, crates/jet-pkg-model/src/FFI.rs, crates/jet-pkg-model/src/Manifest.rs
+- **bd1856/corpus-health** — 85429ee80 2026-08-12 13:59:58 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 1 file changed, 56 insertions(+)
+  - files: scripts/agent/time-suites.sh
+- **codex/e3-1500** — 7cad1b01f 2026-08-09 22:30:59 -0400 docs: close authority record map
+  - 3 files changed, 128 insertions(+), 59 deletions(-)
+  - files: crates/jet-foundation/src/Syntax/effects_surface.rs, docs/proposals/authority-one-model.md, docs/spec/syntax-decisions.md
+- **sweep/bd1393** — 1715411ce 2026-08-10 06:34:05 -0400 checkpoint: recover orphaned session work
+  - 55 files changed, 1633 insertions(+), 372 deletions(-)
+  - files: Source/LSP/Server.rs, Source/LSP/SymbolDB.rs, crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/Imports.rs, crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs, crates/jet-codegen/src/Codegen/TIR/subset/expressions.rs
+- **sweep/bd1421** — 6c613d7b1 2026-08-10 06:34:05 -0400 checkpoint: recover orphaned session work
+  - 29 files changed, 990 insertions(+), 13 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/Library.rs, crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs, crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs, crates/jet-codegen/src/Codegen/TIR/eval/handles.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/TIR/subset/handles.rs, crates/jet-codegen/src/Codegen/mod.rs
+- **sweep/bd1497** — b7b611137 2026-08-10 06:34:05 -0400 checkpoint: recover orphaned session work
+  - 1 file changed, 26 insertions(+), 26 deletions(-)
+  - files: tests/corelib.rs
+- **sweep/bd1546** — 3bd930e1e 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 132 files changed, 1254 insertions(+), 1022 deletions(-)
+  - files: crates/jet-cli/src/CLI.rs, crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/Imports.rs, crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/Plugin.rs, crates/jet-codegen/src/Codegen/Statement.rs, crates/jet-codegen/src/Codegen/TIR/emit/encoding.rs, crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs
+- **sweep/bd1547** — 02f43b38a 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 27 files changed, 1047 insertions(+), 53 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/Imports.rs, crates/jet-codegen/src/Codegen/Tuples.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Prelude/Facts.jet, crates/jet-comptime/src/Comptime/Reflect.rs, crates/jet-comptime/src/Comptime/mod.rs, crates/jet-foundation/src/AST.rs
+- **sweep/bd1680** — e1c4e8f96 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 6 files changed, 112 insertions(+), 18 deletions(-)
+  - files: crates/jet-foundation/src/Syntax/core_surface.rs, crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs, crates/jet-sema/src/Sema/CheckerCoreLib/fields_ptrs.rs, crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, crates/jet-sema/src/Sema/CheckerCoreLib/tests.rs, docs/spec/syntax-decisions.md
+- **sweep/bd1692** — 961587a73 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 27 files changed, 534 insertions(+), 35 deletions(-)
+  - files: crates/jet-comptime/src/Comptime/Reflect.rs, crates/jet-driver/src/Driver/mod.rs, crates/jet-foundation/src/AST/items.rs, crates/jet-foundation/src/Syntax/core_surface.rs, crates/jet-parser/src/Formatter/Items.rs, crates/jet-parser/src/Parser/Items/functions_params.rs, crates/jet-parser/src/Parser/Items/reactive_unsafe_c.rs, crates/jet-sema/src/Sema/ApiFreeze.rs
+- **sweep/bd1708** — 681da8f01 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 13 files changed, 1912 insertions(+), 792 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs, crates/jet-comptime/src/Comptime/CorePureParity.rs, crates/jet-comptime/src/Comptime/Methods/core_calls.rs, crates/jet-comptime/src/Comptime/Methods/dispatch.rs, crates/jet-foundation/src/Syntax/core_calls.rs, crates/jet-jit/src/ambient_interp.rs
+- **sweep/bd1802** — 0af4651eb 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 35 files changed, 743 insertions(+), 36 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs
+- **sweep/bd1810** — f8eb31450 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 6 files changed, 87 insertions(+), 1 deletion(-)
+  - files: crates/jet-sema/src/Sema/CheckerCore/statements.rs, crates/jet-sema/src/Sema/CheckerInfer/fallible.rs, tests/dev.rs, tests/ui/result_loop_break_payloads.jet, tests/ui/result_loop_break_payloads.stderr, tests/ui/value_loop_exhaustion_route.jet
+- **sweep/final3** — 5b7965a7b 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 1 file changed, 31 insertions(+), 26 deletions(-)
+  - files: tests/corelib.rs
+- **sweep/final5** — 9f426bf1f 2026-08-10 06:34:06 -0400 checkpoint: recover orphaned session work
+  - 4 files changed, 57 insertions(+), 48 deletions(-)
+  - files: crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-foundation/src/Traits.rs, tests/support/fmt_lossless.rs
+- **sweep/luna1825-recovery** — 21bb456fd 2026-08-10 06:34:07 -0400 checkpoint: recover orphaned session work
+  - 2 files changed, 38 insertions(+), 29 deletions(-)
+  - files: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs, tests/corelib.rs
+- **sweep/wt2** — c508ea42e 2026-08-10 06:34:07 -0400 checkpoint: recover orphaned session work
+  - 1 file changed, 1 insertion(+), 1 deletion(-)
+  - files: examples/features/expected/tooling/tests.test.out
+- **sweep/wt3** — 656df922f 2026-08-10 06:34:07 -0400 checkpoint: recover orphaned session work
+  - 5 files changed, 10 insertions(+), 40 deletions(-)
+  - files: examples/features/serde/encoding_cbor_stream.jet, examples/features/serde/encoding_csv_stream.jet, examples/features/serde/encoding_json_stream.jet, examples/features/serde/encoding_jsonl_stream.jet, examples/features/serde/encoding_xml_stream.jet
+- **sweep/wt4** — 9513c19d6 2026-08-12 14:00:12 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
+  - 28 files changed, 351 insertions(+), 160 deletions(-)
+  - files: Source/lib.rs, crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/eval/handles.rs, crates/jet-codegen/src/Codegen/TIR/eval/mod.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/TIR/subset/handles.rs, crates/jet-codegen/src/Codegen/TIR/tests.rs
