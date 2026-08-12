@@ -709,17 +709,10 @@ extern "C" fn jet_jit_list_range_end(
         let Some(len) = rt.heap.list_len(list) else {
             jet_foundation::ice!(None, "jit Range window: bad list handle");
         };
-        match range_semantics::jet_range_bounds(start, end, exclusive != 0, len) {
-            Some((_, end_exclusive)) => end_exclusive,
-            None => {
-                rt.set_trap(&format!(
-                    "can't view {len} items from {start} to {end} ({})",
-                    if exclusive != 0 {
-                        "exclusive"
-                    } else {
-                        "inclusive"
-                    }
-                ));
+        match range_semantics::jet_checked_view_bounds(start, end, exclusive != 0, len) {
+            Ok((_, end_exclusive)) => end_exclusive,
+            Err(message) => {
+                rt.set_trap(&message);
                 0
             }
         }

@@ -4171,29 +4171,35 @@ fn run() {
         jet_jit::try_compile_bundle(&bundle).expect("mutable view bounds must lower to JIT");
         let mut backend = jet_jit::CraneliftBackend::new();
         match backend.run(&bundle, false) {
-            RunOutcome::Ran { exit_code, .. } => {
-                assert_ne!(exit_code, 0, "resident JIT accepted an invalid mutable view");
+            RunOutcome::Ran {
+                stderr, exit_code, ..
+            } => {
+                assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
+                assert_eq!(
+                    stderr,
+                    "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+                    "resident JIT reported the wrong runtime failure"
+                );
             }
-            RunOutcome::Problems(diags) => assert!(
-                diags
-                    .iter()
-                    .any(|diag| diag.code == "E0953"
-                        && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
-                "resident JIT reported the wrong runtime failure: {diags:?}"
+            RunOutcome::Problems(diags) => panic!(
+                "resident JIT returned diagnostics instead of running: {diags:?}"
             ),
         }
     }
 
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
-        RunOutcome::Ran { exit_code, .. } => {
-            assert_ne!(exit_code, 0, "forced interpreter accepted an invalid mutable view");
+        RunOutcome::Ran {
+            stderr, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 70, "forced interpreter exit drift: {stderr}");
+            assert_eq!(
+                stderr,
+                "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+                "forced interpreter reported the wrong runtime failure"
+            );
         }
-        RunOutcome::Problems(diags) => assert!(
-            diags
-                .iter()
-                .any(|diag| diag.code == "E0953"
-                    && diag.why.contains("can't view 1 items from 2 to 2 (inclusive)")),
-            "forced interpreter reported the wrong runtime failure: {diags:?}"
+        RunOutcome::Problems(diags) => panic!(
+            "forced interpreter returned diagnostics instead of running: {diags:?}"
         ),
     }
 

@@ -13,6 +13,28 @@ pub(crate) fn jet_range_bounds(
     (end_exclusive <= len).then_some((start, end_exclusive))
 }
 
+pub(crate) fn jet_view_bounds_error(
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    len: i64,
+) -> String {
+    format!(
+        "can't view {len} items from {start} to {end} ({})",
+        if exclusive { "exclusive" } else { "inclusive" }
+    )
+}
+
+pub(crate) fn jet_checked_view_bounds(
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    len: i64,
+) -> Result<(i64, i64), String> {
+    jet_range_bounds(start, end, exclusive, len)
+        .ok_or_else(|| jet_view_bounds_error(start, end, exclusive, len))
+}
+
 pub(crate) fn jet_range_contains(
     start: i64,
     end: i64,
