@@ -257,7 +257,7 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
 }
 
 #[test]
-fn foreign_member_lists_use_the_shared_unqualified_parser_for_every_root() {
+fn foreign_namespace_selective_imports_reuse_ordinary_parser_path() {
     use jet::AST::{ForeignLanguage, ImportKind};
 
     for language in ForeignLanguage::ALL {
