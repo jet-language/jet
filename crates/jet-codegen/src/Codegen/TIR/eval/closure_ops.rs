@@ -240,7 +240,7 @@ impl<'a> EvalCtx<'a> {
             else {
                 return Err(unsupported("edit_disjoint list base", self.span()));
             };
-            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)? else {
                 return Err(unsupported("edit_disjoint indexes", self.span()));
             };
             let mut indexes = Vec::with_capacity(targets.len());
@@ -277,7 +277,7 @@ impl<'a> EvalCtx<'a> {
             let _ = self.apply_callable(&args[1], argv, scope)?;
             return Ok(CtValue::Present(Box::new(CtValue::Unit)));
         }
-        let mut recv_v = self.eval_expr(recv, scope)?;
+        let mut recv_v = self.eval_expr_child(recv, scope)?;
         let progress = progress_parts(&recv_v);
         let iter = progress_iter_parts(&recv_v);
         if let Some((items, _, _, _, _, _, _, _)) = &progress {
@@ -498,7 +498,7 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("reduce receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 let f = &args[1];
                 for item in items {
                     acc = self.apply_callable(f, vec![acc, item], scope)?;
@@ -712,7 +712,7 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("para_fold receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 let f = &args[1];
                 for item in items {
                     acc = self.apply_callable(f, vec![acc, item], scope)?;
@@ -829,7 +829,7 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Map(entries) = recv_v else {
                     return Err(unsupported("map fold receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 let f = &args[1];
                 for (key, value) in entries {
                     acc = self.apply_callable(f, vec![acc, key.to_value(), value], scope)?;
@@ -916,7 +916,7 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("scan receiver", self.span()));
                 };
-                let mut acc = self.eval_expr(&args[0], scope)?;
+                let mut acc = self.eval_expr_child(&args[0], scope)?;
                 let f = &args[1];
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
@@ -1034,7 +1034,7 @@ impl<'a> EvalCtx<'a> {
                     let mut child = HashMap::new();
                     return self.run_func(func, argv, &mut child);
                 }
-                let v = self.eval_expr(f, scope)?;
+                let v = self.eval_expr_child(f, scope)?;
                 Err(unsupported(
                     &format!("callable value `{v:?}`"),
                     self.span(),
@@ -1059,6 +1059,13 @@ impl<'a> EvalCtx<'a> {
         outer: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut child = outer.clone();
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = outer.get(source).cloned() {
+                    child.insert(runtime.clone(), value);
+                }
+            }
+        }
         let param_names: std::collections::HashSet<String> =
             lam.source_params.iter().cloned().collect();
         for (i, name) in lam.source_params.iter().enumerate() {
@@ -1079,7 +1086,24 @@ impl<'a> EvalCtx<'a> {
                     ));
                 }
             },
+            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
+                Flow::Return(v) => v,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping lambda"),
+                        self.span(),
+                    ));
+                }
+            },
         };
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = child.get(runtime).cloned() {
+                    child.insert(source.clone(), value);
+                }
+            }
+        }
         // FnMut capture write-back: mutations to outer locals (Set.add, Map.add, …)
         // must be visible after the lambda returns (#777 pure-parity HOF).
         for (k, v) in child {
@@ -1104,6 +1128,13 @@ impl<'a> EvalCtx<'a> {
         };
         let mut child = outer.clone();
         child.insert(param.clone(), arg);
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = outer.get(source).cloned() {
+                    child.insert(runtime.clone(), value);
+                }
+            }
+        }
         let result = match &lam.executable {
             TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
             TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
@@ -1116,7 +1147,24 @@ impl<'a> EvalCtx<'a> {
                     ));
                 }
             },
+            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping shared lambda"),
+                        self.span(),
+                    ));
+                }
+            },
         };
+        for (source, runtime, _) in &lam.captures {
+            if runtime != source {
+                if let Some(value) = child.get(runtime).cloned() {
+                    child.insert(source.clone(), value);
+                }
+            }
+        }
         let updated = child.remove(param).unwrap_or(CtValue::Unit);
         for (name, value) in child {
             if outer.contains_key(&name) {

@@ -26,7 +26,7 @@ use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::lower::lower_incdec_place;
-use crate::Codegen::TIR::lower_method_call;
+use crate::Codegen::TIR::lower_method_call_with_sig;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower_panic_stop;
@@ -156,7 +156,8 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
-        let lowered = lower_method_call(
+        let method_sig = expr_cache_take_method_sig(call);
+        let lowered = lower_method_call_with_sig(
             receiver,
             method,
             *method_span,
@@ -169,6 +170,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             cx,
             env,
             lowered_receiver,
+            method_sig.as_deref(),
         );
         // D-APILABEL1=A: a method whose labels reordered its arguments keeps
         // the same source evaluation order as a free call.
@@ -185,7 +187,7 @@ struct ExprWorklistCache {
     active: bool,
     values: HashMap<usize, VecDeque<TExpr>>,
     types: HashMap<usize, Type>,
-    bodies: HashMap<usize, VecDeque<Vec<TStmt>>>,
+    method_sigs: HashMap<usize, VecDeque<Vec<(AccessConvention, Type)>>>,
 }
 
 impl Default for ExprWorklistCache {
@@ -194,7 +196,7 @@ impl Default for ExprWorklistCache {
             active: false,
             values: HashMap::new(),
             types: HashMap::new(),
-            bodies: HashMap::new(),
+            method_sigs: HashMap::new(),
         }
     }
 }
@@ -318,7 +320,7 @@ fn expr_cache_begin() -> bool {
             cache.active = true;
             cache.values.clear();
             cache.types.clear();
-            cache.bodies.clear();
+            cache.method_sigs.clear();
             true
         }
     })
@@ -330,7 +332,7 @@ fn expr_cache_end() {
         cache.active = false;
         cache.values.clear();
         cache.types.clear();
-        cache.bodies.clear();
+        cache.method_sigs.clear();
     });
 }
 
@@ -376,36 +378,36 @@ fn expr_cache_type(expr: &Expr) -> Option<Type> {
     })
 }
 
-fn expr_cache_put_body(expr: &Expr, body: Vec<TStmt>) {
+fn expr_cache_put_method_sig(expr: &Expr, sig: Vec<(AccessConvention, Type)>) {
     EXPR_WORKLIST_CACHE.with(|cache| {
         cache
             .borrow_mut()
-            .bodies
+            .method_sigs
             .entry(expr_key(expr))
             .or_default()
-            .push_back(body);
+            .push_back(sig);
     });
 }
 
-fn expr_cache_take_body(expr: &Expr) -> Option<Vec<TStmt>> {
+fn expr_cache_take_method_sig(expr: &Expr) -> Option<Vec<(AccessConvention, Type)>> {
     EXPR_WORKLIST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.active {
             return None;
         }
         let key = expr_key(expr);
-        let body = cache
-            .bodies
+        let sig = cache
+            .method_sigs
             .get_mut(&key)
-            .and_then(|bodies| bodies.pop_front());
+            .and_then(|sigs| sigs.pop_front());
         if cache
-            .bodies
+            .method_sigs
             .get(&key)
-            .is_some_and(|bodies| bodies.is_empty())
+            .is_some_and(|sigs| sigs.is_empty())
         {
-            cache.bodies.remove(&key);
+            cache.method_sigs.remove(&key);
         }
-        body
+        sig
     })
 }
 
@@ -414,6 +416,14 @@ pub(crate) fn take_scheduled_expr(expr: &Expr) -> Option<TExpr> {
         let stripped = strip_expr_parens(expr);
         (!std::ptr::eq(expr, stripped)).then(|| expr_cache_take(stripped)).flatten()
     })
+}
+
+/// Lower one expression after its work-item children are ready. A condition
+/// builder uses this instead of reopening a nested expression segment, so a
+/// value is consumed from the cache exactly once.
+pub(crate) fn lower_cached_expr(expr: &Expr, _cx: &Cx, _env: &mut LowerEnv) -> TExpr {
+    let expr = strip_expr_parens(expr);
+    take_scheduled_expr(expr).expect("condition child missing from expression worklist")
 }
 
 /// Return the non-call children of an expression. Calls use the unified work
@@ -528,7 +538,8 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
             }
             children
         }
-        Expr::If { .. } | Expr::Lambda(_) => Vec::new(),
+        Expr::If { cond, .. } => vec![cond.as_ref()],
+        Expr::Lambda(_) => Vec::new(),
         Expr::TupleLit(fields, _, _) => fields.iter().map(|(_, value)| value).collect(),
         Expr::PtrFromAddr { addr, .. } => vec![addr.as_ref()],
         Expr::Paren(inner, _) => vec![inner.as_ref()],
@@ -624,21 +635,30 @@ fn direct_call_conventions(
 }
 
 fn method_arg_mode(
+    sig: Option<&[(AccessConvention, Type)]>,
+    index: usize,
+) -> ExprArgMode<'static> {
+    sig.map(|sig| ExprArgMode::Convention(sig.get(index).cloned()))
+        .unwrap_or(ExprArgMode::Plain)
+}
+
+fn method_arg_contract(
     method: &str,
     recv_type: &Option<String>,
     owner_type_args: &[Type],
     type_args: &[Type],
-    index: usize,
     cx: &Cx,
-) -> ExprArgMode<'static> {
-    if owner_type_args.is_empty() && type_args.is_empty() {
-        if let Some(ty) = recv_type {
-            if let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) {
-                return ExprArgMode::Convention(sig.get(index).cloned());
-            }
-        }
-    }
-    ExprArgMode::Plain
+) -> Option<Vec<(AccessConvention, Type)>> {
+    let ty = recv_type.as_ref()?;
+    let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()))?;
+    Some(crate::Codegen::TIR::instantiate_method_sig(
+        cx,
+        ty,
+        method,
+        sig,
+        owner_type_args,
+        type_args,
+    ))
 }
 
 fn inline_loop_body(expr: &Expr) -> Option<&[Stmt]> {
@@ -704,29 +724,36 @@ fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChi
                 ..
             } = cursor
             {
-                calls.push((
-                    receiver.as_ref(),
-                    method.as_str(),
-                    owner_type_args.as_slice(),
-                    type_args.as_slice(),
-                    args,
-                    recv_type,
-                ));
+                calls.push(cursor);
                 cursor = receiver;
             }
             let mut children = vec![ExprWorkChild::Expr(cursor)];
-            for (_, method, owner_type_args, type_args, args, recv_type) in calls.into_iter().rev() {
+            for call in calls.into_iter().rev() {
+                let Expr::MethodCall {
+                    method,
+                    owner_type_args,
+                    type_args,
+                    args,
+                    recv_type,
+                    ..
+                } = call
+                else {
+                    unreachable!("method chain contains only method calls")
+                };
+                let contract = method_arg_contract(
+                    method,
+                    recv_type,
+                    owner_type_args,
+                    type_args,
+                    cx,
+                );
+                if let Some(contract) = contract.as_ref() {
+                    expr_cache_put_method_sig(call, contract.clone());
+                }
                 children.extend(source_arg_indices(args).into_iter().map(|index| {
                     ExprWorkChild::Arg(ExprWorkArg {
                         arg: &args[index],
-                        mode: method_arg_mode(
-                            method,
-                            recv_type,
-                            owner_type_args,
-                            type_args,
-                            index,
-                            cx,
-                        ),
+                        mode: method_arg_mode(contract.as_deref(), index),
                     })
                 }));
             }
@@ -744,10 +771,59 @@ enum ExprWork<'a> {
     EnterArg(ExprWorkArg<'a>),
     Build(&'a Expr),
     BuildArg(ExprWorkArg<'a>),
-    LowerInlineBody {
+    LowerInlineLoop {
         expr: &'a Expr,
         body: &'a [Stmt],
     },
+    BuildIf(&'a Expr),
+    LowerIfCondition(Box<ExprIfConditionWork<'a>>),
+    LowerIfThenBody(Box<ExprIfWork<'a>>),
+    LowerIfThenValue(Box<ExprIfWork<'a>>),
+    LowerIfElseBody(Box<ExprIfWork<'a>>),
+    LowerIfElseValue(Box<ExprIfWork<'a>>),
+}
+
+struct ExprIfConditionWork<'a> {
+    expr: &'a Expr,
+    then_body: &'a [Stmt],
+    then_value: &'a Expr,
+    else_body: &'a [Stmt],
+    else_value: &'a Expr,
+    terms: Vec<&'a Expr>,
+    next: usize,
+    lowered: Vec<TIfCond>,
+    bindings: Vec<(String, TLocal, Option<Type>)>,
+    prefixes: Vec<TStmt>,
+    base_env: LowerEnv,
+}
+
+struct ExprIfWork<'a> {
+    expr: &'a Expr,
+    condition: TIfCond,
+    then_prefix: Vec<TStmt>,
+    then_body: &'a [Stmt],
+    then_value: &'a Expr,
+    else_body: &'a [Stmt],
+    else_value: &'a Expr,
+    base_env: LowerEnv,
+    then_env: Option<LowerEnv>,
+    then_lowered: Vec<TStmt>,
+    then_value_lowered: Option<TExpr>,
+    else_lowered: Vec<TStmt>,
+}
+
+fn condition_terms<'a>(cond: &'a Expr) -> Vec<&'a Expr> {
+    let mut pending = vec![cond];
+    let mut terms = Vec::new();
+    while let Some(term) = pending.pop() {
+        if let Expr::Binary(BinOp::And, left, right, _) = term {
+            pending.push(right);
+            pending.push(left);
+        } else {
+            terms.push(term);
+        }
+    }
+    terms
 }
 
 fn push_expr_children<'a>(
@@ -758,12 +834,23 @@ fn push_expr_children<'a>(
         match child {
             ExprWorkChild::Expr(child) => {
                 let child = strip_expr_parens(child);
-                if !matches!(child, Expr::If { .. }) {
-                    work.push(ExprWork::Enter(child));
-                }
+                work.push(ExprWork::Enter(child));
             }
             ExprWorkChild::Arg(arg) => work.push(ExprWork::EnterArg(arg)),
         }
+    }
+}
+
+fn push_expr_condition_atom<'a>(
+    work: &mut Vec<ExprWork<'a>>,
+    expr: &'a Expr,
+    cx: &Cx,
+    env: &LowerEnv,
+) {
+    if matches!(expr, Expr::PatternTest { .. }) {
+        push_expr_children(work, expr_children(expr, cx, env));
+    } else {
+        push_expr_work(work, expr, cx, env);
     }
 }
 
@@ -774,10 +861,12 @@ fn push_expr_work<'a>(
     env: &LowerEnv,
 ) {
     let expr = strip_expr_parens(expr);
-    work.push(ExprWork::Build(expr));
     if let Some(body) = inline_loop_body(expr) {
-        work.push(ExprWork::LowerInlineBody { expr, body });
+        work.push(ExprWork::LowerInlineLoop { expr, body });
+    } else if matches!(expr, Expr::If { .. }) {
+        work.push(ExprWork::BuildIf(expr));
     } else {
+        work.push(ExprWork::Build(expr));
         push_expr_children(work, expr_children(expr, cx, env));
     }
 }
@@ -789,9 +878,6 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
         match task {
             ExprWork::Enter(expr) => {
                 let expr = strip_expr_parens(expr);
-                if matches!(expr, Expr::If { .. }) {
-                    continue;
-                }
                 push_expr_work(&mut work, expr, cx, env);
             }
             ExprWork::Build(expr) => {
@@ -801,12 +887,21 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 let expr = strip_expr_parens(&arg.arg.expr);
                 work.push(ExprWork::BuildArg(arg));
                 if let Some(body) = inline_loop_body(expr) {
-                    work.push(ExprWork::LowerInlineBody { expr, body });
+                    work.push(ExprWork::LowerInlineLoop { expr, body });
+                } else if matches!(expr, Expr::If { .. }) {
+                    work.push(ExprWork::BuildIf(expr));
                 } else {
                     push_expr_children(&mut work, expr_children(expr, cx, env));
                 }
             }
             ExprWork::BuildArg(arg) => {
+                // A lambda is a lazy argument, not a strict child value. Keep its
+                // lowering in the call site so special callbacks can apply their
+                // host-borrow/value contract exactly once; caching a context-free
+                // lambda here would force that call site to lower it a second time.
+                if matches!(strip_expr_parens(&arg.arg.expr), Expr::Lambda(_)) {
+                    continue;
+                }
                 let value = match arg.mode {
                     ExprArgMode::Plain => lower_expr(&arg.arg.expr, cx, env),
                     ExprArgMode::Convention(conv) => {
@@ -820,7 +915,9 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                                 .map(|ty| (AccessConvention::Read, ty)),
                             _ => None,
                         });
-                        if conv.is_none() && matches!(&arg.arg.expr, Expr::Lambda(_)) {
+                        if conv.is_none()
+                            && matches!(strip_expr_parens(&arg.arg.expr), Expr::Lambda(_))
+                        {
                             continue;
                         }
                         crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv, env, cx)
@@ -828,167 +925,186 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 };
                 expr_cache_put(strip_expr_parens(&arg.arg.expr), value);
             }
-            ExprWork::LowerInlineBody { expr, body } => {
+            ExprWork::LowerInlineLoop { expr, body } => {
                 let mut block_env = clone_env(env);
-                expr_cache_put_body(expr, lower_stmts(body, cx, &mut block_env));
+                let lowered = lower_stmts(body, cx, &mut block_env);
+                let Expr::CallValue { callee, .. } = expr else {
+                    unreachable!("inline loop work item requires a call value")
+                };
+                let Expr::Lambda(lam) = callee.as_ref() else {
+                    unreachable!("inline loop work item requires a lambda")
+                };
+                let ty = if lam.meta.collecting_loop {
+                    Type::List(Box::new(
+                        lam.meta.collect_item_type.clone().unwrap_or(Type::Int),
+                    ))
+                } else {
+                    lam.meta.loop_result_type.clone().unwrap_or(Type::Int)
+                };
+                expr_cache_put(
+                    expr,
+                    TExpr {
+                        ty,
+                        kind: TExprKind::InlineBlock(lowered),
+                    },
+                );
+            }
+            ExprWork::BuildIf(expr) => {
+                let Expr::If {
+                    cond,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    ..
+                } = expr
+                else {
+                    unreachable!("if work item requires an if expression")
+                };
+                let terms = condition_terms(cond);
+                let state = ExprIfConditionWork {
+                    expr,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    terms,
+                    next: 0,
+                    lowered: Vec::new(),
+                    bindings: Vec::new(),
+                    prefixes: Vec::new(),
+                    base_env: clone_env(env),
+                };
+                let first = state
+                    .terms
+                    .first()
+                    .copied()
+                    .expect("if condition has one or more terms");
+                work.push(ExprWork::LowerIfCondition(Box::new(state)));
+                push_expr_condition_atom(&mut work, first, cx, env);
+            }
+            ExprWork::LowerIfCondition(mut state) => {
+                let term = state.terms[state.next];
+                let (lowered, binding, prefix) =
+                    super::control_flow::lower_if_cond_atom_cached(term, cx, env);
+                if let Some((name, place, ty)) = binding {
+                    env.bind(&name, place.clone(), ty.clone());
+                    state.bindings.push((name, place, ty));
+                }
+                state.lowered.push(lowered);
+                state.prefixes.extend(prefix);
+                state.next += 1;
+                if let Some(next) = state.terms.get(state.next).copied() {
+                    work.push(ExprWork::LowerIfCondition(state));
+                    push_expr_condition_atom(&mut work, next, cx, env);
+                    continue;
+                }
+
+                let ExprIfConditionWork {
+                    expr,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    lowered: lowered_terms,
+                    bindings,
+                    prefixes,
+                    base_env,
+                    ..
+                } = *state;
+                let mut lowered = lowered_terms.into_iter().rev();
+                let mut condition = lowered
+                    .next()
+                    .expect("if condition has one or more lowered terms");
+                for left in lowered {
+                    condition = TIfCond::And {
+                        left: Box::new(left),
+                        right: Box::new(condition),
+                    };
+                }
+                let mut then_env = clone_env(&base_env);
+                for (name, place, ty) in &bindings {
+                    then_env.bind(name, place.clone(), ty.clone());
+                }
+                let branch_env = clone_env(&then_env);
+                let if_state = ExprIfWork {
+                    expr,
+                    condition,
+                    then_prefix: prefixes,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    base_env,
+                    then_env: Some(then_env),
+                    then_lowered: Vec::new(),
+                    then_value_lowered: None,
+                    else_lowered: Vec::new(),
+                };
+                *env = branch_env;
+                work.push(ExprWork::LowerIfThenBody(Box::new(if_state)));
+            }
+            ExprWork::LowerIfThenBody(mut state) => {
+                let mut branch_env = state
+                    .then_env
+                    .take()
+                    .expect("if then environment is consumed once");
+                state.then_lowered = lower_stmts(state.then_body, cx, &mut branch_env);
+                *env = branch_env;
+                let then_value = state.then_value;
+                work.push(ExprWork::LowerIfThenValue(state));
+                work.push(ExprWork::Enter(then_value));
+            }
+            ExprWork::LowerIfThenValue(mut state) => {
+                state.then_value_lowered = Some(
+                    expr_cache_take(state.then_value)
+                        .expect("if then value was lowered exactly once"),
+                );
+                state.then_env = Some(clone_env(env));
+                *env = clone_env(&state.base_env);
+                work.push(ExprWork::LowerIfElseBody(state));
+            }
+            ExprWork::LowerIfElseBody(mut state) => {
+                state.else_lowered = lower_stmts(state.else_body, cx, env);
+                let else_value = state.else_value;
+                work.push(ExprWork::LowerIfElseValue(state));
+                work.push(ExprWork::Enter(else_value));
+            }
+            ExprWork::LowerIfElseValue(state) => {
+                let else_value = expr_cache_take(state.else_value)
+                    .expect("if else value was lowered exactly once");
+                let then_value = state
+                    .then_value_lowered
+                    .expect("if then value is consumed once");
+                let mut then_body = state.then_prefix;
+                then_body.extend(state.then_lowered);
+                let value = TExpr {
+                    ty: then_value.ty.clone(),
+                    kind: TExprKind::IfExpr {
+                        cond: Box::new(state.condition),
+                        then_body,
+                        then_value: Box::new(then_value),
+                        else_body: state.else_lowered,
+                        else_value: Box::new(else_value),
+                    },
+                };
+                *env = state.base_env;
+                expr_cache_put(state.expr, value);
             }
         }
     }
     expr_cache_take(root).expect("expression worklist lost its root")
 }
 
-type ExprIfResume<'a> =
-    Box<dyn FnOnce(TExpr, LowerEnv, &'a Cx) -> ExprIfTask<'a> + 'a>;
-type ExprBodyResume<'a> =
-    Box<dyn FnOnce(Vec<TStmt>, LowerEnv, &'a Cx) -> ExprIfTask<'a> + 'a>;
-
-enum ExprIfTask<'a> {
-    Lower {
-        expr: &'a Expr,
-        env: LowerEnv,
-        resume: ExprIfResume<'a>,
-    },
-    LowerBody {
-        stmts: &'a [Stmt],
-        env: LowerEnv,
-        resume: ExprBodyResume<'a>,
-    },
-    Done { value: TExpr, env: LowerEnv },
-}
-
-fn lower_if_expr_after_condition<'a>(
-    condition: TIfCond,
-    bindings: Vec<(String, TLocal, Option<Type>)>,
-    mut then_prefix: Vec<TStmt>,
-    then_body: &'a [crate::AST::Stmt],
-    then_value: &'a Expr,
-    else_body: &'a [crate::AST::Stmt],
-    else_value: &'a Expr,
-    base_env: LowerEnv,
-    resume: ExprIfResume<'a>,
-) -> ExprIfTask<'a> {
-    let mut then_env = clone_env(&base_env);
-    for (name, place, ty) in bindings {
-        then_env.bind(&name, place, ty);
-    }
-    let else_base = clone_env(&base_env);
-    let resume_then_body: ExprBodyResume<'a> = Box::new(move |lowered_then, then_env, _cx| {
-        then_prefix.extend(lowered_then);
-        let resume_then: ExprIfResume<'a> = Box::new(move |then_value, _, _cx| {
-            let else_env = clone_env(&else_base);
-            let resume_else_body: ExprBodyResume<'a> = Box::new(
-                move |lowered_else, else_env, _cx| {
-                    let resume_else: ExprIfResume<'a> = Box::new(move |else_value, _, cx| {
-                        let value = TExpr {
-                            ty: then_value.ty.clone(),
-                            kind: TExprKind::IfExpr {
-                                cond: Box::new(condition),
-                                then_body: then_prefix,
-                                then_value: Box::new(then_value),
-                                else_body: lowered_else,
-                                else_value: Box::new(else_value),
-                            },
-                        };
-                        resume(value, base_env, cx)
-                    });
-                    ExprIfTask::Lower {
-                        expr: else_value,
-                        env: else_env,
-                        resume: resume_else,
-                    }
-                },
-            );
-            ExprIfTask::LowerBody {
-                stmts: else_body,
-                env: else_env,
-                resume: resume_else_body,
-            }
-        });
-        ExprIfTask::Lower {
-            expr: then_value,
-            env: then_env,
-            resume: resume_then,
-        }
-    });
-    ExprIfTask::LowerBody {
-        stmts: then_body,
-        env: then_env,
-        resume: resume_then_body,
-    }
-}
-
-fn lower_if_expr_worklist<'a>(expr: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TExpr {
-    let mut task = ExprIfTask::Lower {
-        expr,
-        env: clone_env(env),
-        resume: Box::new(|value, env, _| ExprIfTask::Done { value, env }),
-    };
-    loop {
-        task = match task {
-            ExprIfTask::Done { value, env: result_env } => {
-                *env = result_env;
-                return value;
-            }
-            ExprIfTask::Lower {
-                expr,
-                mut env,
-                resume,
-            } => {
-                let expr = strip_expr_parens(expr);
-                match expr {
-                    Expr::If {
-                        cond,
-                        then_body,
-                        then_value,
-                        else_body,
-                        else_value,
-                        ..
-                    } => {
-                        let (condition, bindings, prefix) =
-                            super::control_flow::lower_if_cond(cond, cx, &mut env);
-                        lower_if_expr_after_condition(
-                            condition,
-                            bindings,
-                            prefix,
-                            then_body,
-                            then_value,
-                            else_body,
-                            else_value,
-                            env,
-                            resume,
-                        )
-                    }
-                    _ => {
-                        let value = lower_expr(expr, cx, &mut env);
-                        resume(value, env, cx)
-                    }
-                }
-            }
-            ExprIfTask::LowerBody {
-                stmts,
-                mut env,
-                resume,
-            } => {
-                let body = lower_stmts(stmts, cx, &mut env);
-                resume(body, env, cx)
-            }
-        };
-    }
-}
-
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    // Keep expression descent off the native stack. Structural nodes are built by
-    // `lower_expr_segment`; value-level `if` nodes use the continuation worklist below.
+    // Keep expression descent off the native stack. Value-if and inline-loop nodes
+    // use the same continuation worklist as every other expression.
     let e = strip_expr_parens(e);
     if let Some(value) = expr_cache_take(e) {
         return value;
     }
     let owns_cache = expr_cache_begin();
-    let value = if matches!(e, Expr::If { .. }) {
-        lower_if_expr_worklist(e, cx, env)
-    } else {
-        lower_expr_segment(e, cx, env)
-    };
+    let value = lower_expr_segment(e, cx, env);
     if owns_cache {
         expr_cache_end();
     }
@@ -1397,37 +1513,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
         },
-        // D-LOOPEVAL1: the parser carries a yielding loop through sema as an
-        // immediately-called private lambda. Lower it as a block in the current
-        // function, not as a closure call: captures, effects, `return`, and cleanup
-        // must keep ordinary loop behavior.
-        Expr::CallValue { callee, args, .. }
-            if args.is_empty()
-                && matches!(
-                    callee.as_ref(),
-                    Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
-                ) =>
-        {
-            let Expr::Lambda(lam) = callee.as_ref() else {
-                unreachable!("collecting loop guard requires a lambda")
-            };
-            let crate::AST::LambdaBody::Block(_) = &lam.body else {
-                unreachable!("collecting loops always carry a block")
-            };
-            let ty = if lam.meta.collecting_loop {
-                Type::List(Box::new(
-                    lam.meta.collect_item_type.clone().unwrap_or(Type::Int),
-                ))
-            } else {
-                lam.meta.loop_result_type.clone().unwrap_or(Type::Int)
-            };
-            TExpr {
-                ty,
-                kind: TExprKind::InlineBlock(
-                    expr_cache_take_body(e).expect("generated loop body was deferred"),
-                ),
-            }
-        }
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
         // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
         Expr::CallValue { callee, args, .. } => {
@@ -2160,7 +2245,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lower_one_call_arg(a, conv, env, cx)
                         })
                         .collect();
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: call_return_type_with_args(
                             cx,
                             &mangled_key,
@@ -2174,6 +2259,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             type_args: call.type_args.clone(),
                             args,
                         },
+                    };
+                    return match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(
+                            lowered,
+                            &order,
+                            call.args.len(),
+                            call.name_span.start as u32,
+                        ),
+                        None => lowered,
                     };
                 }
                 // c109 Phase 14: unqualified file-module import (`emit_call`'s
@@ -2209,7 +2303,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .cloned()
                         .flatten()
                         .unwrap_or_else(unit_type);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::Qualified {
@@ -2219,6 +2313,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             type_args: call.type_args.clone(),
                             args,
                         },
+                    };
+                    return match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(
+                            lowered,
+                            &order,
+                            call.args.len(),
+                            call.name_span.start as u32,
+                        ),
+                        None => lowered,
                     };
                 }
             }

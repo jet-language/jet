@@ -1144,6 +1144,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         TIR::TLambdaBody::Block(stmts) => {
                             stmts.iter().all(|s| resident_safe_stmt(s, callees))
                         }
+                        TIR::TLambdaBody::SharedBlock(stmts) => {
+                            stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                        }
                     }
             }
             TCoreClosureKind::ReactiveDerived { executable, .. }
@@ -1162,6 +1165,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
                 }
             }
             TCoreClosureKind::Guard { executable, .. }
@@ -1170,6 +1176,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 match &executable.executable {
                     TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
                     TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
                 }
@@ -1601,6 +1610,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
                 }
         }
         TExprKind::FnValue { kind } => match kind {
@@ -1861,6 +1873,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|s| resident_safe_stmt(s, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
                 }
         }
         TExprKind::ConditionNotify { condition, .. } => resident_safe_expr(condition, callees),
@@ -1980,6 +1995,9 @@ fn resident_safe_map_callback(args: &[TExpr], index: usize, callees: &HashSet<St
                     TIR::TLambdaBody::Block(stmts) => {
                         stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                     }
+                    TIR::TLambdaBody::SharedBlock(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
                 }
     )
 }
@@ -2011,6 +2029,10 @@ fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool 
                     && match &lam.executable {
                         TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
                         TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|stmt| {
+                            matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
+                                && resident_safe_stmt(stmt, callees)
+                        }),
+                        TIR::TLambdaBody::SharedBlock(stmts) => stmts.iter().all(|stmt| {
                             matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
                                 && resident_safe_stmt(stmt, callees)
                         }),
@@ -2087,6 +2109,9 @@ fn resident_safe_closure_method(
                             && match &lambda.executable {
                                 TIR::TLambdaBody::Expr(body) => resident_safe_expr(body, callees),
                                 TIR::TLambdaBody::Block(stmts) => {
+                                    stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                                }
+                                TIR::TLambdaBody::SharedBlock(stmts) => {
                                     stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
                                 }
                             }
@@ -2166,6 +2191,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -2183,6 +2209,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -2197,6 +2224,7 @@ fn resident_safe_closure_method(
                         TExprKind::Lambda(lam) => match &lam.executable {
                             TIR::TLambdaBody::Expr(body) => Some(&body.ty),
                             TIR::TLambdaBody::Block(_) => None,
+                            TIR::TLambdaBody::SharedBlock(_) => None,
                         },
                         _ => None,
                     }),
@@ -3438,6 +3466,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::Reactive { executable, .. } => match &executable.executable {
             TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
             TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|s| resident_safe_stmt(s, callees)),
+            TIR::TLambdaBody::SharedBlock(stmts) => {
+                stmts.iter().all(|s| resident_safe_stmt(s, callees))
+            }
         },
         TStmt::Layout { body, .. } => body.iter().all(|s| resident_safe_stmt(s, callees)),
         TStmt::IndexHookAssign {
@@ -3576,6 +3607,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
                             TIR::TLambdaBody::Block(stmts) => {
                                 tag.push_str(&format!(" block_len={}", stmts.len()));
                             }
+                            TIR::TLambdaBody::SharedBlock(stmts) => {
+                                tag.push_str(&format!(" block_len={}", stmts.len()));
+                            }
                         }
                     }
                     tag
@@ -3697,6 +3731,11 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                         }
                         TIR::TLambdaBody::Block(inner) => {
                             if let Some(b) = first_unsafe_stmt_detail(inner, callees) {
+                                detail.push_str(&format!(" block>{b}"));
+                            }
+                        }
+                        TIR::TLambdaBody::SharedBlock(inner) => {
+                            if let Some(b) = first_unsafe_stmt_detail(&inner[..], callees) {
                                 detail.push_str(&format!(" block>{b}"));
                             }
                         }
@@ -4075,6 +4114,17 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
         TJitSpawnBody::Block { prefix, tail } => {
             prefix.iter().all(|s| resident_safe_stmt(s, callees))
                 && tail.as_ref().is_none_or(|t| resident_safe_expr(t, callees))
+        }
+        TJitSpawnBody::SharedBlock { body, tail } => {
+            body.iter().all(|s| resident_safe_stmt(s, callees))
+                && (!tail
+                    || body
+                        .last()
+                        .and_then(|stmt| match stmt {
+                            TStmt::ExprStmt(expr) | TStmt::Return(Some(expr)) => Some(expr),
+                            _ => None,
+                        })
+                        .is_some_and(|expr| resident_safe_expr(expr, callees)))
         }
     }
 }

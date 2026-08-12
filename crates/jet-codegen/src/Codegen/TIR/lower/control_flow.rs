@@ -294,7 +294,12 @@ fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
     }
 }
 
-fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+fn lower_if_let_subject(
+    subject: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    cached: bool,
+) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
     // field, so an if-let may move it. Preserve an explicitly written `~field`
@@ -306,7 +311,7 @@ fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 && pattern_subject_is_owned_self(inner, env) => inner.as_ref(),
         _ => subject,
     };
-    let subj = lower_expr(lowered_subject, cx, env);
+    let subj = lower_if_expr(lowered_subject, cx, env, cached);
     if pattern_subject_is_borrowed(subject, env) {
         let ty = subj.ty.clone();
         TExpr {
@@ -352,6 +357,14 @@ mod borrowed_pattern_tests {
 
 type IfBinding = (String, TLocal, Option<Type>);
 
+fn lower_if_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
+    if cached {
+        super::lower_cached_expr(expr, cx, env)
+    } else {
+        lower_expr(expr, cx, env)
+    }
+}
+
 fn flatten_and<'a>(cond: &'a Expr, terms: &mut Vec<&'a Expr>) {
     let mut pending = vec![cond];
     while let Some(term) = pending.pop() {
@@ -369,10 +382,27 @@ pub(crate) fn lower_if_cond(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> (TIfCond, Vec<IfBinding>, Vec<TStmt>) {
+    lower_if_cond_impl(cond, cx, env, false)
+}
+
+pub(crate) fn lower_if_cond_atom_cached(
+    cond: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> (TIfCond, Option<(String, TLocal, Option<Type>)>, Vec<TStmt>) {
+    lower_if_cond_atom(cond, cx, env, true)
+}
+
+fn lower_if_cond_impl(
+    cond: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    cached: bool,
+) -> (TIfCond, Vec<IfBinding>, Vec<TStmt>) {
     let mut terms = Vec::new();
     flatten_and(cond, &mut terms);
     if terms.len() == 1 {
-        let (cond, binding, prefix) = lower_if_cond_atom(cond, cx, env);
+        let (cond, binding, prefix) = lower_if_cond_atom(cond, cx, env, cached);
         return (cond, binding.into_iter().collect(), prefix);
     }
 
@@ -381,17 +411,13 @@ pub(crate) fn lower_if_cond(
     let mut bindings = Vec::new();
     let mut prefixes = Vec::new();
     for term in terms {
-        let (term, binding, prefix) = lower_if_cond_atom(term, cx, &mut cond_env);
+        let (term, binding, prefix) = lower_if_cond_atom(term, cx, &mut cond_env, cached);
         if let Some((name, place, ty)) = binding {
             cond_env.bind(&name, place.clone(), ty.clone());
             bindings.push((name, place, ty));
         }
         prefixes.extend(prefix);
         lowered.push(term);
-    }
-
-    if bindings.is_empty() {
-        return (TIfCond::Plain(lower_expr(cond, cx, env)), bindings, prefixes);
     }
 
     let mut lowered = lowered.into_iter().rev();
@@ -409,6 +435,7 @@ fn lower_if_cond_atom(
     cond: &Expr,
     cx: &Cx,
     env: &mut LowerEnv,
+    cached: bool,
 ) -> (TIfCond, Option<IfBinding>, Vec<TStmt>) {
     if let Expr::PatternTest {
         subject,
@@ -416,7 +443,7 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
-        let subj = lower_expr(subject, cx, env);
+        let subj = lower_if_expr(subject, cx, env, cached);
         return (TIfCond::IsNone { subj }, None, Vec::new());
     }
     // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
@@ -442,7 +469,7 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
-        let subj = lower_if_let_subject(subject, cx, env);
+        let subj = lower_if_let_subject(subject, cx, env, cached);
         // DataEvent shares variant names (`Int`, `Float`, …) with the dynamic
         // DataTree surface. Once sema has resolved the subject to DataEvent, use
         // that enum's prelude pattern and payload facts instead of the DataTree
@@ -453,10 +480,9 @@ fn lower_if_cond_atom(
                 if bindings.len() == 1 {
                     let ty = variant_binding_types_for_enum(cx, "DataEvent", variant)
                         .and_then(|ts| ts.into_iter().next());
-                    let cloned = lower_if_let_subject(subject, cx, env);
                     let cloned_subj = TExpr {
-                        ty: cloned.ty.clone(),
-                        kind: TExprKind::Clone(Box::new(cloned)),
+                        ty: subj.ty.clone(),
+                        kind: TExprKind::Clone(Box::new(subj)),
                     };
                     return (
                         TIfCond::IfLet {
@@ -468,10 +494,9 @@ fn lower_if_cond_atom(
                     );
                 }
             } else if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
-                let cloned = lower_if_let_subject(subject, cx, env);
                 let cloned_subj = TExpr {
-                    ty: cloned.ty.clone(),
-                    kind: TExprKind::Clone(Box::new(cloned)),
+                    ty: subj.ty.clone(),
+                    kind: TExprKind::Clone(Box::new(subj)),
                 };
                 return (
                     TIfCond::IfLet {
@@ -614,8 +639,19 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
-        let lhs_ge = lower_expr(subject, cx, env);
-        let lhs_le = lower_expr(subject, cx, env);
+        // The range subject is one source expression. Lower it once, bind its
+        // value in the condition block, and let both comparisons read that
+        // binding. Cloning the lowered tree here would duplicate runtime
+        // evaluation (and moving it into the first comparison would make the
+        // second comparison invalid).
+        let subject_value = lower_if_expr(subject, cx, env, cached);
+        let subject_ty = subject_value.ty.clone();
+        let temp = format!("__jet_if_range_{}", subject.span().start);
+        let local = TLocal::generated(&temp);
+        let local_expr = || TExpr {
+            ty: subject_ty.clone(),
+            kind: TExprKind::Local(local.clone()),
+        };
         let lo_e = TExpr {
             ty: Type::Int,
             kind: TExprKind::IntLit(*lo, None),
@@ -630,7 +666,7 @@ fn lower_if_cond_atom(
                 op: BinOp::Ge,
                 overflow: false,
                 line: 0,
-                lhs: Box::new(lhs_ge),
+                lhs: Box::new(local_expr()),
                 rhs: Box::new(lo_e),
             },
         };
@@ -640,20 +676,34 @@ fn lower_if_cond_atom(
                 op: BinOp::Le,
                 overflow: false,
                 line: 0,
-                lhs: Box::new(lhs_le),
+                lhs: Box::new(local_expr()),
                 rhs: Box::new(hi_e),
+            },
+        };
+        let test = TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::Binary {
+                op: BinOp::And,
+                overflow: false,
+                line: 0,
+                lhs: Box::new(ge),
+                rhs: Box::new(le),
             },
         };
         return (
             TIfCond::Plain(TExpr {
                 ty: Type::Bool,
-                kind: TExprKind::Binary {
-                    op: BinOp::And,
-                    overflow: false,
-                    line: 0,
-                    lhs: Box::new(ge),
-                    rhs: Box::new(le),
-                },
+                kind: TExprKind::InlineBlock(vec![
+                    TStmt::Let {
+                        name: temp,
+                        kw: "let",
+                        let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+                        init: subject_value,
+                        gc_promotion: None,
+                        gc_transferred: false,
+                    },
+                    TStmt::ExprStmt(test),
+                ]),
             }),
             None,
             Vec::new(),
@@ -667,7 +717,7 @@ fn lower_if_cond_atom(
             pattern,
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
-            let subj = lower_if_let_subject(subject, cx, env);
+            let subj = lower_if_let_subject(subject, cx, env, cached);
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
             let binding = match pattern {
@@ -711,7 +761,7 @@ fn lower_if_cond_atom(
     } = cond
     {
         if is_binding_free_user_variant_pattern_test(pattern, cx) {
-            let subj = lower_expr(subject, cx, env);
+            let subj = lower_if_expr(subject, cx, env, cached);
             let enum_type = match pattern {
                 Pattern::Variant { variant, .. } => {
                     cx.variant_owner.get(variant).map(String::as_str)
@@ -728,7 +778,11 @@ fn lower_if_cond_atom(
             );
         }
     }
-    (TIfCond::Plain(lower_expr(cond, cx, env)), None, Vec::new())
+    (
+        TIfCond::Plain(lower_if_expr(cond, cx, env, cached)),
+        None,
+        Vec::new(),
+    )
 }
 
 /// c109 Phase 4: lower a `when`/match. The gate (`switch_in_subset`) has already

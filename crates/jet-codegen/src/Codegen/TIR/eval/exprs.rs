@@ -5,8 +5,9 @@ use std::sync::Arc;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::{
-    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
-    TOrFallback, TPlace, TStrPart,
+    ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
+    THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
+    TStmt,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{
@@ -744,6 +745,7 @@ fn ambient_http_json_decode_error(span: crate::Diagnostics::Span) -> Result<CtVa
 
 struct EvalExprWorklistCache {
     values: HashMap<usize, VecDeque<CtValue>>,
+    conditions: HashMap<usize, VecDeque<bool>>,
 }
 
 thread_local! {
@@ -759,7 +761,10 @@ fn eval_expr_cache_begin() {
     EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
         cache
             .borrow_mut()
-            .push(EvalExprWorklistCache { values: HashMap::new() });
+            .push(EvalExprWorklistCache {
+                values: HashMap::new(),
+                conditions: HashMap::new(),
+            });
     });
 }
 
@@ -799,13 +804,255 @@ fn eval_expr_cache_put(expr: &TExpr, value: CtValue) {
     });
 }
 
-/// These are the strict children on the evaluator's hot recursive spine. They
-/// are scheduled in source order by `eval_expr_worklist`; lazy/control-flow
-/// nodes deliberately remain opaque and retain their existing evaluator logic.
+fn eval_if_cond_key(cond: &TIfCond) -> usize {
+    cond as *const TIfCond as usize
+}
+
+fn eval_if_cond_cache_take(cond: &TIfCond) -> Option<bool> {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let current = cache.last_mut()?;
+        let key = eval_if_cond_key(cond);
+        let (value, empty) = {
+            let values = current.conditions.get_mut(&key)?;
+            let value = values.pop_front();
+            (value, values.is_empty())
+        };
+        if empty {
+            current.conditions.remove(&key);
+        }
+        value
+    })
+}
+
+fn eval_if_cond_cache_put(cond: &TIfCond, value: bool) {
+    EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .last_mut()
+            .expect("expression worklist cache is not active")
+            .conditions
+            .entry(eval_if_cond_key(cond))
+            .or_default()
+            .push_back(value);
+    });
+}
+
+fn eval_call_children(args: &[TCallArg]) -> Vec<&TExpr> {
+    args.iter().map(|arg| &arg.value).collect()
+}
+
+fn eval_enum_children(payload: &TEnumPayload) -> Vec<&TExpr> {
+    match payload {
+        TEnumPayload::Unit => Vec::new(),
+        TEnumPayload::Positional(args) => args.iter().map(|arg| &arg.value).collect(),
+        TEnumPayload::Named(args) => args.iter().map(|(_, arg)| &arg.value).collect(),
+    }
+}
+
+fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
+    match host {
+        THostCall::Helper { args, .. } => args
+            .iter()
+            .filter_map(|arg| match arg {
+                THostArg::Expr(expr) | THostArg::Borrow(expr) => Some(expr),
+                THostArg::Lambda(_) => None,
+            })
+            .collect(),
+        THostCall::Method { recv, method, args } => {
+            let lazy_callback = matches!(method.as_str(), "read" | "edit" | "get_or_set" | "with");
+            std::iter::once(recv.as_ref())
+                .chain(args.iter().filter(move |arg| {
+                    !(lazy_callback && matches!(&arg.kind, TExprKind::Lambda(_)))
+                }))
+                .collect()
+        }
+        THostCall::CarrierFact { recv, .. }
+        | THostCall::CellGuardProject { recv, .. }
+        | THostCall::TypedText { arg: recv, .. }
+        | THostCall::OptionProbe { inner: recv, .. }
+        | THostCall::TupleIndex { base: recv, .. }
+        | THostCall::YieldSend { value: recv }
+        | THostCall::ExpectSnapshot { value: recv, .. } => vec![recv.as_ref()],
+        THostCall::FixedListIndex { base, index } => vec![base.as_ref(), index.as_ref()],
+        THostCall::GcEdit {
+            edit, index_temp, ..
+        } => std::iter::once(edit.as_ref())
+            .chain(index_temp.iter().map(|(_, expr)| expr))
+            .collect(),
+        THostCall::TypedTextInterp { holes, .. } => holes.iter().collect(),
+        THostCall::EnvSet { name, value, .. } => vec![name.as_ref(), value.as_ref()],
+        THostCall::ExpiringSecretNew {
+            value,
+            duration,
+            clock,
+            ..
+        }
+        | THostCall::ExpiringValueNew {
+            value,
+            duration,
+            clock,
+        } => vec![value.as_ref(), duration.as_ref(), clock.as_ref()],
+        THostCall::GcRead { .. }
+        | THostCall::FnName(_)
+        | THostCall::StrMatchScan { .. }
+        | THostCall::BinMatchScan { .. }
+        | THostCall::SwitchSubjectField { .. }
+        | THostCall::SwitchSubjectValue
+        | THostCall::NumericBounds { .. }
+        | THostCall::CCallback { .. } => Vec::new(),
+    }
+}
+
+fn eval_closure_children(args: &[TExpr]) -> Vec<&TExpr> {
+    args.iter()
+        .filter(|arg| !matches!(&arg.kind, TExprKind::Lambda(_)))
+        .collect()
+}
+
+fn eval_core_closure_children(kind: &TCoreClosureKind) -> Vec<&TExpr> {
+    match kind {
+        TCoreClosureKind::Spawn { group, .. } => group.iter().map(|expr| expr.as_ref()).collect(),
+        TCoreClosureKind::Serve { addr, .. } => vec![addr.as_ref()],
+        TCoreClosureKind::OnInterrupt { callback } => vec![callback.as_ref()],
+        TCoreClosureKind::UiButtonOnClick { label, .. } => vec![label.as_ref()],
+        TCoreClosureKind::Guard { .. }
+        | TCoreClosureKind::OnCommit { .. }
+        | TCoreClosureKind::OnRollback { .. }
+        | TCoreClosureKind::ReactiveDerived { .. }
+        | TCoreClosureKind::ReactiveEffect { .. }
+        | TCoreClosureKind::UiReactiveRender { .. } => Vec::new(),
+    }
+}
+
+fn eval_place_children(place: &TPlace) -> Vec<&TExpr> {
+    match place {
+        TPlace::Local(_) => Vec::new(),
+        TPlace::Expr(expr) => vec![expr.as_ref()],
+    }
+}
+
+/// Every strict child is scheduled in source order. Lazy bodies and
+/// short-circuit/control-flow edges are resumed by explicit work items instead
+/// of being placed in this list.
 fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
     match &expr.kind {
-        TExprKind::Binary { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
-        TExprKind::Unary { operand, .. } => vec![operand.as_ref()],
+        TExprKind::StrLit(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                TStrPart::Lit(_) => None,
+                TStrPart::Interp(expr, _) => Some(expr),
+            })
+            .collect(),
+        TExprKind::HostCall(host) => eval_host_children(host),
+        TExprKind::Call { args, .. } | TExprKind::ModuleCall { args, .. } => {
+            eval_call_children(args)
+        }
+        TExprKind::ExternCall { args, .. } => args.iter().map(|arg| &arg.value).collect(),
+        TExprKind::DistinctCtor { arg, .. }
+        | TExprKind::RangeCheckedCtor { arg, .. }
+        | TExprKind::DistinctConvert { arg, .. }
+        | TExprKind::Print(arg)
+        | TExprKind::Drop(arg)
+        | TExprKind::Close(arg)
+        | TExprKind::ResourceNew(arg)
+        | TExprKind::LayoutLit { inner: arg }
+        | TExprKind::Unary { operand: arg, .. }
+        | TExprKind::Field { recv: arg, .. }
+        | TExprKind::SharedGuardValue { guard: arg, .. }
+        | TExprKind::SharedGuardMap { guard: arg, .. }
+        | TExprKind::SharedGuardSplit { guard: arg, .. }
+        | TExprKind::PtrFromAddr { addr: arg, .. }
+        | TExprKind::Deref(arg)
+        | TExprKind::RawOf(arg)
+        | TExprKind::DistinctRaw(arg)
+        | TExprKind::Present(arg)
+        | TExprKind::Ok(arg)
+        | TExprKind::Err(arg)
+        | TExprKind::Try { inner: arg, .. }
+        | TExprKind::OptField { base: arg, .. }
+        | TExprKind::PatternMatches { subj: arg, .. }
+        | TExprKind::HostBorrowCallback { callable: arg, .. }
+        | TExprKind::NumericMethod { recv: arg, .. }
+        | TExprKind::TaskGroupAll { tasks: arg }
+        | TExprKind::TaskGroupRace { tasks: arg }
+        | TExprKind::TaskGroupAny { tasks: arg }
+        | TExprKind::SelectWait { builder: arg } => vec![arg.as_ref()],
+        TExprKind::AmbientInput { prompt } => prompt
+            .as_ref()
+            .map(|expr| vec![expr.as_ref()])
+            .unwrap_or_default(),
+        TExprKind::UnitConvert { arg, rounding, .. } => std::iter::once(arg.as_ref())
+            .chain(rounding.iter().map(|(_, expr)| expr.as_ref()))
+            .collect(),
+        TExprKind::MathBuiltin { args, .. }
+        | TExprKind::PreciseBuiltin { args, .. }
+        | TExprKind::ListLit(args)
+        | TExprKind::ColumnarListLit { elems: args, .. } => args.iter().collect(),
+        TExprKind::RequireStop { .. } => Vec::new(),
+        TExprKind::Binary { op, lhs, rhs, .. }
+            if !matches!(*op, BinOp::And | BinOp::Or) => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::Binary { .. } => Vec::new(),
+        TExprKind::OverflowOpt { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::CompareChain { operands, .. } => operands.iter().collect(),
+        TExprKind::LayoutCompare { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::IncDec { place, .. } => eval_place_children(place),
+        TExprKind::StructLit { fields, .. } => fields.iter().map(|(_, value, _)| value).collect(),
+        TExprKind::TupleLit { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+        TExprKind::MapLit(entries) => entries.iter().flat_map(|(key, value)| [key, value]).collect(),
+        TExprKind::SharedGuardWait {
+            guard, condition, ..
+        } => vec![guard.as_ref(), condition.as_ref()],
+        TExprKind::ConditionNotify { condition, .. } => vec![condition.as_ref()],
+        TExprKind::EnumLit { payload, .. } => eval_enum_children(payload),
+        TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => arg
+            .as_ref()
+            .map(|arg| vec![&arg.0])
+            .unwrap_or_default(),
+        TExprKind::ListSpread { parts } => parts
+            .iter()
+            .map(|part| match part {
+                ListSpreadPart::Elem(expr) | ListSpreadPart::Spread(expr) => expr,
+            })
+            .collect(),
+        TExprKind::ColumnarGather { base, index, .. }
+        | TExprKind::ColumnarColumnRead { base, index, .. }
+        | TExprKind::Index { base, index, .. }
+        | TExprKind::IndexHook { base, index, .. }
+        | TExprKind::MathLaneIndex { base, index, .. }
+        | TExprKind::PoolSlot {
+            pool: base,
+            id: index,
+            ..
+        } => vec![base.as_ref(), index.as_ref()],
+        TExprKind::MathSwizzleRead { recv, .. } => vec![recv.as_ref()],
+        TExprKind::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            let mut children = vec![base.as_ref()];
+            if let Some(range) = range {
+                children.push(range.as_ref());
+            } else {
+                children.push(start.as_ref());
+                children.push(end.as_ref());
+            }
+            children
+        }
+        TExprKind::Clone(arg)
+        | TExprKind::Borrow { place: arg, .. }
+        | TExprKind::MaterializeView(arg) => vec![arg.as_ref()],
+        TExprKind::MethodCall { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_call_children(args))
+            .collect(),
+        TExprKind::StaticCall { args, .. } => eval_call_children(args),
+        TExprKind::FnFieldCall { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_call_children(args))
+            .collect(),
+        TExprKind::DecodeUnder { segment, inner } => vec![segment.as_ref(), inner.as_ref()],
         TExprKind::BuiltinMethod { recv, op, args }
             if !matches!(
                 op,
@@ -816,9 +1063,82 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
             ) => std::iter::once(recv.as_ref())
                 .chain(args.iter())
                 .collect(),
-        TExprKind::BuiltinMethod { .. } => Vec::new(),
-        _ => Vec::new(),
+        TExprKind::BuiltinMethod { args, .. } => args.iter().collect(),
+        TExprKind::CoreCall { args, .. } => args.iter().collect(),
+        TExprKind::IfExpr { .. } | TExprKind::OrFallback { .. } | TExprKind::InlineBlock(_) => {
+            Vec::new()
+        }
+        TExprKind::OptionLift2 { f, a, b } => vec![f.as_ref(), a.as_ref(), b.as_ref()],
+        TExprKind::ClosureMethod { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(eval_closure_children(args))
+            .collect(),
+        TExprKind::HandleMethod { recv, args, .. } => std::iter::once(recv.as_ref())
+            .chain(args.iter())
+            .collect(),
+        TExprKind::CoreClosureCall { kind } => eval_core_closure_children(kind),
+        TExprKind::SelectRecv { builder, channel }
+        | TExprKind::SelectRead {
+            builder,
+            stream: channel,
+        } => vec![builder.as_ref(), channel.as_ref()],
+        TExprKind::SelectAfter {
+            builder,
+            millis,
+            value,
+        } => std::iter::once(builder.as_ref())
+            .chain(std::iter::once(millis.as_ref()))
+            .chain(value.iter().map(|expr| expr.as_ref()))
+            .collect(),
+        TExprKind::FnValue { kind } => match kind {
+            TFnValueKind::NamedFn { .. } => Vec::new(),
+            TFnValueKind::Call { callee, args } => std::iter::once(callee.as_ref())
+                .chain(eval_call_children(args))
+                .collect(),
+        },
+        TExprKind::Lambda(_)
+        | TExprKind::Todo { .. }
+        | TExprKind::Unreachable { .. }
+        | TExprKind::Absent
+        | TExprKind::SelectStart
+        | TExprKind::ResourceTake(_)
+        | TExprKind::ConstRef(_)
+        | TExprKind::DataEntriesToMap(_)
+        | TExprKind::IntLit(_, _)
+        | TExprKind::FloatLit(_)
+        | TExprKind::BoolLit(_)
+        | TExprKind::CharLit(_)
+        | TExprKind::Local(_)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(_)
+        | TExprKind::AllocNew { .. } => Vec::new(),
     }
+}
+
+#[derive(Clone, Copy)]
+struct EvalIfWork<'a> {
+    original: &'a TExpr,
+    cond: &'a TIfCond,
+    then_body: &'a [TStmt],
+    then_value: &'a TExpr,
+    else_body: &'a [TStmt],
+    else_value: &'a TExpr,
+}
+
+#[derive(Clone, Copy)]
+struct EvalOrWork<'a> {
+    original: &'a TExpr,
+    value: &'a TExpr,
+    fallback: &'a TOrFallback,
+}
+
+#[derive(Clone, Copy)]
+struct EvalRequireWork<'a> {
+    original: &'a TExpr,
+    kind: &'a TRequireKind,
+    loc: &'a crate::Codegen::TIR::TPanicLoc,
+    always_stops: bool,
 }
 
 enum EvalExprWork<'a> {
@@ -827,6 +1147,67 @@ enum EvalExprWork<'a> {
         original: &'a TExpr,
         leaf: &'a TExpr,
     },
+    BinaryAfterLeft {
+        original: &'a TExpr,
+        op: BinOp,
+        left: &'a TExpr,
+        rhs: &'a TExpr,
+    },
+    BinaryAfterRight {
+        original: &'a TExpr,
+        op: BinOp,
+        left: CtValue,
+        rhs: &'a TExpr,
+    },
+    IfStart(EvalIfWork<'a>),
+    IfCondition {
+        state: EvalIfWork<'a>,
+        cond: &'a TIfCond,
+    },
+    IfAfterAndLeft {
+        state: EvalIfWork<'a>,
+        parent: &'a TIfCond,
+        left: &'a TIfCond,
+        right: &'a TIfCond,
+    },
+    IfAfterAndRight {
+        state: EvalIfWork<'a>,
+        parent: &'a TIfCond,
+        right: &'a TIfCond,
+    },
+    IfAfterLeaf {
+        state: EvalIfWork<'a>,
+        cond: &'a TIfCond,
+        expr: &'a TExpr,
+    },
+    IfAfterCondition(EvalIfWork<'a>),
+    IfAfterValue {
+        state: EvalIfWork<'a>,
+        value: &'a TExpr,
+    },
+    OrStart(EvalOrWork<'a>),
+    OrAfterValue(EvalOrWork<'a>),
+    OrAfterFallback {
+        original: &'a TExpr,
+        fallback: &'a TOrFallback,
+    },
+    OrAfterPanic {
+        original: &'a TExpr,
+        loc: &'a crate::Codegen::TIR::TPanicLoc,
+        message: &'a TExpr,
+    },
+    RequireStart(EvalRequireWork<'a>),
+    RequireAfterCond(EvalRequireWork<'a>),
+    RequireAfterLeft {
+        state: EvalRequireWork<'a>,
+        left: &'a TExpr,
+        right: &'a TExpr,
+    },
+    RequireAfterRight {
+        state: EvalRequireWork<'a>,
+        left: CtValue,
+    },
+    RequireAfterMessage(EvalRequireWork<'a>),
     Leave(usize),
 }
 
@@ -1682,7 +2063,7 @@ impl<'a> EvalCtx<'a> {
         edit_paths_disjoint: bool,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let handle = self.eval_expr(recv, scope)?;
+        let handle = self.eval_expr_child(recv, scope)?;
         if editable {
             let index = local_cell_index(&handle, "__JetTirCellEditGuard")
                 .ok_or_else(|| unsupported("Cell edit guard projection", self.span()))?;
@@ -1788,7 +2169,7 @@ impl<'a> EvalCtx<'a> {
             return match method {
                 "get" => Ok(cell.get()),
                 "set" => {
-                    let value = self.eval_expr(
+                    let value = self.eval_expr_child(
                         args.first()
                             .ok_or_else(|| unsupported("Cell.set argument", self.span()))?,
                         scope,
@@ -1797,7 +2178,7 @@ impl<'a> EvalCtx<'a> {
                     Ok(CtValue::Unit)
                 }
                 "replace" => {
-                    let value = self.eval_expr(
+                    let value = self.eval_expr_child(
                         args.first()
                             .ok_or_else(|| unsupported("Cell.replace argument", self.span()))?,
                         scope,
@@ -1882,7 +2263,7 @@ impl<'a> EvalCtx<'a> {
         match method {
             "get" => Ok(guard.get()),
             "set" => {
-                let value = self.eval_expr(
+                let value = self.eval_expr_child(
                     args.first().ok_or_else(|| {
                         unsupported("Cell guard set argument", self.span())
                     })?,
@@ -1930,6 +2311,21 @@ impl<'a> EvalCtx<'a> {
         self.eval_expr_worklist(expr, scope)
     }
 
+    pub(super) fn eval_expr_child(
+        &mut self,
+        expr: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        if let Some(value) = eval_expr_cache_take(expr) {
+            return Ok(value);
+        }
+        // A statement body is itself a control-flow continuation. It can
+        // contain an expression that was not part of the enclosing expression
+        // node's strict-child list, so give that child its own worklist rather
+        // than reopening eval_expr/eval_expr_inner recursively.
+        self.eval_expr_worklist(expr, scope)
+    }
+
     fn eval_expr_worklist(
         &mut self,
         root: &'a TExpr,
@@ -1954,12 +2350,24 @@ impl<'a> EvalCtx<'a> {
                             leaf = inner;
                         }
 
-                        if !matches!(
+                        let special = matches!(
                             &leaf.kind,
-                            TExprKind::CoreCall { .. }
-                                | TExprKind::ListLit(_)
+                            TExprKind::CoreCall { .. } | TExprKind::ListLit(_)
+                        );
+                        let short_binary = matches!(
+                            &leaf.kind,
+                            TExprKind::Binary {
+                                op: BinOp::And | BinOp::Or,
+                                ..
+                            }
+                        );
+                        let control = matches!(
+                            &leaf.kind,
+                            TExprKind::IfExpr { .. }
                                 | TExprKind::OrFallback { .. }
-                        ) {
+                                | TExprKind::RequireStop { .. }
+                        );
+                        if !special || short_binary || control {
                             // `eval_expr_inner` charges before it descends. Do
                             // that at Enter so queued children retain the same
                             // fuel and diagnostic order as the old call path.
@@ -1967,12 +2375,61 @@ impl<'a> EvalCtx<'a> {
                         }
 
                         work.push(EvalExprWork::Leave(transparent_depth + 1));
-                        work.push(EvalExprWork::Build {
-                            original: expr,
-                            leaf,
-                        });
-                        for child in eval_expr_children(leaf).into_iter().rev() {
-                            work.push(EvalExprWork::Enter(child));
+                        match &leaf.kind {
+                            TExprKind::Binary { op, lhs, rhs, .. }
+                                if matches!(*op, BinOp::And | BinOp::Or) => {
+                                    work.push(EvalExprWork::BinaryAfterLeft {
+                                        original: expr,
+                                        op: *op,
+                                        left: lhs.as_ref(),
+                                        rhs: rhs.as_ref(),
+                                    });
+                                    work.push(EvalExprWork::Enter(lhs));
+                                }
+                            TExprKind::IfExpr {
+                                cond,
+                                then_body,
+                                then_value,
+                                else_body,
+                                else_value,
+                            } => {
+                                work.push(EvalExprWork::IfStart(EvalIfWork {
+                                    original: expr,
+                                    cond: cond.as_ref(),
+                                    then_body,
+                                    then_value,
+                                    else_body,
+                                    else_value,
+                                }));
+                            }
+                            TExprKind::OrFallback { value, fallback } => {
+                                work.push(EvalExprWork::OrStart(EvalOrWork {
+                                    original: expr,
+                                    value,
+                                    fallback,
+                                }));
+                            }
+                            TExprKind::RequireStop {
+                                kind,
+                                loc,
+                                always_stops,
+                            } => {
+                                work.push(EvalExprWork::RequireStart(EvalRequireWork {
+                                    original: expr,
+                                    kind,
+                                    loc,
+                                    always_stops: *always_stops,
+                                }));
+                            }
+                            _ => {
+                                work.push(EvalExprWork::Build {
+                                    original: expr,
+                                    leaf,
+                                });
+                                for child in eval_expr_children(leaf).into_iter().rev() {
+                                    work.push(EvalExprWork::Enter(child));
+                                }
+                            }
                         }
                     }
                     EvalExprWork::Build { original, leaf } => {
@@ -1981,6 +2438,304 @@ impl<'a> EvalCtx<'a> {
                             None => self.eval_expr_inner(leaf, scope, false),
                         }?;
                         eval_expr_cache_put(original, value);
+                    }
+                    EvalExprWork::BinaryAfterLeft {
+                        original,
+                        op,
+                        left,
+                        rhs,
+                    } => {
+                        let left_value = eval_expr_cache_take(left).ok_or_else(|| {
+                            unreachable!("binary left value missing from evaluator worklist")
+                        })?;
+                        let left_bool = as_bool(&left_value, self.span())?;
+                        if (matches!(op, BinOp::And) && !left_bool)
+                            || (matches!(op, BinOp::Or) && left_bool)
+                        {
+                            eval_expr_cache_put(original, CtValue::Bool(left_bool));
+                        } else {
+                            work.push(EvalExprWork::BinaryAfterRight {
+                                original,
+                                op,
+                                left: left_value,
+                                rhs,
+                            });
+                            work.push(EvalExprWork::Enter(rhs));
+                        }
+                    }
+                    EvalExprWork::BinaryAfterRight {
+                        original,
+                        op,
+                        left,
+                        rhs,
+                    } => {
+                        let right = eval_expr_cache_take(rhs).ok_or_else(|| {
+                            unreachable!("binary right value missing from evaluator worklist")
+                        })?;
+                        let value = eval_binop(op, left, right, self.span())?;
+                        eval_expr_cache_put(original, value);
+                    }
+                    EvalExprWork::IfStart(state) => {
+                        work.push(EvalExprWork::IfAfterCondition(state));
+                        work.push(EvalExprWork::IfCondition {
+                            state,
+                            cond: state.cond,
+                        });
+                    }
+                    EvalExprWork::IfCondition { state, cond } => match cond {
+                        TIfCond::And { left, right } => {
+                            work.push(EvalExprWork::IfAfterAndLeft {
+                                state,
+                                parent: cond,
+                                left,
+                                right,
+                            });
+                            work.push(EvalExprWork::IfCondition {
+                                state,
+                                cond: left,
+                            });
+                        }
+                        TIfCond::Plain(expr)
+                        | TIfCond::IsNone { subj: expr }
+                        | TIfCond::IfLet { subj: expr, .. }
+                        | TIfCond::Matches { subj: expr, .. } => {
+                            work.push(EvalExprWork::IfAfterLeaf {
+                                state,
+                                cond,
+                                expr,
+                            });
+                            work.push(EvalExprWork::Enter(expr));
+                        }
+                    },
+                    EvalExprWork::IfAfterAndLeft {
+                        state,
+                        parent,
+                        left,
+                        right,
+                    } => {
+                        let value = eval_if_cond_cache_take(left).ok_or_else(|| {
+                            unreachable!("if condition left value missing from evaluator worklist")
+                        })?;
+                        if value {
+                            work.push(EvalExprWork::IfAfterAndRight {
+                                state,
+                                parent,
+                                right,
+                            });
+                            work.push(EvalExprWork::IfCondition {
+                                state,
+                                cond: right,
+                            });
+                        } else {
+                            eval_if_cond_cache_put(parent, false);
+                        }
+                    }
+                    EvalExprWork::IfAfterAndRight {
+                        parent, right, ..
+                    } => {
+                        let value = eval_if_cond_cache_take(right).ok_or_else(|| {
+                            unreachable!("if condition right value missing from evaluator worklist")
+                        })?;
+                        eval_if_cond_cache_put(parent, value);
+                    }
+                    EvalExprWork::IfAfterLeaf { cond, expr, .. } => {
+                        let value = eval_expr_cache_take(expr).ok_or_else(|| {
+                            unreachable!("if condition value missing from evaluator worklist")
+                        })?;
+                        let result = self.eval_if_cond_leaf(cond, value, scope)?;
+                        eval_if_cond_cache_put(cond, result);
+                    }
+                    EvalExprWork::IfAfterCondition(state) => {
+                        let selected = eval_if_cond_cache_take(state.cond).ok_or_else(|| {
+                            unreachable!("if condition result missing from evaluator worklist")
+                        })?;
+                        let (body, value) = if selected {
+                            (state.then_body, state.then_value)
+                        } else {
+                            (state.else_body, state.else_value)
+                        };
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Return(value) => eval_expr_cache_put(state.original, value),
+                            Flow::Normal => {
+                                work.push(EvalExprWork::IfAfterValue { state, value });
+                                work.push(EvalExprWork::Enter(value));
+                            }
+                            other => {
+                                self.pending_flow = Some(other);
+                                return Err(unsupported("pending loop control", self.span()));
+                            }
+                        }
+                    }
+                    EvalExprWork::IfAfterValue { state, value } => {
+                        let value = eval_expr_cache_take(value).ok_or_else(|| {
+                            unreachable!("if branch value missing from evaluator worklist")
+                        })?;
+                        eval_expr_cache_put(state.original, value);
+                    }
+                    EvalExprWork::OrStart(state) => {
+                        work.push(EvalExprWork::OrAfterValue(state));
+                        work.push(EvalExprWork::Enter(state.value));
+                    }
+                    EvalExprWork::OrAfterValue(state) => {
+                        let value = eval_expr_cache_take(state.value).ok_or_else(|| {
+                            unreachable!("fallback value missing from evaluator worklist")
+                        })?;
+                        let miss = matches!(
+                            &value,
+                            CtValue::Failed(CtReport::Clean(_))
+                                | CtValue::Failed(CtReport::Told(_))
+                        );
+                        if !miss {
+                            eval_expr_cache_put(
+                                state.original,
+                                match value {
+                                    CtValue::Present(inner) => *inner,
+                                    other => other,
+                                },
+                            );
+                            continue;
+                        }
+                        match state.fallback {
+                            TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => {
+                                work.push(EvalExprWork::OrAfterFallback {
+                                    original: state.original,
+                                    fallback: state.fallback,
+                                });
+                                work.push(EvalExprWork::Enter(expr));
+                            }
+                            TOrFallback::Return(None) => {
+                                self.pending_return = Some(CtValue::Unit);
+                                eval_expr_cache_put(state.original, CtValue::Unit);
+                            }
+                            TOrFallback::Panic { msg, loc } => {
+                                work.push(EvalExprWork::OrAfterPanic {
+                                    original: state.original,
+                                    loc,
+                                    message: msg,
+                                });
+                                work.push(EvalExprWork::Enter(msg));
+                            }
+                            _ => return Err(unsupported("or-fallback form", self.span())),
+                        }
+                    }
+                    EvalExprWork::OrAfterFallback { original, fallback } => {
+                        let expr = match fallback {
+                            TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => expr,
+                            _ => unreachable!("invalid fallback continuation"),
+                        };
+                        let value = eval_expr_cache_take(expr).ok_or_else(|| {
+                            unreachable!("fallback branch value missing from evaluator worklist")
+                        })?;
+                        if matches!(fallback, TOrFallback::Return(Some(_))) {
+                            self.pending_return = Some(value);
+                            eval_expr_cache_put(original, CtValue::Unit);
+                        } else {
+                            eval_expr_cache_put(original, value);
+                        }
+                    }
+                    EvalExprWork::OrAfterPanic {
+                        original,
+                        loc,
+                        message,
+                    } => {
+                        let message = eval_expr_cache_take(message).ok_or_else(|| {
+                            unreachable!("fallback panic message missing from evaluator worklist")
+                        })?;
+                        self.eval_or_fallback_panic(message, loc)?;
+                        eval_expr_cache_put(original, CtValue::Unit);
+                    }
+                    EvalExprWork::RequireStart(state) => {
+                        if state.always_stops {
+                            let message = match state.kind {
+                                TRequireKind::Require { msg: Some(msg), .. }
+                                | TRequireKind::Panic { msg } => Some(msg.as_ref()),
+                                TRequireKind::Require { msg: None, .. }
+                                | TRequireKind::RequireEq { .. } => None,
+                            };
+                            if let Some(message) = message {
+                                work.push(EvalExprWork::RequireAfterMessage(state));
+                                work.push(EvalExprWork::Enter(message));
+                            } else {
+                                let fallback = match state.kind {
+                                    TRequireKind::Require { .. } => "requirement failed",
+                                    TRequireKind::RequireEq { .. } => "values are not equal",
+                                    TRequireKind::Panic { .. } => unreachable!(
+                                        "panic always-stop must carry its message"
+                                    ),
+                                };
+                                self.eval_require_failure(state.loc, fallback)?;
+                                eval_expr_cache_put(state.original, CtValue::Unit);
+                            }
+                            continue;
+                        }
+                        match state.kind {
+                            TRequireKind::Require { cond, .. } => {
+                                work.push(EvalExprWork::RequireAfterCond(state));
+                                work.push(EvalExprWork::Enter(cond));
+                            }
+                            TRequireKind::RequireEq { left, right } => {
+                                work.push(EvalExprWork::RequireAfterLeft {
+                                    state,
+                                    left,
+                                    right,
+                                });
+                                work.push(EvalExprWork::Enter(left));
+                            }
+                            TRequireKind::Panic { msg } => {
+                                work.push(EvalExprWork::RequireAfterMessage(state));
+                                work.push(EvalExprWork::Enter(msg));
+                            }
+                        }
+                    }
+                    EvalExprWork::RequireAfterCond(state) => {
+                        let TRequireKind::Require { cond, msg } = state.kind else {
+                            unreachable!("require condition continuation has non-require kind")
+                        };
+                        let value = eval_expr_cache_take(cond).ok_or_else(|| {
+                            unreachable!("require condition missing from evaluator worklist")
+                        })?;
+                        if as_bool(&value, self.span())? {
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        } else if let Some(msg) = msg {
+                            work.push(EvalExprWork::RequireAfterMessage(state));
+                            work.push(EvalExprWork::Enter(msg));
+                        } else {
+                            self.eval_require_failure(state.loc, "requirement failed")?;
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        }
+                    }
+                    EvalExprWork::RequireAfterLeft { state, left, right } => {
+                        let left = eval_expr_cache_take(left).ok_or_else(|| {
+                            unreachable!("require_eq left missing from evaluator worklist")
+                        })?;
+                        work.push(EvalExprWork::RequireAfterRight { state, left });
+                        work.push(EvalExprWork::Enter(right));
+                    }
+                    EvalExprWork::RequireAfterRight { state, left } => {
+                        let TRequireKind::RequireEq { right, .. } = state.kind else {
+                            unreachable!("require_eq right continuation has non-equality kind")
+                        };
+                        let right = eval_expr_cache_take(right).ok_or_else(|| {
+                            unreachable!("require_eq right missing from evaluator worklist")
+                        })?;
+                        if left == right {
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        } else {
+                            self.eval_require_failure(state.loc, "values are not equal")?;
+                            eval_expr_cache_put(state.original, CtValue::Unit);
+                        }
+                    }
+                    EvalExprWork::RequireAfterMessage(state) => {
+                        let message = match state.kind {
+                            TRequireKind::Require { msg: Some(msg), .. }
+                            | TRequireKind::Panic { msg } => msg,
+                            _ => unreachable!("require message continuation has no message"),
+                        };
+                        let message = eval_expr_cache_take(message).ok_or_else(|| {
+                            unreachable!("require message missing from evaluator worklist")
+                        })?;
+                        self.eval_require_failure(state.loc, &message.jet_show())?;
+                        eval_expr_cache_put(state.original, CtValue::Unit);
                     }
                     EvalExprWork::Leave(count) => {
                         for _ in 0..count {
@@ -2026,11 +2781,122 @@ impl<'a> EvalCtx<'a> {
                 scope,
             )),
             TExprKind::ListLit(elems) => Some(self.eval_list_lit_expr(expr, elems, scope)),
-            TExprKind::OrFallback { value, fallback } => {
-                Some(self.eval_or_fallback_expr(value, fallback, scope))
-            }
             _ => None,
         }
+    }
+
+    pub(super) fn eval_if_cond_leaf(
+        &mut self,
+        cond: &TIfCond,
+        value: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<bool, Diagnostic> {
+        match cond {
+            TIfCond::Plain(_) => as_bool(&value, self.span()),
+            TIfCond::IsNone { .. } => Ok(matches!(
+                value,
+                CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+            )),
+            TIfCond::IfLet { pattern, .. } => {
+                if let crate::Codegen::TIR::TPatternPosition::DataEntries { temp } = &pattern.position
+                {
+                    if let CtValue::Enum { args, .. } = &value {
+                        if let Some((_, payload)) = args.first() {
+                            scope.insert(temp.clone(), payload.clone());
+                        }
+                    }
+                }
+                match &pattern.pattern {
+                    crate::AST::Pattern::Ok { binding, .. }
+                    | crate::AST::Pattern::Present { binding, .. } => match value {
+                        CtValue::Present(inner) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Err { binding, .. } => match value {
+                        CtValue::Failed(CtReport::Told(inner)) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Absent(_) => Ok(matches!(
+                        value,
+                        CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+                    )),
+                    _ => super::stmts::bind_match_pattern(&pattern.pattern, &value, scope),
+                }
+            }
+            TIfCond::Matches { pattern, .. } => {
+                super::stmts::bind_match_pattern(&pattern.pattern, &value, scope)
+            }
+            TIfCond::And { .. } => unreachable!("and condition reached leaf evaluator"),
+        }
+    }
+
+    fn eval_or_fallback_panic(
+        &mut self,
+        message: CtValue,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+    ) -> Result<(), Diagnostic> {
+        let message = message.jet_show();
+        let file = loc.file.trim_matches('"');
+        let fn_name = loc.fn_name.trim_matches('"');
+        let src_line = loc.src_line.trim_matches('"');
+        let line_s = loc.line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = loc.col.saturating_sub(1) as usize;
+        let caret = "^".repeat(loc.caret.max(1) as usize);
+        let rendered = format!(
+            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+            loc.line,
+            " ".repeat(col_offset)
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&rendered);
+            sink.exit_code = Some(70);
+            return Err(Diagnostic::soft_exit(
+                "70".to_string(),
+                "or-fallback panic stop".to_string(),
+                Some(self.span()),
+            ));
+        }
+        Err(unsupported("or-fallback panic", self.span()))
+    }
+
+    fn eval_require_failure(
+        &mut self,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+        message: &str,
+    ) -> Result<(), Diagnostic> {
+        let file = loc.file.trim_matches('"');
+        let fn_name = loc.fn_name.trim_matches('"');
+        let src_line = loc.src_line.trim_matches('"');
+        let line_s = loc.line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = loc.col.saturating_sub(1) as usize;
+        let caret = "^".repeat(loc.caret.max(1) as usize);
+        let rendered = format!(
+            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+            loc.line,
+            " ".repeat(col_offset)
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&rendered);
+            sink.exit_code = Some(70);
+            return Err(Diagnostic::soft_exit(
+                "70".to_string(),
+                "require/panic stop".to_string(),
+                Some(self.span()),
+            ));
+        }
+        Err(unsupported("require/panic stop", self.span()))
     }
 
     fn eval_list_lit_expr(
@@ -2044,76 +2910,14 @@ impl<'a> EvalCtx<'a> {
             // Early typed-list lowering wraps `T.{ value }` in one ListLit. Preserve
             // the value when it already has T.
             if expr.ty == inner.ty {
-                return self.eval_expr(inner, scope);
+                return self.eval_expr_child(inner, scope);
             }
         }
         let mut out = Vec::with_capacity(elems.len());
         for e in elems {
-            out.push(self.eval_expr(e, scope)?);
+            out.push(self.eval_expr_child(e, scope)?);
         }
         Ok(CtValue::List(out))
-    }
-
-    fn eval_or_fallback_expr(
-        &mut self,
-        value: &'a TExpr,
-        fallback: &'a TOrFallback,
-        scope: &mut HashMap<String, CtValue>,
-    ) -> Result<CtValue, Diagnostic> {
-        self.burn()?;
-        let v = self.eval_expr(value, scope)?;
-        // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
-        // whether the report is a clean absence or a failure.
-        let miss = matches!(
-            v,
-            CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_))
-        );
-        if !miss {
-            return match v {
-                CtValue::Present(inner) => Ok(*inner),
-                other => Ok(other),
-            };
-        }
-        match fallback {
-            TOrFallback::Value(fb) => self.eval_expr(fb, scope),
-            TOrFallback::Return(Some(fb)) => {
-                let ret = self.eval_expr(fb, scope)?;
-                self.pending_return = Some(ret);
-                Ok(CtValue::Unit)
-            }
-            TOrFallback::Return(None) => {
-                self.pending_return = Some(CtValue::Unit);
-                Ok(CtValue::Unit)
-            }
-            TOrFallback::Panic { msg, loc } => {
-                let message = self.eval_expr(msg, scope)?.jet_show();
-                let file = loc.file.trim_matches('"');
-                let fn_name = loc.fn_name.trim_matches('"');
-                let src_line = loc.src_line.trim_matches('"');
-                let line_s = loc.line.to_string();
-                let margin = line_s.len();
-                let pad = " ".repeat(margin);
-                let col_offset = loc.col.saturating_sub(1) as usize;
-                let caret = "^".repeat(loc.caret.max(1) as usize);
-                let rendered = format!(
-                    "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-                    loc.line,
-                    " ".repeat(col_offset)
-                );
-                if let Some(sink) = self.sink.as_ref() {
-                    let mut sink = sink.lock().expect("evaluator sink poisoned");
-                    sink.stderr.push_str(&rendered);
-                    sink.exit_code = Some(70);
-                    return Err(Diagnostic::soft_exit(
-                        "70".to_string(),
-                        "or-fallback panic stop".to_string(),
-                        Some(self.span()),
-                    ));
-                }
-                Err(unsupported("or-fallback panic", self.span()))
-            }
-            _ => Err(unsupported("or-fallback form", self.span())),
-        }
     }
 
     fn eval_core_call_expr(
@@ -2169,7 +2973,7 @@ impl<'a> EvalCtx<'a> {
             }
             let capacity = args
                 .first()
-                .map(|arg| self.eval_expr(arg, scope))
+                .map(|arg| self.eval_expr_child(arg, scope))
                 .transpose()?
                 .map(|value| as_int(&value, self.span()))
                 .transpose()?;
@@ -2185,8 +2989,8 @@ impl<'a> EvalCtx<'a> {
             ));
         }
         if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
-            let pointer = self.eval_expr(&args[0], scope)?;
-            let value = self.eval_expr(&args[1], scope)?;
+            let pointer = self.eval_expr_child(&args[0], scope)?;
+            let value = self.eval_expr_child(&args[1], scope)?;
             let CtValue::Struct { type_name, fields } = pointer else {
                 return Err(unsupported("raw pointer carrier", self.span()));
             };
@@ -2206,7 +3010,7 @@ impl<'a> EvalCtx<'a> {
             return Ok(CtValue::Unit);
         }
         if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
-            let pointer = self.eval_expr(&args[0], scope)?;
+            let pointer = self.eval_expr_child(&args[0], scope)?;
             let CtValue::Struct { type_name, fields } = pointer else {
                 return Err(unsupported("raw pointer carrier", self.span()));
             };
@@ -2225,7 +3029,7 @@ impl<'a> EvalCtx<'a> {
         }
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
-            argv.push(self.eval_expr(a, scope)?);
+            argv.push(self.eval_expr_child(a, scope)?);
         }
         let progress_known_total = if module == "core.io" && method == "progress" {
             if let Some((items, known_total)) = argv.first().and_then(progress_iter_parts) {
@@ -2500,7 +3304,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::BoolLit(b) => Ok(CtValue::Bool(*b)),
             TExprKind::CharLit(c) => Ok(CtValue::Char(*c)),
             TExprKind::SharedGuardValue { guard, .. } => {
-                let guard = self.eval_expr(guard, scope)?;
+                let guard = self.eval_expr_child(guard, scope)?;
                 let (index, _, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard handle", self.span()))?;
                 let value = self.runtime
@@ -2519,7 +3323,7 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported("SharedGuard projection", self.span()))
             }
             TExprKind::SharedGuardMap { guard, path, .. } => {
-                let mut guard = self.eval_expr(guard, scope)?;
+                let mut guard = self.eval_expr_child(guard, scope)?;
                 append_shared_guard_path(&mut guard, path)
                     .then_some(guard)
                     .ok_or_else(|| unsupported("SharedGuard map", self.span()))
@@ -2530,7 +3334,7 @@ impl<'a> EvalCtx<'a> {
                 second,
                 ..
             } => {
-                let guard = self.eval_expr(guard, scope)?;
+                let guard = self.eval_expr_child(guard, scope)?;
                 let mut first_guard = guard.clone();
                 let mut second_guard = guard;
                 if !append_shared_guard_path(&mut first_guard, first)
@@ -2551,7 +3355,7 @@ impl<'a> EvalCtx<'a> {
                 condition,
                 predicate,
             } => {
-                let guard = self.eval_expr(guard, scope)?;
+                let guard = self.eval_expr_child(guard, scope)?;
                 let (shared_index, lease_index, editable, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard wait", self.span()))?;
                 if !editable {
@@ -2559,7 +3363,7 @@ impl<'a> EvalCtx<'a> {
                         "a condition wait needs an edit guard".to_string(),
                     ))));
                 }
-                let condition = self.eval_expr(condition, scope)?;
+                let condition = self.eval_expr_child(condition, scope)?;
                 let condition_index = condition_index(&condition)
                     .ok_or_else(|| unsupported("Condition wait", self.span()))?;
                 let state = self
@@ -2622,7 +3426,7 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ConditionNotify { condition, all } => {
-                let condition = self.eval_expr(condition, scope)?;
+                let condition = self.eval_expr_child(condition, scope)?;
                 let index = condition_index(&condition)
                     .ok_or_else(|| unsupported("Condition notify", self.span()))?;
                 let state = self
@@ -2646,7 +3450,7 @@ impl<'a> EvalCtx<'a> {
                     match part {
                         TStrPart::Lit(s) => out.push_str(s),
                         TStrPart::Interp(e, fmt) => {
-                            let v = self.eval_expr(e, scope)?;
+                            let v = self.eval_expr_child(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => {
                                     let manual = match &e.ty {
@@ -2787,10 +3591,10 @@ impl<'a> EvalCtx<'a> {
                     return value;
                 }
                 let value = match tail {
-                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr(value, scope),
+                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr_child(value, scope),
                     crate::Codegen::TIR::TStmt::Return(value) => {
                         let value = match value {
-                            Some(value) => self.eval_expr(value, scope)?,
+                            Some(value) => self.eval_expr_child(value, scope)?,
                             None => CtValue::Unit,
                         };
                         self.pending_return = Some(value);
@@ -2823,7 +3627,7 @@ impl<'a> EvalCtx<'a> {
                 .cloned()
                 .ok_or_else(|| unsupported(&format!("const `{name}`"), self.span())),
             TExprKind::Print(inner) => {
-                let v = self.eval_expr(inner, scope)?;
+                let v = self.eval_expr_child(inner, scope)?;
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
@@ -2863,11 +3667,11 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) => {
-                let _ = self.eval_expr(inner, scope)?;
+                let _ = self.eval_expr_child(inner, scope)?;
                 Ok(CtValue::Unit)
             }
             TExprKind::Close(inner) => {
-                let value = self.eval_expr(inner, scope)?;
+                let value = self.eval_expr_child(inner, scope)?;
                 let type_name = match &inner.ty {
                     Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
                     _ => return Ok(CtValue::Unit),
@@ -2881,8 +3685,8 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Unit)
             }
             TExprKind::Binary { op, lhs, rhs, .. } => {
-                let l = self.eval_expr(lhs, scope)?;
-                let r = self.eval_expr(rhs, scope)?;
+                let l = self.eval_expr_child(lhs, scope)?;
+                let r = self.eval_expr_child(rhs, scope)?;
                 if matches!(op, BinOp::Eq | BinOp::Ne)
                     && matches!(
                         &lhs.ty,
@@ -2929,7 +3733,7 @@ impl<'a> EvalCtx<'a> {
                 eval_binop(*op, l, r, self.span())
             }
             TExprKind::Unary { op, operand } => {
-                let v = self.eval_expr(operand, scope)?;
+                let v = self.eval_expr_child(operand, scope)?;
                 match (*op, v) {
                     (UnOp::Neg, CtValue::Int(n))
                         if matches!(&operand.ty, Type::IntN { signed: true, .. }) =>
@@ -2971,7 +3775,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CompareChain { operands, ops, .. } => {
                 let mut vals = Vec::with_capacity(operands.len());
                 for o in operands {
-                    vals.push(self.eval_expr(o, scope)?);
+                    vals.push(self.eval_expr_child(o, scope)?);
                 }
                 for (i, op) in ops.iter().enumerate() {
                     let part = if let Type::IntN { signed, bits } = &operands[i].ty {
@@ -2998,34 +3802,8 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Bool(true))
             }
             TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
-            TExprKind::IfExpr {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-            } => {
-                if self.eval_if_cond(cond, scope)? {
-                    match self.exec_stmts(then_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
-                        other => {
-                            self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
-                        }
-                    }
-                    self.eval_expr(then_value, scope)
-                } else {
-                    match self.exec_stmts(else_body, scope)? {
-                        Flow::Return(v) => return Ok(v),
-                        Flow::Normal => {}
-                        other => {
-                            self.pending_flow = Some(other);
-                            return Err(unsupported("pending loop control", self.span()));
-                        }
-                    }
-                    self.eval_expr(else_value, scope)
-                }
+            TExprKind::IfExpr { .. } => {
+                unreachable!("if expression bypassed its evaluator continuation")
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
                 let is_tensor = matches!(&recv.ty, Type::Named(name) if name == "Tensor")
@@ -3052,7 +3830,7 @@ impl<'a> EvalCtx<'a> {
                     if is_tensor {
                         let evaluated_args = args
                             .iter()
-                            .map(|arg| self.eval_expr(arg, scope))
+                            .map(|arg| self.eval_expr_child(arg, scope))
                             .collect::<Result<Vec<_>, _>>()?;
                         let (start, end_exclusive) =
                             crate::Comptime::ComputeLite::tensor_view_window(
@@ -3073,11 +3851,11 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
                     let (start, end_exclusive) = if args.len() == 1 {
-                        let range = self.eval_expr(&args[0], scope)?;
+                        let range = self.eval_expr_child(&args[0], scope)?;
                         super::range_window(&range, xs.len(), self.span())?
                     } else {
-                        let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
-                        let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
+                        let start = as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
+                        let end = as_int(&self.eval_expr_child(&args[1], scope)?, self.span())?;
                         if start < 0 || end < start || end as usize >= xs.len() {
                             return Err(super::view_bounds_diagnostic(
                                 xs.len(),
@@ -3130,7 +3908,7 @@ impl<'a> EvalCtx<'a> {
                     match op {
                         crate::Codegen::TIR::TBuiltinOp::SplitWrite { tuple_struct } => {
                             let mid =
-                                as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                                as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
                             let ((left_start, left_end), (right_start, right_end)) =
                                 match super::disjoint_semantics::split(xs.len(), mid) {
                                     Ok(bounds) => bounds,
@@ -3153,7 +3931,7 @@ impl<'a> EvalCtx<'a> {
                             })));
                         }
                         crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite => {
-                            let CtValue::List(targets) = self.eval_expr(&args[0], scope)? else {
+                            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)? else {
                                 return Err(unsupported("disjoint-view targets", self.span()));
                             };
                             let mut indexes = Vec::with_capacity(targets.len());
@@ -3181,7 +3959,7 @@ impl<'a> EvalCtx<'a> {
                         _ => unreachable!(),
                     }
                 }
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let progress = progress_parts(&r);
                 let iter = progress_iter_parts(&r);
                 if let Some((items, _, _, _, _, _, _, _)) = &progress {
@@ -3220,7 +3998,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 let progress_arg = argv.first().cloned();
                 if let Some((source_items, description, format, started_at, pulls, tail, total, known_total)) = &progress {
@@ -3274,10 +4052,10 @@ impl<'a> EvalCtx<'a> {
                 Ok(result)
             }
             TExprKind::HandleMethod { recv, op, args } => {
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 if matches!(op, crate::Codegen::TIR::THandleOp::ReflectValueDisplay) {
                     let CtValue::Struct { type_name, fields } = &r else {
@@ -3590,7 +4368,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, val, _) in fields {
-                    out.push((name.clone(), self.eval_expr(val, scope)?));
+                    out.push((name.clone(), self.eval_expr_child(val, scope)?));
                 }
                 let type_name = as_trait
                     .as_ref()
@@ -3612,7 +4390,7 @@ impl<'a> EvalCtx<'a> {
                         Type::Apply { name, args }
                             if name == "VjpRun" && args.len() == 1
                     );
-                let r = self.eval_expr(recv, scope)?;
+                let r = self.eval_expr_child(recv, scope)?;
                 if vjp_grads {
                     let CtValue::Struct { fields, .. } = &r else {
                         return Err(unsupported("compute.vjp result", self.span()));
@@ -3781,17 +4559,17 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ListLit(elems) => self.eval_list_lit_expr(expr, elems, scope),
-            TExprKind::Clone(inner) => self.eval_expr(inner, scope),
+            TExprKind::Clone(inner) => self.eval_expr_child(inner, scope),
             TExprKind::Present(inner) => {
-                Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
+                Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?)))
             }
             TExprKind::Absent => Ok(CtValue::absent(expr.ty.clone())),
-            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?))),
-            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr(inner, scope)?))),
+            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?))),
+            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr_child(inner, scope)?))),
             TExprKind::TupleLit { fields, .. } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, e) in fields {
-                    out.push((name.clone(), self.eval_expr(e, scope)?));
+                    out.push((name.clone(), self.eval_expr_child(e, scope)?));
                 }
                 Ok(CtValue::Struct {
                     type_name: "tuple".into(),
@@ -3801,9 +4579,9 @@ impl<'a> EvalCtx<'a> {
             TExprKind::MapLit(entries) => {
                 let mut m = std::collections::BTreeMap::new();
                 for (k, v) in entries {
-                    let key = crate::AST::CtKey::from_value(self.eval_expr(k, scope)?)
+                    let key = crate::AST::CtKey::from_value(self.eval_expr_child(k, scope)?)
                         .ok_or_else(|| unsupported("map key", self.span()))?;
-                    m.insert(key, self.eval_expr(v, scope)?);
+                    m.insert(key, self.eval_expr_child(v, scope)?);
                 }
                 Ok(CtValue::Map(m))
             }
@@ -3813,11 +4591,11 @@ impl<'a> EvalCtx<'a> {
                 is_map,
                 ..
             } => {
-                let b = match self.eval_expr(base, scope)? {
+                let b = match self.eval_expr_child(base, scope)? {
                     CtValue::Present(inner) => *inner,
                     other => other,
                 };
-                let i = self.eval_expr(index, scope)?;
+                let i = self.eval_expr_child(index, scope)?;
                 if *is_map || matches!(&b, CtValue::Map(_)) {
                     let key = crate::AST::CtKey::from_value(i)
                         .ok_or_else(|| unsupported("map index key", self.span()))?;
@@ -3898,9 +4676,9 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Slice {
                 base, start, end, range, ..
             } => {
-                let b = self.eval_expr(base, scope)?;
+                let b = self.eval_expr_child(base, scope)?;
                 let (a, z, exclusive) = if let Some(range) = range {
-                    let value = self.eval_expr(range, scope)?;
+                    let value = self.eval_expr_child(range, scope)?;
                     let CtValue::Struct { type_name, fields } = value else {
                         return Err(unsupported("Range slice", self.span()));
                     };
@@ -3921,8 +4699,8 @@ impl<'a> EvalCtx<'a> {
                     )
                 } else {
                     (
-                        as_int(&self.eval_expr(start, scope)?, self.span())?,
-                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        as_int(&self.eval_expr_child(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr_child(end, scope)?, self.span())?,
                         false,
                     )
                 };
@@ -3972,8 +4750,8 @@ impl<'a> EvalCtx<'a> {
                     _ => Err(unsupported("slice recv", self.span())),
                 }
             }
-            TExprKind::Borrow { place, .. } => self.eval_expr(place, scope),
-            TExprKind::MaterializeView(inner) => self.eval_expr(inner, scope),
+            TExprKind::Borrow { place, .. } => self.eval_expr_child(place, scope),
+            TExprKind::MaterializeView(inner) => self.eval_expr_child(inner, scope),
             TExprKind::MethodCall {
                 recv,
                 method,
@@ -3981,10 +4759,10 @@ impl<'a> EvalCtx<'a> {
                 source_first_string_literal,
                 ..
             } => {
-                let mut r = self.eval_expr(recv, scope)?;
+                let mut r = self.eval_expr_child(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(&a.value, scope)?);
+                    argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
                 if method.name == "clone" {
                     return Ok(r);
@@ -4227,7 +5005,7 @@ impl<'a> EvalCtx<'a> {
                 line,
                 fn_name,
             } => {
-                let v = self.eval_expr(inner, scope)?;
+                let v = self.eval_expr_child(inner, scope)?;
                 match v {
                     CtValue::Present(inner) => Ok(*inner),
                     CtValue::Failed(CtReport::Told(e)) => {
@@ -4269,8 +5047,8 @@ impl<'a> EvalCtx<'a> {
                     other => Ok(other),
                 }
             }
-            TExprKind::OrFallback { value, fallback } => {
-                self.eval_or_fallback_expr(value, fallback, scope)
+            TExprKind::OrFallback { .. } => {
+                unreachable!("or-fallback bypassed its evaluator continuation")
             }
             TExprKind::EnumLit {
                 enum_type,
@@ -4284,14 +5062,14 @@ impl<'a> EvalCtx<'a> {
                     crate::Codegen::TIR::TEnumPayload::Positional(pos) => {
                         let mut out = Vec::with_capacity(pos.len());
                         for a in pos {
-                            out.push((None, self.eval_expr(&a.value, scope)?));
+                            out.push((None, self.eval_expr_child(&a.value, scope)?));
                         }
                         out
                     }
                     crate::Codegen::TIR::TEnumPayload::Named(named) => {
                         let mut out = Vec::with_capacity(named.len());
                         for (name, a) in named {
-                            out.push((Some(name.clone()), self.eval_expr(&a.value, scope)?));
+                            out.push((Some(name.clone()), self.eval_expr_child(&a.value, scope)?));
                         }
                         out
                     }
@@ -4306,7 +5084,7 @@ impl<'a> EvalCtx<'a> {
                 crate::Codegen::TIR::THostCall::ExpectSnapshot { value, .. } => {
                     // Comptime/transcript: evaluate the wrapped value; snapshot I/O
                     // is an AOT harness concern.
-                    let _ = self.eval_expr(value, scope)?;
+                    let _ = self.eval_expr_child(value, scope)?;
                     Ok(CtValue::Unit)
                 }
                 crate::Codegen::TIR::THostCall::NumericBounds { ty, member } => {
@@ -4394,8 +5172,8 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 crate::Codegen::TIR::THostCall::FixedListIndex { base, index } => {
-                    let b = self.eval_expr(base, scope)?;
-                    let idx = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                    let b = self.eval_expr_child(base, scope)?;
+                    let idx = as_int(&self.eval_expr_child(index, scope)?, self.span())?;
                     match b {
                         CtValue::List(xs) => {
                             if idx < 0 || idx as usize >= xs.len() {
@@ -4417,7 +5195,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 crate::Codegen::TIR::THostCall::TypedText { kind, arg } => {
                     use crate::Codegen::TIR::TTypedTextForm;
-                    let value = self.eval_expr(arg, scope)?;
+                    let value = self.eval_expr_child(arg, scope)?;
                     match kind {
                         TTypedTextForm::SQLRaw => match value {
                             CtValue::Str(template) => {
@@ -4459,7 +5237,7 @@ impl<'a> EvalCtx<'a> {
                     use crate::Codegen::TIR::TTypedTextInterpKind;
                     let mut values = Vec::with_capacity(holes.len());
                     for hole in holes {
-                        values.push(self.eval_expr(hole, scope)?);
+                        values.push(self.eval_expr_child(hole, scope)?);
                     }
                     match kind {
                         TTypedTextInterpKind::SQL => {
@@ -4536,7 +5314,7 @@ impl<'a> EvalCtx<'a> {
                 // prelude reader every other tier calls, so what a success and
                 // a failure each answer is decided in one place.
                 crate::Codegen::TIR::THostCall::CarrierFact { recv, field, notes } => {
-                    let outcome = self.eval_expr(recv, scope)?;
+                    let outcome = self.eval_expr_child(recv, scope)?;
                     crate::Comptime::Builtins::carrier_fact(&outcome, field, *notes)
                         .ok_or_else(|| {
                             unsupported(
@@ -4546,7 +5324,7 @@ impl<'a> EvalCtx<'a> {
                         })
                 }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
-                    let mut r = self.eval_expr(recv, scope)?;
+                    let mut r = self.eval_expr_child(recv, scope)?;
                     if matches!(
                         &r,
                         CtValue::Struct { type_name, .. }
@@ -4743,7 +5521,7 @@ impl<'a> EvalCtx<'a> {
                     }
                     let mut argv = Vec::with_capacity(args.len());
                     for a in args {
-                        argv.push(self.eval_expr(a, scope)?);
+                        argv.push(self.eval_expr_child(a, scope)?);
                     }
                     let result = match crate::Comptime::Builtins::apply_mutating(
                         &mut r,
@@ -4763,7 +5541,7 @@ impl<'a> EvalCtx<'a> {
                     Ok(result)
                 }
                 crate::Codegen::TIR::THostCall::YieldSend { value } => {
-                    let yielded = self.eval_expr(value, scope)?;
+                    let yielded = self.eval_expr_child(value, scope)?;
                     if let Some(items) = self.collecting_items.last_mut() {
                         items.push(yielded);
                         return Ok(CtValue::Unit);
@@ -4801,7 +5579,7 @@ impl<'a> EvalCtx<'a> {
                         match a {
                             crate::Codegen::TIR::THostArg::Expr(e)
                             | crate::Codegen::TIR::THostArg::Borrow(e) => {
-                                argv.push(self.eval_expr(e, scope)?);
+                                argv.push(self.eval_expr_child(e, scope)?);
                             }
                             crate::Codegen::TIR::THostArg::Lambda(_) => {
                                 return Err(unsupported(
@@ -4874,11 +5652,11 @@ impl<'a> EvalCtx<'a> {
                     clock,
                     ..
                 } => {
-                    let value = self.eval_expr(value, scope)?;
-                    let duration = self.eval_expr(duration, scope)?;
+                    let value = self.eval_expr_child(value, scope)?;
+                    let duration = self.eval_expr_child(duration, scope)?;
                     let duration = struct_int(&duration, "ms")
                         .ok_or_else(|| unsupported("expiring duration", self.span()))?;
-                    let clock = self.eval_expr(clock, scope)?;
+                    let clock = self.eval_expr_child(clock, scope)?;
                     let clock_index = handle_index(&clock, "__JetTirClock")
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
@@ -4953,10 +5731,10 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::DistinctCtor { name: _, arg, base: _ } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
-                self.eval_expr(arg, scope)
+                self.eval_expr_child(arg, scope)
             }
             TExprKind::RangeCheckedCtor { name, arg } => {
-                let v = self.eval_expr(arg, scope)?;
+                let v = self.eval_expr_child(arg, scope)?;
                 Ok(CtValue::Present(Box::new(v)))
                 // Range bounds are enforced by sema for literals; dynamic checks
                 // reuse the same ok-wrapping Result shape as AOT try_new.
@@ -4972,7 +5750,7 @@ impl<'a> EvalCtx<'a> {
                 range,
                 fallible,
             } => {
-                let v = self.eval_expr(arg, scope)?;
+                let v = self.eval_expr_child(arg, scope)?;
                 let converted = self.eval_numeric_op(&v, op, &arg.ty, &expr.ty)?;
                 let inner = match converted {
                     CtValue::Present(v) => *v,
@@ -5007,11 +5785,11 @@ impl<'a> EvalCtx<'a> {
                 fallible,
                 ..
             } => {
-                let CtValue::Float(value) = self.eval_expr(arg, scope)? else {
+                let CtValue::Float(value) = self.eval_expr_child(arg, scope)? else {
                     return Err(unsupported("unit conversion on non-Float", self.span()));
                 };
                 let converted = if let Some((mode, digits)) = rounding {
-                    let CtValue::Int(digits) = self.eval_expr(digits, scope)? else {
+                    let CtValue::Int(digits) = self.eval_expr_child(digits, scope)? else {
                         return Err(unsupported(
                             "unit conversion digits on non-Int",
                             self.span(),
@@ -5055,7 +5833,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                     type_name,
@@ -5090,11 +5868,11 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(a, scope)?);
+                    argv.push(self.eval_expr_child(a, scope)?);
                 }
                 eval_precise_builtin(type_name, func, argv, self.span())
             }
-            TExprKind::ResourceNew(inner) => self.eval_expr(inner, scope),
+            TExprKind::ResourceNew(inner) => self.eval_expr_child(inner, scope),
             TExprKind::ResourceTake(place) => scope
                 .get(place)
                 .cloned()
@@ -5102,63 +5880,8 @@ impl<'a> EvalCtx<'a> {
                 .or_else(|| self.globals.get(place).cloned())
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
-            TExprKind::RequireStop {
-                kind,
-                loc,
-                always_stops,
-            } => {
-                let failed = if *always_stops {
-                    true
-                } else {
-                    match kind {
-                        crate::Codegen::TIR::TRequireKind::Require { cond, .. } => {
-                            !as_bool(&self.eval_expr(cond, scope)?, self.span())?
-                        }
-                        crate::Codegen::TIR::TRequireKind::RequireEq { left, right, .. } => {
-                            self.eval_expr(left, scope)? != self.eval_expr(right, scope)?
-                        }
-                        crate::Codegen::TIR::TRequireKind::Panic { .. } => true,
-                    }
-                };
-                if !failed {
-                    return Ok(CtValue::Unit);
-                }
-                let msg = match kind {
-                    crate::Codegen::TIR::TRequireKind::Require { msg: Some(msg), .. }
-                    | crate::Codegen::TIR::TRequireKind::Panic { msg } => {
-                        self.eval_expr(msg, scope)?.jet_show()
-                    }
-                    crate::Codegen::TIR::TRequireKind::Require { msg: None, .. } => {
-                        "requirement failed".to_string()
-                    }
-                    crate::Codegen::TIR::TRequireKind::RequireEq { .. } => {
-                        "values are not equal".to_string()
-                    }
-                };
-                let file = loc.file.trim_matches('"');
-                let fn_name = loc.fn_name.trim_matches('"');
-                let src_line = loc.src_line.trim_matches('"');
-                let line_s = loc.line.to_string();
-                let margin = line_s.len();
-                let pad = " ".repeat(margin);
-                let col_offset = loc.col.saturating_sub(1) as usize;
-                let caret = "^".repeat(loc.caret.max(1) as usize);
-                let rendered = format!(
-                    "panic: {msg}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-                    loc.line,
-                    " ".repeat(col_offset)
-                );
-                if let Some(sink) = self.sink.as_ref() {
-                    let mut sink = sink.lock().expect("evaluator sink poisoned");
-                    sink.stderr.push_str(&rendered);
-                    sink.exit_code = Some(70);
-                    return Err(Diagnostic::soft_exit(
-                        "70".to_string(),
-                        "require/panic stop".to_string(),
-                        Some(self.span()),
-                    ));
-                }
-                Err(unsupported("require/panic stop", self.span()))
+            TExprKind::RequireStop { .. } => {
+                unreachable!("require/panic stop bypassed its evaluator continuation")
             }
             TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),
@@ -5191,7 +5914,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
             TExprKind::Deref(inner) => {
-                let pointer = self.eval_expr(inner, scope)?;
+                let pointer = self.eval_expr_child(inner, scope)?;
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };
@@ -5216,13 +5939,13 @@ impl<'a> EvalCtx<'a> {
                     Type::Apply { name, args }
                         if name == crate::Syntax::TYPE_PTR && args.len() == 1
                 ) {
-                    return self.eval_expr(inner, scope);
+                    return self.eval_expr_child(inner, scope);
                 }
                 let local = super::raw_place_local(inner);
                 let fields = if let Some(local) = local {
                     vec![("name".to_string(), CtValue::Str(local.name.clone()))]
                 } else {
-                    vec![("value".to_string(), self.eval_expr(inner, scope)?)]
+                    vec![("value".to_string(), self.eval_expr_child(inner, scope)?)]
                 };
                 Ok(CtValue::Struct {
                     type_name: "__JetRawLocal".to_string(),
@@ -5235,7 +5958,7 @@ impl<'a> EvalCtx<'a> {
             }),
             TExprKind::JSONLit { variant, arg } => {
                 let payload = match arg {
-                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    Some(inner) => Some(self.eval_expr_child(&inner.0, scope)?),
                     None => None,
                 };
                 Ok(CtValue::Enum {
@@ -5249,7 +5972,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::DBValueLit { variant, arg } => {
                 let payload = match arg {
-                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    Some(inner) => Some(self.eval_expr_child(&inner.0, scope)?),
                     None => None,
                 };
                 Ok(CtValue::Enum {
@@ -5266,10 +5989,10 @@ impl<'a> EvalCtx<'a> {
                 for part in parts {
                     match part {
                         ListSpreadPart::Elem(expr) => {
-                            values.push(self.eval_expr(expr, scope)?);
+                            values.push(self.eval_expr_child(expr, scope)?);
                         }
                         ListSpreadPart::Spread(expr) => {
-                            let CtValue::List(items) = self.eval_expr(expr, scope)? else {
+                            let CtValue::List(items) = self.eval_expr_child(expr, scope)? else {
                                 return Err(unsupported("list spread operand", self.span()));
                             };
                             values.extend(items);
@@ -5293,8 +6016,8 @@ impl<'a> EvalCtx<'a> {
                 field,
                 ..
             } => {
-                let pool_value = self.eval_expr(pool, scope)?;
-                let id_value = self.eval_expr(id, scope)?;
+                let pool_value = self.eval_expr_child(pool, scope)?;
+                let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
                     return Err(pool_stale_diagnostic());
                 };
@@ -5338,8 +6061,8 @@ impl<'a> EvalCtx<'a> {
                 index,
                 ..
             } => {
-                let recv = self.eval_expr(base, scope)?;
-                let key = self.eval_expr(index, scope)?;
+                let recv = self.eval_expr_child(base, scope)?;
+                let key = self.eval_expr_child(index, scope)?;
                 let func = self
                     .funcs
                     .get(&format!("{type_name}::get"))
@@ -5354,8 +6077,8 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::MathLaneIndex { base, index, .. } => {
-                let b = self.eval_expr(base, scope)?;
-                let i = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                let b = self.eval_expr_child(base, scope)?;
+                let i = as_int(&self.eval_expr_child(index, scope)?, self.span())?;
                 match crate::Comptime::MathLayout::lane_at(&b, i, self.span()) {
                     Some(r) => r,
                     None => Err(unsupported("expr `MathLaneIndex`", self.span())),
@@ -5365,7 +6088,7 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `MathSwizzleRead`", self.span()))
             }
             TExprKind::FnFieldCall { recv, field, args } => {
-                let value = self.eval_expr(recv, scope)?;
+                let value = self.eval_expr_child(recv, scope)?;
                 let CtValue::Struct { fields, .. } = value else {
                     return Err(unsupported("function field receiver", self.span()));
                 };
@@ -5375,16 +6098,16 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported(&format!("function field `{field}`"), self.span()))?;
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
-                    argv.push(self.eval_expr(&arg.value, scope)?);
+                    argv.push(self.eval_expr_child(&arg.value, scope)?);
                 }
                 self.call_callable(&callable, argv)
             }
             TExprKind::DecodeUnder { segment, inner } => {
-                let segment = match self.eval_expr(segment, scope)? {
+                let segment = match self.eval_expr_child(segment, scope)? {
                     CtValue::Str(value) => value,
                     other => other.jet_show(),
                 };
-                let result = self.eval_expr(inner, scope)?;
+                let result = self.eval_expr_child(inner, scope)?;
                 match result {
                     CtValue::Failed(CtReport::Told(error)) => Ok(CtValue::failed(Box::new(
                         decode_error_under(&segment, *error),
@@ -5401,7 +6124,7 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr(&a.value, scope)?);
+                    argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
                 match owner {
                     crate::Codegen::TIR::TStaticOwner::User(type_name) => {
@@ -5588,13 +6311,13 @@ impl<'a> EvalCtx<'a> {
                 &format!("proven-unreachable exhaustive-dispatch arm (line {line})"),
                 self.span(),
             )),
-            TExprKind::DistinctRaw(inner) => self.eval_expr(inner, scope),
+            TExprKind::DistinctRaw(inner) => self.eval_expr_child(inner, scope),
             TExprKind::OptField {
                 base,
                 member,
                 flatten,
             } => {
-                let v = self.eval_expr(base, scope)?;
+                let v = self.eval_expr_child(base, scope)?;
                 match v {
                     CtValue::Failed(CtReport::Clean(_)) => Ok(CtValue::absent(expr.ty.clone())),
                     CtValue::Present(inner) => {
@@ -5647,7 +6370,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(self.store_callable(EvalCallable::Lambda { lambda, captured }))
             }
             TExprKind::PatternMatches { subj, pattern } => {
-                let value = self.eval_expr(subj, scope)?;
+                let value = self.eval_expr_child(subj, scope)?;
                 // Binding-free `x == .Variant` — reuse match-arm binder, discard locals.
                 let mut scratch = HashMap::new();
                 Ok(CtValue::Bool(super::stmts::bind_match_pattern(
@@ -5664,7 +6387,7 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `HostBorrowCallback`", self.span()))
             }
             TExprKind::NumericMethod { recv, op } => {
-                let v = self.eval_expr(recv, scope)?;
+                let v = self.eval_expr_child(recv, scope)?;
                 self.eval_numeric_op(&v, op, &recv.ty, &expr.ty)
             }
             TExprKind::OverflowOpt {
@@ -5673,8 +6396,8 @@ impl<'a> EvalCtx<'a> {
                 lhs,
                 rhs,
             } => {
-                let l = self.eval_expr(lhs, scope)?;
-                let r = self.eval_expr(rhs, scope)?;
+                let l = self.eval_expr_child(lhs, scope)?;
+                let r = self.eval_expr_child(rhs, scope)?;
                 let a = as_int(&l, self.span())?;
                 let b = as_int(&r, self.span())?;
                 let width_ty = match &expr.ty {
@@ -5761,27 +6484,27 @@ impl<'a> EvalCtx<'a> {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
             TExprKind::TaskGroupAll { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
                     return Err(unsupported("taskgroup all list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
             }
             TExprKind::TaskGroupRace { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
                     return Err(unsupported("taskgroup race list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Race)
             }
             TExprKind::TaskGroupAny { tasks } => {
-                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                let CtValue::List(tasks) = self.eval_expr_child(tasks, scope)? else {
                     return Err(unsupported("taskgroup any list", self.span()));
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
             }
             TExprKind::SelectStart => Ok(self.new_eval_select()),
             TExprKind::SelectRecv { builder, channel } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let channel = self.eval_expr(channel, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let channel = self.eval_expr_child(channel, scope)?;
                 let receiver = handle_index(&channel, "Receiver")
                     .ok_or_else(|| unsupported("select receiver", self.span()))?;
                 self.eval_select_recv(builder, receiver)
@@ -5791,22 +6514,22 @@ impl<'a> EvalCtx<'a> {
                 millis,
                 value,
             } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let millis = as_int(&self.eval_expr(millis, scope)?, self.span())?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let millis = as_int(&self.eval_expr_child(millis, scope)?, self.span())?;
                 let value = value
                     .as_ref()
-                    .map(|value| self.eval_expr(value, scope))
+                    .map(|value| self.eval_expr_child(value, scope))
                     .transpose()?
                     .unwrap_or(CtValue::Unit);
                 self.eval_select_after(builder, millis, value)
             }
             TExprKind::SelectRead { builder, stream } => {
-                let builder = self.eval_expr(builder, scope)?;
-                let _ = self.eval_expr(stream, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
+                let _ = self.eval_expr_child(stream, scope)?;
                 Ok(builder)
             }
             TExprKind::SelectWait { builder } => {
-                let builder = self.eval_expr(builder, scope)?;
+                let builder = self.eval_expr_child(builder, scope)?;
                 self.eval_select_wait(builder)
             }
             TExprKind::FnValue { kind } => match kind {
@@ -5817,10 +6540,10 @@ impl<'a> EvalCtx<'a> {
                     Err(unsupported("rendered function coercion", self.span()))
                 }
                 TFnValueKind::Call { callee, args } => {
-                    let callable = self.eval_expr(callee, scope)?;
+                    let callable = self.eval_expr_child(callee, scope)?;
                     let mut argv = Vec::with_capacity(args.len());
                     for arg in args {
-                        argv.push(self.eval_expr(&arg.value, scope)?);
+                        argv.push(self.eval_expr_child(&arg.value, scope)?);
                     }
                     self.call_callable(&callable, argv)
                 }
@@ -5870,7 +6593,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(())
             }
             TExprKind::SharedGuardValue { guard, .. } => {
-                let guard = self.eval_expr(guard, scope)?;
+                let guard = self.eval_expr_child(guard, scope)?;
                 let (index, _, editable, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))?;
                 if !editable {
@@ -5892,7 +6615,7 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported("SharedGuard write-back", self.span()))
             }
             TExprKind::Deref(inner) => {
-                let pointer = self.eval_expr(inner, scope)?;
+                let pointer = self.eval_expr_child(inner, scope)?;
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };
@@ -5973,7 +6696,7 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                 }
-                let mut base_val = self.eval_expr(recv, scope)?;
+                let mut base_val = self.eval_expr_child(recv, scope)?;
                 match &mut base_val {
                     CtValue::Struct {
                         type_name,
@@ -6005,8 +6728,8 @@ impl<'a> EvalCtx<'a> {
                 field,
                 ..
             } => {
-                let mut pool_value = self.eval_expr(pool, scope)?;
-                let id_value = self.eval_expr(id, scope)?;
+                let mut pool_value = self.eval_expr_child(pool, scope)?;
+                let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
                     return Err(pool_stale_diagnostic());
                 };
@@ -6218,7 +6941,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
-            let mut v = self.eval_expr(&a.value, scope)?;
+            let mut v = self.eval_expr_child(&a.value, scope)?;
             // D-UNIONTYPE1=A: member → union inject at the call boundary (mirrors emit).
             if let Some(Type::Union(members)) = &a.widen_to_union {
                 let tag = crate::AST::union_member_tag(&a.value.ty);

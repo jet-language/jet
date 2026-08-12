@@ -1631,59 +1631,69 @@ impl<'a> EvalCtx<'a> {
         cond: &'a TIfCond,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<bool, Diagnostic> {
-        match cond {
-            TIfCond::Plain(e) => as_bool(&self.eval_expr(e, scope)?, self.span()),
-            TIfCond::And { left, right } => {
-                Ok(self.eval_if_cond(left, scope)? && self.eval_if_cond(right, scope)?)
-            }
-            TIfCond::IsNone { subj } => {
-                Ok(matches!(
-                    self.eval_expr(subj, scope)?,
-                    CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
-                ))
-            }
-            TIfCond::IfLet { pattern, subj } => {
-                let value = self.eval_expr(subj, scope)?;
-                if let TPatternPosition::DataEntries { temp } = &pattern.position {
-                    if let CtValue::Enum { args, .. } = &value {
-                        if let Some((_, payload)) = args.first() {
-                            scope.insert(temp.clone(), payload.clone());
-                        }
+        enum CondWork<'b> {
+            Eval(&'b TIfCond),
+            AfterLeft {
+                parent: &'b TIfCond,
+                left: &'b TIfCond,
+                right: &'b TIfCond,
+            },
+            AfterRight {
+                parent: &'b TIfCond,
+                right: &'b TIfCond,
+            },
+        }
+
+        let mut work = vec![CondWork::Eval(cond)];
+        let mut results = std::collections::HashMap::new();
+        while let Some(task) = work.pop() {
+            match task {
+                CondWork::Eval(cond) => match cond {
+                    TIfCond::And { left, right } => {
+                        work.push(CondWork::AfterLeft {
+                            parent: cond,
+                            left,
+                            right,
+                        });
+                        work.push(CondWork::Eval(left));
+                    }
+                    TIfCond::Plain(expr)
+                    | TIfCond::IsNone { subj: expr }
+                    | TIfCond::IfLet { subj: expr, .. }
+                    | TIfCond::Matches { subj: expr, .. } => {
+                        let value = self.eval_expr_child(expr, scope)?;
+                        results.insert(
+                            cond as *const TIfCond as usize,
+                            self.eval_if_cond_leaf(cond, value, scope)?,
+                        );
+                    }
+                },
+                CondWork::AfterLeft {
+                    parent,
+                    left,
+                    right,
+                } => {
+                    let left = results.remove(&(left as *const TIfCond as usize)).ok_or_else(|| {
+                        unsupported("if condition result stack", self.span())
+                    })?;
+                    if left {
+                        work.push(CondWork::AfterRight { parent, right });
+                        work.push(CondWork::Eval(right));
+                    } else {
+                        results.insert(parent as *const TIfCond as usize, false);
                     }
                 }
-                match &pattern.pattern {
-                    crate::AST::Pattern::Ok { binding, .. } => match value {
-                        CtValue::Present(inner) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Err { binding, .. } => match value {
-                        CtValue::Failed(CtReport::Told(inner)) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Present { binding, .. } => match value {
-                        CtValue::Present(inner) => {
-                            scope.insert(binding.clone(), *inner);
-                            Ok(true)
-                        }
-                        _ => Ok(false),
-                    },
-                    crate::AST::Pattern::Absent(_) => {
-                        Ok(matches!(value, CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit))
-                    }
-                    _ => bind_match_pattern(&pattern.pattern, &value, scope),
+                CondWork::AfterRight { parent, right } => {
+                    let right = results.remove(&(right as *const TIfCond as usize)).ok_or_else(|| {
+                        unsupported("if condition result stack", self.span())
+                    })?;
+                    results.insert(parent as *const TIfCond as usize, right);
                 }
-            }
-            TIfCond::Matches { pattern, subj } => {
-                let value = self.eval_expr(subj, scope)?;
-                bind_match_pattern(&pattern.pattern, &value, scope)
             }
         }
+        results
+            .remove(&(cond as *const TIfCond as usize))
+            .ok_or_else(|| unsupported("empty if condition", self.span()))
     }
 
     fn exec_infinite(

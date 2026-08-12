@@ -27,9 +27,17 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 fn lambda_jit_name(start: usize, end: usize) -> String {
     crate::Syntax::generated_name(&format!("lambda_{start}_{end}"))
+}
+
+fn reactive_capture_name(name: &str) -> String {
+    format!(
+        "__jet_cap_{}",
+        crate::Syntax::generated_suffix(&mangle(name))
+    )
 }
 
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
@@ -54,7 +62,7 @@ pub(crate) fn lower_lambda_expecting(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false)
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, expected_params, None, false, None)
 }
 
 /// Lower a callback for a native helper whose Rust contract consumes each
@@ -65,7 +73,7 @@ pub(crate) fn lower_lambda_expecting_value(
     env: &LowerEnv,
     expected_params: &[Type],
 ) -> TLambda {
-    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), None, true)
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, Some(expected_params), None, true, None)
 }
 
 /// Runtime helpers such as `Shared.read` and collection adapters already lend
@@ -85,6 +93,7 @@ pub(crate) fn lower_lambda_expecting_host_borrow(
         Some(expected_params),
         Some(write),
         false,
+        None,
     )
 }
 
@@ -95,6 +104,7 @@ fn lower_lambda_expecting_with_host_borrow(
     expected_params: Option<&[Type]>,
     host_borrow: Option<bool>,
     by_value: bool,
+    shared_body: Option<Arc<[TStmt]>>,
 ) -> TLambda {
     let param_types: Vec<Type> = lam
         .params
@@ -108,7 +118,10 @@ fn lower_lambda_expecting_with_host_borrow(
                 .unwrap_or(Type::Int)
         })
         .collect();
-    let body_ty = lambda_body_ty_expecting(lam, cx, env, expected_params);
+    let body_ty = shared_body
+        .as_ref()
+        .map(|body| lowered_block_return_ty(body))
+        .unwrap_or_else(|| lambda_body_ty_expecting(lam, cx, env, expected_params));
     // HTTP handlers cross the server boundary as owned requests. Their public
     // callback type is `Fn(HTTPRequest)`, never Jet's ordinary read-borrowed
     // function convention.
@@ -288,11 +301,20 @@ fn lower_lambda_expecting_with_host_borrow(
             (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
         }
         LambdaBody::Block(stmts) => {
-            prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
-            let lowered = lower_stmts(stmts, cx, &mut lam_env);
-            let mut inner = String::new();
-            emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
-            (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
+            if let Some(shared) = shared_body.as_ref() {
+                let mut inner = String::new();
+                emit_tir_lambda_block(&shared[..], cx, &mut inner, 1);
+                (
+                    format!("{{ {} }}", inner),
+                    TLambdaBody::SharedBlock(shared.clone()),
+                )
+            } else {
+                prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
+                let lowered = lower_stmts(stmts, cx, &mut lam_env);
+                let mut inner = String::new();
+                emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
+                (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
+            }
         }
     };
     cx.in_stm_transact.set(prev_in_stm);
@@ -322,6 +344,23 @@ fn lower_lambda_expecting_with_host_borrow(
     }
 }
 
+fn lowered_block_return_ty(body: &[TStmt]) -> Type {
+    match body.last() {
+        Some(TStmt::ExprStmt(expr)) => expr.ty.clone(),
+        Some(TStmt::Return(Some(expr))) => expr.ty.clone(),
+        _ => unit_type(),
+    }
+}
+
+pub(crate) fn lower_lambda_with_shared_block(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    body: Arc<[TStmt]>,
+) -> TLambda {
+    lower_lambda_expecting_with_host_borrow(lam, cx, env, None, None, false, Some(body))
+}
+
 /// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.
 pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TJitSpawnLambda {
     lower_spawn_lambda_for_jit_expecting(lam, cx, env, &[])
@@ -334,6 +373,16 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     cx: &Cx,
     env: &LowerEnv,
     expected_params: &[Type],
+) -> TJitSpawnLambda {
+    lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, expected_params, None)
+}
+
+fn lower_spawn_lambda_for_jit_expecting_with_body(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+    shared_body: Option<Arc<[TStmt]>>,
 ) -> TJitSpawnLambda {
     let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
     let cloned: HashSet<&str> = lam
@@ -350,22 +399,30 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
         .into_iter()
         .filter(|n| !param_names.contains(n.as_str()))
         .filter(|n| env.locals.contains_key(n))
-        .map(|name| JitSpawnCapture {
-            clone_at_spawn: cloned.contains(name.as_str()),
-            // D-TASKBORROW1=A: a borrowed split-view crosses as its window
-            // handle, not as the element type its Jet binding shows.
-            ty: env
-                .split_view_handle(&name)
-                .or_else(|| env.ty_of(&name))
-                .unwrap_or_else(|| Type::Named("Unit".to_string())),
-            name,
+        .map(|source| {
+            let name = if shared_body.is_some() {
+                reactive_capture_name(&source)
+            } else {
+                source.clone()
+            };
+            JitSpawnCapture {
+                clone_at_spawn: cloned.contains(source.as_str()),
+                // D-TASKBORROW1=A: a borrowed split-view crosses as its window
+                // handle, not as the element type its Jet binding shows.
+                ty: env
+                    .split_view_handle(&source)
+                    .or_else(|| env.ty_of(&source))
+                    .unwrap_or_else(|| Type::Named("Unit".to_string())),
+                name,
+                source,
+            }
         })
         .collect();
     captures.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut lam_env = fork_panic(env);
     for cap in &captures {
-        let slot = match env.origin_of(&cap.name) {
+        let slot = match env.origin_of(&cap.source) {
             Some(origin) => TLocal::user(&cap.name).with_origin(origin),
             None => TLocal::user(&cap.name),
         };
@@ -380,15 +437,25 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
         lam_env.bind(&p.name, TLocal::user(&p.name), ty);
     }
 
-    let ret = lambda_body_ty(lam, cx, env);
-    match &lam.body {
-        LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
-        LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+    let ret = shared_body
+        .as_ref()
+        .map(|body| lowered_block_return_ty(body))
+        .unwrap_or_else(|| lambda_body_ty(lam, cx, env));
+    if shared_body.is_none() {
+        match &lam.body {
+            LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),
+            LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
+        }
     }
     let body = match &lam.body {
         LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
         LambdaBody::Block(stmts) => {
-            if let Some((prefix, tail)) = lambda_block_tail(stmts) {
+            if let Some(shared) = shared_body.as_ref() {
+                TJitSpawnBody::SharedBlock {
+                    body: shared.clone(),
+                    tail: lambda_block_tail(stmts).is_some(),
+                }
+            } else if let Some((prefix, tail)) = lambda_block_tail(stmts) {
                 let prefix_lowered = lower_stmts(prefix, cx, &mut lam_env);
                 let tail_lowered = Some(Box::new(match tail {
                     Stmt::Return(Some(e), _) => lower_expr(e, cx, &mut lam_env),
@@ -432,6 +499,15 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     }
 }
 
+pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    body: Arc<[TStmt]>,
+) -> TJitSpawnLambda {
+    lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, &[], Some(body))
+}
+
 /// c109 Phase 13: render a `tasks.spawn` lambda. It is `emit_lambda` minus the
 /// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
 /// prelude is identical. Returns the full rendered closure string (wrapped in
@@ -440,10 +516,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     let mut lam_env = fork_panic(env);
     let mut prep = String::new();
     for name in &lam.meta.cloned_captures {
-        let cap = format!(
-            "__jet_cap_{}",
-            crate::Syntax::generated_suffix(&mangle(name))
-        );
+        let cap = reactive_capture_name(name);
         prep.push_str(&format!(
             "let {} = ({}).clone();\n    ",
             cap,
@@ -498,10 +571,7 @@ fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, Lowe
     let mut lam_env = fork_panic(outer_env);
     let mut prep = String::new();
     for name in &caps {
-        let cap = format!(
-            "__jet_cap_{}",
-            crate::Syntax::generated_suffix(&mangle(name))
-        );
+        let cap = reactive_capture_name(name);
         // Reactive bodies may update their private clone on every rerun. The
         // runtime serializes the resulting FnMut closure behind a Mutex.
         prep.push_str(&format!(

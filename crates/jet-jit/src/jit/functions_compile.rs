@@ -190,6 +190,30 @@ fn lower_spawn_function(
                     lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
+            TJitSpawnBody::SharedBlock { body, tail } => {
+                let (prefix, tail_expr) = if *tail {
+                    match body.split_last() {
+                        Some((TStmt::ExprStmt(expr), prefix))
+                        | Some((TStmt::Return(Some(expr)), prefix)) => (prefix, Some(expr)),
+                        _ => (body.as_ref(), None),
+                    }
+                } else {
+                    (body.as_ref(), None)
+                };
+                lctx.lower_stmts(prefix)?;
+                if let Some(t) = tail_expr {
+                    let val = lctx.lower_expr(t)?;
+                    if clif_ty(&lam.ret).is_some() {
+                        let packed = pack_spawn_return(lctx.b, val, &lam.ret)?;
+                        lctx.emit_lexical_exit(Some(packed), false, lctx.shield_depth)?;
+                    } else {
+                        let _ = val;
+                        lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
+                    }
+                } else {
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
+                }
+            }
         }
         b.finalize();
     }
@@ -278,6 +302,7 @@ pub(crate) fn lower_callable_lambda(
     };
     let block_returns_value = match &lam.executable {
         TLambdaBody::Block(stmts) => block_has_valued_return(stmts),
+        TLambdaBody::SharedBlock(stmts) => block_has_valued_return(&stmts[..]),
         TLambdaBody::Expr(_) => false,
     };
     let sig = if capturing {
@@ -396,6 +421,15 @@ pub(crate) fn lower_callable_lambda(
             }
             TLambdaBody::Block(stmts) => {
                 lctx.lower_stmts(stmts)?;
+                if !lctx.dead {
+                    if lam.ret.is_some() {
+                        return Err("jit callable block missing return".to_string());
+                    }
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
+                }
+            }
+            TLambdaBody::SharedBlock(stmts) => {
+                lctx.lower_stmts(&stmts[..])?;
                 if !lctx.dead {
                     if lam.ret.is_some() {
                         return Err("jit callable block missing return".to_string());

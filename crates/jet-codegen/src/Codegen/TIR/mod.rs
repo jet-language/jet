@@ -61,7 +61,10 @@ pub struct TJitSpawnLambda {
 }
 
 pub struct JitSpawnCapture {
+    /// Local name used by the lowered spawn body.
     pub name: String,
+    /// Source local read at the spawn site.
+    pub source: String,
     pub ty: Type,
     pub clone_at_spawn: bool,
 }
@@ -71,6 +74,11 @@ pub enum TJitSpawnBody {
     Block {
         prefix: Vec<TStmt>,
         tail: Option<Box<TExpr>>,
+    },
+    /// A reactive body lowered once and shared with the normal lambda path.
+    SharedBlock {
+        body: std::sync::Arc<[TStmt]>,
+        tail: bool,
     },
 }
 
@@ -3881,6 +3889,8 @@ pub struct TLambda {
 pub enum TLambdaBody {
     Expr(Box<TExpr>),
     Block(Vec<TStmt>),
+    /// A deferred body shared by the AOT closure representation and JIT lambda.
+    SharedBlock(std::sync::Arc<[TStmt]>),
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`

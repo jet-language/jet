@@ -17,6 +17,8 @@ use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower::lower_string_view_init;
 use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
+use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
+use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
@@ -37,6 +39,7 @@ use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Preserve contextual union typing when a sema-resolved comptime value stays
 /// as a `CtLit`. The literal must remain a single fact for JIT/interpreter, but
@@ -2558,16 +2561,20 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 vec![LowerBody::scoped(body, body_env)],
                 move |mut lowered| {
                     let lowered = lowered.pop().expect("reactive body was deferred");
-                    let closure = render_reactive_block_closure(body, &lowered, cx, &outer_env);
-                    let executable = Box::new(crate::Codegen::TIR::lower_lambda(
+                    let shared: Arc<[TStmt]> = Arc::from(lowered.into_boxed_slice());
+                    let closure =
+                        render_reactive_block_closure(body, &shared[..], cx, &outer_env);
+                    let executable = Box::new(lower_lambda_with_shared_block(
                         &synthetic,
                         cx,
                         &outer_env,
+                        shared.clone(),
                     ));
-                    let jit_lambda = crate::Codegen::TIR::lower_spawn_lambda_for_jit(
+                    let jit_lambda = lower_spawn_lambda_for_jit_with_shared_block(
                         &synthetic,
                         cx,
                         &outer_env,
+                        shared,
                     );
                     cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                     TStmt::Reactive {
