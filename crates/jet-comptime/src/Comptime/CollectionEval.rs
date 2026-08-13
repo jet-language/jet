@@ -274,7 +274,7 @@ fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>
 fn as_string(v: &CtValue, span: Span) -> Result<String, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.clone()),
-        _ => Err(unsupported("non-String argument to ByteBuffer", span)),
+        _ => Err(unsupported("non-String argument to Bytes", span)),
     }
 }
 
@@ -291,14 +291,14 @@ fn set_struct(type_name: &str, items: Vec<CtValue>) -> CtValue {
 
 fn bitset_struct(bits: Vec<CtValue>) -> CtValue {
     CtValue::Struct {
-        type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+        type_name: crate::Syntax::TYPE_BITS.to_string(),
         fields: vec![("bits".to_string(), CtValue::List(bits))],
     }
 }
 
 fn bag_struct(items: Vec<CtValue>, counts: Vec<CtValue>) -> CtValue {
     CtValue::Struct {
-        type_name: "Bag".to_string(),
+        type_name: crate::Syntax::TYPE_TALLY.to_string(),
         fields: vec![
             ("items".to_string(), CtValue::List(items)),
             ("counts".to_string(), CtValue::List(counts)),
@@ -322,7 +322,7 @@ fn byte_buffer_struct(bytes: Vec<u8>) -> CtValue {
 
 fn byte_buffer_struct_at(bytes: Vec<u8>, pos: usize) -> CtValue {
     CtValue::Struct {
-        type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
+        type_name: crate::Syntax::TYPE_BYTES.to_string(),
         fields: vec![
             ("bytes".to_string(), CtValue::Bytes(bytes)),
             ("pos".to_string(), CtValue::Int(pos as i64)),
@@ -332,7 +332,7 @@ fn byte_buffer_struct_at(bytes: Vec<u8>, pos: usize) -> CtValue {
 
 fn deque_struct(items: Vec<CtValue>) -> CtValue {
     CtValue::Struct {
-        type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+        type_name: crate::Syntax::TYPE_QUEUE.to_string(),
         fields: vec![("items".to_string(), CtValue::List(items))],
     }
 }
@@ -347,8 +347,8 @@ fn pool_struct() -> CtValue {
     }
 }
 
-/// `Set.from(list)` / `SortedSet.from(list)` / `PriorityQueue.from(list)` /
-/// `Deque.init(list)` — recv is the list (TIR lowering).
+/// `Set.from(list)` / `Rank.from(list)` / `PriorityQueue.from(list)` /
+/// `Queue.init(list)` — recv is the list (TIR lowering).
 pub fn from_list(type_name: &str, list: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
     let CtValue::List(items) = list else {
         return Err(unsupported(
@@ -359,13 +359,13 @@ pub fn from_list(type_name: &str, list: &CtValue, span: Span) -> Result<CtValue,
     let items = items.clone();
     match type_name {
         name if name == crate::Syntax::TYPE_SET => Ok(set_struct(name, unique_values(items))),
-        name if name == crate::Syntax::TYPE_SORTED_SET => {
+        name if name == crate::Syntax::TYPE_RANK => {
             Ok(set_struct(name, sorted_unique(items, span)?))
         }
         name if name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
             Ok(set_struct(name, sorted_descending(items, span)?))
         }
-        name if name == crate::Syntax::TYPE_DEQUE => Ok(deque_struct(items)),
+        name if name == crate::Syntax::TYPE_QUEUE => Ok(deque_struct(items)),
         _ => Err(unsupported(
             &format!("{type_name}.from at compile time"),
             span,
@@ -404,7 +404,7 @@ pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<
             Ok(lru_struct(capacity, Vec::new()))
         }
         "std::collections::VecDeque" => Ok(deque_struct(Vec::new())),
-        // Bag.new → HashMap (Map literals use MapLit, not this path).
+        // Tally.new → HashMap (Map literals use MapLit, not this path).
         "std::collections::HashMap" => Ok(bag_struct(Vec::new(), Vec::new())),
         // #1478: `Set.new()` at this tier — the tier1 native path
         // (`crates/jet-jit/.../lower_ctx.rs`) already builds an empty
@@ -413,7 +413,7 @@ pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<
         // just below (I9 — no tier left calling this an unsupported prelude
         // static once tier1 already ships it natively).
         "std::collections::HashSet" => Ok(set_struct(crate::Syntax::TYPE_SET, Vec::new())),
-        "std::collections::BTreeSet" => Ok(set_struct(crate::Syntax::TYPE_SORTED_SET, Vec::new())),
+        "std::collections::BTreeSet" => Ok(set_struct(crate::Syntax::TYPE_RANK, Vec::new())),
         "std::collections::BinaryHeap" => {
             Ok(set_struct(crate::Syntax::TYPE_PRIORITY_QUEUE, Vec::new()))
         }
@@ -433,22 +433,22 @@ pub fn apply_method(
         return None;
     };
     let method = if method == "contains"
-        && matches!(type_name.as_str(), "Set" | "SortedSet" | "BitSet")
+        && matches!(type_name.as_str(), "Set" | crate::Syntax::TYPE_RANK | crate::Syntax::TYPE_BITS)
     {
         "has"
     } else {
         method
     };
 
-    if type_name == "Bag" {
+    if type_name == crate::Syntax::TYPE_TALLY {
         return Some(bag_method(fields, method, args, span));
     }
     if type_name == crate::Syntax::TYPE_SET {
         return Some(set_method(crate::Syntax::TYPE_SET, fields, method, args, span, false));
     }
-    if type_name == crate::Syntax::TYPE_SORTED_SET {
+    if type_name == crate::Syntax::TYPE_RANK {
         return Some(set_method(
-            crate::Syntax::TYPE_SORTED_SET,
+            crate::Syntax::TYPE_RANK,
             fields,
             method,
             args,
@@ -459,16 +459,16 @@ pub fn apply_method(
     if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE {
         return Some(priority_queue_method(fields, method, args, span));
     }
-    if type_name == crate::Syntax::TYPE_BIT_SET {
+    if type_name == crate::Syntax::TYPE_BITS {
         return Some(bitset_method(fields, method, args, span));
     }
-    if type_name == crate::Syntax::TYPE_DEQUE {
+    if type_name == crate::Syntax::TYPE_QUEUE {
         return Some(deque_method(fields, method, args, span));
     }
     if type_name == crate::Syntax::TYPE_LRU {
         return Some(lru_method(fields, method, args, span));
     }
-    if type_name == crate::Syntax::TYPE_BYTE_BUFFER {
+    if type_name == crate::Syntax::TYPE_BYTES {
         return Some(byte_buffer_method(fields, method, args, span));
     }
     None
@@ -488,15 +488,15 @@ pub fn apply_mutating(
     // PriorityQueue uses ordinary push/pop names.
     let handled = matches!(
         (type_name.as_str(), method),
-        ("Bag", "add" | "remove" | "clear")
+        (crate::Syntax::TYPE_TALLY, "add" | "remove" | "clear")
             | ("Set", "add" | "remove" | "pop" | "clear")
-            | ("SortedSet", "add" | "remove" | "clear")
+            | (crate::Syntax::TYPE_RANK, "add" | "remove" | "clear")
             | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
-            | ("BitSet", "add" | "remove" | "clear")
-            | ("Deque", "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
+            | (crate::Syntax::TYPE_BITS, "add" | "remove" | "clear")
+            | (crate::Syntax::TYPE_QUEUE, "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
             | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
             | (
-                "ByteBuffer",
+                crate::Syntax::TYPE_BYTES,
                 "clear"
                     | "write_u8"
                     | "write_u16_le"
@@ -517,11 +517,11 @@ pub fn apply_mutating(
         return None;
     };
     let result = match type_name.as_str() {
-        "Bag" => bag_mutating(recv, fields, method, &args, span),
+        crate::Syntax::TYPE_TALLY => bag_mutating(recv, fields, method, &args, span),
         "Set" => set_mutating(recv, crate::Syntax::TYPE_SET, fields, method, &args, span, false),
-        "SortedSet" => set_mutating(
+        crate::Syntax::TYPE_RANK => set_mutating(
             recv,
-            crate::Syntax::TYPE_SORTED_SET,
+            crate::Syntax::TYPE_RANK,
             fields,
             method,
             &args,
@@ -529,10 +529,10 @@ pub fn apply_mutating(
             true,
         ),
         "PriorityQueue" => priority_queue_mutating(recv, fields, method, &args, span),
-        "BitSet" => bitset_mutating(recv, fields, method, &args, span),
-        "Deque" => deque_mutating(recv, fields, method, &args, span),
+        crate::Syntax::TYPE_BITS => bitset_mutating(recv, fields, method, &args, span),
+        crate::Syntax::TYPE_QUEUE => deque_mutating(recv, fields, method, &args, span),
         "Cache" => lru_mutating(recv, fields, method, &args, span),
-        "ByteBuffer" => byte_buffer_mutating(recv, fields, method, &args, span),
+        crate::Syntax::TYPE_BYTES => byte_buffer_mutating(recv, fields, method, &args, span),
         _ => return None,
     };
     Some(result)
@@ -576,7 +576,7 @@ fn bag_method(
                 .unwrap_or(0),
         )),
         _ => Err(unsupported(
-            &format!("Bag.{} at compile time", method),
+            &format!("Tally.{} at compile time", method),
             span,
         )),
     }
@@ -631,7 +631,7 @@ fn bag_mutating(
         }
         _ => {
             return Err(unsupported(
-                &format!("Bag.{} at compile time", method),
+                &format!("Tally.{} at compile time", method),
                 span,
             ))
         }
@@ -951,7 +951,7 @@ fn bitset_method(
         "copy" => Ok(bitset_struct(bits.clone())),
         "to_list" => Ok(CtValue::List(bits)),
         _ => Err(unsupported(
-            &format!("BitSet.{} at compile time", method),
+            &format!("Bits.{} at compile time", method),
             span,
         )),
     }
@@ -988,7 +988,7 @@ fn bitset_mutating(
         }
         _ => {
             return Err(unsupported(
-                &format!("BitSet.{} at compile time", method),
+                &format!("Bits.{} at compile time", method),
                 span,
             ))
         }
@@ -1039,7 +1039,7 @@ fn deque_method(
             Ok(CtValue::Str(parts.join(sep)))
         }
         _ => Err(unsupported(
-            &format!("Deque.{} at compile time", method),
+            &format!("Queue.{} at compile time", method),
             span,
         )),
     }
@@ -1096,7 +1096,7 @@ fn deque_mutating(
         }
         _ => {
             return Err(unsupported(
-                &format!("Deque.{} at compile time", method),
+                &format!("Queue.{} at compile time", method),
                 span,
             ))
         }
@@ -1374,7 +1374,7 @@ fn byte_buffer_method(
             Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
         },
         _ => Err(unsupported(
-            &format!("ByteBuffer.{} at compile time", method),
+            &format!("Bytes.{} at compile time", method),
             span,
         )),
     }
@@ -1512,13 +1512,13 @@ fn byte_buffer_mutating(
         "copy_to" | "write_to" => {
             // Mutating methods with a second buffer are runtime-only.
             return Err(unsupported(
-                &format!("ByteBuffer.{} at compile time", method),
+                &format!("Bytes.{} at compile time", method),
                 span,
             ));
         }
         _ => {
             return Err(unsupported(
-                &format!("ByteBuffer.{} at compile time", method),
+                &format!("Bytes.{} at compile time", method),
                 span,
             ))
         }

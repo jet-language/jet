@@ -1,7 +1,7 @@
-// ByteBuffer: builder + one read cursor + string-like decode (I9 / #1467).
+// Bytes: builder + one read cursor + string-like decode (I9 / #1467).
 // Cursor EOF is position == len. Reader/Writer stay on core.binary / core.io.
 fn run() {
-    b := ByteBuffer.with_capacity(16)
+    b := Bytes.with_capacity(16)
     print("capacity_ok: {b.capacity() >= 16}")
     one :: U8.{65}
     b.write_byte(one)
@@ -27,17 +27,17 @@ fn run() {
     print("read_rest: {b.read()}")
     print("eof1: {b.eof()}")
 
-    spaced := ByteBuffer.from([32, 104, 105, 32])
+    spaced := Bytes.from([32, 104, 105, 32])
     print("trim: {spaced.trim().string()}")
-    print("lower: {ByteBuffer.from([72, 73]).to_lower().string()}")
-    print("title: {ByteBuffer.from([104, 105]).to_title().string()}")
+    print("lower: {Bytes.from([72, 73]).to_lower().string()}")
+    print("title: {Bytes.from([104, 105]).to_title().string()}")
     from_a :: "a"
     to_b :: "b"
-    print("replace: {ByteBuffer.from([97, 97]).replace(from_a, to_b).string()}")
+    print("replace: {Bytes.from([97, 97]).replace(from_a, to_b).string()}")
     sep_comma :: ","
-    print("split: {ByteBuffer.from([97, 44, 98]).split(sep_comma)}")
-    print("lines: {ByteBuffer.from([97, 10, 98]).lines()}")
-    sep := ByteBuffer.from([45])
+    print("split: {Bytes.from([97, 44, 98]).split(sep_comma)}")
+    print("lines: {Bytes.from([97, 10, 98]).lines()}")
+    sep := Bytes.from([45])
     print("join: {sep.join(["x", "y"]).string()}")
 
     c := b.copy()

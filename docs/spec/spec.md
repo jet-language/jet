@@ -2136,11 +2136,11 @@ module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
 
-### `ByteBuffer`
+### `Bytes`
 
 Growable byte builder with one read cursor (D-ITERTOOLS1=A / #1467). EOF is
-`position == len`. Construct with `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`,
-or `ByteBuffer.from(bytes)`.
+`position == len`. Construct with `Bytes.new()`, `Bytes.with_capacity(n)`,
+or `Bytes.from(bytes)`.
 
 Write path: `write_u8` / `write_byte`, width-specific `write_u16_*` / `write_u32_*` /
 `write_u64_*`, `write_bytes` / `write`, `write_to`.
@@ -2158,7 +2158,7 @@ Lifecycle: `flush`, `close`, `shutdown`, `copy` / `clone`, `copy_to`, `equal`,
 `clear`.
 
 Consuming typed reads stay on `core.binary.Reader` / `core.io` Writer handles —
-ByteBuffer does not grow a second Reader/Writer type (I8).
+Bytes does not grow a second Reader/Writer type (I8).
 
 Example: `examples/features/io/byte_buffer.jet`.
 
@@ -2344,7 +2344,7 @@ backpressure only; channels have no drop policy.
 | `core.encoding` readers/writers and `core.data.DataStream` | Blocking `next`/`write`/`flush`; `EncodingLimits`/`DataLimits` bound retained work; no hidden queue or drop | Bounded pull/push stream, not lossy delivery |
 | `core.log` sinks | No public bounded queue, capacity, or overflow policy; sink writes and `flush` are explicit | No buffering-loss rule today; sampling/disable are explicit emission controls |
 
-`Deque`, `PriorityQueue`, `Cache`, and `ByteBuffer` capacity fields are storage
+`Queue`, `PriorityQueue`, `Cache`, and `Bytes` capacity fields are storage
 capacity, not concurrent producer/consumer buffering. Host-internal queues for
 browser events, HTTP admission, observation, and tooling are implementation
 limits, not Jet primitives. Any future buffered log sink or other lossy surface

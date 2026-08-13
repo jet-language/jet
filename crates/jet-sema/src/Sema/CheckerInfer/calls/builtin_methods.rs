@@ -923,7 +923,7 @@ impl<'a> Checker<'a> {
                                     // `List.map`; a Set's uniqueness doesn't carry through
                                     // an arbitrary mapping, so the result is a plain list.
                                     Type::Apply { name, .. }
-                                        if name == "Set" || name == Syntax::TYPE_SORTED_SET => {
+                                        if name == "Set" || name == Syntax::TYPE_RANK => {
                                         refined_ret = Some(Type::List(Box::new((**r).clone())));
                                     }
                                     _ => {}

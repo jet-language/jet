@@ -1571,9 +1571,9 @@ impl TraitRegistry {
             "ArgsSpec",
             "AriaRole",
             "BigInt",
-            "BitSet",
+            crate::Syntax::TYPE_BITS,
             "BrowserError",
-            "ByteBuffer",
+            crate::Syntax::TYPE_BYTES,
             "Clock",
             "Closed",
             "CountMinSketch",
@@ -1682,8 +1682,8 @@ impl TraitRegistry {
             self.auto_printable.insert(ty.to_string());
         }
         for ty in [
-            "BitSet",
-            "ByteBuffer",
+            crate::Syntax::TYPE_BITS,
+            crate::Syntax::TYPE_BYTES,
             "Clock",
             "Decimal",
             "DataTree",

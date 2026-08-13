@@ -1,4 +1,4 @@
-// Shared Set and SortedSet algebra.
+// Shared Set and Rank algebra.
 //
 // AOT emission and the JIT host both marshal to these functions.  Keep the
 // operation laws here so an execution tier cannot quietly grow a second set

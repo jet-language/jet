@@ -486,7 +486,7 @@ impl<'a> EvalCtx<'a> {
                 let items = match recv_v {
                     CtValue::List(items) => items,
                     CtValue::Struct { type_name, fields }
-                        if type_name == "Bag" || type_name.ends_with("Bag") =>
+                        if type_name == crate::Syntax::TYPE_TALLY || type_name.ends_with(crate::Syntax::TYPE_TALLY) =>
                     {
                         fields
                             .into_iter()

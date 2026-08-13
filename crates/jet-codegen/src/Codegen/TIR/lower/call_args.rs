@@ -520,7 +520,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                     && method == "from"
                     && matches!(
                         name.as_str(),
-                        crate::Syntax::TYPE_SET | crate::Syntax::TYPE_SORTED_SET
+                        crate::Syntax::TYPE_SET | crate::Syntax::TYPE_RANK
                     )
                     && args.len() == 1
                 {
@@ -530,16 +530,16 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                         args: vec![elem],
                     });
                 }
-                // ByteBuffer static constructors used as chain receivers
-                // (`ByteBuffer.from([…]).to_lower()`).
+                // Bytes static constructors used as chain receivers
+                // (`Bytes.from([…]).to_lower()`).
                 if !env.locals.contains_key(name)
-                    && name == crate::Syntax::TYPE_BYTE_BUFFER
+                    && name == crate::Syntax::TYPE_BYTES
                     && matches!(
                         (method.as_str(), args.len()),
                         ("new", 0) | ("from", 1) | ("with_capacity", 1)
                     )
                 {
-                    return Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()));
+                    return Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string()));
                 }
             }
             // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must

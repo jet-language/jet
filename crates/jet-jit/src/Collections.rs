@@ -19,7 +19,7 @@ mod range_semantics {
 pub(crate) mod byte_buffer_semantics {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/Core/ByteBuffer.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Bytes.rs");
 }
 
 mod disjoint_semantics {
@@ -3668,7 +3668,7 @@ extern "C" fn jet_jit_byte_buffer_to_bytes(handle: i64) -> i64 {
 /// method codes for ByteBufferMethod / cursor+string-like surface.
 /// Returns packed values: bool as 0/1 in low byte when ret_kind=0;
 /// i64 when ret_kind=1; option i64 (0=None else v+1) when ret_kind=2;
-/// string handle when ret_kind=3; new ByteBuffer handle when ret_kind=4;
+/// string handle when ret_kind=3; new Bytes handle when ret_kind=4;
 /// list-of-string handle when ret_kind=5; unit 0 when ret_kind=6.
 extern "C" fn jet_jit_byte_buffer_method(
     handle: i64,

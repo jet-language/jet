@@ -64,7 +64,7 @@ false rhyme / absent.
 | `()` / Void callables | V01 | — | Unit | teaches well |
 | Named tuples `(x: 1, y: 2)` | V20 | X01 | Product with required names | partial (clear; longer) |
 | `struct` / `Type.{…}` / field punning | V21, C01 | — | Named product and literal | teaches well |
-| `[T]`, `[T#N]`, `[K: V]`, `Set`/`Bag` | V22,V25,V26 | X03 (`#N`) | Collections; fixed length as refinement | partial (`#N` vs `#Rule`) |
+| `[T]`, `[T#N]`, `[K: V]`, `Set`/`Tally` | V22,V25,V26 | X03 (`#N`) | Collections; fixed length as refinement | partial (`#N` vs `#Rule`) |
 | `enum` / leading-dot / nested groups | V40,V41,V46 | — | Tagged sums; group names a subtree | teaches well |
 | `T?` / `Val`/`None`; `T ? E` / `Ok`/`Err` | V42,V43 | — | Optional and Result as separate spellings | teaches well |
 | `A \| B` anonymous union | V40,T16 | — | Closed structural sum sugar | teaches well |

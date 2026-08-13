@@ -324,8 +324,8 @@ pub fn binary_text_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "Reader" => Some("JetReader"),
         "Cursor" => Some("JetCursor"),
-        TYPE_BIT_SET => Some("JetBitSet"),
-        TYPE_BYTE_BUFFER => Some("JetByteBuffer"),
+        TYPE_BITS => Some("JetBitSet"),
+        TYPE_BYTES => Some("JetByteBuffer"),
         _ => None,
     }
 }
@@ -406,7 +406,7 @@ use super::core_surface::{
 };
 use super::effects_surface::KW_STATE_DECL;
 use super::math_layout::{
-    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BIT_SET, TYPE_BYTE_BUFFER, TYPE_DATA, TYPE_JSON,
+    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON,
     TYPE_RESULT,
 };
 use super::package_files::{JET_KEYWORD_LIST, JET_TYPE_LIST};

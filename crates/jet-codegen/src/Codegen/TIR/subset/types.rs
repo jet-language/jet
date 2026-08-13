@@ -293,7 +293,7 @@ pub(crate) fn is_covered_reactive_ty(ty: &Type, cx: &Cx) -> bool {
 pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::Named(name)
-            if name == crate::Syntax::TYPE_BIT_SET || name == crate::Syntax::TYPE_BYTE_BUFFER =>
+            if name == crate::Syntax::TYPE_BITS || name == crate::Syntax::TYPE_BYTES =>
         {
             true
         }
@@ -301,9 +301,9 @@ pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
             if matches!(
                 name.as_str(),
                 crate::Syntax::TYPE_SET
-                    | crate::Syntax::TYPE_SORTED_SET
+                    | crate::Syntax::TYPE_RANK
                     | crate::Syntax::TYPE_PRIORITY_QUEUE
-                    | "Bag"
+                    | crate::Syntax::TYPE_TALLY
             ) =>
         {
             args.len() == 1 && is_subset_param_ty(&args[0], cx)

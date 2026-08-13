@@ -439,7 +439,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetSort => apply_method(recv, "sort", args, span),
         TBuiltinOp::SetShuffle => apply_method(recv, "shuffle", args, span),
         TBuiltinOp::SortedSetFrom => {
-            CollectionEval::from_list(Syntax::TYPE_SORTED_SET, recv, span)
+            CollectionEval::from_list(Syntax::TYPE_RANK, recv, span)
         }
         TBuiltinOp::SortedSetInsert => apply_mutating(recv, "add", args, span),
         TBuiltinOp::SortedSetRemove => apply_mutating(recv, "remove", args, span),
@@ -468,12 +468,12 @@ pub(super) fn eval_builtin(
         TBuiltinOp::BitSetToList => apply_method(recv, "to_list", args, span),
         TBuiltinOp::BitSetCopy => apply_method(recv, "copy", args, span),
         TBuiltinOp::BitSetNew => CollectionEval::prelude_new("JetBitSet", vec![], span)
-            .unwrap_or_else(|| Err(unsupported("BitSet.new", span))),
+            .unwrap_or_else(|| Err(unsupported("Bits.new", span))),
         TBuiltinOp::ByteBufferNew => CollectionEval::prelude_new("JetByteBuffer", vec![], span)
-            .unwrap_or_else(|| Err(unsupported("ByteBuffer.new", span))),
+            .unwrap_or_else(|| Err(unsupported("Bytes.new", span))),
         TBuiltinOp::ByteBufferWithCapacity => {
             CollectionEval::prelude_new("JetByteBuffer", vec![recv.clone()], span)
-                .unwrap_or_else(|| Err(unsupported("ByteBuffer.with_capacity", span)))
+                .unwrap_or_else(|| Err(unsupported("Bytes.with_capacity", span)))
         }
         TBuiltinOp::ByteBufferFrom => CollectionEval::byte_buffer_from(recv, span),
         TBuiltinOp::ByteBufferWrite { method } => {
@@ -482,7 +482,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::ByteBufferToBytes => apply_method(recv, "to_bytes", args, span),
         TBuiltinOp::ByteBufferMethod { method } => {
             if crate::Collections::builtin_method_mutates(
-                &Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                &Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
                 method.as_str(),
             ) {
                 apply_mutating(recv, method.as_str(), args, span)
@@ -509,7 +509,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::DequeJoin => apply_method(recv, "join", args, span),
         TBuiltinOp::DequeReverse => apply_mutating(recv, "reverse", args, span),
         TBuiltinOp::DequeSplit => apply_mutating(recv, "split", args, span),
-        TBuiltinOp::DequeFrom => CollectionEval::from_list(Syntax::TYPE_DEQUE, recv, span),
+        TBuiltinOp::DequeFrom => CollectionEval::from_list(crate::Syntax::TYPE_QUEUE, recv, span),
         // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<T?E> / [T?E] → T?E.
         TBuiltinOp::TryCollect => {
             let CtValue::List(xs) = recv else {

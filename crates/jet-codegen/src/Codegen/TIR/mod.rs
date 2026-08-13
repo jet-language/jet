@@ -4167,7 +4167,7 @@ pub enum TClosureOp {
     Find,
     /// `any` — `jet_list_any((recv).clone(), f)`.
     Any,
-    /// `any` on `Bag<T>` — `(recv).keys().any(f)`.
+    /// `any` on `Tally<T>` — `(recv).keys().any(f)`.
     BagAny,
     /// `all` — `jet_list_all((recv).clone(), f)`.
     All,
@@ -4677,18 +4677,18 @@ pub enum TBuiltinOp {
         method: String,
     },
     ByteBufferToBytes,
-    /// Generic `ByteBuffer` instance call → `(recv).method(args…)` (cursor + string-like).
+    /// Generic `Bytes` instance call → `(recv).method(args…)` (cursor + string-like).
     ByteBufferMethod {
         method: String,
     },
     ByteBufferWithCapacity,
-    // D-TAG1: Bag<T> counted multiset (HashMap-backed).
+    // D-TAG1: Tally<T> counted multiset (HashMap-backed).
     BagAdd,
     BagRemove,
     BagHas,
     BagCount,
     BagLen,
-    // D-COLLBREADTH1=A: Deque<T> operations.
+    // D-COLLBREADTH1=A: Queue<T> operations.
     /// `deque.push_front(v)` → `(recv).push_front(a0)`.
     DequePushFront,
     /// `deque.push_back(v)` → `(recv).push_back(a0)`.
@@ -4717,7 +4717,7 @@ pub enum TBuiltinOp {
     DequeReverse,
     /// `deque.split(i)` → `(recv).split_off(i as usize)` (returns other half).
     DequeSplit,
-    /// `Deque.from(xs)` / `Deque.init(xs)` — build from a list.
+    /// `Queue.from(xs)` / `Queue.init(xs)` — build from a list.
     DequeFrom,
     // D-FAILCOMP1: failure-aware list adapters.
     /// `try_collect()` on `[Result<T,E>]` → `jet_list_try_collect((recv).clone())`.

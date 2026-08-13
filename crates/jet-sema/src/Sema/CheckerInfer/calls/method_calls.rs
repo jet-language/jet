@@ -1522,29 +1522,29 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                // D-ITERTOOLS1=A: `SortedSet.from([...])` → `SortedSet<T>`.
-                if type_name == Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
+                // D-ITERTOOLS1=A: `Rank.from([...])` → `Rank<T>`.
+                if type_name == Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
                     let arg_ty = self.infer(&mut args[0].expr);
                     let elem_ty = match arg_ty {
                         Some(Type::List(inner)) => *inner,
                         _ => Type::Int,
                     };
                     return Some(Type::Apply {
-                        name: Syntax::TYPE_SORTED_SET.to_string(),
+                        name: Syntax::TYPE_RANK.to_string(),
                         args: vec![elem_ty],
                     });
                 }
-                if type_name == Syntax::TYPE_SORTED_SET && method == "new" && args.is_empty() {
+                if type_name == Syntax::TYPE_RANK && method == "new" && args.is_empty() {
                     let elem_ty = match &self.expected_type {
                         Some(Type::Apply { name, args, .. })
-                            if name == Syntax::TYPE_SORTED_SET && !args.is_empty() =>
+                            if name == Syntax::TYPE_RANK && !args.is_empty() =>
                         {
                             args[0].clone()
                         }
                         _ => Type::Int,
                     };
                     let ret = Type::Apply {
-                        name: Syntax::TYPE_SORTED_SET.to_string(),
+                        name: Syntax::TYPE_RANK.to_string(),
                         args: vec![elem_ty],
                     };
                     *resolved_ret_out = Some(ret.clone());
@@ -1596,20 +1596,20 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                if type_name == Syntax::TYPE_BIT_SET && method == "new" && args.is_empty() {
-                    return Some(Type::Named(Syntax::TYPE_BIT_SET.to_string()));
+                if type_name == Syntax::TYPE_BITS && method == "new" && args.is_empty() {
+                    return Some(Type::Named(Syntax::TYPE_BITS.to_string()));
                 }
-                if type_name == Syntax::TYPE_BYTE_BUFFER && method == "new" && args.is_empty() {
-                    return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
+                if type_name == Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
+                    return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
                 }
-                if type_name == Syntax::TYPE_BYTE_BUFFER
+                if type_name == Syntax::TYPE_BYTES
                     && method == "with_capacity"
                     && args.len() == 1
                 {
                     self.expect_core_arg("with_capacity", 0, &Type::Int, &mut args[0]);
-                    return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
+                    return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
                 }
-                if type_name == Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
+                if type_name == Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
                     self.expect_core_arg(
                         "from",
                         0,
@@ -1619,38 +1619,38 @@ impl<'a> Checker<'a> {
                         })),
                         &mut args[0],
                     );
-                    return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
+                    return Some(Type::Named(Syntax::TYPE_BYTES.to_string()));
                 }
-                // D-COLLBREADTH1=A: `Deque.new()` → `Deque<T>`.
+                // D-COLLBREADTH1=A: `Queue.new()` → `Queue<T>`.
                 // T is inferred from the type annotation's expected type.
-                // D-COLLBREADTH1=A: `Deque.init([...])` → collect list into VecDeque.
-                if type_name == "Deque" && method == "init" && args.len() == 1 {
+                // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
+                if type_name == Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
                     let arg_ty = self.infer(&mut args[0].expr);
                     let elem_ty = match arg_ty {
                         Some(Type::List(inner)) => *inner,
                         _ => Type::Int,
                     };
                     return Some(Type::Apply {
-                        name: "Deque".to_string(),
+                        name: Syntax::TYPE_QUEUE.to_string(),
                         args: vec![elem_ty],
                     });
                 }
-                if type_name == "Deque" && method == "new" && args.is_empty() {
+                if type_name == Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
                     let elem_ty = match &self.expected_type {
-                        Some(Type::Apply { name, args, .. }) if name == "Deque" && !args.is_empty() => {
+                        Some(Type::Apply { name, args, .. }) if name == Syntax::TYPE_QUEUE && !args.is_empty() => {
                             args[0].clone()
                         }
                         _ => Type::Int,
                     };
                     let ret = Type::Apply {
-                        name: "Deque".to_string(),
+                        name: Syntax::TYPE_QUEUE.to_string(),
                         args: vec![elem_ty],
                     };
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                // D-TAG1: `Bag.new()` → `Bag<T>`. Turbofish / annotation supplies T.
-                if type_name == "Bag" && method == "new" && args.is_empty() {
+                // D-TAG1: `Tally.new()` → `Tally<T>`. Turbofish / annotation supplies T.
+                if type_name == Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
                     let elem_ty = type_args
                         .first()
                         .or_else(|| owner_type_args.first())
@@ -1658,7 +1658,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or_else(|| {
                         match &self.expected_type {
                             Some(Type::Apply { name, args, .. })
-                                if name == "Bag" && !args.is_empty() =>
+                                if name == Syntax::TYPE_TALLY && !args.is_empty() =>
                             {
                                 args[0].clone()
                             }
@@ -1669,11 +1669,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0506",
                             format!(
-                                "`Bag<{}>` is not valid — `{}` is not hashable",
+                                "`Tally<{}>` is not valid — `{}` is not hashable",
                                 elem_ty.name(),
                                 elem_ty.name()
                             ),
-                            "Bag elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+                            "Tally elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
                             format!(
                                 "change the element type to a hashable type, or use a `[{}]` list instead",
                                 elem_ty.name()
@@ -1682,7 +1682,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let ret = Type::Apply {
-                        name: "Bag".to_string(),
+                        name: Syntax::TYPE_TALLY.to_string(),
                         args: vec![elem_ty],
                     };
                     *resolved_ret_out = Some(ret.clone());
@@ -1779,7 +1779,7 @@ impl<'a> Checker<'a> {
                 // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` — an empty generational
                 // arena. `T` comes from the call-site turbofish (`Pool<Player>.new()`)
                 // or, failing that, the binding's type annotation — same fallback shape
-                // as `Deque.new()`/`Bag.new()` above.
+                // as `Queue.new()`/`Tally.new()` above.
                 if type_name == "Pool" && method == "new" && args.is_empty() {
                     let elem_ty =
                         type_args
@@ -1875,7 +1875,7 @@ impl<'a> Checker<'a> {
                 // `a`/`b` only when both are present; `null` otherwise. A static
                 // combinator (both optionals are plain arguments, not the receiver), so
                 // it's resolved directly here, the same static-constructor shape as
-                // `Set.from`/`Deque.new`/`Path.from` above.
+                // `Set.from`/`Queue.new`/`Path.from` above.
                 if type_name == "Option" && method == "lift2" && !self.registry.contains("Option") {
                     return self.check_option_lift2(args, span, resolved_ret_out);
                 }

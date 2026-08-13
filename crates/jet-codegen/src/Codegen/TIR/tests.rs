@@ -682,7 +682,7 @@ fn mk() {
         // c109 Phase 16: a struct with a covered collection field (`[Int]`). The
         // struct-literal emit is plain (`items: vec![…]`), byte-identical to the AST
         // path, so the owning struct is covered as a param/return.
-        let src = "struct Bag { items: [Int] }\nfn first_tag(b: Bag) => Int {\n return 0\n}\n";
+        let src = "struct Tally { items: [Int] }\nfn first_tag(b: Tally) => Int {\n return 0\n}\n";
         assert!(covers(src, "first_tag"));
     }
 
@@ -982,11 +982,11 @@ fn mk() {
         // exists. The AST `emit_method_call` dispatches such a call to `__jet_<method>` BEFORE
         // `emit_builtin_method` (the fix), so the gate admits it. `recv_type` is a sema fact
         // (`build_cx` alone leaves the call node's `recv_type` empty), so we drive
-        // `method_call_in_subset` directly with a synthetic `Some("Bag")` receiver — exactly
+        // `method_call_in_subset` directly with a synthetic `Some(crate::Syntax::TYPE_TALLY)` receiver — exactly
         // the node sema produces. (The end-to-end build+run + byte-parity in the TIR
         // feature integration targets is
         // the authoritative proof; this exercises the gate's user-vs-builtin decision.)
-        let src = "struct Bag {\n items: [Int]\n fn get(self) => Int {\n return 1\n }\n fn len(self) => Int {\n return 2\n }\n}\n";
+        let src = "struct Tally {\n items: [Int]\n fn get(self) => Int {\n return 1\n }\n fn len(self) => Int {\n return 2\n }\n}\n";
         let (toks, _) = crate::Lexer::lex(src);
         let prog = crate::Parser::parse(&toks).expect("parse failed");
         let cx = build_cx(&prog, src, "test.jet");
@@ -998,7 +998,7 @@ fn mk() {
             owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: Vec::new(),
-            recv_type: Some("Bag".to_string()),
+            recv_type: Some(crate::Syntax::TYPE_TALLY.to_string()),
             resolved_ret: None,
             checked_widen: false,
         };
@@ -1021,7 +1021,7 @@ fn mk() {
             }
         }
         // A builtin name with NO user method on the type stays excluded (`push` isn't a
-        // method on `Bag`), so the builtin/name-keyed path keeps it on the AST side.
+        // method on `Tally`), so the builtin/name-keyed path keeps it on the AST side.
         if let Expr::MethodCall {
             receiver,
             method,

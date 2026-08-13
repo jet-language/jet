@@ -517,7 +517,7 @@ impl LowerCtx<'_, '_> {
                     matches!(&recv.ty, Type::Map { .. })
                 }
                 TBuiltinOp::First | TBuiltinOp::Last => {
-                    Self::receiver_is(&recv.ty, "SortedSet")
+                    Self::receiver_is(&recv.ty, jet_foundation::Syntax::TYPE_RANK)
                 }
                 TBuiltinOp::Min { float: false } | TBuiltinOp::Max { float: false } => {
                     matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
@@ -528,7 +528,7 @@ impl LowerCtx<'_, '_> {
                 TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
                     Self::receiver_is(&recv.ty, "Cache")
                 }
-                // ByteBuffer get/first/next/read_byte → Option(U8) via result-arena ABI.
+                // Bytes get/first/next/read_byte → Option(U8) via result-arena ABI.
                 TBuiltinOp::ByteBufferMethod { method }
                     if matches!(
                         method.as_str(),
@@ -10071,13 +10071,13 @@ impl LowerCtx<'_, '_> {
     fn require_raw_bag_key(&self, recv_ty: &Type) -> Result<(), String> {
         match recv_ty {
             Type::Apply { name, args }
-                if name == "Bag"
+                if name == jet_foundation::Syntax::TYPE_TALLY
                     && args.len() == 1
                     && self.meta.raw_bag_key_type(&args[0]) =>
             {
                 Ok(())
             }
-            _ => Err(format!("jit Bag key type unsupported: {recv_ty:?}")),
+            _ => Err(format!("jit Tally key type unsupported: {recv_ty:?}")),
         }
     }
 
@@ -16106,7 +16106,7 @@ impl LowerCtx<'_, '_> {
                         }
                     }
                 }
-                // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque handle.
+                // D-COLLBREADTH1=A: `Queue.new()` → empty VecDeque handle.
                 let is_deque_new = method.name == "new"
                     && args.is_empty()
                     && matches!(
@@ -16152,7 +16152,7 @@ impl LowerCtx<'_, '_> {
                                 || path.ends_with("::HashMap")
                                 || path.ends_with(".HashMap")
                     )
-                    && matches!(&expr.ty, Type::Apply { name, .. } if name == "Bag");
+                    && matches!(&expr.ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_TALLY);
                 if is_bag_new {
                     return Ok(self.call_host(self.host.coll.bag_new, &[]));
                 }
@@ -16224,7 +16224,7 @@ impl LowerCtx<'_, '_> {
                                 &expr.ty,
                                 Type::Apply { name, args }
                                     if (name == "Set"
-                                        || name == jet_foundation::Syntax::TYPE_SORTED_SET)
+                                        || name == jet_foundation::Syntax::TYPE_RANK)
                                         && args.first().is_some_and(|ty| matches!(ty, Type::String))
                             );
                             let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
@@ -18034,13 +18034,13 @@ impl LowerCtx<'_, '_> {
                     self.host.coll.set_len
                 } else if matches!(&recv_ty, Type::Map { .. }) {
                     self.host.coll.map_len
-                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "Deque") {
+                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_QUEUE) {
                     self.host.coll.deque_len
-                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "SortedSet") {
+                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK) {
                     self.host.coll.sorted_set_len
                 } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "PriorityQueue") {
                     self.host.coll.priority_queue_len
-                } else if matches!(&recv_ty, Type::Named(name) if name == "BitSet") {
+                } else if matches!(&recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS) {
                     self.host.coll.bit_set_len
                 } else {
                     self.host.coll.list_len
@@ -18091,9 +18091,9 @@ impl LowerCtx<'_, '_> {
                     self.host.coll.set_len
                 } else if matches!(&recv_ty, Type::Map { .. }) {
                     self.host.coll.map_len
-                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "Deque") {
+                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_QUEUE) {
                     self.host.coll.deque_len
-                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "SortedSet") {
+                } else if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK) {
                     self.host.coll.sorted_set_len
                 } else if matches!(&recv_ty, Type::Apply { name, .. } if name == "PriorityQueue") {
                     self.host.coll.priority_queue_len
@@ -18369,7 +18369,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.coll.map_get_opt, &[recv_val, key]))
             }
             TBuiltinOp::First | TBuiltinOp::Last => {
-                if matches!(&recv_ty, Type::Apply { name, .. } if name == "SortedSet") {
+                if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK) {
                     let host_id = if matches!(op, TBuiltinOp::First) {
                         self.host.coll.sorted_set_first
                     } else {
@@ -18397,12 +18397,12 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TBuiltinOp::Contains => {
-                // Set.has(x) / SortedSet.has — Int/String elems.
+                // Set.has(x) / Rank.has — Int/String elems.
                 if matches!(&recv_ty, Type::Apply { name, .. } if name == "Set") {
                     let needle = self.lower_expr(&args[0])?;
                     return Ok(self.call_host(self.host.coll.set_has, &[recv_val, needle]));
                 }
-                if matches!(&recv_ty, Type::Apply { name, .. } if name == "SortedSet") {
+                if matches!(&recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK) {
                     let needle = self.lower_expr(&args[0])?;
                     return Ok(self.call_host(self.host.coll.sorted_set_has, &[recv_val, needle]));
                 }

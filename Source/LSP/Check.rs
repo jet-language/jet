@@ -85,6 +85,14 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                 edit,
             }),
     );
+    fixes.extend(
+        crate::Formatter::retired_type_edits(text)
+            .into_iter()
+            .map(|edit| Fix {
+                title: "rewrite retired Core container name (D-COLLNAME1=A)".to_string(),
+                edit,
+            }),
+    );
     fixes
 }
 

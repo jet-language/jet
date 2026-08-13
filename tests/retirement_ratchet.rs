@@ -122,6 +122,16 @@ fn read(path: &Path) -> Option<String> {
     (ext == "rs" || ext == "jet").then(|| fs::read_to_string(path).ok())?
 }
 
+fn contains_word(text: &str, word: &str) -> bool {
+    let is_word = |character: Option<char>| {
+        character.is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+    };
+    text.match_indices(word).any(|(index, _)| {
+        !is_word(text[..index].chars().next_back())
+            && !is_word(text[index + word.len()..].chars().next())
+    })
+}
+
 /// A manifest written with the retired `payload: { … }` identity wrapper,
 /// either as a file or as manifest text a test writes out. The opener must sit
 /// at the start of a line or right after a quote, so a `payload:` field on a

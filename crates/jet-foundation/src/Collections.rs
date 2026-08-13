@@ -11,10 +11,10 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_BTREE_MAP,
     Syntax::TYPE_MAP,
     Syntax::TYPE_CHAR,
-    Syntax::TYPE_BIT_SET,
-    Syntax::TYPE_BYTE_BUFFER,
+    Syntax::TYPE_BITS,
+    Syntax::TYPE_BYTES,
     Syntax::TYPE_SET,
-    Syntax::TYPE_SORTED_SET,
+    Syntax::TYPE_RANK,
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
@@ -25,8 +25,8 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_SHARED_GUARD,
     Syntax::TYPE_SHARED_WEAK,
     Syntax::TYPE_CONDITION,
-    "Bag",
-    Syntax::TYPE_DEQUE,
+    Syntax::TYPE_TALLY,
+    Syntax::TYPE_QUEUE,
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
     Syntax::DURATION_TYPE,
@@ -49,7 +49,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     "CellReadGuard",
     "CellEditGuard",
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
-    // `Deque`) — `View` is already a widely-used user type name across the
+    // `Queue`) — `View` is already a widely-used user type name across the
     // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
     // src/Jetpack/components/*.jet). `list.view(a..b)` always types as
     // `Type::Apply{"View", [T]}`; a user's own `enum View`/`struct View` types
@@ -461,11 +461,11 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_WATCH_SET => {
             watch_set_method_return(method, arg_count)
         }
-        // D-COLLBREADTH1=A: Set<T> and Deque<T>.
+        // D-COLLBREADTH1=A: Set<T> and Queue<T>.
         Type::Apply { name, args } if name == "Set" => {
             set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
-        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => {
+        Type::Apply { name, args } if name == Syntax::TYPE_RANK => {
             sorted_set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => {
@@ -474,15 +474,15 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => {
             lru_method_return(&args[0], &args[1], method, arg_count)
         }
-        // D-TAG1: Bag<T> counted multiset.
-        Type::Apply { name, args } if name == "Bag" => {
+        // D-TAG1: Tally<T> counted multiset.
+        Type::Apply { name, args } if name == Syntax::TYPE_TALLY => {
             bag_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
-        Type::Apply { name, args } if name == "Deque" => {
+        Type::Apply { name, args } if name == Syntax::TYPE_QUEUE => {
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
-        Type::Named(n) if n == Syntax::TYPE_BIT_SET => bit_set_method_return(method, arg_count),
-        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => {
+        Type::Named(n) if n == Syntax::TYPE_BITS => bit_set_method_return(method, arg_count),
+        Type::Named(n) if n == Syntax::TYPE_BYTES => {
             byte_buffer_method_return(method, arg_count)
         }
         Type::Named(n) if n == "SigningKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("VerifyKey".into()))),
@@ -890,31 +890,31 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
         (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result { ok: Box::new(Type::Named("PasswordHash".into())), err: Box::new(Type::Named("CryptoError".into())) })),
-        (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
-            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_BYTES => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string())))
         }
-        (Type::Named(n), "with_capacity", 1) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
-            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        (Type::Named(n), "with_capacity", 1) if n == crate::Syntax::TYPE_BYTES => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string())))
         }
-        (Type::Named(n), "from", 1) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
-            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        (Type::Named(n), "from", 1) if n == crate::Syntax::TYPE_BYTES => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string())))
         }
-        // D-COLLBREADTH1=A: Deque static constructors (ledger + static return table).
-        (Type::Named(n), "new", 0) if n == "Deque" => Some(Some(Type::Apply {
-            name: "Deque".to_string(),
+        // D-COLLBREADTH1=A: Queue static constructors (ledger + static return table).
+        (Type::Named(n), "new", 0) if n == Syntax::TYPE_QUEUE => Some(Some(Type::Apply {
+            name: Syntax::TYPE_QUEUE.to_string(),
             args: vec![Type::Int],
         })),
-        (Type::Named(n), "init", 1) if n == "Deque" => Some(Some(Type::Apply {
-            name: "Deque".to_string(),
+        (Type::Named(n), "init", 1) if n == Syntax::TYPE_QUEUE => Some(Some(Type::Apply {
+            name: Syntax::TYPE_QUEUE.to_string(),
             args: vec![Type::Int],
         })),
-        // #1478: Set/SortedSet empty constructors (ledger + static return table).
+        // #1478: Set/Rank empty constructors (ledger + static return table).
         (Type::Named(n), "new", 0) if n == "Set" => Some(Some(Type::Apply {
             name: "Set".to_string(),
             args: vec![Type::Int],
         })),
-        (Type::Named(n), "new", 0) if n == Syntax::TYPE_SORTED_SET => Some(Some(Type::Apply {
-            name: Syntax::TYPE_SORTED_SET.to_string(),
+        (Type::Named(n), "new", 0) if n == Syntax::TYPE_RANK => Some(Some(Type::Apply {
+            name: Syntax::TYPE_RANK.to_string(),
             args: vec![Type::Int],
         })),
         // #1477: Map constructors.
@@ -1916,10 +1916,10 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
     }
 }
 
-/// D-ITERTOOLS1=A: `SortedSet<T>` methods (BTreeSet-backed ordered set).
+/// D-ITERTOOLS1=A: `Rank<T>` methods (BTreeSet-backed ordered set).
 fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     let set_of_elem = || Type::Apply {
-        name: Syntax::TYPE_SORTED_SET.to_string(),
+        name: Syntax::TYPE_RANK.to_string(),
         args: vec![elem.clone()],
     };
     match (method, nargs) {
@@ -1968,7 +1968,7 @@ fn lru_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
     }
 }
 
-/// D-ITERTOOLS1=A: `BitSet` methods.
+/// D-ITERTOOLS1=A: `Bits` methods.
 fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len" | "count", 0) => Some(Some(Type::Int)),
@@ -1977,15 +1977,15 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
-        ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BIT_SET.to_string()))),
+        ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BITS.to_string()))),
         _ => None,
     }
 }
 
-/// D-ITERTOOLS1=A / #1467: `ByteBuffer` builder + read cursor + string-like.
+/// D-ITERTOOLS1=A / #1467: `Bytes` builder + read cursor + string-like.
 fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     let bytes = || Type::List(Box::new(u8t()));
-    let buf = || Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string());
+    let buf = || Type::Named(Syntax::TYPE_BYTES.to_string());
     match (method, nargs) {
         ("len" | "capacity" | "position", 0) => Some(Some(Type::Int)),
         ("is_empty" | "eof" | "is_ascii", 0) => Some(Some(Type::Bool)),
@@ -2025,7 +2025,7 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-/// D-TAG1: `Bag<T>` methods (counted multiset backed by `HashMap<T, usize>`).
+/// D-TAG1: `Tally<T>` methods (counted multiset backed by `HashMap<T, usize>`).
 fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
@@ -2039,10 +2039,10 @@ fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<
     }
 }
 
-/// D-COLLBREADTH1=A: `Deque<T>` methods (ring-buffer double-ended queue).
+/// D-COLLBREADTH1=A: `Queue<T>` methods (ring-buffer double-ended queue).
 fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     let deque = || Type::Apply {
-        name: "Deque".to_string(),
+        name: Syntax::TYPE_QUEUE.to_string(),
         args: vec![elem.clone()],
     };
     match (method, nargs) {
@@ -2093,7 +2093,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Apply { name, .. } if name == "Set" => {
             matches!(method, "add" | "remove" | "pop" | "clear")
         }
-        Type::Apply { name, .. } if name == Syntax::TYPE_SORTED_SET => {
+        Type::Apply { name, .. } if name == Syntax::TYPE_RANK => {
             matches!(method, "add" | "remove" | "clear")
         }
         Type::Apply { name, .. } if name == Syntax::TYPE_PRIORITY_QUEUE => {
@@ -2102,10 +2102,10 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Apply { name, .. } if name == Syntax::TYPE_LRU => {
             matches!(method, "add" | "add_new" | "get" | "remove" | "clear")
         }
-        Type::Named(n) if n == Syntax::TYPE_BIT_SET => {
+        Type::Named(n) if n == Syntax::TYPE_BITS => {
             matches!(method, "add" | "remove" | "clear")
         }
-        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => matches!(
+        Type::Named(n) if n == Syntax::TYPE_BYTES => matches!(
             method,
             "write_u8"
                 | "write_byte"
@@ -2131,12 +2131,12 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "shutdown"
                 | "copy_to"
         ),
-        // D-TAG1: Bag mutating methods.
-        Type::Apply { name, .. } if name == "Bag" => {
+        // D-TAG1: Tally mutating methods.
+        Type::Apply { name, .. } if name == Syntax::TYPE_TALLY => {
             matches!(method, "add" | "remove" | "clear")
         }
-        // D-COLLBREADTH1=A: Deque mutating methods.
-        Type::Apply { name, .. } if name == "Deque" => {
+        // D-COLLBREADTH1=A: Queue mutating methods.
+        Type::Apply { name, .. } if name == Syntax::TYPE_QUEUE => {
             matches!(
                 method,
                 "push_front"
@@ -2615,10 +2615,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 _ => Some(vec![]),
             }
         }
-        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => match method {
+        Type::Apply { name, args } if name == Syntax::TYPE_RANK => match method {
             "add" | "remove" | "has" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
             "union" => Some(vec![Type::Apply {
-                name: Syntax::TYPE_SORTED_SET.to_string(),
+                name: Syntax::TYPE_RANK.to_string(),
                 args: vec![args.first().cloned().unwrap_or(Type::Int)],
             }]),
             _ => Some(vec![]),
@@ -2636,11 +2636,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "get" | "remove" | "has_key" => Some(vec![args[0].clone()]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == Syntax::TYPE_BIT_SET => match method {
+        Type::Named(n) if n == Syntax::TYPE_BITS => match method {
             "add" | "remove" | "has" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => match method {
+        Type::Named(n) if n == Syntax::TYPE_BYTES => match method {
             "write_bytes" | "write" => Some(vec![Type::List(Box::new(u8t()))]),
             "write_u8" | "write_byte" => Some(vec![u8t()]),
             "write_u16_le" | "write_u16_be" => Some(vec![Type::IntN {
@@ -2662,7 +2662,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "replace" => Some(vec![Type::String, Type::String]),
             "join" => Some(vec![Type::List(Box::new(Type::String))]),
             "equal" | "compare" | "copy_to" | "write_to" => {
-                Some(vec![Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string())])
+                Some(vec![Type::Named(Syntax::TYPE_BYTES.to_string())])
             }
             _ => Some(vec![]),
         },
@@ -2866,20 +2866,20 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 _ => Some(vec![]),
             }
         }
-        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => {
+        Type::Apply { name, args } if name == Syntax::TYPE_RANK => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "add" | "has" | "remove" => Some(vec![elem.clone()]),
                 "union" | "intersection" | "difference" | "symmetric_difference"
                 | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
-                    name: Syntax::TYPE_SORTED_SET.to_string(),
+                    name: Syntax::TYPE_RANK.to_string(),
                     args: vec![elem],
                 }]),
                 _ => Some(vec![]),
             }
         }
-        // D-TAG1: Bag<T> arg types.
-        Type::Apply { name, args } if name == "Bag" => {
+        // D-TAG1: Tally<T> arg types.
+        Type::Apply { name, args } if name == Syntax::TYPE_TALLY => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "add" | "remove" | "has" | "count" => Some(vec![elem]),
@@ -2893,8 +2893,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 _ => Some(vec![]),
             }
         }
-        // D-COLLBREADTH1=A: Deque<T> arg types.
-        Type::Apply { name, args } if name == "Deque" => {
+        // D-COLLBREADTH1=A: Queue<T> arg types.
+        Type::Apply { name, args } if name == Syntax::TYPE_QUEUE => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "push_front" | "push_back" | "contains" | "delete" => Some(vec![elem]),

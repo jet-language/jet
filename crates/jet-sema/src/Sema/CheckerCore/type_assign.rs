@@ -325,10 +325,10 @@ impl<'a> Checker<'a> {
                         && matches!(
                             lookup_name,
                             "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
-                            // D-COLLBREADTH1=A: Set<T> and Deque<T>.
-                            | "Set" | "Bag" | "Deque"
+                            // D-COLLBREADTH1=A: Set<T> and Queue<T>.
+                            | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
                             // D-ITERTOOLS1=A: expanded generic collection handles.
-                            | "SortedSet" | "PriorityQueue" | "Cache"
+                            | Syntax::TYPE_RANK | "PriorityQueue" | "Cache"
                             | "BigInt" | "Decimal"
                             // D-REACT1=B: reactive handle types.
                             | "Signal" | "Derived" | "Computed"

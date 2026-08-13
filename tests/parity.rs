@@ -1260,22 +1260,22 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::DirectStatic, "Set", "from").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "ExpiringValue", "new").class, Class::Boundary);
     for (owner, method) in [
-        ("SortedSet", "from"),
-        ("SortedSet", "new"),
+        ("Rank", "from"),
+        ("Rank", "new"),
         ("PriorityQueue", "from"),
         ("PriorityQueue", "new"),
         ("Cache", "new"),
-        ("Deque", "new"),
-        ("BitSet", "new"),
-        ("ByteBuffer", "from"),
-        ("ByteBuffer", "new"),
+        ("Queue", "new"),
+        ("Bits", "new"),
+        ("Bytes", "from"),
+        ("Bytes", "new"),
     ] {
         assert_eq!(
             record(&records, Surface::DirectStatic, owner, method).class,
             Class::Covered
         );
     }
-    assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Tally", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
@@ -1373,7 +1373,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "write_u64_be",
         "write_bytes",
     ] {
-        assert_eq!(record(&records, Surface::Value, "ByteBuffer", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Bytes", method).class, Class::Covered);
     }
     for method in [
         "add",
@@ -1400,7 +1400,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "is_empty",
         "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Deque", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Queue", method).class, Class::Covered);
     }
     for method in [
         "add",
@@ -1414,12 +1414,12 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "is_empty",
         "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "SortedSet", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Rank", method).class, Class::Covered);
     }
     for method in [
         "add", "remove", "has", "count", "len", "is_empty", "clear", "to_list",
     ] {
-        assert_eq!(record(&records, Surface::Value, "BitSet", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Bits", method).class, Class::Covered);
     }
     for method in [
         "push",
@@ -1441,7 +1441,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         assert_eq!(record(&records, Surface::Value, "Set", method).class, Class::Covered);
     }
     for method in ["add", "remove", "has", "count", "len", "is_empty", "any"] {
-        assert_eq!(record(&records, Surface::Value, "Bag", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "Tally", method).class, Class::Covered);
     }
     for method in ["media_type", "subtype", "essence", "to_string", "param", "params"] {
         assert_eq!(record(&records, Surface::Value, "Mime", method).class, Class::Covered);
@@ -1746,8 +1746,8 @@ fn inventory_validator_rejects_duplicate_stale_and_unclassified_entries() {
 
     let fake_statics = r###"
 // if type_name == crate::Syntax::TYPE_SET && method == "from" {
-/* if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" { */
-let example = r#"if type_name == crate::Syntax::TYPE_DEQUE && method == "new" {"#;
+/* if type_name == crate::Syntax::TYPE_BITS && method == "new" { */
+let example = r#"if type_name == crate::Syntax::TYPE_QUEUE && method == "new" {"#;
 "###;
     assert!(
         guarded_static_methods(fake_statics).is_empty(),

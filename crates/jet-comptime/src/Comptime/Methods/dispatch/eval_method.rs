@@ -221,7 +221,7 @@ impl<'a> Interp<'a> {
             if type_name == crate::Syntax::MEM_POOL && method == "new" {
                 return Ok(super::super::pool::new_value());
             }
-            if type_name == crate::Syntax::TYPE_BYTE_BUFFER
+            if type_name == crate::Syntax::TYPE_BYTES
                 && matches!(method, "new" | "from")
             {
                 let bytes = if method == "new" {
@@ -230,7 +230,7 @@ impl<'a> Interp<'a> {
                     as_bytes(&self.eval(&args[0].expr, scope)?, span)?
                 };
                 return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
+                    type_name: crate::Syntax::TYPE_BYTES.to_string(),
                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
                 });
             }
@@ -244,31 +244,31 @@ impl<'a> Interp<'a> {
                     ],
                 });
             }
-            if type_name == crate::Syntax::TYPE_DEQUE && method == "new" {
+            if type_name == crate::Syntax::TYPE_QUEUE && method == "new" {
                 return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                    type_name: crate::Syntax::TYPE_QUEUE.to_string(),
                     fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
                 });
             }
-            if type_name == crate::Syntax::TYPE_DEQUE && method == "init" {
+            if type_name == crate::Syntax::TYPE_QUEUE && method == "init" {
                 let items = match self.eval(&args[0].expr, scope)? {
                     CtValue::List(items) => items,
-                    _ => return Err(unsupported("Deque.init with a non-list", span)),
+                    _ => return Err(unsupported("Queue.init with a non-list", span)),
                 };
                 return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                    type_name: crate::Syntax::TYPE_QUEUE.to_string(),
                     fields: vec![("items".to_string(), CtValue::List(items))],
                 });
             }
-            if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" {
+            if type_name == crate::Syntax::TYPE_BITS && method == "new" {
                 return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                    type_name: crate::Syntax::TYPE_BITS.to_string(),
                     fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
                 });
             }
-            if type_name == "Bag" && method == "new" {
+            if type_name == crate::Syntax::TYPE_TALLY && method == "new" {
                 return Ok(CtValue::Struct {
-                    type_name: "Bag".to_string(),
+                    type_name: crate::Syntax::TYPE_TALLY.to_string(),
                     fields: vec![
                         ("items".to_string(), CtValue::List(Vec::new())),
                         ("counts".to_string(), CtValue::List(Vec::new())),
@@ -301,7 +301,7 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(items))],
                 });
             }
-            if type_name == crate::Syntax::TYPE_SORTED_SET
+            if type_name == crate::Syntax::TYPE_RANK
                 && matches!(method, "new" | "from")
             {
                 let items = if method == "new" {
@@ -309,11 +309,11 @@ impl<'a> Interp<'a> {
                 } else {
                     match self.eval(&args[0].expr, scope)? {
                         CtValue::List(items) => sorted_unique(items, span)?,
-                        _ => return Err(unsupported("SortedSet.from with a non-list", span)),
+                        _ => return Err(unsupported("Rank.from with a non-list", span)),
                     }
                 };
                 return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    type_name: crate::Syntax::TYPE_RANK.to_string(),
                     fields: vec![("items".to_string(), CtValue::List(items))],
                 });
             }
@@ -1131,7 +1131,7 @@ impl<'a> Interp<'a> {
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "any"),
-                ) if type_name == "Bag" => {
+                ) if type_name == crate::Syntax::TYPE_TALLY => {
                     // ponytail: comptime bags are small; parallel equality-only
                     // vectors support every CtValue without a second hash model.
                     let mut items = fields
@@ -1218,13 +1218,13 @@ impl<'a> Interp<'a> {
                             }
                             CtValue::Unit
                         }
-                        _ => unreachable!("Bag method set is closed"),
+                        _ => unreachable!("Tally method set is closed"),
                     };
                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                         self.write_back(
                             receiver,
                             CtValue::Struct {
-                                type_name: "Bag".to_string(),
+                                type_name: crate::Syntax::TYPE_TALLY.to_string(),
                                 fields: vec![
                                     ("items".to_string(), CtValue::List(items)),
                                     ("counts".to_string(), CtValue::List(counts)),
@@ -1400,7 +1400,7 @@ impl<'a> Interp<'a> {
                         | "clear"
                         | "to_list"
                         | "copy"),
-                ) if type_name == crate::Syntax::TYPE_BIT_SET => {
+                ) if type_name == crate::Syntax::TYPE_BITS => {
                     let mut bits = fields
                         .iter()
                         .find_map(|(name, value)| match (name.as_str(), value) {
@@ -1424,7 +1424,7 @@ impl<'a> Interp<'a> {
                             bits.contains(&CtValue::Int(as_int(&argv[0], span)?)),
                         ),
                         "copy" => CtValue::Struct {
-                            type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                            type_name: crate::Syntax::TYPE_BITS.to_string(),
                             fields: vec![("bits".to_string(), CtValue::List(bits.clone()))],
                         },
                         "to_list" => CtValue::List(bits.clone()),
@@ -1451,13 +1451,13 @@ impl<'a> Interp<'a> {
                             changed = true;
                             CtValue::Unit
                         }
-                        _ => unreachable!("BitSet method set is closed"),
+                        _ => unreachable!("Bits method set is closed"),
                     };
                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                         self.write_back(
                             receiver,
                             CtValue::Struct {
-                                type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                                type_name: crate::Syntax::TYPE_BITS.to_string(),
                                 fields: vec![("bits".to_string(), CtValue::List(bits))],
                             },
                             scope,
@@ -1477,7 +1477,7 @@ impl<'a> Interp<'a> {
                         | "len"
                         | "is_empty"
                         | "clear"),
-                ) if type_name == crate::Syntax::TYPE_SORTED_SET => {
+                ) if type_name == crate::Syntax::TYPE_RANK => {
                     let mut items = fields
                         .iter()
                         .find_map(|(name, value)| match (name.as_str(), value) {
@@ -1531,10 +1531,10 @@ impl<'a> Interp<'a> {
                                 fields: other_fields,
                             } = &argv[0]
                             else {
-                                return Err(unsupported("SortedSet.union with a non-set", span));
+                                return Err(unsupported("Rank.union with a non-set", span));
                             };
-                            if other_type != crate::Syntax::TYPE_SORTED_SET {
-                                return Err(unsupported("SortedSet.union with a non-set", span));
+                            if other_type != crate::Syntax::TYPE_RANK {
+                                return Err(unsupported("Rank.union with a non-set", span));
                             }
                             if let Some(CtValue::List(other)) = other_fields
                                 .iter()
@@ -1544,7 +1544,7 @@ impl<'a> Interp<'a> {
                                 items.extend(other.iter().cloned());
                             }
                             CtValue::Struct {
-                                type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                                type_name: crate::Syntax::TYPE_RANK.to_string(),
                                 fields: vec![(
                                     "items".to_string(),
                                     CtValue::List(sorted_unique(items.clone(), span)?),
@@ -1556,13 +1556,13 @@ impl<'a> Interp<'a> {
                             changed = true;
                             CtValue::Unit
                         }
-                        _ => unreachable!("SortedSet method set is closed"),
+                        _ => unreachable!("Rank method set is closed"),
                     };
                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                         self.write_back(
                             receiver,
                             CtValue::Struct {
-                                type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                                type_name: crate::Syntax::TYPE_RANK.to_string(),
                                 fields: vec![("items".to_string(), CtValue::List(items))],
                             },
                             scope,
@@ -1589,7 +1589,7 @@ impl<'a> Interp<'a> {
                         | "join"
                         | "reverse"
                         | "split"),
-                ) if type_name == crate::Syntax::TYPE_DEQUE => {
+                ) if type_name == crate::Syntax::TYPE_QUEUE => {
                     let mut items = fields
                         .iter()
                         .find_map(|(name, value)| match (name.as_str(), value) {
@@ -1690,17 +1690,17 @@ impl<'a> Interp<'a> {
                             let rest = items.split_off(idx);
                             changed = true;
                             CtValue::Struct {
-                                type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                                type_name: crate::Syntax::TYPE_QUEUE.to_string(),
                                 fields: vec![("items".to_string(), CtValue::List(rest))],
                             }
                         }
-                        _ => unreachable!("Deque method set is closed"),
+                        _ => unreachable!("Queue method set is closed"),
                     };
                     if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                         self.write_back(
                             receiver,
                             CtValue::Struct {
-                                type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                                type_name: crate::Syntax::TYPE_QUEUE.to_string(),
                                 fields: vec![("items".to_string(), CtValue::List(items))],
                             },
                             scope,
@@ -2032,7 +2032,7 @@ impl<'a> Interp<'a> {
                     | "write_u64_le"
                     | "write_u64_be"
                     | "write_bytes"),
-            ) if type_name == crate::Syntax::TYPE_BYTE_BUFFER => {
+            ) if type_name == crate::Syntax::TYPE_BYTES => {
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
                     argv.push(self.eval(&arg.expr, scope)?);
@@ -2077,7 +2077,7 @@ impl<'a> Interp<'a> {
                             "write_u64_be" => {
                                 bytes.extend_from_slice(&(value as u64).to_be_bytes())
                             }
-                            _ => unreachable!("ByteBuffer method set is closed"),
+                            _ => unreachable!("Bytes method set is closed"),
                         }
                         CtValue::Unit
                     }
@@ -2086,7 +2086,7 @@ impl<'a> Interp<'a> {
                     self.write_back(
                         receiver,
                         CtValue::Struct {
-                            type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
+                            type_name: crate::Syntax::TYPE_BYTES.to_string(),
                             fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
                         },
                         scope,

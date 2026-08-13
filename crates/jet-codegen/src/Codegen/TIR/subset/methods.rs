@@ -609,7 +609,7 @@ pub(crate) fn method_call_in_subset(
     // Sema may retain the nominal Set family in `recv_type` for an instance
     // operation. It is still the same built-in collection surface, not a user
     // method; keep it on the TIR/JIT path rather than falling through to Todo.
-    if matches!(recv_type.as_deref(), Some("Set") | Some("SortedSet"))
+    if matches!(recv_type.as_deref(), Some("Set") | Some(crate::Syntax::TYPE_RANK))
         && is_covered_builtin_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
@@ -618,9 +618,9 @@ pub(crate) fn method_call_in_subset(
                 .all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
-    // `Set.from([...])` or `Deque.new()`. The receiver is a bare type-name ident
-    // (`"Set"` / `"Deque"`), NOT a local. Sema types the call and leaves
-    // `recv_type == None`. The method is `"from"` (for Set) or `"new"` (for Deque).
+    // `Set.from([...])` or `Queue.new()`. The receiver is a bare type-name ident
+    // (`"Set"` / `crate::Syntax::TYPE_QUEUE`), NOT a local. Sema types the call and leaves
+    // `recv_type == None`. The method is `"from"` (for Set) or `"new"` (for Queue).
     // Both are `is_intercepted_method_name` names, so they never reach the static
     // user-type shape (line ~2843). This shape claims them BEFORE that check. Every arg
     // must be in-subset (for `Set.from`, the list literal is always in-subset).
@@ -632,24 +632,24 @@ pub(crate) fn method_call_in_subset(
                     | ("Set", "new", 0)
                     | ("Map", "new", 0)
                     | ("Map", "from_keys", 2)
-                    | ("SortedSet", "from", 1)
+                    | (crate::Syntax::TYPE_RANK, "from", 1)
                     | ("PriorityQueue", "from", 1)
-                    | ("ByteBuffer", "from", 1)
-                    | ("Bag", "new", 0)
-                    | ("Deque", "new", 0)
-                    | ("Deque", "init", 1)
-                    | ("SortedSet", "new", 0)
+                    | (crate::Syntax::TYPE_BYTES, "from", 1)
+                    | (crate::Syntax::TYPE_TALLY, "new", 0)
+                    | (crate::Syntax::TYPE_QUEUE, "new", 0)
+                    | (crate::Syntax::TYPE_QUEUE, "init", 1)
+                    | (crate::Syntax::TYPE_RANK, "new", 0)
                     | ("PriorityQueue", "new", 0)
                     | ("Cache", "new", 1)
-                    | ("BitSet", "new", 0)
-                    | ("ByteBuffer", "new", 0)
-                    | ("ByteBuffer", "with_capacity", 1) => {
+                    | (crate::Syntax::TYPE_BITS, "new", 0)
+                    | (crate::Syntax::TYPE_BYTES, "new", 0)
+                    | (crate::Syntax::TYPE_BYTES, "with_capacity", 1) => {
                         return args
                             .iter()
                             .all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-MEM1 S6: `Pool<T>.new()` / `Shared.new(x)` — same bare
-                    // type-name static-constructor shape as `Deque.new()` above.
+                    // type-name static-constructor shape as `Queue.new()` above.
                     ("Pool", "new", 0) => return true,
                     ("Shared", "new", 1) => {
                         return args
@@ -1583,13 +1583,13 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "alloc" | "reset" | "accept" | "local_addr" | "read" | "write"
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
-        // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.
+        // D-COLLBREADTH1=A: Set<T> and Queue<T> methods.
         | "union" | "to_list" | "collect" | "count"
         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
         | "capacity"
         // `from` is the static constructor for Set — admitted here so the static-call
         // shape below can claim it before `is_intercepted_method_name` blocks it.
-        // `init` is Deque's list constructor (same surface role).
+        // `init` is Queue's list constructor (same surface role).
         | "from" | "init"
         // D-HOLE1: `zip` is already listed above (D-ITER1); `lift2` is `Option`'s
         // static combinator, admitted the same way `from`/`new` are.

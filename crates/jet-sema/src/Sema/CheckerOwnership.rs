@@ -635,7 +635,7 @@ impl<'a> Checker<'a> {
             return ViewKind::Pin;
         }
         match self.lookup(&place.owner.name).map(|info| &info.ty) {
-            Some(Type::Named(name)) if name == Syntax::TYPE_BYTE_BUFFER => ViewKind::Buffer,
+            Some(Type::Named(name)) if name == Syntax::TYPE_BYTES => ViewKind::Buffer,
             Some(Type::Apply { name, .. })
                 if matches!(name.as_str(), "Vec" | "Matrix" | "Tensor") =>
             {

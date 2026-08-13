@@ -142,17 +142,30 @@ pub const TYPE_LIST: &str = "List";
 
 /// D-LISTMAP-CANON1=A: legacy default map spelling; `[K: V]` is canonical.
 pub const TYPE_MAP: &str = "Map";
-/// D-LISTMAP-CANON1=A: named specific collection types.
+/// D-LISTMAP-CANON1=A / D-COLLNAME1=A: named specific collection types.
 pub const TYPE_HASH_MAP: &str = "HashMap";
 pub const TYPE_BTREE_MAP: &str = "BTreeMap";
-pub const TYPE_DEQUE: &str = "Deque";
+pub const TYPE_QUEUE: &str = "Queue";
 pub const TYPE_SET: &str = "Set";
-/// D-ITERTOOLS1=A: expanded collection handles.
-pub const TYPE_SORTED_SET: &str = "SortedSet";
+/// D-COLLNAME1=A: the ordered unique collection uses a rank word.
+pub const TYPE_RANK: &str = "Rank";
 pub const TYPE_PRIORITY_QUEUE: &str = "PriorityQueue";
 pub const TYPE_LRU: &str = "Cache";
-pub const TYPE_BIT_SET: &str = "BitSet";
-pub const TYPE_BYTE_BUFFER: &str = "ByteBuffer";
+/// D-COLLNAME1=A: the counted multiset uses a tally word.
+pub const TYPE_TALLY: &str = "Tally";
+/// D-COLLNAME1=A: the bit membership collection uses a plural noun.
+pub const TYPE_BITS: &str = "Bits";
+/// D-COLLNAME1=A: the byte sequence builder uses a plural noun.
+pub const TYPE_BYTES: &str = "Bytes";
+
+/// D-ONCE-RETIRE1=C / D-COLLNAME1=A: migration inputs for the five renamed
+/// collection types. Split literals keep retired source spellings out of the
+/// live corpus while the formatter and fix engine can still recognize them.
+pub const RETIRED_TYPE_QUEUE: &str = concat!("De", "que");
+pub const RETIRED_TYPE_RANK: &str = concat!("Sorte", "dSet");
+pub const RETIRED_TYPE_TALLY: &str = concat!("B", "ag");
+pub const RETIRED_TYPE_BITS: &str = concat!("Bit", "Set");
+pub const RETIRED_TYPE_BYTES: &str = concat!("Byte", "Buffer");
 /// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
 pub const TYPE_ITER: &str = "Iter";
 /// D-LISTREMOVE1/F: selector for the two List.remove meanings.  The default
@@ -397,7 +410,7 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // depth. A group name matches its whole subtree in `==` pattern tests and dispatch arms
 // (`d == .Fire` is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
 // payloads live on leaves only (E0331); a value is always a leaf — a group name is not a
-// value (E0332). Ships with the core counted multiset `Bag<T>` (`Bag.new()`, `add`,
+// value (E0332). Ships with the core counted multiset `Tally<T>` (`Tally.new()`, `add`,
 // `remove`, `has`, `count`; subtree queries stay an explicit `any` closure). No new keyword
 // or sigil — reuses `{ }` blocks, OP_DOT paths, and D-ENUMDOT1 leading-dot patterns.
 

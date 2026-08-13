@@ -76,15 +76,15 @@ const PYTHON_SOURCE_CONTAINER = {
   "type:dict": "Map",
   "type:set": "Set",
   "type:str": "String",
-  "type:bytes": "ByteBuffer",
+  "type:bytes": "Bytes",
   "type:int": "core.math",
   "type:float": "core.math",
   "mod:builtins": "core.io",
   "mod:itertools": "Iter",
-  "mod:collections": "Deque",
+  "mod:collections": "Queue",
   "mod:heapq": "PriorityQueue",
   "mod:functools": "Cache",
-  "mod:io": "ByteBuffer",
+  "mod:io": "Bytes",
   "mod:string": "String",
   "mod:textwrap": "String",
   "mod:math": "core.math",
@@ -143,8 +143,8 @@ const PYTHON_UNASSIGNED = {
 };
 
 const PYTHON_ABSENT = {
-  SortedSet: "no Python standard-library ordered set",
-  BitSet: "no Python standard-library bit set; int carries bit operations",
+  Rank: "no Python standard-library ordered set",
+  Bits: "no Python standard-library bit set; int carries bit operations",
   "core.env": "environment access lives in the os module, recorded under core.os",
   "core.encoding.base32": "base32 lives in the base64 module, recorded under core.encoding.base64",
   "core.fmt": "formatting lives on str.format, recorded under String",
@@ -206,7 +206,7 @@ const CONTAINER_ALIASES = {
 // domain alone can hold every occurrence at one witness forever. Those names
 // pool their witnesses across domains before the two-witness threshold.
 //
-// `close` on a ByteBuffer and `close` on a database handle are different
+// `close` on a byte builder and `close` on a database handle are different
 // operations that share a spelling. Pooling them would invent evidence, so they
 // keep the per-domain count.
 //
@@ -460,7 +460,7 @@ const MATCH_DOMAIN = {
   "core.path": "filesystem",
   "core.os": "filesystem",
   "core.env": "filesystem",
-  ByteBuffer: "bytes",
+  Bytes: "bytes",
   "core.binary": "bytes",
   "core.io": "bytes",
   "core.net": "network",
@@ -528,10 +528,10 @@ const TYPE_CONTAINER = {
   X25519SecretKey: "core.crypto",
   X25519PublicKey: "core.crypto",
   PasswordHash: "core.crypto",
-  ByteBuffer: "ByteBuffer",
-  Deque: "Deque",
+  Bytes: "Bytes",
+  Queue: "Queue",
   Set: "Set",
-  SortedSet: "SortedSet",
+  Rank: "Rank",
   Map: "Map",
 };
 
@@ -573,13 +573,13 @@ const COLLECTION_METHOD_FUNCTIONS = {
   watch_handle_method_return: "WatchHandle",
   watch_set_method_return: "WatchSet",
   set_method_return: "Set",
-  sorted_set_method_return: "SortedSet",
+  sorted_set_method_return: "Rank",
   priority_queue_method_return: "PriorityQueue",
   lru_method_return: "Cache",
-  bit_set_method_return: "BitSet",
-  byte_buffer_method_return: "ByteBuffer",
-  bag_method_return: "Bag",
-  deque_method_return: "Deque",
+  bit_set_method_return: "Bits",
+  byte_buffer_method_return: "Bytes",
+  bag_method_return: "Tally",
+  deque_method_return: "Queue",
   numeric_method_return: "core.math",
   numeric_conversion_return: "core.math",
   bigint_method_return: "core.math",
@@ -601,12 +601,12 @@ const CLUSTER_OWNER = {
   // Pooling a recurring capability across domains gave these three their first
   // scored gaps; nothing in them had ever reached two witnesses per-domain.
   "core.fmt": 1493,
-  BitSet: 1493,
+  Bits: 1493,
   "core.text.unicode": 1493,
   "core.math": 1464,
   "core.os": 1465,
   "core.time": 1466,
-  ByteBuffer: 1467,
+  Bytes: 1467,
   "core.tasks": 1468,
   "core.net": 1469,
   "core.archive": 1470,
@@ -614,12 +614,12 @@ const CLUSTER_OWNER = {
   "core.url": 1472,
   "core.crypto": 1725,
   "core.log": 1474,
-  Deque: 1475,
+  Queue: 1475,
   String: 1581,
   List: 1477,
   Map: 1477,
   Set: 1584,
-  SortedSet: 1584,
+  Rank: 1584,
   "core.io": 1480,
   "core.files": 288,
   "core.path": 288,
@@ -2044,7 +2044,7 @@ function packageAttributedContainers(surfaces) {
 }
 
 // One capability can still be missing from several unrelated containers: every
-// competitor ships Map.new, Set.new and Deque.new, and Jet constructs
+// competitor ships Map.new, Set.new and a double-ended queue constructor, and Jet constructs
 // differently. That is one design question, not one backlog item per container,
 // so it is reported as a repeat instead of hiding inside the row count.
 function repeatedCapabilities(rows) {

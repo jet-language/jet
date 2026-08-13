@@ -1741,7 +1741,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     _ => format!("({}).{}()", recv, method),
                 },
-                // D-TAG1: Bag<T> counted multiset.
+                // D-TAG1: Tally<T> counted multiset.
                 TBuiltinOp::BagAdd => format!(
                     "{{ *({}).entry({}).or_insert(0) += 1; true }}",
                     recv,
@@ -1766,7 +1766,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "({}).values().sum::<usize>() as i64",
                     recv
                 ),
-                // D-COLLBREADTH1=A: Deque<T> operations.
+                // D-COLLBREADTH1=A: Queue<T> operations.
                 TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),
                 TBuiltinOp::DequePushBack => format!("({}).push_back({})", recv, a(0)),
                 TBuiltinOp::DequePopFront => {

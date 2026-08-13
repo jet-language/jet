@@ -1662,7 +1662,7 @@ fn lower_method_call_impl(
         }
         if let Expr::Ident(type_name, _) = receiver {
             if !env.locals.contains_key(type_name)
-                && matches!(type_name.as_str(), Syntax::TYPE_SET | Syntax::TYPE_SORTED_SET)
+                && matches!(type_name.as_str(), Syntax::TYPE_SET | Syntax::TYPE_RANK)
                 && method == "from"
                 && args.len() == 1
             {
@@ -1679,7 +1679,7 @@ fn lower_method_call_impl(
                     ty: resolved_ret.cloned().unwrap_or(set_ty),
                     kind: TExprKind::BuiltinMethod {
                         recv: Box::new(lowered_list),
-                        op: if type_name == Syntax::TYPE_SORTED_SET {
+                        op: if type_name == Syntax::TYPE_RANK {
                             TBuiltinOp::SortedSetFrom
                         } else {
                             TBuiltinOp::SetFrom
@@ -2999,7 +2999,7 @@ fn lower_method_call_impl(
     // emit makes no type decision (I3). The result type comes from the builtin's
     // sema return (`Collections::builtin_method_return`) for totality.
     if recv_type.is_none()
-        || matches!(recv_type.as_deref(), Some("Set") | Some("SortedSet"))
+        || matches!(recv_type.as_deref(), Some("Set") | Some(crate::Syntax::TYPE_RANK))
     {
         if let Some(op) =
             resolve_builtin_op(receiver, method, method_span, args, resolved_ret, env, cx)
@@ -4392,13 +4392,13 @@ fn lower_method_call_impl(
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
-        // #1478: Set/SortedSet closures (filter/map/each/all/fold/flat_map)
+        // #1478: Set/Rank closures (filter/map/each/all/fold/flat_map)
         // route through the same to_list()-then-List path every other
         // container's closures already use (I9 — AOT and JIT both need a
         // real `Vec`-backed list, not a raw `HashSet`/`BTreeSet`).
         let (recv_t, recv_ty) = if matches!(
             &recv_ty,
-            Type::Apply { name, .. } if name == "Set" || name == crate::Syntax::TYPE_SORTED_SET
+            Type::Apply { name, .. } if name == "Set" || name == crate::Syntax::TYPE_RANK
         ) {
             let wrapped = crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t);
             let ty = wrapped.ty.clone();
@@ -5502,7 +5502,7 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
+        if type_name == crate::Syntax::TYPE_RANK && method == "from" && args.len() == 1 {
             let list_arg = lower_expr(&args[0].expr, cx, env);
             let elem_ty = match &list_arg.ty {
                 Type::List(inner) => *inner.clone(),
@@ -5510,7 +5510,7 @@ fn lower_method_call_impl(
             };
             return TExpr {
                 ty: Type::Apply {
-                    name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    name: crate::Syntax::TYPE_RANK.to_string(),
                     args: vec![elem_ty],
                 },
                 kind: TExprKind::BuiltinMethod {
@@ -5520,14 +5520,14 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_SORTED_SET && method == "new" && args.is_empty() {
+        if type_name == crate::Syntax::TYPE_RANK && method == "new" && args.is_empty() {
             let elem_ty = match resolved_ret {
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
             return TExpr {
                 ty: Type::Apply {
-                    name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    name: crate::Syntax::TYPE_RANK.to_string(),
                     args: vec![elem_ty.clone()],
                 },
                 kind: TExprKind::StaticCall {
@@ -5614,9 +5614,9 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" && args.is_empty() {
+        if type_name == crate::Syntax::TYPE_BITS && method == "new" && args.is_empty() {
             return TExpr {
-                ty: Type::Named(crate::Syntax::TYPE_BIT_SET.to_string()),
+                ty: Type::Named(crate::Syntax::TYPE_BITS.to_string()),
                 kind: TExprKind::StaticCall {
                     owner: host_owner("JetBitSet"),
                     owner_type: None,
@@ -5626,9 +5626,9 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_BYTE_BUFFER && method == "new" && args.is_empty() {
+        if type_name == crate::Syntax::TYPE_BYTES && method == "new" && args.is_empty() {
             return TExpr {
-                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
                 kind: TExprKind::StaticCall {
                     owner: host_owner("JetByteBuffer"),
                     owner_type: None,
@@ -5638,13 +5638,13 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_BYTE_BUFFER
+        if type_name == crate::Syntax::TYPE_BYTES
             && method == "with_capacity"
             && args.len() == 1
         {
             let n = lower_expr(&args[0].expr, cx, env);
             return TExpr {
-                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
                 kind: TExprKind::BuiltinMethod {
                     recv: Box::new(n),
                     op: TBuiltinOp::ByteBufferWithCapacity,
@@ -5652,10 +5652,10 @@ fn lower_method_call_impl(
                 },
             };
         }
-        if type_name == crate::Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
+        if type_name == crate::Syntax::TYPE_BYTES && method == "from" && args.len() == 1 {
             let bytes_arg = lower_expr(&args[0].expr, cx, env);
             return TExpr {
-                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                ty: Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
                 kind: TExprKind::BuiltinMethod {
                     recv: Box::new(bytes_arg),
                     op: TBuiltinOp::ByteBufferFrom,
@@ -5663,8 +5663,8 @@ fn lower_method_call_impl(
                 },
             };
         }
-        // D-COLLBREADTH1=A: `Deque.init([...])` → collect list into VecDeque.
-        if type_name == "Deque" && method == "init" && args.len() == 1 {
+        // D-COLLBREADTH1=A: `Queue.init([...])` → collect list into VecDeque.
+        if type_name == crate::Syntax::TYPE_QUEUE && method == "init" && args.len() == 1 {
             let list_arg = lower_expr(&args[0].expr, cx, env);
             let elem_ty = match &list_arg.ty {
                 Type::List(inner) => *inner.clone(),
@@ -5672,7 +5672,7 @@ fn lower_method_call_impl(
             };
             return TExpr {
                 ty: Type::Apply {
-                    name: "Deque".to_string(),
+                    name: crate::Syntax::TYPE_QUEUE.to_string(),
                     args: vec![elem_ty],
                 },
                 kind: TExprKind::BuiltinMethod {
@@ -5682,15 +5682,15 @@ fn lower_method_call_impl(
                 },
             };
         }
-        // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque with elem type from sema.
+        // D-COLLBREADTH1=A: `Queue.new()` → empty VecDeque with elem type from sema.
         // The element type comes from `resolved_ret` (sema filled it from the annotation).
-        if type_name == "Deque" && method == "new" && args.is_empty() {
+        if type_name == crate::Syntax::TYPE_QUEUE && method == "new" && args.is_empty() {
             let elem_ty = match resolved_ret {
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
             let deque_ty = Type::Apply {
-                name: "Deque".to_string(),
+                name: crate::Syntax::TYPE_QUEUE.to_string(),
                 args: vec![elem_ty.clone()],
             };
             return TExpr {
@@ -5707,14 +5707,14 @@ fn lower_method_call_impl(
                 },
             };
         }
-        // D-TAG1: `Bag.new()` → empty HashMap with elem type from sema.
-        if type_name == "Bag" && method == "new" && args.is_empty() {
+        // D-TAG1: `Tally.new()` → empty HashMap with elem type from sema.
+        if type_name == crate::Syntax::TYPE_TALLY && method == "new" && args.is_empty() {
             let elem_ty = match resolved_ret {
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
             let bag_ty = Type::Apply {
-                name: "Bag".to_string(),
+                name: crate::Syntax::TYPE_TALLY.to_string(),
                 args: vec![elem_ty.clone()],
             };
             return TExpr {

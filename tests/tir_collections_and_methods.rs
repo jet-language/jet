@@ -700,7 +700,7 @@ fn run() {
     );
 }
 
-/// E3 breadth: Set and SortedSet expose the complete algebra surface with one
+/// E3 breadth: Set and Rank expose the complete algebra surface with one
 /// semantic operation family on every execution tier.
 #[test]
 fn set_algebra_methods() {
@@ -725,14 +725,14 @@ fn run() {
     print(a.is_subset(Set.from([1, 2, 3, 4])))
     print(a.is_superset(Set.from([1, 2])))
     print(a.is_disjoint(Set.from([8])))
-    s := SortedSet.from([1, 2, 3])
-    t := SortedSet.from([3, 4])
+    s := Rank.from([1, 2, 3])
+    t := Rank.from([3, 4])
     print(s.intersection(t).to_list())
     print(s.difference(t).to_list())
     print(s.symmetric_difference(t).to_list())
-    print(s.is_subset(SortedSet.from([1, 2, 3, 4])))
-    print(s.is_superset(SortedSet.from([1, 2])))
-    print(s.is_disjoint(SortedSet.from([8])))
+    print(s.is_subset(Rank.from([1, 2, 3, 4])))
+    print(s.is_superset(Rank.from([1, 2])))
+    print(s.is_disjoint(Rank.from([8])))
 }
 ";
     let (code, stdout) = build_and_run("tir_set_algebra", src);
@@ -814,7 +814,7 @@ fn run() {
     print(counts.pop(\"words\") ?? -1)
     seen := Set.from([7, 8])
     print(seen.pop(8) ?? -1)
-    queue := Deque.init([1, 2, 3])
+    queue := Queue.init([1, 2, 3])
     print(queue.pop_front() ?? -1)
     priorities := PriorityQueue.from([2, 9, 4])
     print(priorities.pop() ?? -1)
@@ -947,7 +947,7 @@ fn list_surface_forced_interpreter() {
             // over from a smaller version of the fixture).
             assert_eq!(
                 stdout,
-                "true\ntrue\n[2, 3, 4]\ntrue\n2\n[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\n1\n5\n1\n1\n[9, 2, 9]\n"
+                "true\ntrue\n[2, 3, 4]\ntrue\n2\n[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\n1\n5\n1\n1\n[1, 9, 1]\n"
             );
         }
         RunOutcome::Problems(diagnostics) => {

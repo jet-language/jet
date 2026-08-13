@@ -597,23 +597,23 @@ fn jit_compound_type(ty: &Type) -> bool {
                     && (matches!(
                         name.as_str(),
                         "Set"
-                            | "Deque"
+                            | jet_foundation::Syntax::TYPE_QUEUE
                             | "Pool"
                             | "Id"
                             | "Stream"
                             | "ExpiringValue"
                             | "ExpiringSecret"
-                            | "SortedSet"
+                            | jet_foundation::Syntax::TYPE_RANK
                             | "PriorityQueue"
                             | "Cache"
                             | "Ptr"
-                    ) || (name == "Bag" && jit_bag_raw_key_candidate(&args[0])))
+                    ) || (name == jet_foundation::Syntax::TYPE_TALLY && jit_bag_raw_key_candidate(&args[0])))
         )
         || matches!(ty, Type::Apply { name, args }
             if matches!(name.as_str(), "View" | "ComputeViewMut")
                 && args.len() == 1
                 && jit_value_type(&args[0]))
-        || matches!(ty, Type::Named(name) if matches!(name.as_str(), "BitSet" | "ByteBuffer"))
+        || matches!(ty, Type::Named(name) if matches!(name.as_str(), jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES))
         || matches!(ty, Type::Shared(_))
 }
 
@@ -2859,10 +2859,10 @@ fn resident_safe_builtin_op(
                     Type::Apply { name, .. }
                         if matches!(
                             name.as_str(),
-                            "Set" | "Deque" | "SortedSet" | "PriorityQueue"
+                            "Set" | jet_foundation::Syntax::TYPE_QUEUE | jet_foundation::Syntax::TYPE_RANK | "PriorityQueue"
                         )
                 )
-                || matches!(recv_ty, Type::Named(name) if name == "BitSet"))
+                || matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS))
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
@@ -2968,7 +2968,7 @@ fn resident_safe_builtin_op(
                     Type::Apply { name, .. }
                         if matches!(
                             name.as_str(),
-                            "Set" | "Deque" | "SortedSet" | "PriorityQueue"
+                            "Set" | jet_foundation::Syntax::TYPE_QUEUE | jet_foundation::Syntax::TYPE_RANK | "PriorityQueue"
                         )
                 ))
                 && args.is_empty()
@@ -3147,7 +3147,7 @@ fn resident_safe_builtin_op(
                 && jit_list_int_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
         }
-        // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
+        // D-COLLBREADTH1=A: Set / Queue / list.remove — Int elems only.
         // D-LISTREMOVE1/F: these operations use the canonical Prelude through
         // deopt; the resident list-handle ABI cannot carry Option<T> or a
         // value-vs-slot selector without inventing a second semantic path.
@@ -3214,7 +3214,7 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::SortedSetInsert | TBuiltinOp::SortedSetRemove => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                if name == jet_foundation::Syntax::TYPE_RANK && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int | Type::String)
                 && resident_safe_expr(&args[0], callees)
@@ -3227,10 +3227,10 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::SortedSetIsSuperset
         | TBuiltinOp::SortedSetIsDisjoint => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                if name == jet_foundation::Syntax::TYPE_RANK && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
-                    if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                    if name == jet_foundation::Syntax::TYPE_RANK && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::PriorityQueueFrom => {
@@ -3245,7 +3245,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::BitSetCopy
         | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
         TBuiltinOp::First | TBuiltinOp::Last => {
-            (matches!(recv_ty, Type::Apply { name, .. } if name == "SortedSet")
+            (matches!(recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK)
                 || matches!(recv_ty, Type::List(_) | Type::FixedList { .. })
                 || jit_list_native_type(recv_ty)
                 || (matches!(op, TBuiltinOp::First)
@@ -3269,7 +3269,7 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BitSetAdd | TBuiltinOp::BitSetRemove => {
-            matches!(recv_ty, Type::Named(name) if name == "BitSet")
+            matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS)
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
@@ -3283,12 +3283,12 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(recv, callees)
         }
         TBuiltinOp::ByteBufferWrite { .. } => {
-            matches!(recv_ty, Type::Named(name) if name == "ByteBuffer")
+            matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BYTES)
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::ByteBufferMethod { .. } => {
-            matches!(recv_ty, Type::Named(name) if name == "ByteBuffer")
+            matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BYTES)
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TBuiltinOp::TrimView => matches!(recv_ty, Type::String) && args.is_empty(),
@@ -3299,13 +3299,13 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::BagAdd | TBuiltinOp::BagRemove | TBuiltinOp::BagHas | TBuiltinOp::BagCount => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
+                if name == jet_foundation::Syntax::TYPE_TALLY && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BagLen => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
+                if name == jet_foundation::Syntax::TYPE_TALLY && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.is_empty()
         }
         TBuiltinOp::Contains
@@ -3317,7 +3317,7 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Contains
             if matches!(recv_ty, Type::Apply { name, args: targs }
-                if matches!(name.as_str(), "Set" | "SortedSet")
+                if matches!(name.as_str(), "Set" | jet_foundation::Syntax::TYPE_RANK)
                     && targs.len() == 1
                     && matches!(&targs[0], Type::Int | Type::String)) =>
         {
@@ -3447,7 +3447,7 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::DequePushFront | TBuiltinOp::DequePushBack => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == jet_foundation::Syntax::TYPE_QUEUE && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
@@ -3460,26 +3460,26 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::DequeToList
         | TBuiltinOp::DequeReverse => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == jet_foundation::Syntax::TYPE_QUEUE && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.is_empty()
         }
         TBuiltinOp::DequeContains | TBuiltinOp::DequeDelete => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == jet_foundation::Syntax::TYPE_QUEUE && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::DequeGet | TBuiltinOp::DequeSplit => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == jet_foundation::Syntax::TYPE_QUEUE && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::DequeJoin => {
             matches!(recv_ty, Type::Apply { name, args: targs }
-                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                if name == jet_foundation::Syntax::TYPE_QUEUE && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)

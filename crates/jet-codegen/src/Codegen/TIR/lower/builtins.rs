@@ -12,7 +12,7 @@ use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListRemoveMode;
 use crate::Diagnostics::Span;
 
-/// #1478: Set/SortedSet delegate their iterator-family surface (filter, map,
+/// #1478: Set/Rank delegate their iterator-family surface (filter, map,
 /// each, all, fold, flat_map, min, max) to the same List/Iter machinery every
 /// other container already uses — insert the exact `.to_list()` conversion a
 /// user would write by hand. AOT and JIT then never see a raw `HashSet`/
@@ -24,7 +24,7 @@ pub(crate) fn wrap_set_receiver_as_list(recv: TExpr) -> TExpr {
         Type::Apply { name, args } if name == "Set" => {
             (TBuiltinOp::SetToList, args.first().cloned().unwrap_or(Type::Int))
         }
-        Type::Apply { name, args } if name == crate::Syntax::TYPE_SORTED_SET => {
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_RANK => {
             (TBuiltinOp::SortedSetToList, args.first().cloned().unwrap_or(Type::Int))
         }
         _ => return recv,
@@ -163,8 +163,8 @@ pub(crate) fn resolve_builtin_op(
         };
     }
     let is_byte_buffer =
-        matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
-    // ByteBuffer.position() is a 0-arg cursor read — must win before the
+        matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTES);
+    // Bytes.position() is a 0-arg cursor read — must win before the
     // Iter.position(pred) closure-method early-out.
     if is_byte_buffer {
         let op = match (method, args.len()) {
@@ -237,12 +237,12 @@ pub(crate) fn resolve_builtin_op(
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
     let is_sorted_set =
-        matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_SORTED_SET);
+        matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK);
     let is_priority_queue = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_PRIORITY_QUEUE);
     let is_lru = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU);
-    let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Bag");
-    let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
-    let is_deque = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Deque");
+    let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_TALLY);
+    let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BITS);
+    let is_deque = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_QUEUE);
     let is_iter = matches!(
         &rty,
         Some(ty) if crate::Collections::is_iter_type(ty)
@@ -770,7 +770,7 @@ pub(crate) fn resolve_builtin_op(
         ("to_bytes", 0) if is_byte_buffer => TBuiltinOp::ByteBufferToBytes,
         ("has", 1) if is_bag => TBuiltinOp::BagHas,
         ("count", 1) if is_bag => TBuiltinOp::BagCount,
-        // D-COLLBREADTH1=A: Deque<T> instance methods.
+        // D-COLLBREADTH1=A: Queue<T> instance methods.
         ("push_front", 1) => TBuiltinOp::DequePushFront,
         ("push_back", 1) => TBuiltinOp::DequePushBack,
         ("pop_front", 0) => TBuiltinOp::DequePopFront,
@@ -902,7 +902,7 @@ pub(crate) fn resolve_closure_op(
             }
         }
         "find" => TClosureOp::Find,
-        "any" if matches!(recv_ty, Type::Apply { name, .. } if name == "Bag") => {
+        "any" if matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY) => {
             TClosureOp::BagAny
         }
         "any" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAny,

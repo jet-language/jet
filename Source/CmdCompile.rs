@@ -1264,6 +1264,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     }
     let retired_selector_count =
         jet::Formatter::retired_interpolation_selector_edits(&migrated).len();
+    let retired_type_count = jet::Formatter::retired_type_edits(&migrated).len();
     let fixes = jet::LSP::collect_fixes(file, &migrated);
     let fixed = if fixes.is_empty() {
         migrated
@@ -1277,7 +1278,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let n = fixes.len();
     if dry_run {
         print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
-        if n == 0 && retired_target_count == 0 {
+        if n == 0 && retired_target_count == 0 && retired_type_count == 0 {
             println!(
                 "{}: would apply edition migration (dry run; nothing written)",
                 file
@@ -1306,13 +1307,21 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
                 if retired_selector_count == 1 { "" } else { "s" }
             );
         }
+        if retired_type_count > 0 {
+            println!(
+                "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
+                file,
+                retired_type_count,
+                if retired_type_count == 1 { "" } else { "s" }
+            );
+        }
         return;
     }
     fs::write(file, &fixed).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
-    if n == 0 && retired_target_count == 0 {
+    if n == 0 && retired_target_count == 0 && retired_type_count == 0 {
         println!("{}: applied edition migration", file);
     } else if n > 0 {
         println!(
@@ -1336,6 +1345,14 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
             file,
             retired_selector_count,
             if retired_selector_count == 1 { "" } else { "s" }
+        );
+    }
+    if retired_type_count > 0 {
+        println!(
+            "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
+            file,
+            retired_type_count,
+            if retired_type_count == 1 { "" } else { "s" }
         );
     }
 }
@@ -2323,6 +2340,7 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
     let (_, retired_target_count) = rewrite_retired_package_targets(&src, label);
     let retired_selector_count =
         jet::Formatter::retired_interpolation_selector_edits(&src).len();
+    let retired_type_count = jet::Formatter::retired_type_edits(&src).len();
     match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>")) {
         Ok(formatted) => {
             print!("{}", formatted);
@@ -2340,6 +2358,14 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
                     label,
                     retired_selector_count,
                     if retired_selector_count == 1 { "" } else { "s" }
+                );
+            }
+            if retired_type_count > 0 {
+                eprintln!(
+                    "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
+                    label,
+                    retired_type_count,
+                    if retired_type_count == 1 { "" } else { "s" }
                 );
             }
         }
@@ -2447,6 +2473,7 @@ pub(crate) fn run_fmt(
         formatted: String,
         changed: bool,
         retired_interpolation_selectors: usize,
+        retired_type_names: usize,
         retired_target_spellings: usize,
         io_error: Option<String>,
         parse_diags: Vec<jet::Diagnostics::Diagnostic>,
@@ -2463,6 +2490,7 @@ pub(crate) fn run_fmt(
                     formatted: String::new(),
                     changed: false,
                     retired_interpolation_selectors: 0,
+                    retired_type_names: 0,
                     retired_target_spellings: 0,
                     io_error: Some(format!("can't read `{}`: {}", path.display(), e)),
                     parse_diags: Vec::new(),
@@ -2475,6 +2503,7 @@ pub(crate) fn run_fmt(
                 let changed = formatted != src;
                 let retired_interpolation_selectors =
                     jet::Formatter::retired_interpolation_selector_edits(&src).len();
+                let retired_type_names = jet::Formatter::retired_type_edits(&src).len();
                 let (_, retired_target_spellings) =
                     rewrite_retired_package_targets(&src, &path.display().to_string());
                 results.push(FileResult {
@@ -2483,6 +2512,7 @@ pub(crate) fn run_fmt(
                     formatted,
                     changed,
                     retired_interpolation_selectors,
+                    retired_type_names,
                     retired_target_spellings,
                     io_error: None,
                     parse_diags: Vec::new(),
@@ -2495,6 +2525,7 @@ pub(crate) fn run_fmt(
                     formatted: String::new(),
                     changed: false,
                     retired_interpolation_selectors: 0,
+                    retired_type_names: 0,
                     retired_target_spellings: 0,
                     io_error: None,
                     parse_diags: diags,
@@ -2622,6 +2653,14 @@ pub(crate) fn run_fmt(
                 r.path.display(),
                 r.retired_target_spellings,
                 if r.retired_target_spellings == 1 { "" } else { "s" }
+            );
+        }
+        if r.retired_type_names > 0 && !mode.json {
+            println!(
+                "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
+                r.path.display(),
+                r.retired_type_names,
+                if r.retired_type_names == 1 { "" } else { "s" }
             );
         }
     }

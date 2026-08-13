@@ -32,7 +32,7 @@ existing drift found during review.
 This table is the one review truth row for collection verbs. Reference docs and
 future API reviews render this row; they do not create a second verb list.
 
-| Job | List | Map | Set | Deque | PriorityQueue |
+| Job | List | Map | Set | Queue | PriorityQueue |
 | --- | --- | --- | --- | --- | --- |
 | remove and return | `pop()` | `pop(key)` | `pop(value)` | `pop_front()` / `pop_back()` | `pop()` |
 | swap at an index | `replace(index, value)` | — | — | — | — |

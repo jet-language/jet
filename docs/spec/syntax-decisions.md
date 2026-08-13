@@ -542,8 +542,8 @@ Physical { Blunt, Pierce } Fire { Burn, Scald } Cold }`). A group name
 matches its whole subtree in `==` pattern tests and dispatch arms (`d == .Fire`
 is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
 payloads live on leaves only (E0331); a value is always a leaf — a group name
-is not a value (E0332). Ships with core `Bag<T>` counted multiset
-(`Bag.new()`, `add`, `remove`, `has`, `count`; subtree queries stay an explicit
+is not a value (E0332). Ships with core `Tally<T>` counted multiset
+(`Tally.new()`, `add`, `remove`, `has`, `count`; subtree queries stay an explicit
 `any` closure). No new keyword — reuses `{ }`, dot paths, and D-ENUMDOT1
 leading-dot patterns.
 
@@ -944,8 +944,8 @@ shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
 are dead. Named specific collection spellings stay named rather than short
-bracket forms; shipped today: `Set<T>`, `SortedSet<T>`, `Deque<T>`,
-`PriorityQueue<T>`, `Cache<K,V>`, `Bag<T>`, `BitSet`, and `ByteBuffer`.
+bracket forms; shipped today: `Set<T>`, `Rank<T>`, `Queue<T>`,
+`PriorityQueue<T>`, `Cache<K,V>`, `Tally<T>`, `Bits`, and `Bytes`.
 `HashMap<K,V>` and `BTreeMap<K,V>` are reserved names for specialized map
 implementations.
 
@@ -1038,8 +1038,8 @@ column, and `fills: (field: value, ...)` supplies typed per-column values.
 Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
 
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
-`SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
-`Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
+`Rank<T>`, ring-buffer `Queue<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
+`Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K: V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
 `DataTree` is the single dynamic value
 (`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
@@ -3603,7 +3603,7 @@ aliases or whole-buffer facades.
 
 **D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.
 
-**D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`SortedSet`/`BitSet` `contains` respells to `has(value)`, map/`Cache` `contains_key` respells to `has_key(key)`, `Bag.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
+**D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`Rank`/`Bits` `contains` respells to `has(value)`, map/`Cache` `contains_key` respells to `has_key(key)`, `Tally.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
 
 **D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
@@ -3644,7 +3644,7 @@ alias, or priority rule.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
-**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Cache`/D-COLLBREADTH1 method lists.
+**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`Rank`: true if newly added; `Tally`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Cache`/D-COLLBREADTH1 method lists.
 
 **D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
 
@@ -7103,3 +7103,10 @@ consumer can open; and `fix_edits` apply to the named span. No status line is
 promoted to a report, no report falls back to a bare string, and no engine,
 editor, JSON writer, or web host re-creates registry meaning. A missing tier
 proof is an open criterion, not a `tests/jit_gaps.txt` entry.
+
+**2026-08-13 — D-COLLNAME1=A** *(card #1439)*: the canonical named Core
+container roster is `Set`, `Rank`, `Queue`, `PriorityQueue`, `Tally`, `Cache`,
+`Bits`, and `Bytes`. The five renamed rows use the D-ONCE-RETIRE1=C pure-rename
+path: formatter and fix edits are mechanical, the notice names this decision,
+and the retirement ratchet remains at zero after migration. No aliases or
+fallback type-resolution paths remain.

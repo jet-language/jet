@@ -13,7 +13,7 @@ use crate::Codegen::TIR::TNumericOp;
 pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // Closure-taking methods are NEVER covered here (Phase 11), even by name.
     // Exception: 0-arg forms that share a name with a closure adapter
-    // (ByteBuffer.position — cursor read, not Iter.position(pred)).
+    // (Bytes.position — cursor read, not Iter.position(pred)).
     if crate::Collections::is_closure_method(method) && nargs > 0 {
         return false;
     }
@@ -96,9 +96,9 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
         | ("contains_value", 1) | ("pop_first", 0)
         | ("write_to", 1)
-        // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
+        // D-TAG1: Tally<T> instance methods (add/remove share list/set arms above).
         | ("has", 1)
-        // D-COLLBREADTH1=A: Deque<T> instance methods.
+        // D-COLLBREADTH1=A: Queue<T> instance methods.
         | ("push_front", 1) | ("push_back", 1)
         | ("pop_front", 0) | ("pop_back", 0)
         | ("peek_front", 0) | ("peek_back", 0)

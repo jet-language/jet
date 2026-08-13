@@ -163,7 +163,7 @@ pub(crate) struct Cx {
     pub(crate) auto_debug: HashSet<String>,
     pub(crate) auto_equatable: HashSet<String>,
     /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
-    /// float fields) — gates `derive(Eq, Hash)` for `Bag<T>` keys.
+    /// float fields) — gates `derive(Eq, Hash)` for `Tally<T>` keys.
     pub(crate) hashable: HashSet<String>,
     pub(crate) patchable: HashSet<String>,
     /// D-FIELDPOL1: struct name -> computed field names. Sema already
@@ -2484,11 +2484,11 @@ impl Cx {
             Type::Apply { name, args } if name == "ExpiringSecret" && args.len() == 1 => {
                 format!("JetExpiringSecret<{}>", self.rust_type(&args[0]))
             }
-            // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Deque<T> → VecDeque<T>.
+            // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Queue<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
             }
-            Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET && !args.is_empty() => {
+            Type::Apply { name, args } if name == Syntax::TYPE_RANK && !args.is_empty() => {
                 format!("std::collections::BTreeSet<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args }
@@ -2503,14 +2503,14 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
-            // D-TAG1: Bag<T> → HashMap<T, usize>.
-            Type::Apply { name, args } if name == "Bag" && !args.is_empty() => {
+            // D-TAG1: Tally<T> → HashMap<T, usize>.
+            Type::Apply { name, args } if name == crate::Syntax::TYPE_TALLY && !args.is_empty() => {
                 format!(
                     "std::collections::HashMap<{}, usize>",
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args } if name == "Deque" && !args.is_empty() => {
+            Type::Apply { name, args } if name == crate::Syntax::TYPE_QUEUE && !args.is_empty() => {
                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
             }
             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
@@ -4976,7 +4976,7 @@ pub(crate) fn field_type_rust_eq_compatible(
         // runtime handle (`JetTask`/`JetSender`/`JetReceiver`) — none implement
         // `PartialEq`, regardless of whether their element type `T` does. Only
         // surfaces once one of these lands as a tuple field (`tasks.channel<T>()`'s
-        // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Bag/Deque/…)
+        // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Tally/Queue/…)
         // is still checked structurally through its args below.
         Type::Apply { name, .. }
             if matches!(

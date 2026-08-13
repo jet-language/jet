@@ -246,7 +246,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
         // D-ITERTOOLS1=A: expanded collection handles.
-        | "BitSet" | "ByteBuffer"
+        | Syntax::TYPE_BITS | Syntax::TYPE_BYTES
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "IPAddr" | "SocketAddr" | "UdpSocket" | "UDPPacket"
         | "DNSSrv" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
@@ -2253,7 +2253,7 @@ pub(crate) fn core_encoding_variants(
     if enum_name == "DataEvent" {
         for (name, ty) in [
             ("Bool", Type::Bool), ("Int", Type::Int), ("Float", Type::Float),
-            ("Text", Type::String), ("Bytes", Type::List(Box::new(u8_ty()))),
+            ("Text", Type::String), (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
             ("Key", Type::String),
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));

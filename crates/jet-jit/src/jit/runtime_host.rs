@@ -216,9 +216,9 @@ pub(crate) struct JitRuntime {
     pub(crate) sets: Vec<std::collections::HashSet<i64>>,
     /// Parallel element-kind tags: `true` means String, `false` means Int.
     pub(crate) set_string_kinds: Vec<bool>,
-    /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
+    /// `Queue<T>` handles — 1-based indices (#729 collections/queue). Int elems only.
     pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
-    /// `Bag<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
+    /// `Tally<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
     pub(crate) bags: Vec<std::collections::HashMap<i64, usize>>,
     pub(crate) sorted_sets: Vec<std::collections::BTreeSet<i64>>,
     pub(crate) sorted_set_string_kinds: Vec<bool>,

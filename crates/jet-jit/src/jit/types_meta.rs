@@ -248,7 +248,7 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant" | "Hasher" | "TestSuite" | "BenchSuite"
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES | "Mod" | "ModGrant" | "Hasher" | "TestSuite" | "BenchSuite"
         ))
     {
         return Some(types::I64);
@@ -266,7 +266,7 @@ pub(crate) fn clif_ty_with_distinct(
                     | "Stream"
                     | "ExpiringValue"
                     | "ExpiringSecret"
-                    | "SortedSet"
+                    | jet_foundation::Syntax::TYPE_RANK
                     | "PriorityQueue"
                     | "Cache"
             ) || name == jet_foundation::Syntax::TYPE_SHARED_GUARD)
@@ -1596,7 +1596,7 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         "Int" => INT.as_slice(),
         "Float" => FLOAT.as_slice(),
         "Text" => TEXT.as_slice(),
-        "Bytes" => BYTES.as_slice(),
+        jet_foundation::Syntax::TYPE_BYTES => BYTES.as_slice(),
         "Array" => ARRAY.as_slice(),
         "Object" => OBJECT.as_slice(),
         _ => &[],
@@ -1748,7 +1748,7 @@ fn data_event_payload(variant: &str) -> &'static [Type] {
         "Int" => INT.as_slice(),
         "Float" => FLOAT.as_slice(),
         "Text" | "Key" => STRING.as_slice(),
-        "Bytes" => BYTES.as_slice(),
+        jet_foundation::Syntax::TYPE_BYTES => BYTES.as_slice(),
         _ => &[],
     }
 }

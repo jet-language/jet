@@ -360,7 +360,7 @@ impl<T: JetDebug, const N: usize> JetDebug for [T; N] {
     }
 }
 // D-COLLBREADTH1=A: Set<T> (HashSet) shows lexicographically sorted like a list;
-// Deque<T> shows in order like a list. Sort by string rep for determinism.
+// Queue<T> shows in order like a list. Sort by string rep for determinism.
 impl<T: JetShow> JetShow for std::collections::HashSet<T> {
     fn jet_show(&self) -> String {
         let mut parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();

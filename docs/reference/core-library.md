@@ -200,13 +200,13 @@ uses that truth row.
 | `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
 | `[K: V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
-| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
-| `Deque<T>` | `Deque.new()`, `Deque.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
+| `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
+| `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove` (`x, by: RemoveBy = .Val`, D-LISTREMOVE1), `len`, `is_empty`, `clear` |
 | `Cache<K,V>` | `Cache.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
-| `Bag<T>` | `Bag.new()`, `Bag.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
-| `BitSet` | `BitSet.new()` | `add`, `remove`, `has`, `count`, `to_list`, `copy`, `len`, `clear` |
-| `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`, `ByteBuffer.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
+| `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
+| `Bits` | `Bits.new()` | `add`, `remove`, `has`, `count`, `to_list`, `copy`, `len`, `is_empty`, `clear` |
+| `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
 
 `Set`'s closure and sequence adapters (`all`, `each`, `filter`, `fold`, `map`,
 `flat_map`, `min`, `max`) use the same collection kernels as every other
@@ -225,7 +225,7 @@ turns an unordered Set into a fresh `List`, running the same `to_list()`-then-
 each name needs `to_list()` first instead. `Set` also declines `flatten`:
 Jet requires every Set element to implement Hash and Eq (E0506), so no
 `Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
-`copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
+`copyto` is declined on `Set` and `Rank`; use `to_list()` then list/iter
 methods for all of the above.
 
 For a positional pick from an `Iter<T>`, use `skip(n).first()`. `n` is

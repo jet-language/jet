@@ -92,8 +92,8 @@ fn integer_bit_queries_view() => String {
 }"#;
 const INTEGER_BIT_QUERIES_EXPECTED: &str =
     "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4|4|4";
-const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() => String {
-    buffer := ByteBuffer.new()
+const BYTES_DECLS: &str = r#"fn bytes_view() => String {
+    buffer := Bytes.new()
     empty_before :: buffer.is_empty()
     buffer.write_u8(18)
     buffer.write_u16_le(13398)
@@ -106,29 +106,29 @@ const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() => String {
     length :: buffer.len()
     bytes :: buffer.to_bytes()
     buffer.clear()
-    from := ByteBuffer.from([255, 0])
+    from := Bytes.from([255, 0])
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
-const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
-const DEQUE_DECLS: &str = r#"fn deque_view() => String {
-    deque := Deque.new()
-    empty_before :: deque.is_empty()
-    missing_front :: deque.peek_front() ?? -1
-    missing_back :: deque.peek_back() ?? -1
-    deque.push_back(2)
-    deque.push_front(1)
-    deque.push_back(3)
-    length :: deque.len()
-    front :: deque.peek_front() ?? -1
-    back :: deque.peek_back() ?? -1
-    popped_front :: deque.pop_front() ?? -1
-    popped_back :: deque.pop_back() ?? -1
-    remaining :: deque.peek_front() ?? -1
-    deque.clear()
-    empty_pop :: deque.pop_front() ?? -1
-    return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{deque.is_empty()}|{deque.len()}|{empty_pop}"
+const BYTES_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
+const QUEUE_DECLS: &str = r#"fn queue_view() => String {
+    queue := Queue.new()
+    empty_before :: queue.is_empty()
+    missing_front :: queue.peek_front() ?? -1
+    missing_back :: queue.peek_back() ?? -1
+    queue.push_back(2)
+    queue.push_front(1)
+    queue.push_back(3)
+    length :: queue.len()
+    front :: queue.peek_front() ?? -1
+    back :: queue.peek_back() ?? -1
+    popped_front :: queue.pop_front() ?? -1
+    popped_back :: queue.pop_back() ?? -1
+    remaining :: queue.peek_front() ?? -1
+    queue.clear()
+    empty_pop :: queue.pop_front() ?? -1
+    return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{queue.is_empty()}|{queue.len()}|{empty_pop}"
 }"#;
-const DEQUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
+const QUEUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
 const LRU_DECLS: &str = r#"fn lru_view() => String {
     cache := Cache.new(2)
     empty_before :: cache.is_empty()
@@ -281,11 +281,11 @@ fn testing_fake_clock_writeback_view() => String {
     return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
 }"#;
 const TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED: &str = "6|10|12|12|12;7|7|7|1";
-const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) => Bool {
+const BITS_DECLS: &str = r#"fn add_bit(values: &Bits, bit: Int) => Bool {
     return values.add(bit)
 }
-fn bit_set_view() => String {
-    bits := BitSet.new()
+fn bits_view() => String {
+    bits := Bits.new()
     empty_before :: bits.is_empty()
     negative_added :: bits.add(-1)
     added_four :: bits.add(4)
@@ -302,7 +302,7 @@ fn bit_set_view() => String {
     bits.clear()
     return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
 }"#;
-const BIT_SET_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
+const BITS_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
 const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
     values.push(value)
 }
@@ -384,21 +384,21 @@ fn set_call_receiver_view() => String {
     value :: counted_set(&receiver_hits).has(6)
     return "{added}|{values.has(8)}|{value}|{receiver_hits}"
 }"#;
-const BAG_DECLS: &str = r#"enum BagToken {
+const TALLY_DECLS: &str = r#"enum TallyToken {
     Red
     Blue
 }
-fn add_bag(values: &Bag<Int>, value: Int) => Bool {
+fn add_bag(values: &Tally<Int>, value: Int) => Bool {
     return values.add(value)
 }
-fn counted_bag(hits: &Int) => Bag<Int> {
+fn counted_bag(hits: &Int) => Tally<Int> {
     hits += 1
-    values := Bag<Int>.new()
+    values := Tally<Int>.new()
     values.add(6)
     return values
 }
 fn bag_view() => String {
-    values := Bag<Int>.new()
+    values := Tally<Int>.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
     duplicate_four :: values.add(4)
@@ -412,27 +412,27 @@ fn bag_view() => String {
     count_four_after_one :: values.count(4)
     values.remove(4)
     values.remove(99)
-    words := Bag<String>.new()
+    words := Tally<String>.new()
     words.add("a")
     words.add("z")
     words.add("a")
-    tokens := Bag<BagToken>.new()
-    tokens.add(BagToken.Red)
-    tokens.add(BagToken.Red)
-    empty := Bag<Int>.new()
-    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
+    tokens := Tally<TallyToken>.new()
+    tokens.add(TallyToken.Red)
+    tokens.add(TallyToken.Red)
+    empty := Tally<Int>.new()
+    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) => value == 0)}"
 }"#;
-const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
-const BAG_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() => String {
+const TALLY_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
+const TALLY_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() => String {
     receiver_hits := 0
     count :: counted_bag(&receiver_hits).count(6)
     return "{count}|{receiver_hits}"
 }"#;
-const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) => Bool {
+const RANK_DECLS: &str = r#"fn add_through_param(values: &Rank<Int>, value: Int) => Bool {
     return values.add(value)
 }
-fn sorted_set_view() => String {
-    values := SortedSet.from([3, 1, 2, 3])
+fn rank_view() => String {
+    values := Rank.from([3, 1, 2, 3])
     initial :: values.to_list()
     initial_len :: values.len()
     initial_empty :: values.is_empty()
@@ -444,25 +444,25 @@ fn sorted_set_view() => String {
     values.remove(2)
     has_two :: values.has(2)
     current :: values.to_list()
-    other := SortedSet.from([5, 4, 0])
+    other := Rank.from([5, 4, 0])
     combined :: values.union(other).to_list()
     after_union :: values.to_list()
-    words := SortedSet.from(["z", "a", "m", "a"])
-    through_param := SortedSet.from([9, 7])
+    words := Rank.from(["z", "a", "m", "a"])
+    through_param := Rank.from([9, 7])
     param_added :: add_through_param(&through_param, 8)
     values.clear()
-    empty := SortedSet.new()
+    empty := Rank.new()
     return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
 }"#;
-const SORTED_SET_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
-const SORTED_SET_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: SortedSet<Int> }
-fn sorted_set_field_view() => String {
-    values := SortedSet.from([9, 7])
+const RANK_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
+const RANK_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: Rank<Int> }
+fn rank_field_view() => String {
+    values := Rank.from([9, 7])
     holder := SortedSetHolder.{ values: values }
     added :: holder.values.add(8)
     return "{added}|{holder.values.to_list()}"
 }"#;
-const SORTED_SET_FIELD_EXPECTED: &str = "true|[7, 8, 9]";
+const RANK_FIELD_EXPECTED: &str = "true|[7, 8, 9]";
 
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);
@@ -659,15 +659,15 @@ fn public_transcript_comptime_only_evaluates_map_call_receiver_once_inner() {
 }
 
 #[test]
-fn public_transcript_covers_deque_methods_exactly() {
-    let values = exact_values(&[DEQUE_DECLS, "deque_view()"]);
-    assert_eq!(values, [format!("\"{DEQUE_EXPECTED}\" : String")]);
+fn public_transcript_covers_queue_methods_exactly() {
+    let values = exact_values(&[QUEUE_DECLS, "queue_view()"]);
+    assert_eq!(values, [format!("\"{QUEUE_EXPECTED}\" : String")]);
 }
 
 #[test]
-fn public_transcript_covers_bit_set_methods_exactly() {
-    let values = exact_values(&[BIT_SET_DECLS, "bit_set_view()"]);
-    assert_eq!(values, [format!("\"{BIT_SET_EXPECTED}\" : String")]);
+fn public_transcript_covers_bits_methods_exactly() {
+    let values = exact_values(&[BITS_DECLS, "bits_view()"]);
+    assert_eq!(values, [format!("\"{BITS_EXPECTED}\" : String")]);
 }
 
 #[test]
@@ -751,8 +751,8 @@ fn public_transcript_comptime_only_evaluates_set_call_receiver_once() {
 
 #[test]
 fn public_transcript_covers_bag_methods_exactly() {
-    let values = exact_values(&[BAG_DECLS, "bag_view()"]);
-    assert_eq!(values, [format!("\"{BAG_EXPECTED}\" : String")]);
+    let values = exact_values(&[TALLY_DECLS, "bag_view()"]);
+    assert_eq!(values, [format!("\"{TALLY_EXPECTED}\" : String")]);
 }
 
 #[test]
@@ -760,27 +760,27 @@ fn public_transcript_comptime_only_evaluates_bag_call_receiver_once() {
     // The public comptime/REPL path supports this direct call receiver. TIR/AOT
     // retains the existing nested-receiver boundary in method_calls.rs.
     let values = exact_values(&[
-        BAG_DECLS,
-        BAG_CALL_RECEIVER_DECLS,
+        TALLY_DECLS,
+        TALLY_CALL_RECEIVER_DECLS,
         "bag_call_receiver_view()",
     ]);
     assert_eq!(values, ["\"1|1\" : String"]);
 }
 
 #[test]
-fn public_transcript_covers_sorted_set_methods_exactly() {
-    let values = exact_values(&[SORTED_SET_DECLS, "sorted_set_view()"]);
-    assert_eq!(values, [format!("\"{SORTED_SET_EXPECTED}\" : String")]);
+fn public_transcript_covers_rank_methods_exactly() {
+    let values = exact_values(&[RANK_DECLS, "rank_view()"]);
+    assert_eq!(values, [format!("\"{RANK_EXPECTED}\" : String")]);
 }
 
 #[test]
-fn public_transcript_covers_sorted_set_field_writeback_exactly() {
+fn public_transcript_covers_rank_field_writeback_exactly() {
     // Direct field receivers work in the public comptime path. Generated-Rust
     // lowering for this source shape remains a pre-existing TIR boundary.
-    let values = exact_values(&[SORTED_SET_FIELD_DECLS, "sorted_set_field_view()"]);
+    let values = exact_values(&[RANK_FIELD_DECLS, "rank_field_view()"]);
     assert_eq!(
         values,
-        [format!("\"{SORTED_SET_FIELD_EXPECTED}\" : String")]
+        [format!("\"{RANK_FIELD_EXPECTED}\" : String")]
     );
 }
 
@@ -1162,13 +1162,13 @@ fn rustc_backed_primitive_instance_stringification_matches_all_execution_tiers_e
 }
 
 #[test]
-fn rustc_backed_byte_buffer_matches_all_execution_tiers_exactly() {
-    let source = parity_source("byte_buffer_view()", BYTE_BUFFER_DECLS);
+fn rustc_backed_bytes_matches_all_execution_tiers_exactly() {
+    let source = parity_source("bytes_view()", BYTES_DECLS);
     assert_eq!(
         check_aot_comptime("byte-buffer/all-methods", &source),
-        BYTE_BUFFER_EXPECTED
+        BYTES_EXPECTED
     );
-    check_dev_tiers("byte-buffer", &source, BYTE_BUFFER_EXPECTED);
+    check_dev_tiers("byte-buffer", &source, BYTES_EXPECTED);
 }
 
 #[test]
@@ -1208,20 +1208,20 @@ fn rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and
 }
 
 #[test]
-fn rustc_backed_deque_matches_all_execution_tiers_exactly() {
-    let source = parity_source("deque_view()", DEQUE_DECLS);
-    assert_eq!(check_aot_comptime("deque/all-methods", &source), DEQUE_EXPECTED);
-    check_dev_tiers("deque", &source, DEQUE_EXPECTED);
+fn rustc_backed_queue_matches_all_execution_tiers_exactly() {
+    let source = parity_source("queue_view()", QUEUE_DECLS);
+    assert_eq!(check_aot_comptime("queue/all-methods", &source), QUEUE_EXPECTED);
+    check_dev_tiers("queue", &source, QUEUE_EXPECTED);
 }
 
 #[test]
-fn rustc_backed_bit_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
-    let source = parity_source("bit_set_view()", BIT_SET_DECLS);
+fn rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    let source = parity_source("bits_view()", BITS_DECLS);
     assert_eq!(
         check_aot_comptime("bit-set/all-methods", &source),
-        BIT_SET_EXPECTED
+        BITS_EXPECTED
     );
-    check_dev_tiers_with_boundary("bit-set", &source, BIT_SET_EXPECTED, true);
+    check_dev_tiers_with_boundary("bit-set", &source, BITS_EXPECTED, true);
 }
 
 #[test]
@@ -1254,22 +1254,22 @@ fn rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fall
 
 #[test]
 fn rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
-    let source = parity_source("bag_view()", BAG_DECLS);
-    assert_eq!(check_aot_comptime("bag/all-methods", &source), BAG_EXPECTED);
-    check_dev_tiers_with_boundary("bag", &source, BAG_EXPECTED, true);
+    let source = parity_source("bag_view()", TALLY_DECLS);
+    assert_eq!(check_aot_comptime("tally/all-methods", &source), TALLY_EXPECTED);
+    check_dev_tiers_with_boundary("tally", &source, TALLY_EXPECTED, true);
 }
 
 #[test]
-fn rustc_backed_sorted_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
-    // Mutating a SortedSet returned directly by a call remains the existing
-    // non-place receiver boundary. A named `&SortedSet` receiver proves one
+fn rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    // Mutating a Rank returned directly by a call remains the existing
+    // non-place receiver boundary. A named `&Rank` receiver proves one
     // mutating call result and its caller-visible writeback exactly.
-    let source = parity_source("sorted_set_view()", SORTED_SET_DECLS);
+    let source = parity_source("rank_view()", RANK_DECLS);
     assert_eq!(
         check_aot_comptime("sorted-set/all-methods", &source),
-        SORTED_SET_EXPECTED
+        RANK_EXPECTED
     );
-    check_dev_tiers_with_boundary("sorted-set", &source, SORTED_SET_EXPECTED, true);
+    check_dev_tiers_with_boundary("sorted-set", &source, RANK_EXPECTED, true);
 }
 
 #[test]

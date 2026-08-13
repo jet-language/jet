@@ -187,7 +187,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Division.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
-    include_str!("../Prelude/Core/ByteBuffer.rs"),
+    include_str!("../Prelude/Core/Bytes.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Memo.rs"),
@@ -2484,7 +2484,7 @@ mod tests {
         let progress =
             std::fs::read_to_string(root.join("src/Prelude/Core/Progress.rs")).unwrap();
         let byte_buffer =
-            std::fs::read_to_string(root.join("src/Prelude/Core/ByteBuffer.rs")).unwrap();
+            std::fs::read_to_string(root.join("src/Prelude/Core/Bytes.rs")).unwrap();
         let iter = std::fs::read_to_string(root.join("src/Prelude/CoreLib/JetStd/Iter.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
@@ -2539,7 +2539,7 @@ mod tests {
             ("src/Prelude/Core/Division.rs", division.as_str()),
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
-            ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
+            ("src/Prelude/Core/Bytes.rs", byte_buffer.as_str()),
             ("src/Prelude/CoreLib/JetStd/Iter.rs", iter.as_str()),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
             ("src/Prelude/Memo.rs", memo.as_str()),
@@ -2643,7 +2643,7 @@ mod tests {
             .find("include_str!(\"../Prelude/Core/ViewAccess.rs\")")
             .unwrap();
         let byte_buffer_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ByteBuffer.rs\")")
+            .find("include_str!(\"../Prelude/Core/Bytes.rs\")")
             .unwrap();
         let collections_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Collections.rs\")")

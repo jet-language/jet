@@ -281,6 +281,53 @@ fn apply_source_edits(src: &str, edits: &[TextEdit]) -> Option<String> {
     Some(out)
 }
 
+/// D-ONCE-RETIRE1=C / D-COLLNAME1=A: collect identifier edits for retired
+/// Core type names. Lexing keeps the rewrite out of comments and plain string
+/// contents; interpolation expressions are scanned recursively.
+pub fn retired_type_edits(src: &str) -> Vec<TextEdit> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let mut edits = Vec::new();
+    collect_retired_type_edits(&tokens, &mut edits);
+    edits
+}
+
+fn collect_retired_type_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
+    for token in tokens {
+        match &token.kind {
+            TokKind::Ident(name) => {
+                let Some(canonical) = Syntax::rename_target(name) else {
+                    continue;
+                };
+                edits.push(TextEdit {
+                    span: token.span,
+                    new_text: canonical.to_string(),
+                });
+            }
+            TokKind::Str(parts) => {
+                for part in parts {
+                    let StrTokPart::Interp(inner) = part else {
+                        continue;
+                    };
+                    collect_retired_type_edits(inner, edits);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn apply_retired_type_edits(src: &str) -> String {
+    let edits = retired_type_edits(src);
+    let mut out = src.to_string();
+    for edit in edits.iter().rev() {
+        out.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+    }
+    out
+}
+
 fn collect_retired_selector_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
     for token in tokens {
         let TokKind::Str(parts) = &token.kind else {
@@ -1425,7 +1472,8 @@ pub(super) fn escape_str_lit(s: &str) -> String {
 /// Lex + parse + format. Parse errors propagate; sema is not required.
 pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
     let print_edits = retired_print_family_edits(src);
-    let migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
+    let print_migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
+    let migrated = apply_retired_type_edits(&print_migrated);
     let (toks, lex_diags) = crate::Lexer::lex(&migrated);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
@@ -1488,7 +1536,7 @@ pub fn unified_diff(path: &str, old: &str, new: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_source, retired_interpolation_selector_edits};
+    use super::{format_source, retired_interpolation_selector_edits, retired_type_edits};
 
     #[test]
     fn retired_selector_rewrites_through_the_parser_and_formatter() {
@@ -1527,6 +1575,23 @@ mod tests {
             crate::Syntax::RETIRED_INTERPOLATION_SELECTOR_RAIL
         );
         assert!(retired_interpolation_selector_edits(&ordinary_hash).is_empty());
+    }
+
+    #[test]
+    fn retired_core_type_edits_skip_plain_strings() {
+        let source = format!(
+            "{}.new()\nprint(\"{}\")",
+            crate::Syntax::RETIRED_TYPE_QUEUE,
+            crate::Syntax::RETIRED_TYPE_QUEUE
+        );
+        let edits = retired_type_edits(&source);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, crate::Syntax::TYPE_QUEUE);
+        let expected = format!(
+            "Queue.new()\nprint(\"{}\")\n",
+            crate::Syntax::RETIRED_TYPE_QUEUE
+        );
+        assert_eq!(format_source(&source).unwrap(), expected);
     }
 
     #[test]
