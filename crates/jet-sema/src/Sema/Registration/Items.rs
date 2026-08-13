@@ -496,7 +496,7 @@ impl<'a> ComptimeTypeResolver<'a> {
                     }
                 }
             }
-            Item::UserDerive(derive) => self.resolve_stmts(&mut derive.body),
+            Item::UserDerive(derive) => self.resolve_derive_body_items(&mut derive.body),
             Item::CodeModule(module) => {
                 if let Some(body) = &mut module.body {
                     self.resolve_items(body);
@@ -791,6 +791,21 @@ impl<'a> ComptimeTypeResolver<'a> {
                 | Stmt::Yield(..) => {}
             }
             statement.for_each_expr_mut(|expression| self.resolve_expr_types(expression));
+        }
+    }
+
+    fn resolve_derive_body_items(&mut self, items: &mut [crate::AST::DeriveBodyItem]) {
+        for item in items {
+            match item {
+                crate::AST::DeriveBodyItem::Item(item) => self.resolve_item(item.as_mut()),
+                crate::AST::DeriveBodyItem::Stmt(statement) => {
+                    self.resolve_stmts(std::slice::from_mut(statement));
+                }
+                crate::AST::DeriveBodyItem::Loop { source, body, .. } => {
+                    self.resolve_expr_types(source);
+                    self.resolve_derive_body_items(body);
+                }
+            }
         }
     }
 

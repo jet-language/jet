@@ -1002,8 +1002,8 @@ fn check_bundle_opts_for_output_inner(
             }
         }
 
-        // D-META-USER1=A: a declared marker body uses the same checked
-        // comptime fragment path as a derive body. The target TypeInfo is
+        // D-META-USER1=A: a declared marker body uses the same typed
+        // comptime expansion path as a derive body. The target TypeInfo is
         // immutable input; generated items re-enter ordinary registration.
         {
             let declared_targets: Vec<(
@@ -1067,99 +1067,69 @@ fn check_bundle_opts_for_output_inner(
                     &type_path,
                     Some(&marker_vocabulary),
                 );
-                match crate::Comptime::evaluate_derive_body(
+                match crate::Comptime::expand_derive_body(
                     body,
                     "target",
                     type_info,
                     &actual_funcs,
                     &bundle.project_root,
                 ) {
-                    Ok(fragments) => {
-                        for fragment in fragments {
-                            let what = format!(
-                                "rule `{}` generated invalid Jet while expanding `#{}` on `{}`",
-                                declaration.name, declaration.name, target.name
-                            );
-                            let Some(mut parsed) = super::super::Registration::parse_generated_fragment(
-                                &fragment,
-                                what,
-                                "fix the rule body so every emitted fragment is valid Jet source".to_string(),
-                                marker.span,
-                                &mut diags,
-                            ) else {
+                    Ok(expanded) => {
+                        for item in expanded {
+                            let Item::Impl(implementation) = &item else {
+                                new_items.push(item);
                                 continue;
                             };
-                            for item in parsed.drain(..) {
-                                let Item::Impl(implementation) = &item else {
-                                    new_items.push(item);
-                                    continue;
-                                };
-                                let mut accepted = implementation.clone();
-                                accepted.methods.retain(|method| {
-                                    let existing = existing_member_span(
-                                        &module.items,
+                            let mut accepted = implementation.clone();
+                            accepted.methods.retain(|method| {
+                                let existing = existing_member_span(
+                                    &module.items,
+                                    &accepted.type_name,
+                                    &method.name,
+                                )
+                                .or_else(|| {
+                                    existing_member_span(
+                                        &new_items,
                                         &accepted.type_name,
                                         &method.name,
                                     )
-                                    .or_else(|| {
-                                        existing_member_span(
-                                            &new_items,
-                                            &accepted.type_name,
-                                            &method.name,
-                                        )
-                                    });
-                                    let Some(existing) = existing else {
-                                        return true;
-                                    };
-                                    diags.push(
-                                        Diagnostic::error(
-                                            "E0105",
-                                            format!(
-                                                "generated member `{}` would change or shadow `{}` on `{}`",
-                                                method.name, method.name, accepted.type_name
-                                            ),
-                                            "a rule may add a member but cannot change or shadow a written member".to_string(),
-                                            "rename the generated member or remove the existing member".to_string(),
-                                            Some(method.name_span),
-                                        )
-                                        .with_detail(format!(
-                                            "generated rule `{}` at span {}..{}\nexisting member at span {}..{}",
-                                            declaration.name,
-                                            marker.span.start,
-                                            marker.span.end,
-                                            existing.start,
-                                            existing.end,
-                                        )),
-                                    );
-                                    false
                                 });
-                                if !accepted.methods.is_empty() {
-                                    new_items.push(Item::Impl(accepted));
-                                }
+                                let Some(existing) = existing else {
+                                    return true;
+                                };
+                                diags.push(
+                                    Diagnostic::error(
+                                        "E0105",
+                                        format!(
+                                            "generated member `{}` would change or shadow `{}` on `{}`",
+                                            method.name, method.name, accepted.type_name
+                                        ),
+                                        "a rule may add a member but cannot change or shadow a written member".to_string(),
+                                        "rename the generated member or remove the existing member".to_string(),
+                                        Some(method.name_span),
+                                    )
+                                    .with_detail(format!(
+                                        "generated rule `{}` at span {}..{}\nexisting member at span {}..{}",
+                                        declaration.name,
+                                        marker.span.start,
+                                        marker.span.end,
+                                        existing.start,
+                                        existing.end,
+                                    )),
+                                );
+                                false
+                            });
+                            if !accepted.methods.is_empty() {
+                                new_items.push(Item::Impl(accepted));
                             }
                         }
                     }
-                    Err(inner) => {
-                        super::super::push_causal_report(
-                            &mut diags,
-                            Diagnostic::error(
-                                "E2710",
-                                format!(
-                                    "rule `{}` body failed while expanding `#{}` on `{}`",
-                                    declaration.name, declaration.name, target.name
-                                ),
-                                inner.what.clone(),
-                                "fix the rule body so it succeeds at compile time".to_string(),
-                                Some(marker.span),
-                            ),
-                            inner,
-                        );
-                    }
+                    Err(inner) => diags.push(inner),
                 }
             }
 
-            // Function-site rules use the same body evaluator. Their target
-            // projection is a FunctionInfo, and a body may reject the
+            // Function-site rules use the same typed body expansion. Their
+            // target projection is a FunctionInfo, and a body may reject the
             // declaration or emit ordinary top-level Jet items.
             let declared_function_targets: Vec<(
                 crate::AST::Func,
@@ -1187,54 +1157,21 @@ fn check_bundle_opts_for_output_inner(
                     continue;
                 };
                 let target_info = crate::Comptime::build_function_type_info(&target);
-                match crate::Comptime::evaluate_derive_body(
+                match crate::Comptime::expand_derive_body(
                     body,
                     "target",
                     target_info,
                     &actual_funcs,
                     &bundle.project_root,
                 ) {
-                    Ok(fragments) => {
-                        for fragment in fragments {
-                            let what = format!(
-                                "rule `{}` generated invalid Jet while expanding `#{}` on `{}`",
-                                declaration.name, declaration.name, target.name
-                            );
-                            if let Some(mut parsed) =
-                                super::super::Registration::parse_generated_fragment(
-                                    &fragment,
-                                    what,
-                                    "fix the rule body so every emitted fragment is valid Jet source".to_string(),
-                                    marker.span,
-                                    &mut diags,
-                                )
-                            {
-                                new_items.extend(parsed.drain(..));
-                            }
-                        }
-                    }
-                    Err(inner) => {
-                        super::super::push_causal_report(
-                            &mut diags,
-                            Diagnostic::error(
-                                "E2710",
-                                format!(
-                                    "rule `{}` body failed while expanding `#{}` on `{}`",
-                                    declaration.name, declaration.name, target.name
-                                ),
-                                inner.what.clone(),
-                                "fix the rule body so it succeeds at compile time".to_string(),
-                                Some(marker.span),
-                            ),
-                            inner,
-                        );
-                    }
+                    Ok(expanded) => new_items.extend(expanded),
+                    Err(inner) => diags.push(inner),
                 }
             }
 
             // D-META-DSL1=A: a `.Block` rule receives the text inside Jet's
             // closed braces as its `target` value. The library body can check
-            // that text and emit ordinary Jet items through the same re-entry
+            // that text and emit ordinary Jet items through the same typed
             // path as a type or function rule.
             let mut declared_text_blocks = Vec::new();
             for item in &module.items {
@@ -1245,55 +1182,22 @@ fn check_bundle_opts_for_output_inner(
                     &mut declared_text_blocks,
                 );
             }
-            for (block_name, block_text, block_span) in declared_text_blocks {
+            for (block_name, block_text, _block_span) in declared_text_blocks {
                 let Some(declaration) = marker_vocabulary.declaration(&block_name) else {
                     continue;
                 };
                 let Some(body) = declaration.body.as_ref() else {
                     continue;
                 };
-                match crate::Comptime::evaluate_derive_body(
+                match crate::Comptime::expand_derive_body(
                     body,
                     "target",
                     crate::AST::CtValue::Str(block_text),
                     &actual_funcs,
                     &bundle.project_root,
                 ) {
-                    Ok(fragments) => {
-                        for fragment in fragments {
-                            let what = format!(
-                                "rule `{}` generated invalid Jet while expanding `#{}`",
-                                declaration.name, block_name
-                            );
-                            if let Some(mut parsed) =
-                                super::super::Registration::parse_generated_fragment(
-                                    &fragment,
-                                    what,
-                                    "fix the rule body so every emitted fragment is valid Jet source".to_string(),
-                                    block_span,
-                                    &mut diags,
-                                )
-                            {
-                                new_items.extend(parsed.drain(..));
-                            }
-                        }
-                    }
-                    Err(inner) => {
-                        super::super::push_causal_report(
-                            &mut diags,
-                            Diagnostic::error(
-                                "E2710",
-                                format!(
-                                    "rule `{}` body failed while checking `#{}`",
-                                    declaration.name, block_name
-                                ),
-                                inner.what.clone(),
-                                "fix the rule body so it succeeds at compile time".to_string(),
-                                Some(block_span),
-                            ),
-                            inner,
-                        );
-                    }
+                    Ok(expanded) => new_items.extend(expanded),
+                    Err(inner) => diags.push(inner),
                 }
             }
 
