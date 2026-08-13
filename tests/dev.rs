@@ -9676,7 +9676,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-job tick
 /// consumer. `scheduled_tasks` must enumerate every `#Job #Every(…)` fn
 /// with its resolved schedule (and skip a plain `#Job fn` with no
 /// `#Every(…)`), and `run_named_job` must actually execute one by name
@@ -9708,7 +9708,7 @@ fn schedule_every_dev_loop_consumer() {
         names,
         vec!["nightly_backup", "prune_sessions"],
         "scheduled_tasks must list every #Job fn carrying #Every(…), and skip the \
-         #Every(…)-less `manual_only` task"
+         #Every(…)-less `manual_only` job"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
         tasks.iter().map(|(n, s)| (n.as_str(), s)).collect();
@@ -9725,7 +9725,7 @@ fn schedule_every_dev_loop_consumer() {
         "`#Every(\"03:00\")` must resolve to 03:00 daily"
     );
 
-    // Actually invoking a named task runs it like an ordinary call.
+    // Actually invoking a named job runs it like an ordinary call.
     match jet::Interpreter::run_named_job(&bundle, "prune_sessions", false) {
         RunOutcome::Ran { stdout, exit_code, .. } => {
             assert_eq!(exit_code, 0);

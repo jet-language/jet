@@ -2094,13 +2094,13 @@ the marker before its declaration.
 ### E0925 — `#Job`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
 
 `#Every(…)` names when a `#Job fn` runs (D-JPK-TASKRUN1); `#Job` itself
-only marks a top-level function, because a task needs a free-standing name
+only marks a top-level function, because a job needs a free-standing name
 `jet run --job <name> <entry>` can invoke.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `#Job`/`#Every(…)` only mark a top-level function ``. | a method has no free-standing name to invoke, so it can't be a task. | Move the function to the top level, beside `fn run()`. |
-| `` `#Every(…)` needs `#Job` on the same function ``. | a schedule only means something on a task — `#Every(…)` isn't a standalone timer. | Add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a scheduled task. |
+| `` `#Job`/`#Every(…)` only mark a top-level function ``. | a method has no free-standing name to invoke, so it can't be a job. | Move the function to the top level, beside `fn run()`. |
+| `` `#Every(…)` needs `#Job` on the same function ``. | a schedule only means something on a job — `#Every(…)` isn't a standalone timer. | Add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a scheduled job. |
 
 ### E0926 — bad `#Every(…)` schedule value (D-SCHEDULE1, card #505)
 

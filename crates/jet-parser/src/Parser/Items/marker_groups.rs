@@ -1348,7 +1348,7 @@ impl<'a> Parser<'a> {
             if let Some(every) = &function.every {
                 if !function.is_task {
                     self.diags
-                        .push(Self::e0925_every_without_task(every.span));
+                        .push(Self::e0925_every_without_job(every.span));
                 }
             }
             self.policy_declarations.extend(policy);

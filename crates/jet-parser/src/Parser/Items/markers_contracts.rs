@@ -121,15 +121,15 @@ impl<'a> Parser<'a> {
 
 
         /// E0925: `#Every(…)` without the `#Job` marker it schedules.
-        pub(super) fn e0925_every_without_task(span: Span) -> Diagnostic {
+        pub(super) fn e0925_every_without_job(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0925",
                 "`#Every(…)` needs `#Job` on the same function".to_string(),
-                "a schedule only means something on a task — `#Every(…)` names when `#Job` \
+                "a schedule only means something on a job — `#Every(…)` names when `#Job` \
                  runs, it isn't a standalone timer."
                     .to_string(),
                 "add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
-                 scheduled task."
+                 scheduled job."
                     .to_string(),
                 Some(span),
             )

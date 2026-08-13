@@ -194,8 +194,8 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): run one `#Job fn` by name,
 /// the same way `run_checked` runs `fn run()` — the `jet dev` consumer
-/// (`Source/CmdDevTools.rs`'s due-task tick) calls this to invoke a scheduled
-/// task automatically. The caller has already filtered to `Func::is_task`
+/// (`Source/CmdDevTools.rs`'s due-job tick) calls this to invoke a scheduled
+/// job automatically. The caller has already filtered to `Func::is_task`
 /// fns pulled from this same checked bundle, so a missing name here is an
 /// internal-tooling mismatch, not a source error.
 pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
@@ -205,13 +205,13 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
             return RunOutcome::Problems(vec![diagnostic]);
         }
     }
-    // Tasks share the same TIR program; re-entry is by temporarily selecting
+    // Jobs share the same TIR program; re-entry is by temporarily selecting
     // the named function as the program entry via a lowered copy.
     let Some(mut program) = crate::Codegen::TIR::lower_interp_program(bundle) else {
         return RunOutcome::Problems(vec![Diagnostic::error(
             "E2201",
-            format!("`{name}` isn't a task in this file"),
-            "the dev loop's due-task tick looks up the task by name in the checked bundle."
+            format!("`{name}` isn't a job in this file"),
+            "the dev loop's due-job tick looks up the job by name in the checked bundle."
                 .to_string(),
             "this is an internal-tooling mismatch, not a source error — please report it."
                 .to_string(),
@@ -221,8 +221,8 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
     if !program.funcs.iter().any(|f| f.name == name) {
         return RunOutcome::Problems(vec![Diagnostic::error(
             "E2201",
-            format!("`{name}` isn't a task in this file"),
-            "the dev loop's due-task tick looks up the task by name in the checked bundle."
+            format!("`{name}` isn't a job in this file"),
+            "the dev loop's due-job tick looks up the job by name in the checked bundle."
                 .to_string(),
             "this is an internal-tooling mismatch, not a source error — please report it."
                 .to_string(),
@@ -307,10 +307,10 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
     }
 }
 
-/// D-SCHEDULE1: the `#Job`/`#Every(…)` facts the dev loop's due-task tick
-/// needs — a task's name and its resolved schedule (`None` for a `#Job fn`
+/// D-SCHEDULE1: the `#Job`/`#Every(…)` facts the dev loop's due-job tick
+/// needs — a job's name and its resolved schedule (`None` for a `#Job fn`
 /// with no `#Every(…)`, i.e. manual-invocation-only). Scoped to the entry
-/// module's top-level items only (D-JPK-TASKRUN1: a task lives "beside `fn
+/// module's top-level items only (D-JPK-TASKRUN1: a job lives "beside `fn
 /// run()`" — the same file, not an imported one). Sema has already rejected
 /// a bad `#Every(…)` value (E0926) by the time a bundle reaches `jet dev`,
 /// so `resolve()` failing here is defensive, not a real path.
