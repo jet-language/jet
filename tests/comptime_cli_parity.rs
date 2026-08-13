@@ -1,7 +1,7 @@
 mod common;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const COMPTIME_STEMS: [&str; 4] = [
@@ -11,24 +11,80 @@ const COMPTIME_STEMS: [&str; 4] = [
     "comptime/find_empty",
 ];
 
+fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {
+    let file_name = stem.rsplit('/').next().expect("comptime stem has a file name");
+    fs::copy(
+        root.join("examples/features").join(format!("{stem}.jet")),
+        destination.join(format!("{file_name}.jet")),
+    )
+    .unwrap_or_else(|error| panic!("copy `{stem}` fixture: {error}"));
+
+    let assets: &[&str] = match stem {
+        "comptime/embed" => &["motd.txt"],
+        "comptime/embed_bytes" => &["logo.bin"],
+        "comptime/find" | "comptime/find_empty" => &[
+            "find_inputs/alpha-1.txt",
+            "find_inputs/nested/beta-2.txt",
+            "find_inputs/nested/gamma-3.txt",
+        ],
+        _ => &[],
+    };
+    for relative in assets {
+        let target = destination.join(relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).expect("create comptime fixture asset directory");
+        }
+        fs::copy(root.join("examples/features/comptime").join(relative), &target)
+            .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
+    }
+    format!("{file_name}.jet")
+}
+
 #[test]
 fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("comptime_effect_parity");
 
     for stem in COMPTIME_STEMS {
-        let file = format!("examples/features/{stem}.jet");
+        let case_dir = scratch.join(&stem.replace('/', "_"));
+        fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
+        let file_name = copy_comptime_fixture(&root, &case_dir, stem);
         let expected_path = root.join(format!("examples/features/expected/{stem}.out"));
         let expected = fs::read(&expected_path)
             .unwrap_or_else(|error| panic!("missing golden for `{stem}`: {error}"));
-        let cache = std::env::temp_dir().join(format!(
-            "jet_1543_cli_{}_{}",
-            std::process::id(),
-            stem.replace('/', "_")
-        ));
+        let cache = case_dir.join("cache");
+
+        let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["build", &file_name])
+            .current_dir(&case_dir)
+            .env("JET_CACHE_DIR", cache.join("aot"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("failed to spawn AOT build for `{stem}`: {error}"));
+        assert!(
+            build.status.success(),
+            "AOT build failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let binary_name = file_name.strip_suffix(".jet").expect("Jet fixture extension");
+        let aot = Command::new(case_dir.join("build").join(binary_name))
+            .current_dir(&case_dir)
+            .output()
+            .unwrap_or_else(|error| panic!("failed to run AOT binary for `{stem}`: {error}"));
+        assert!(
+            aot.status.success(),
+            "AOT run failed for `{stem}`:\n{}",
+            String::from_utf8_lossy(&aot.stderr)
+        );
+        assert_eq!(
+            aot.stdout, expected,
+            "AOT output differs from the checked-in golden for `{stem}`"
+        );
 
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", &file, "--trace-tiers"])
-            .current_dir(&root)
+            .args(["run", &file_name, "--trace-tiers"])
+            .current_dir(&case_dir)
             .env("JET_RUN_CACHE_DIR", cache.join("run"))
             .env("JET_CACHE_DIR", cache.join("build"))
             .env("NO_COLOR", "1")
@@ -58,8 +114,8 @@ fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
 
         let interpreted_cache = cache.join("interpret");
         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", "--interpret", &file, "--trace-tiers"])
-            .current_dir(&root)
+            .args(["run", "--interpret", &file_name, "--trace-tiers"])
+            .current_dir(&case_dir)
             .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
             .env("JET_CACHE_DIR", interpreted_cache.join("build"))
             .env("NO_COLOR", "1")
@@ -85,7 +141,6 @@ fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
             "interpreter output differs from the checked-in golden for `{stem}`"
         );
 
-        let _ = fs::remove_dir_all(cache);
     }
 }
 
