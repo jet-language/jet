@@ -186,7 +186,8 @@ pub const TYPE_INT: &str = "Int";
 pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
-/// D-FAIL-ERROR1=A: default error type and constructor share `Err`.
+/// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
+/// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";
 /// D-FAIL-BIND1=A (ratified 2026-08-06): ambient failure report inside a
 /// fallible `??` fallback. This is an ordinary contextual identifier, not a
