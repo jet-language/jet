@@ -30,6 +30,8 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         cloned_types: env.cloned_types.clone(),
         send_fn_locals: env.send_fn_locals.clone(),
         binder_refs: env.binder_refs.clone(),
+        txn_handle: env.txn_handle.clone(),
+        txn_undo_needed: env.txn_undo_needed.clone(),
     }
 }
 

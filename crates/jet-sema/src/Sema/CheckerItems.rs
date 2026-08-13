@@ -832,6 +832,7 @@ impl<'a> Checker<'a> {
             is_c_abi: false,
             c_abi_name: None,
             foreign_effect_root: None,
+            undo: None,
             param_info: sig.param_info.clone(),
             param_call: sig.param_call.clone(),
             defaults: sig.defaults.clone(),
@@ -1038,6 +1039,7 @@ impl<'a> Checker<'a> {
                 is_c_abi: false,
                 c_abi_name: None,
                 foreign_effect_root: None,
+                undo: None,
                 param_info: params
                     .iter()
                     .map(|param| (param.name.clone(), param.default.is_some()))

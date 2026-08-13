@@ -4,7 +4,7 @@ use crate::Codegen::TIR::TirWorklist;
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Per-function lowering environment: a local name -> (structured slot, type).
@@ -67,6 +67,12 @@ pub(crate) struct LowerEnv {
     /// Compiler-private default references resolve to the declaration-slot
     /// temporary made by source-order lowering.
     pub(super) binder_refs: HashMap<String, (String, Type)>,
+    /// D-BOUND-UNDO1=A: active transaction handle for compiler-registered FFI
+    /// inverse hooks. Nested transactions replace this fact in their child env.
+    pub(super) txn_handle: Option<TLocal>,
+    /// Set when a synthesized FFI undo hook is emitted in a bare transaction,
+    /// so the transaction gets a runtime handle even without user snapshots.
+    pub(super) txn_undo_needed: Option<Rc<Cell<bool>>>,
 }
 
 impl LowerEnv {
@@ -87,6 +93,8 @@ impl LowerEnv {
             cloned_types: Rc::new(RefCell::new(Vec::new())),
             send_fn_locals: HashSet::new(),
             binder_refs: HashMap::new(),
+            txn_handle: None,
+            txn_undo_needed: None,
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).

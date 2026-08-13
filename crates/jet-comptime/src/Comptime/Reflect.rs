@@ -1278,6 +1278,7 @@ mod tests {
             every: None,
             task_metadata: None,
             inline_foreign: None,
+            undo: None,
             inline_span: None,
             return_view_provenance: None,
             declared_return_view_provenance: None,

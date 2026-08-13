@@ -333,6 +333,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_extern_fn(&mut self, ef: &ExternFn) {
+        if let Some((inverse, _)) = &ef.undo {
+            self.write(&format!("#{}({}) ", Syntax::MARKER_UNDO, inverse));
+        }
         if let Some((abi, _)) = &ef.abi {
             self.write(&format!("#{}({}) ", Syntax::MARKER_ABI, abi));
         }

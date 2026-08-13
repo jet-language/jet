@@ -196,6 +196,9 @@ pub(crate) struct Cx {
     pub(crate) ffi_crate: Option<String>,
     /// M7: Jet function name -> wrapper symbol in the FFI crate.
     pub(crate) extern_funcs: HashMap<String, String>,
+    /// D-BOUND-UNDO1=A: foreign binding name -> compensating Jet function.
+    /// Lowering reads this fact; engines only marshal the resulting rollback hook.
+    pub(crate) foreign_undos: HashMap<String, String>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     pub(crate) code_modules: HashSet<String>,
     /// D-MOD3: unqualified inline-module items (name → canonical member name).
@@ -2726,6 +2729,58 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
     map
 }
 
+fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
+    fn collect(items: &[Item], map: &mut HashMap<String, String>, prefix: Option<&str>) {
+        for item in items {
+            match item {
+                Item::ExternRust(block) => {
+                    for ef in &block.functions {
+                        if let Some((inverse, _)) = &ef.undo {
+                            map.insert(
+                                prefix
+                                    .map(|p| format!("{p}::{}", ef.name))
+                                    .unwrap_or_else(|| ef.name.clone()),
+                                inverse.clone(),
+                            );
+                        }
+                    }
+                }
+                Item::CModule(module) => {
+                    for ef in &module.functions {
+                        if let Some((inverse, _)) = &ef.undo {
+                            map.insert(
+                                prefix
+                                    .map(|p| format!("{p}::{}", ef.name))
+                                    .unwrap_or_else(|| ef.name.clone()),
+                                inverse.clone(),
+                            );
+                        }
+                    }
+                }
+                Item::Func(func) => {
+                    if let Some((inverse, _)) = &func.undo {
+                        map.insert(
+                            prefix
+                                .map(|p| format!("{p}::{}", func.name))
+                                .unwrap_or_else(|| func.name.clone()),
+                            inverse.clone(),
+                        );
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        collect(body, map, Some(&module.name));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut map = HashMap::new();
+    collect(items, &mut map, None);
+    map
+}
+
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
@@ -2750,6 +2805,19 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
                     }
                 }
             }
+        }
+    }
+    map
+}
+
+pub(crate) fn bundle_foreign_undos(bundle: &ProgramBundle) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for module in &bundle.modules {
+        let module_undos = foreign_undo_map(&module.items);
+        let module_prefix = mangle(&module.alias);
+        for (name, inverse) in module_undos {
+            map.insert(name.clone(), inverse.clone());
+            map.insert(format!("{module_prefix}::{name}"), inverse);
         }
     }
     map
@@ -2936,6 +3004,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_close_types(cx);
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
+    cx.foreign_undos = bundle_foreign_undos(bundle);
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(cx, bundle, module_idx);
     register_imported_methods(cx, bundle, module_idx);
@@ -3340,6 +3409,7 @@ pub(crate) fn build_cx_items(
         root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),
+        foreign_undos: foreign_undo_map(items),
         code_modules: HashSet::new(),
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),

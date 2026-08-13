@@ -2241,6 +2241,14 @@ and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
 Irreversible effects (`Net`/`FS`/`Exec`) inside the block are E0746 — move
 after the block or register via `on_commit`.
 
+**D-BOUND-UNDO1=A — Foreign undo contracts** *(ratified; amends the
+D-TXN2 irreversible set and rides D-ROLLBACK-TRAIT)*: an FFI call is
+irreversible inside `#Transact` because the compiler cannot inspect the
+foreign body. Such a call is E0746 unless its binding declares
+`#Undo(inverse)`. The declared inverse is registered on the same rollback
+path as `on_rollback` hooks, so multiple inverses run in reverse call order.
+Hoisting the foreign call out of the transaction remains the beginner fix.
+
 **D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` values must be
 consumed exactly once on every path — `^` param, return,
 or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;

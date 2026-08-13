@@ -140,6 +140,10 @@ fn lower_lambda_expecting_with_host_borrow(
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function.
     let mut lam_env = fork_panic(env);
+    // Sema suspends transaction checks inside deferred lambdas. Do not attach
+    // a foreign call in a closure to the outer transaction at codegen time.
+    lam_env.txn_handle = None;
+    lam_env.txn_undo_needed = None;
     // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
     // Computed before the clone-capture prelude so a moving escape can also clone
     // borrowed/Fn captures rustc would otherwise reject (E0521).
@@ -419,6 +423,8 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
     captures.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut lam_env = fork_panic(env);
+    lam_env.txn_handle = None;
+    lam_env.txn_undo_needed = None;
     for cap in &captures {
         let slot = match env.origin_of(&cap.source) {
             Some(origin) => TLocal::user(&cap.name).with_origin(origin),
@@ -512,6 +518,8 @@ pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
 /// `{ <prep> <closure> }` when there are cloned captures).
 pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
     let mut lam_env = fork_panic(env);
+    lam_env.txn_handle = None;
+    lam_env.txn_undo_needed = None;
     let mut prep = String::new();
     let mut cloned_captures = lam.meta.cloned_captures.clone();
     cloned_captures.retain(|capture| {

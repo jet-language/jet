@@ -173,6 +173,26 @@ pub fn effect_set_has_root(set: &EffectSet, root: Effect) -> bool {
 }
 
 impl<'a> super::Checker<'a> {
+    /// D-BOUND-UNDO1=A: foreign calls are an explicit transaction boundary.
+    /// Keep the policy here so every call-resolution route uses the same check;
+    /// codegen only consumes the proven inverse fact.
+    pub(crate) fn check_foreign_transaction_call(
+        &mut self,
+        sig: &crate::AST::FuncSig,
+        api: &str,
+        span: Span,
+    ) {
+        if !sig.is_extern {
+            return;
+        }
+        if sig.foreign_effect_root.is_none() {
+            self.record_effect(Effect::FFI.name(), span);
+        }
+        if self.txn_depth > 0 && sig.undo.is_none() {
+            self.diags.push(e0746(api, Effect::FFI, span));
+        }
+    }
+
     /// D-EFF1: record an effect this function reaches directly — into the
     /// function's set and every open `#Caps(…)` region (which must account for
     /// effects reached inside it, E0741).
@@ -354,10 +374,23 @@ impl<'a> super::Checker<'a> {
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
-/// E0746 (D-TXN2): an irreversible effect (Net/FS/Exec) used directly inside a
+/// E0746 (D-TXN2/D-BOUND-UNDO1): an irreversible effect (Net/FS/Exec/FFI) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() => { … })`.
 pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
+    if e == Effect::FFI {
+        return Diagnostic::error(
+            "E0746",
+            format!(
+                "`{api}` has the `FFI` effect, which can't be rolled back inside a `#Transact` block"
+            ),
+            "a foreign function can change external state that the compiler cannot undo automatically"
+                .to_string(),
+            "move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse"
+                .to_string(),
+            Some(span),
+        );
+    }
     Diagnostic::error(
         "E0746",
         format!(

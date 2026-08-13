@@ -173,6 +173,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-BOUND-UNDO1=A: prove the inverse named by `#Undo` is callable before
+    /// codegen can lower it into a rollback closure.
+    fn check_undo_contract(&mut self, f: &Func) {
+        let Some((_inverse, span)) = &f.undo else {
+            return;
+        };
+        if f.inline_foreign.is_none() {
+            self.diags.push(Diagnostic::error(
+                "E3212",
+                "`#Undo` only applies to a foreign binding".to_string(),
+                "an undo contract names the Jet function that compensates a foreign call"
+                    .to_string(),
+                "attach `#Undo(inverse)` to `#FFI(...) fn` or an extern declaration"
+                    .to_string(),
+                Some(*span),
+            ));
+            return;
+        }
+    }
+
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
@@ -328,6 +348,7 @@ impl<'a> Checker<'a> {
         // in scope above (the Jet signature is a real, checked contract at call
         // sites); validate the tier gate and skip the ordinary body/return
         // checker (the empty statement body would otherwise be E0114).
+        self.check_undo_contract(f);
         if f.inline_foreign.is_some() {
             self.check_inline_foreign_fn(f);
             return;
@@ -1359,6 +1380,7 @@ pub(crate) fn synthesize_delegation_method(
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        undo: None,
         markers: Vec::new(),
         body: vec![body_stmt],
     }
@@ -1439,6 +1461,7 @@ pub(crate) fn synthesize_default_method(
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        undo: None,
         markers: Vec::new(),
         body: body.to_vec(),
     }

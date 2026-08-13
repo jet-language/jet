@@ -59,6 +59,25 @@ pub fn jit_run(name: &str, src: &str) -> (i32, String, String) {
     jit_run_with_env(name, src, &[])
 }
 
+pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
+    let dir = unique_tmp("jet_jit_run_traced");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join(format!("{name}.jet"));
+    fs::write(&jet_path, src).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
 /// `jit_run` with environment variables the program can read back.
 ///
 /// A trap test needs an operand the comptime evaluator cannot see. It folds

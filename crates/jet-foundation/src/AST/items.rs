@@ -808,6 +808,8 @@ pub struct ExternFn {
     /// Compiler-owned effect root for a generated foreign binding. User-written
     /// extern declarations leave this unset and retain maximal foreign effects.
     pub effect_root: Option<String>,
+    /// D-BOUND-UNDO1=A: optional compensating function for transactional calls.
+    pub undo: Option<(String, Span)>,
     pub span: Span,
 }
 
@@ -1063,6 +1065,8 @@ pub struct Func {
     /// the per-language binder compiles; `body` is empty and the Jet signature is
     /// the checked contract sema enforces at every call site.
     pub inline_foreign: Option<InlineForeign>,
+    /// D-BOUND-UNDO1=A: compensating function registered on transaction rollback.
+    pub undo: Option<(String, Span)>,
     /// D-VERDICT-1455-1: every marker written on this callable, in source
     /// order, kept whole. The typed fields above are the decoded facts codegen
     /// reads; this is the record every *consumer* reads — formatter, reflection,
@@ -1127,6 +1131,7 @@ impl Func {
             pre: Vec::new(),
             post: Vec::new(),
             inline_foreign: None,
+            undo: None,
             markers: Vec::new(),
             body,
         }

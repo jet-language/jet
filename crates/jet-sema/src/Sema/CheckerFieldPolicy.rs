@@ -405,6 +405,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        undo: None,
         markers: Vec::new(),
         body: vec![Stmt::Return(Some(body_expr), span)],
     }

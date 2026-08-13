@@ -89,6 +89,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         every: None,
         task_metadata: None,
         inline_foreign: None,
+        undo: None,
         markers: Vec::new(),
         body: Vec::new(),
     }

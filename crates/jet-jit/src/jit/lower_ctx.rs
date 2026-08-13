@@ -233,8 +233,11 @@ pub(crate) enum TxnSnap {
 pub(crate) struct TxnFrame {
     /// `(place, snap_value, kind)`.
     pub snapshots: Vec<(String, Value, TxnSnap)>,
-    pub on_commit: Vec<FuncId>,
-    pub on_rollback: Vec<FuncId>,
+    /// `(callback, capture environment)`. A `None` environment is the
+    /// capture-free callback ABI; `Some` is the leading environment argument
+    /// used by captured lambdas.
+    pub on_commit: Vec<(FuncId, Option<Value>)>,
+    pub on_rollback: Vec<(FuncId, Option<Value>)>,
 }
 
 impl LowerCtx<'_, '_> {
@@ -248,6 +251,52 @@ impl LowerCtx<'_, '_> {
         let func_ref = self.module.declare_func_in_func(id, self.b.func);
         let call = self.b.ins().call(func_ref, args);
         self.b.inst_results(call)[0]
+    }
+
+    /// Materialize the environment expected by a captured callback. Ordinary
+    /// function-value lowering performs the same packing; transaction hooks
+    /// keep the handle directly because they call the compiled callback later
+    /// instead of binding it to a host callable.
+    fn lower_lambda_capture_env(&mut self, lambda: &TLambda) -> Result<Option<Value>, String> {
+        if lambda.captures.is_empty() {
+            return Ok(None);
+        }
+        let env = self.call_host(self.host.coll.list_new, &[]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        for (outer, _place, ty) in &lambda.captures {
+            let key = TIR::local_place(outer);
+            let var = self
+                .vars
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit transaction hook capture unknown `{outer}`"))?;
+            let value = self.b.use_var(var);
+            let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                Some(clif) if clif == types::F64 => self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    value,
+                ),
+                Some(clif) if clif == types::I8 || clif == types::I32 => {
+                    self.b.ins().uextend(types::I64, value)
+                }
+                Some(clif) if clif == types::I64 => value,
+                Some(clif) => {
+                    return Err(format!(
+                        "jit transaction hook capture unsupported: {ty:?} ({clif:?})"
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "jit transaction hook capture unsupported: {ty:?}"
+                    ));
+                }
+            };
+            self.b.ins().call(push, &[env, raw]);
+        }
+        Ok(Some(env))
     }
 
     /// Lower a plain Core row through the resident host symbol derived from
@@ -2825,9 +2874,13 @@ impl LowerCtx<'_, '_> {
             return Ok(());
         };
         let hooks: Vec<_> = frame.on_commit.drain(..).rev().collect();
-        for id in hooks {
+        for (id, env) in hooks {
             let func_ref = self.module.declare_func_in_func(id, self.b.func);
-            self.b.ins().call(func_ref, &[]);
+            if let Some(env) = env {
+                self.b.ins().call(func_ref, &[env]);
+            } else {
+                self.b.ins().call(func_ref, &[]);
+            }
             self.emit_trap_check()?;
         }
         Ok(())
@@ -2839,7 +2892,10 @@ impl LowerCtx<'_, '_> {
     /// need for commit hooks.
     fn emit_txn_rollbacks_keep(&mut self) -> Result<(), String> {
         // Snapshot the restore plan so emit_trap_check can mutably borrow self.
-        let frames: Vec<(Vec<(String, Value, TxnSnap)>, Vec<FuncId>)> = self
+        let frames: Vec<(
+            Vec<(String, Value, TxnSnap)>,
+            Vec<(FuncId, Option<Value>)>,
+        )> = self
             .txn_stack
             .iter()
             .rev()
@@ -2878,9 +2934,13 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             }
-            for id in hooks.into_iter().rev() {
+            for (id, env) in hooks.into_iter().rev() {
                 let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                self.b.ins().call(func_ref, &[]);
+                if let Some(env) = env {
+                    self.b.ins().call(func_ref, &[env]);
+                } else {
+                    self.b.ins().call(func_ref, &[]);
+                }
                 self.emit_trap_check()?;
             }
         }
@@ -14856,10 +14916,11 @@ impl LowerCtx<'_, '_> {
                         self.spawn_site,
                         self.runtime,
                     )?;
+                    let env = self.lower_lambda_capture_env(executable)?;
                     let Some(frame) = self.txn_stack.last_mut() else {
                         return Err("jit on_commit outside transaction".to_string());
                     };
-                    frame.on_commit.push(id);
+                    frame.on_commit.push((id, env));
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
                 TCoreClosureKind::OnRollback { executable, .. } => {
@@ -14874,10 +14935,11 @@ impl LowerCtx<'_, '_> {
                         self.spawn_site,
                         self.runtime,
                     )?;
+                    let env = self.lower_lambda_capture_env(executable)?;
                     let Some(frame) = self.txn_stack.last_mut() else {
                         return Err("jit on_rollback outside transaction".to_string());
                     };
-                    frame.on_rollback.push(id);
+                    frame.on_rollback.push((id, env));
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
                 TCoreClosureKind::ReactiveDerived { .. } => self.lower_reactive_cb_call(
