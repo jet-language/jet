@@ -1056,12 +1056,47 @@ pub fn seed_build_facts(
             None,
         )]
     })?;
+    let profile_key = jet_foundation::Policy::FactKey::new("Build.Profile");
+    let mut profile_contributions = vec![jet_foundation::Policy::FactContribution::new(
+        "Build.Profile",
+        jet_foundation::Policy::FactValue::Text("dev".to_string()),
+        jet_foundation::Policy::SourceScope::Package,
+        jet_foundation::Policy::ContributionLayer::Declaration,
+        manifest
+            .as_ref()
+            .map(|facts| facts.origin.clone())
+            .unwrap_or_else(|| "<default>".to_string()),
+    )];
+    if profile != "dev" {
+        profile_contributions.push(jet_foundation::Policy::FactContribution::new(
+            "Build.Profile",
+            jet_foundation::Policy::FactValue::Text(profile.to_string()),
+            jet_foundation::Policy::SourceScope::Package,
+            jet_foundation::Policy::ContributionLayer::CommandLine,
+            "command line",
+        ));
+    }
+    let profile_fact = jet_foundation::Policy::resolve(profile_key, profile_contributions)
+        .map_err(|error| {
+            vec![Diagnostic::error(
+                "E3521",
+                "the selected build profile has conflicting contributions".to_string(),
+                error.message(),
+                "make the profile writers agree, or select one explicit profile".to_string(),
+                None,
+            )]
+        })?;
+    let contributions = profile_fact
+        .into_iter()
+        .map(|fact| (fact.key.name.clone(), fact))
+        .collect();
     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
         package_name,
         package_version,
         os: bundle.active_os,
         profile: profile.to_string(),
         stamp,
+        contributions,
     };
     Ok(())
 }

@@ -21,7 +21,7 @@ impl PolicyKey {
     pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolicyValue {
     Enabled,
     Limit(u64),
@@ -44,6 +44,238 @@ impl PolicyValue {
         Self::Relaxed => ".Relaxed".into(), Self::PerSite => ".PerSite".into(),
         Self::Track => ".Track".into(), Self::Skip => ".Skip".into(), Self::Allow => ".Allow".into(),
     } }
+}
+
+/// The six lexical source rungs used by every build fact. Package is the
+/// outermost source and Item is the nearest source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum SourceScope { Package, File, Module, Function, Block, Item }
+
+impl SourceScope {
+    pub const fn name(self) -> &'static str { match self {
+        Self::Package => "package",
+        Self::File => "file",
+        Self::Module => "module",
+        Self::Function => "function",
+        Self::Block => "block",
+        Self::Item => "item",
+    } }
+
+    const fn rank(self) -> u8 { match self {
+        Self::Package => 0,
+        Self::File => 1,
+        Self::Module => 2,
+        Self::Function => 3,
+        Self::Block => 4,
+        Self::Item => 5,
+    } }
+}
+
+/// Contribution layers are ordered from least to most explicit. A later
+/// layer may replace an earlier layer; two different values at one deciding
+/// layer are a hard conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum ContributionLayer {
+    Declaration,
+    OptimizationBundle,
+    Workspace,
+    Environment,
+    System,
+    Fleet,
+    CommandLine,
+}
+
+impl ContributionLayer {
+    pub const fn name(self) -> &'static str { match self {
+        Self::Declaration => "declaration",
+        Self::OptimizationBundle => "optimization bundle",
+        Self::Workspace => "workspace",
+        Self::Environment => "environment",
+        Self::System => "system",
+        Self::Fleet => "fleet",
+        Self::CommandLine => "command line",
+    } }
+
+    const fn rank(self) -> u8 { match self {
+        Self::Declaration => 0,
+        Self::OptimizationBundle => 1,
+        Self::Workspace => 2,
+        Self::Environment => 3,
+        Self::System => 4,
+        Self::Fleet => 5,
+        Self::CommandLine => 6,
+    } }
+
+    const fn can_force(self) -> bool {
+        matches!(self, Self::System | Self::Fleet)
+    }
+}
+
+/// How a fact combines across the contribution ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FactMerge { Override, TightenOnly }
+
+/// A registered fact key. The registry supplies the key's merge direction;
+/// contributors supply only a value and provenance.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FactKey {
+    pub name: String,
+    pub merge: FactMerge,
+}
+
+impl FactKey {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), merge: FactMerge::Override }
+    }
+
+    pub fn tighten_only(name: impl Into<String>) -> Self {
+        Self { name: name.into(), merge: FactMerge::TightenOnly }
+    }
+}
+
+/// Tier-0 values that can travel through the contribution law. Facts erase
+/// before runtime; this carrier exists only for folding and explanation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FactValue {
+    Bool(bool),
+    Int(i64),
+    Char(char),
+    Text(String),
+    Enum(String),
+    OptionalText(Option<String>),
+    Policy(PolicyValue),
+}
+
+impl FactValue {
+    pub fn display(&self) -> String { match self {
+        Self::Bool(value) => value.to_string(),
+        Self::Int(value) => value.to_string(),
+        Self::Char(value) => format!("'{value}'"),
+        Self::Text(value) => format!("\"{value}\""),
+        Self::Enum(value) => format!(".{value}"),
+        Self::OptionalText(Some(value)) => format!("Some(\"{value}\")"),
+        Self::OptionalText(None) => "None".to_string(),
+        Self::Policy(value) => value.display(),
+    } }
+
+    fn safety_relation(&self, next: &Self) -> SafetyRelation {
+        if self == next {
+            return SafetyRelation::Same;
+        }
+        match (self, next) {
+            (Self::Bool(outer), Self::Bool(inner)) => {
+                if *outer && !*inner { SafetyRelation::Tighten } else { SafetyRelation::Widen }
+            }
+            (Self::Int(outer), Self::Int(inner)) => {
+                if inner < outer { SafetyRelation::Tighten } else { SafetyRelation::Widen }
+            }
+            (Self::Policy(outer), Self::Policy(inner)) => {
+                if gate_widens(*outer, *inner) { SafetyRelation::Widen } else { SafetyRelation::Tighten }
+            }
+            _ => SafetyRelation::Incomparable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SafetyRelation { Same, Tighten, Widen, Incomparable }
+
+/// One written contributor to one fact. `target` lets a source-scoped value
+/// identify the item it governs without changing the global ordering law.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FactContribution {
+    pub key: String,
+    pub value: FactValue,
+    pub scope: SourceScope,
+    pub layer: ContributionLayer,
+    pub span: Span,
+    pub target: Option<Span>,
+    pub source: String,
+    pub force: bool,
+    pub force_reason: Option<String>,
+}
+
+impl FactContribution {
+    pub fn new(
+        key: impl Into<String>,
+        value: FactValue,
+        scope: SourceScope,
+        layer: ContributionLayer,
+        source: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            value,
+            scope,
+            layer,
+            span: Span::new(0, 0),
+            target: None,
+            source: source.into(),
+            force: false,
+            force_reason: None,
+        }
+    }
+
+    pub fn at(mut self, span: Span) -> Self {
+        self.span = span;
+        self
+    }
+
+    pub fn for_target(mut self, target: Span) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn force_with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.force = true;
+        self.force_reason = Some(reason.into());
+        self
+    }
+
+    pub fn force(self) -> Self {
+        self.force_with_reason(".Force")
+    }
+}
+
+/// The resolved value plus the complete writer chain. `effective` indexes
+/// `provenance`, so explain output can mark exactly one writer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveFact {
+    pub key: FactKey,
+    pub value: FactValue,
+    pub provenance: Vec<FactContribution>,
+    pub effective: usize,
+    pub forced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactError {
+    InvalidForce { key: String, layer: ContributionLayer, source: String },
+    Conflict { key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution },
+    SafetyWidening { key: String, previous: FactContribution, next: FactContribution },
+    SafetyIncomparable { key: String, previous: FactContribution, next: FactContribution },
+}
+
+impl FactError {
+    pub fn message(&self) -> String { match self {
+        Self::InvalidForce { key, layer, source } => format!("fact `{key}` uses `.Force` at the unsupported {} layer ({source})", layer.name()),
+        Self::Conflict { key, layer, first, second } => format!("fact `{key}` has conflicting values at the {} layer: {}:{} and {}:{}", layer.name(), first.source, first.span.start, second.source, second.span.start),
+        Self::SafetyWidening { key, previous, next } => format!("fact `{key}` widens from {} at {} to {} at {}", previous.value.display(), previous.source, next.value.display(), next.source),
+        Self::SafetyIncomparable { key, previous, next } => format!("fact `{key}` has unrelated safety values at {} and {}", previous.source, next.source),
+    } }
+
+    /// The same typed conflict reaches the product diagnostic and names both
+    /// written locations. Other resolver failures remain typed resolver errors.
+    pub fn diagnostic(&self) -> Option<crate::Diagnostics::Diagnostic> {
+        let Self::Conflict { key, layer, first, second } = self else { return None };
+        Some(crate::Diagnostics::Diagnostic::error(
+            "E3521",
+            format!("fact `{key}` has conflicting values at the {} layer", layer.name()),
+            format!("`{}` writes {} at {}:{}; `{}` writes {} at {}:{}.", first.source, first.value.display(), first.span.start, first.span.end, second.source, second.value.display(), second.span.start, second.span.end),
+            "make same-layer writers agree, or move one value to a more explicit contribution layer".to_string(),
+            Some(second.span),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +334,7 @@ pub enum PolicyError {
 
 /// Resolve declarations ordered outer-to-inner. One effective value is returned,
 /// while every shadowed/tightened declaration remains available to explain tools.
-pub fn resolve(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDeclaration>) -> Result<Option<EffectivePolicy>, PolicyError> {
+fn resolve_policy(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDeclaration>) -> Result<Option<EffectivePolicy>, PolicyError> {
     let mut declarations = declarations.into_iter().filter(|d| d.key == key).collect::<Vec<_>>();
     declarations.sort_by_key(|declaration| declaration.scope.rank());
     let mut chain = Vec::new();
@@ -138,6 +370,183 @@ pub fn resolve(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDecl
         chain.push(declaration);
     }
     Ok(effective.map(|value| EffectivePolicy { key, value, provenance: chain }))
+}
+
+/// One resolver seam for policies and build facts. The key selects the
+/// contribution law; no caller gets to choose a second merge algorithm.
+pub trait ResolutionKey: Sized {
+    type Declaration;
+    type Effective;
+    type Error;
+
+    fn resolve_key(
+        key: Self,
+        declarations: Vec<Self::Declaration>,
+    ) -> Result<Option<Self::Effective>, Self::Error>;
+}
+
+impl ResolutionKey for PolicyKey {
+    type Declaration = PolicyDeclaration;
+    type Effective = EffectivePolicy;
+    type Error = PolicyError;
+
+    fn resolve_key(
+        key: Self,
+        declarations: Vec<Self::Declaration>,
+    ) -> Result<Option<Self::Effective>, Self::Error> {
+        resolve_policy(key, declarations)
+    }
+}
+
+impl ResolutionKey for FactKey {
+    type Declaration = FactContribution;
+    type Effective = EffectiveFact;
+    type Error = FactError;
+
+    fn resolve_key(
+        key: Self,
+        declarations: Vec<Self::Declaration>,
+    ) -> Result<Option<Self::Effective>, Self::Error> {
+        resolve_fact(key, declarations)
+    }
+}
+
+pub fn resolve<K, I>(
+    key: K,
+    declarations: I,
+) -> Result<Option<K::Effective>, K::Error>
+where
+    K: ResolutionKey,
+    I: IntoIterator<Item = K::Declaration>,
+{
+    K::resolve_key(key, declarations.into_iter().collect())
+}
+
+fn resolve_fact(
+    key: FactKey,
+    declarations: Vec<FactContribution>,
+) -> Result<Option<EffectiveFact>, FactError> {
+    let mut chain = declarations
+        .into_iter()
+        .filter(|declaration| declaration.key == key.name)
+        .collect::<Vec<_>>();
+    if chain.is_empty() {
+        return Ok(None);
+    }
+    chain.sort_by(|left, right| {
+        left.layer
+            .rank()
+            .cmp(&right.layer.rank())
+            .then_with(|| left.scope.rank().cmp(&right.scope.rank()))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.span.start.cmp(&right.span.start))
+            .then_with(|| left.span.end.cmp(&right.span.end))
+    });
+
+    for declaration in &chain {
+        if declaration.force && !declaration.layer.can_force() {
+            return Err(FactError::InvalidForce {
+                key: key.name.clone(),
+                layer: declaration.layer,
+                source: declaration.source.clone(),
+            });
+        }
+    }
+
+    let mut group: Option<(ContributionLayer, SourceScope)> = None;
+    let mut first_in_group: Option<&FactContribution> = None;
+    for declaration in &chain {
+        let identity = (declaration.layer, declaration.scope);
+        if group != Some(identity) {
+            group = Some(identity);
+            first_in_group = Some(declaration);
+        } else if declaration.value != first_in_group.expect("fact conflict group has a first writer").value {
+            let first = first_in_group.expect("fact conflict group has a first writer");
+            return Err(FactError::Conflict {
+                key: key.name.clone(),
+                layer: declaration.layer,
+                first: first.clone(),
+                second: declaration.clone(),
+            });
+        }
+    }
+
+    let force_layer = chain
+        .iter()
+        .filter(|declaration| declaration.force)
+        .map(|declaration| declaration.layer.rank())
+        .max();
+    let eligible = |declaration: &FactContribution| {
+        force_layer.map_or(true, |layer| declaration.layer.rank() <= layer)
+    };
+
+    let effective_layer = chain
+        .iter()
+        .filter(|declaration| eligible(declaration))
+        .map(|declaration| declaration.layer.rank())
+        .max()
+        .expect("non-empty fact chain");
+    let effective_scope = chain
+        .iter()
+        .filter(|declaration| eligible(declaration) && declaration.layer.rank() == effective_layer)
+        .map(|declaration| declaration.scope.rank())
+        .max()
+        .expect("non-empty effective fact layer");
+    let candidates = chain
+        .iter()
+        .filter(|declaration| {
+            eligible(declaration)
+                && declaration.layer.rank() == effective_layer
+                && declaration.scope.rank() == effective_scope
+        })
+        .collect::<Vec<_>>();
+    let first = candidates.first().expect("non-empty effective fact candidates");
+    for second in candidates.iter().skip(1) {
+        if second.value != first.value {
+            return Err(FactError::Conflict {
+                key: key.name.clone(),
+                layer: first.layer,
+                first: (**first).clone(),
+                second: (**second).clone(),
+            });
+        }
+    }
+    if key.merge == FactMerge::TightenOnly {
+        let mut previous: Option<&FactContribution> = None;
+        for declaration in chain.iter().filter(|declaration| eligible(declaration)) {
+            if let Some(previous) = previous {
+                match previous.value.safety_relation(&declaration.value) {
+                    SafetyRelation::Same | SafetyRelation::Tighten => {}
+                    SafetyRelation::Widen => {
+                        return Err(FactError::SafetyWidening {
+                            key: key.name.clone(),
+                            previous: previous.clone(),
+                            next: declaration.clone(),
+                        });
+                    }
+                    SafetyRelation::Incomparable => {
+                        return Err(FactError::SafetyIncomparable {
+                            key: key.name.clone(),
+                            previous: previous.clone(),
+                            next: declaration.clone(),
+                        });
+                    }
+                }
+            }
+            previous = Some(declaration);
+        }
+    }
+    let effective = chain
+        .iter()
+        .position(|declaration| std::ptr::eq(declaration, *first))
+        .expect("effective fact candidate belongs to chain");
+    Ok(Some(EffectiveFact {
+        key,
+        value: first.value.clone(),
+        provenance: chain,
+        effective,
+        forced: first.force || force_layer.is_some(),
+    }))
 }
 
 fn gate_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
@@ -272,12 +681,38 @@ pub fn resolve_with_gates(
     Ok(effective)
 }
 
-pub fn explain(policy: &EffectivePolicy) -> String {
-    let mut out = format!("{} = {}", policy.key.name(), policy.value.display());
-    for declaration in &policy.provenance {
-        out.push_str(&format!("\n  {} {} at {}:{}..{}", declaration.scope.name(), declaration.value.display(), declaration.source, declaration.span.start, declaration.span.end));
+pub trait ExplainableResolution {
+    fn explain_resolution(&self) -> String;
+}
+
+impl ExplainableResolution for EffectivePolicy {
+    fn explain_resolution(&self) -> String {
+        let mut out = format!("{} = {}", self.key.name(), self.value.display());
+        for (index, declaration) in self.provenance.iter().enumerate() {
+            let status = if index + 1 == self.provenance.len() { "effective" } else { "shadowed" };
+            out.push_str(&format!("\n  [{status}] {} {} at {}:{}..{}", declaration.scope.name(), declaration.value.display(), declaration.source, declaration.span.start, declaration.span.end));
+        }
+        out
     }
-    out
+}
+
+impl ExplainableResolution for EffectiveFact {
+    fn explain_resolution(&self) -> String {
+        let mut out = format!("{} = {}", self.key.name, self.value.display());
+        for (index, contribution) in self.provenance.iter().enumerate() {
+            let status = if index == self.effective { "effective" } else if contribution.force { "pinned" } else { "shadowed" };
+            let pin = contribution
+                .force_reason
+                .as_deref()
+                .map_or(String::new(), |reason| format!(" pin={reason}"));
+            out.push_str(&format!("\n  [{status}] {} / {} {} at {}:{}..{}{}", contribution.layer.name(), contribution.scope.name(), contribution.value.display(), contribution.source, contribution.span.start, contribution.span.end, pin));
+        }
+        out
+    }
+}
+
+pub fn explain<R: ExplainableResolution>(resolution: &R) -> String {
+    resolution.explain_resolution()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1355,5 +1790,142 @@ mod tests {
             declaration(super::PolicyScope::Module, 2048, 2, "Source/main.jet"),
         ];
         assert!(matches!(super::resolve(super::PolicyKey::ArenaBounded, widening), Err(super::PolicyError::Widening { .. })));
+    }
+
+    #[test]
+    fn contribution_law_orders_all_scopes_and_layers() {
+        let key = super::FactKey::new("Build.Profile");
+        let contribution = |value, scope, layer, source| {
+            super::FactContribution::new(
+                "Build.Profile",
+                super::FactValue::Text(value.to_string()),
+                scope,
+                layer,
+                source,
+            )
+        };
+        let resolved = super::resolve(
+            key.clone(),
+            [
+                contribution("package", super::SourceScope::Package, super::ContributionLayer::Declaration, "package.jet"),
+                contribution("file", super::SourceScope::File, super::ContributionLayer::Declaration, "src/main.jet"),
+                contribution("module", super::SourceScope::Module, super::ContributionLayer::Declaration, "src/main.jet"),
+                contribution("function", super::SourceScope::Function, super::ContributionLayer::Declaration, "src/main.jet"),
+                contribution("block", super::SourceScope::Block, super::ContributionLayer::Declaration, "src/main.jet"),
+                contribution("item", super::SourceScope::Item, super::ContributionLayer::Declaration, "src/main.jet"),
+                contribution("bundle", super::SourceScope::Package, super::ContributionLayer::OptimizationBundle, "build bundle"),
+                contribution("workspace", super::SourceScope::Package, super::ContributionLayer::Workspace, "workspace.jet"),
+                contribution("environment", super::SourceScope::Package, super::ContributionLayer::Environment, "env.dev"),
+                contribution("system", super::SourceScope::Package, super::ContributionLayer::System, "system.dev"),
+                contribution("fleet", super::SourceScope::Package, super::ContributionLayer::Fleet, "fleet.ci"),
+                contribution("cli", super::SourceScope::Package, super::ContributionLayer::CommandLine, "command line"),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.key, key);
+        assert_eq!(resolved.value, super::FactValue::Text("cli".to_string()));
+        assert_eq!(resolved.provenance.len(), 12);
+        assert_eq!(resolved.effective, 11);
+    }
+
+    #[test]
+    fn contribution_law_conflicts_same_layer_and_force_pins_later_layers() {
+        let key = super::FactKey::new("Build.Profile");
+        let same_layer = [
+            super::FactContribution::new(
+                "Build.Profile",
+                super::FactValue::Text("debug".to_string()),
+                super::SourceScope::Package,
+                super::ContributionLayer::Workspace,
+                "workspace-a.jet",
+            )
+            .at(crate::Diagnostics::Span::new(10, 11)),
+            super::FactContribution::new(
+                "Build.Profile",
+                super::FactValue::Text("release".to_string()),
+                super::SourceScope::Package,
+                super::ContributionLayer::Workspace,
+                "workspace-b.jet",
+            )
+            .at(crate::Diagnostics::Span::new(20, 21)),
+        ];
+        let error = super::resolve(key.clone(), same_layer).unwrap_err();
+        assert!(matches!(&error, super::FactError::Conflict { .. }));
+        assert!(error.diagnostic().is_some());
+
+        let resolved = super::resolve(
+            key,
+            [
+                super::FactContribution::new(
+                    "Build.Profile",
+                    super::FactValue::Text("debug".to_string()),
+                    super::SourceScope::Package,
+                    super::ContributionLayer::Declaration,
+                    "package.jet",
+                ),
+                super::FactContribution::new(
+                    "Build.Profile",
+                    super::FactValue::Text("release".to_string()),
+                    super::SourceScope::Package,
+                    super::ContributionLayer::System,
+                    "system.jet",
+                )
+                .force_with_reason("release certification"),
+                super::FactContribution::new(
+                    "Build.Profile",
+                    super::FactValue::Text("debug".to_string()),
+                    super::SourceScope::Package,
+                    super::ContributionLayer::CommandLine,
+                    "command line",
+                ),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.value, super::FactValue::Text("release".to_string()));
+        let explanation = super::explain(&resolved);
+        assert!(explanation.contains("[effective] system"));
+        assert!(explanation.contains("pin=release certification"));
+        assert!(explanation.contains("[shadowed] command line"));
+    }
+
+    #[test]
+    fn tighten_only_facts_reject_widening() {
+        let key = super::FactKey::tighten_only("Build.Limit");
+        let declarations = [
+            super::FactContribution::new(
+                "Build.Limit",
+                super::FactValue::Int(8),
+                super::SourceScope::Package,
+                super::ContributionLayer::Declaration,
+                "package.jet",
+            ),
+            super::FactContribution::new(
+                "Build.Limit",
+                super::FactValue::Int(4),
+                super::SourceScope::Package,
+                super::ContributionLayer::Workspace,
+                "workspace.jet",
+            ),
+        ];
+        assert!(super::resolve(key.clone(), declarations).is_ok());
+        let widening = [
+            super::FactContribution::new(
+                "Build.Limit",
+                super::FactValue::Int(4),
+                super::SourceScope::Package,
+                super::ContributionLayer::Declaration,
+                "package.jet",
+            ),
+            super::FactContribution::new(
+                "Build.Limit",
+                super::FactValue::Int(8),
+                super::SourceScope::Package,
+                super::ContributionLayer::Workspace,
+                "workspace.jet",
+            ),
+        ];
+        assert!(matches!(super::resolve(key, widening), Err(super::FactError::SafetyWidening { .. })));
     }
 }

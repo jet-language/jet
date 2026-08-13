@@ -1,4 +1,4 @@
-//! `jet explain <CODE>` — offline terminal essays for every diagnostic code.
+//! `jet explain <CODE|FACT>` — offline essays for diagnostics and build facts.
 //!
 //! The index is built from the typed compile-time diagnostic rows, so
 //! `explain` works with no network and no files on disk. Every row gets an
@@ -270,6 +270,26 @@ pub fn lookup_policy(key: jet_foundation::Policy::PolicyKey, declarations: impl 
         what: Some(jet_foundation::Policy::explain(&effective)),
         why: Some("the nearest applicable declaration wins subject to the registry's tightening and conflict rules".to_string()),
         fix: Some("change the nearest declaration, or remove it to inherit the next outer value".to_string()),
+        example: None,
+        retired: false,
+    })
+}
+
+/// Build the one-chain explanation for a resolved build fact. The caller owns
+/// discovery of written contributors; this projection owns the product voice
+/// and marks the effective writer, including a system/fleet `.Force` pin.
+pub fn lookup_fact(
+    key: jet_foundation::Policy::FactKey,
+    contributions: impl IntoIterator<Item = jet_foundation::Policy::FactContribution>,
+) -> Option<Explanation> {
+    let effective = jet_foundation::Policy::resolve(key.clone(), contributions).ok()??;
+    Some(Explanation {
+        code: key.name.clone(),
+        stage: "build fact".to_string(),
+        meaning: format!("effective build fact `{}`", key.name),
+        what: Some(jet_foundation::Policy::explain(&effective)),
+        why: Some("the nearest source writer wins within the most explicit contribution layer; same-layer disagreement is an error".to_string()),
+        fix: Some("change the effective writer, or remove it to inherit the next writer in the chain".to_string()),
         example: None,
         retired: false,
     })

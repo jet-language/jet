@@ -154,6 +154,53 @@ fn load_pkg_profiles(
         .map(|mf| mf.build_profiles)
 }
 
+/// Resolve the profile name through the shared contribution law. Profile
+/// details remain owned by the package profile table; this function decides
+/// only which writer supplies the selected name.
+fn resolve_profile_name(named_profile: Option<&str>) -> Option<String> {
+    let mut contributions = vec![jet::Policy::FactContribution::new(
+        "Build.Profile",
+        jet::Policy::FactValue::Text("dev".to_string()),
+        jet::Policy::SourceScope::Package,
+        jet::Policy::ContributionLayer::Declaration,
+        "<default>",
+    )];
+    if let Some(name) = named_profile {
+        contributions.push(jet::Policy::FactContribution::new(
+            "Build.Profile",
+            jet::Policy::FactValue::Text(name.to_string()),
+            jet::Policy::SourceScope::Package,
+            jet::Policy::ContributionLayer::CommandLine,
+            "command line",
+        ));
+    }
+    let fact = match jet::Policy::resolve(jet::Policy::FactKey::new("Build.Profile"), contributions) {
+        Ok(fact) => fact,
+        Err(error) => {
+            crate::cli_error!(
+                @full "E3521",
+                error.message(),
+                "same-layer profile writers cannot disagree",
+                "make the profile writers agree, or select one explicit profile"
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }?;
+    match fact.value {
+        jet::Policy::FactValue::Text(name) if name != "dev" => Some(name),
+        jet::Policy::FactValue::Text(_) => None,
+        _ => {
+            crate::cli_error!(
+                @full "E3521",
+                "the selected build profile is not a text fact",
+                "Build.Profile names optimization bundles",
+                "select a named text profile"
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
 /// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
 /// to a `BuildProfile`. Manifest entries override blessed defaults for
 /// `release`/`debug`/`ci`; unknown names emit E1219 and exit.
@@ -232,8 +279,8 @@ pub(crate) fn run_compile_cmd(
         BuildProfile::Freestanding
     } else if small {
         BuildProfile::Small
-    } else if let Some(name) = named_profile {
-        resolve_named_profile(name, file, mode)
+    } else if let Some(name) = resolve_profile_name(named_profile) {
+        resolve_named_profile(&name, file, mode)
     } else {
         BuildProfile::Default
     };

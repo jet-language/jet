@@ -1560,19 +1560,60 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
     }
 }
 
-/// `jet explain <CODE>` — print the offline essay for a diagnostic code.
-pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
+/// `jet explain <CODE|FACT> [file]` — print a diagnostic essay or one complete
+/// build-fact writer chain.
+pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: OutputMode) {
     let code = match code {
         Some(c) => c,
         None => {
             eprintln!(
-                "usage: {} explain <CODE|POLICY>\n       {} explain marker <file>:<line> <policy-key>",
+                "usage: {} explain <CODE|FACT> [file]\n       {} explain marker <file>:<line> <policy-key>",
                 jet::Syntax::BINARY_NAME,
                 jet::Syntax::BINARY_NAME
             );
             exit(ExitCodes::USAGE);
         }
     };
+    if code.eq_ignore_ascii_case("Build.Profile") || code == "@build.profile" {
+        let file = fact_file
+            .map(PathBuf::from)
+            .or_else(|| {
+                let cwd = std::env::current_dir().ok()?;
+                crate::resolve_bare_entry("run", &cwd, None)
+            })
+            .unwrap_or_else(|| {
+                crate::cli_error!("E2104", "a source file is required to explain this build fact");
+                exit(ExitCodes::USAGE);
+            });
+        let mut bundle = jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
+            for diagnostic in diags {
+                eprintln!("{}", diagnostic.what);
+            }
+            exit(ExitCodes::USER_ERROR);
+        });
+        if let Err(diags) = jet::Driver::seed_build_facts(&mut bundle, "dev", false) {
+            for diagnostic in diags {
+                eprintln!("{}", diagnostic.what);
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+        let Some(fact) = bundle.build_facts.contribution("Build.Profile") else {
+            crate::cli_error!("E2104", "the selected build has no `Build.Profile` fact");
+            exit(ExitCodes::USER_ERROR);
+        };
+        let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone()) else {
+            crate::cli_error!(
+                @full "E3521",
+                "the build fact contribution chain could not be resolved",
+                "the selected fact writers must pass the shared contribution law",
+                "remove the conflicting writer or choose one explicit contribution"
+            );
+            exit(ExitCodes::USER_ERROR);
+        };
+        let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
+        print!("{}", jet::Explain::render(&explanation, color));
+        return;
+    }
     match jet::Explain::lookup(code) {
         Some(ex) => {
             let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());

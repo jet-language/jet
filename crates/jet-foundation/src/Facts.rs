@@ -36,6 +36,9 @@ pub struct BuildFactSnapshot {
     pub os: crate::OSTarget::OSTarget,
     pub profile: String,
     pub stamp: BuildStamp,
+    /// Resolved contribution chains used by `jet explain`; fact readers still
+    /// consume the folded fields above.
+    pub contributions: BTreeMap<String, crate::Policy::EffectiveFact>,
 }
 
 impl Default for BuildFactSnapshot {
@@ -46,6 +49,7 @@ impl Default for BuildFactSnapshot {
             os: crate::OSTarget::OSTarget::host(),
             profile: "dev".to_string(),
             stamp: BuildStamp::default(),
+            contributions: BTreeMap::new(),
         }
     }
 }
@@ -66,7 +70,12 @@ impl BuildFactSnapshot {
             os,
             profile: profile.to_string(),
             stamp: BuildStamp::default(),
+            contributions: BTreeMap::new(),
         }
+    }
+
+    pub fn contribution(&self, name: &str) -> Option<&crate::Policy::EffectiveFact> {
+        self.contributions.get(name)
     }
 
     /// Resolve a registered build leaf into a value shape. The registry owns

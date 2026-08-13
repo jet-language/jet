@@ -8,7 +8,7 @@
 //! | `sources` | merge by key; duplicate names with **different** refs conflict |
 //! | `packages` | concatenate, de-duplicate, **preserve source identity** |
 //! | namespace entries | merge by key; package lists combine; scalars per below |
-//! | scalar settings | one value wins only by explicit priority (`default`/`force`) |
+//! | scalar settings | one value wins by the shared contribution law |
 //!
 //! This is the pure data-reconciliation core (std-only, I6). It operates on the
 //! typed contribution model the module parser/evaluator will populate (Chunk 3+)
@@ -110,7 +110,7 @@ fn split_top_level(body: &str) -> Vec<&str> {
 }
 
 /// The explicit priority a scalar setting may carry (§6). A bare value is
-/// `Normal`; `default` is the overridable fallback; `force` overrides everything.
+/// `Normal`; `default` is the declaration fallback; `force` is a fleet pin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Priority {
     Normal,
@@ -168,8 +168,7 @@ pub struct MergedEntry {
 pub enum MergeError {
     /// Two `sources` declarations share a name but resolve to different refs.
     SourceConflict { name: String, a: String, b: String },
-    /// A scalar setting got conflicting values at the same (highest) priority
-    /// with no `force`/`default` to break the tie.
+    /// A scalar setting got conflicting values at one contribution layer.
     ScalarConflict { key: String, values: Vec<String> },
 }
 
@@ -212,35 +211,53 @@ pub fn merge_packages(lists: &[Vec<Pkg>]) -> Vec<Pkg> {
     out
 }
 
-/// Resolve one scalar setting's contributions by priority (§6): `force`
-/// overrides everything; otherwise `normal` wins over `default`; a tie at the
-/// deciding priority with differing values is a conflict.
+/// Resolve one scalar setting's contributions through the canonical fact law.
+/// Scalar inputs carry no precedence algorithm; precedence and conflicts belong
+/// to `jet_foundation::Policy::resolve`.
 pub fn resolve_scalar(key: &str, contribs: &[Scalar]) -> Result<Option<String>, MergeError> {
-    // Distinct values contributed at a given priority (order-independent).
-    let pick = |want: Priority| -> Vec<&str> {
-        let mut uniq: Vec<&str> = Vec::new();
-        for s in contribs.iter().filter(|s| s.priority == want) {
-            if !uniq.contains(&s.value.as_str()) {
-                uniq.push(s.value.as_str());
-            }
+    let declarations = contribs
+        .iter()
+        .enumerate()
+        .map(|(index, scalar)| {
+            let (layer, force) = match scalar.priority {
+                Priority::Default => (jet_foundation::Policy::ContributionLayer::Declaration, false),
+                Priority::Normal => (jet_foundation::Policy::ContributionLayer::OptimizationBundle, false),
+                Priority::Force => (jet_foundation::Policy::ContributionLayer::Fleet, true),
+            };
+            let declaration = jet_foundation::Policy::FactContribution::new(
+                key,
+                jet_foundation::Policy::FactValue::Text(scalar.value.clone()),
+                jet_foundation::Policy::SourceScope::Package,
+                layer,
+                format!("scalar contribution {index}"),
+            );
+            if force { declaration.force() } else { declaration }
+        })
+        .collect::<Vec<_>>();
+    match jet_foundation::Policy::resolve(
+        jet_foundation::Policy::FactKey::new(key),
+        declarations,
+    ) {
+        Ok(Some(fact)) => match fact.value {
+            jet_foundation::Policy::FactValue::Text(value) => Ok(Some(value)),
+            _ => Ok(None),
+        },
+        Ok(None) => Ok(None),
+        Err(jet_foundation::Policy::FactError::Conflict { first, second, .. }) => {
+            let show = |value: jet_foundation::Policy::FactValue| match value {
+                jet_foundation::Policy::FactValue::Text(value) => value,
+                value => value.display(),
+            };
+            Err(MergeError::ScalarConflict {
+                key: key.to_string(),
+                values: vec![show(first.value), show(second.value)],
+            })
         }
-        uniq
-    };
-
-    for level in [Priority::Force, Priority::Normal, Priority::Default] {
-        let uniq = pick(level);
-        match uniq.len() {
-            0 => continue,
-            1 => return Ok(Some(uniq[0].to_string())),
-            _ => {
-                return Err(MergeError::ScalarConflict {
-                    key: key.to_string(),
-                    values: uniq.into_iter().map(str::to_string).collect(),
-                })
-            }
-        }
+        Err(error) => Err(MergeError::ScalarConflict {
+            key: key.to_string(),
+            values: vec![error.message()],
+        }),
     }
-    Ok(None)
 }
 
 /// Merge several contributions to one namespace entry: packages combine+dedup,
@@ -415,7 +432,6 @@ mod tests {
             "k",
             &[
                 Scalar::normal("on"),
-                Scalar::normal("on2"),
                 Scalar::force("win"),
             ],
         )

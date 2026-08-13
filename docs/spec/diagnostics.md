@@ -561,6 +561,7 @@ renumbered, and no new `W` code may be allocated.
 | E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
 | E3505 | build | typed probe or sandboxed action execution failed (D-BUILDACTION1/D-BUILDPROBE1) |
 | E3520 | build | one package declares multiple `fn build` entries (D-CONF-ENTRY1) |
+| E3521 | build | a build fact has conflicting values from the same contribution layer (D-CONF-MERGE1) |
 | E3510 | build | generated module would shadow a hand-written module (D-BUILDGEN1) |
 | E3511 | build | generated source rounds form a cycle or claim one path twice (D-BUILDGEN1) |
 | E3512 | build | `--locked` generated input or output hash drifted (D-BUILDGEN1) |
@@ -1902,6 +1903,7 @@ front-end `.jet` diagnostics).
 | E3504 | Build action `{action}` asks for ungranted `{capability}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
 | E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, capabilities, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |
 | E3520 | Two build entries for one package: both source sites are shown. | One package has one build authority, so policy and provenance have one auditable home. | Keep one `fn build` and remove every other entry. |
+| E3521 | Two writers at the same contribution layer gave different values for `{fact}`; both source locations are shown. | Cross-layer overrides are legal, but same-layer disagreement is ambiguous and cannot be selected by source order. | Make the named writers agree, or move one value to a more explicit contribution layer. |
 | E3510 | `b.generate("{name}")` would shadow the module at `{path}`. | Generation is additive: what you wrote is always what compiles. | Rename the generated module, or delete the hand-written one. |
 | E3511 | Generation rounds form a cycle: `{chain}`. | Generated source must reach a bounded deterministic order, not loop until quiescent. | Break the dependency between the named generators or paths. |
 | E3512 | Locked generated input `{path}` drifted. | `--locked` requires generated input and output hashes to match the unified lock exactly before materialization. | Rerun without `--locked` to review and record the new generated provenance. |

@@ -1708,10 +1708,12 @@ fn main() {
                     is_diagnostic_code(value)
                         || value.starts_with("build.settings.")
                         || jet::Explain::lookup(value).is_some()
+                        || value.eq_ignore_ascii_case("Build.Profile")
+                        || value == "@build.profile"
                 })
                 .unwrap_or(true)
             {
-                run_explain(code, mode);
+                run_explain(code, args.get(2).map(|s| s.as_str()), mode);
             } else {
                 exit(EngineDispatch::dispatch(
                     jet::Syntax::JETPACK_BINARY_NAME,
