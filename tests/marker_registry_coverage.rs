@@ -242,6 +242,32 @@ fn the_one_table_holds_every_kind() {
         assert_eq!(row.identity_bearing, declaration.identity_bearing);
         assert_eq!(row.decision, declaration.decision);
     }
+
+    for row in Registry::fact_rows() {
+        let declaration = Registry::fact_declarations()
+            .iter()
+            .find(|declaration| declaration.name == row.name)
+            .unwrap_or_else(|| panic!("fact `{}` has no Prelude declaration", row.name));
+        assert_eq!(row.target, declaration.target);
+        assert_eq!(row.identity_bearing, declaration.identity_bearing);
+    }
+}
+
+#[test]
+fn every_registered_plane_is_reflectable() {
+    use jet_foundation::Registry::{self, RowKind};
+
+    for row in Registry::type_plane_rows() {
+        assert_eq!(row.kind(), RowKind::Plane);
+        assert!(Registry::row(row.name).is_some(), "plane `{}` has no home", row.name);
+    }
+    assert_eq!(
+        Registry::type_plane_rows().count(),
+        Registry::fact_declarations()
+            .iter()
+            .filter(|declaration| declaration.name.starts_with("Type."))
+            .count()
+    );
 }
 
 /// D-FACT-LAW1=B: every row states which way is safe and which written words

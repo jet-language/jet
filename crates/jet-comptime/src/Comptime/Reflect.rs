@@ -6,8 +6,8 @@
 //! view contains only derives lowered from them.
 
 use crate::AST::{
-    Dimension, DistinctDef, EnumDef, Field, Func, Marker, StructDef, StructLayout, Type, TypeParam,
-    VariantPayload,
+    Dimension, DistinctDef, EnumDef, Field, Func, FunctionObligations, KnowledgeFact, Marker,
+    Measure, StructDef, StructLayout, Type, TypeParam, VariantPayload,
 };
 
 use crate::AST::CtValue;
@@ -201,6 +201,83 @@ fn range_info(start: i64, end: i64) -> CtValue {
     )
 }
 
+fn measure_info(measure: &Measure) -> CtValue {
+    let (kind, value, symbol) = match measure {
+        Measure::Literal { kind, value } => (kind.clone(), Some(CtValue::Int(*value as i64)), None),
+        Measure::Symbol { kind, name } => (kind.clone(), None, Some(ct_str(name.clone()))),
+    };
+    ct_struct(
+        "MeasureInfo",
+        &[
+            ("kind", ct_str(kind)),
+            ("value", optional_value(value, "Int")),
+            ("symbol", optional_value(symbol, "String")),
+        ],
+    )
+}
+
+fn layout_fact_info(bytes: u8) -> CtValue {
+    ct_struct("LayoutFact", &[("bytes", CtValue::Int(bytes as i64))])
+}
+
+fn classification_info(name: &str) -> CtValue {
+    ct_struct("ClassificationInfo", &[("name", ct_str(name))])
+}
+
+fn nominal_info(name: &str) -> CtValue {
+    ct_struct("NominalInfo", &[("name", ct_str(name))])
+}
+
+fn obligation_info(obligations: &FunctionObligations) -> CtValue {
+    let params = obligations
+        .param_contract
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|(name, zone)| {
+            ct_struct(
+                "ObligationParamInfo",
+                &[
+                    ("name", ct_str(name.clone())),
+                    ("zone", ct_str(format!("{zone:?}"))),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "ObligationInfo",
+        &[
+            (
+                "effect_bound",
+                ct_list(
+                    obligations
+                        .effect_bound
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .cloned()
+                        .map(ct_str)
+                        .collect(),
+                ),
+            ),
+            ("param_contract", ct_list(params)),
+            (
+                "variadic",
+                ct_list(
+                    obligations
+                        .variadic
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .copied()
+                        .map(ct_bool)
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
 /// Names and paths remain strings because they are stable fact identities; the
 /// fact's meaning is carried by typed kind, members, range, and dimension.
 fn fact_value(
@@ -224,8 +301,108 @@ fn fact_value(
                 "dimension",
                 optional_value(dimension, "DimensionInfo"),
             ),
+            ("measure", optional_value(None, "MeasureInfo")),
+            ("layout", optional_value(None, "LayoutFact")),
+            (
+                "classification",
+                optional_value(None, "ClassificationInfo"),
+            ),
+            ("nominal", optional_value(None, "NominalInfo")),
+            ("obligation", optional_value(None, "ObligationInfo")),
+            ("state", optional_value(None, "StateRef")),
         ],
     )
+}
+
+fn fact_value_with_detail(
+    kind: &str,
+    name: &str,
+    members: impl IntoIterator<Item = String>,
+    detail: CtValue,
+    detail_field: &str,
+) -> CtValue {
+    let mut value = fact_value(kind, name, members, None, None);
+    if let CtValue::Struct { fields, .. } = &mut value {
+        if let Some((_, field)) = fields
+            .iter_mut()
+            .find(|(field_name, _)| field_name == detail_field)
+        {
+            *field = CtValue::Present(Box::new(detail));
+        }
+    }
+    value
+}
+
+fn fact_kind_for(plane: &str, fact: &KnowledgeFact) -> &'static str {
+    let registered = jet_foundation::Registry::row(plane)
+        .unwrap_or_else(|| panic!("reflection found unregistered plane `{plane}`"));
+    assert_eq!(registered.kind(), jet_foundation::Registry::RowKind::Plane);
+    match fact {
+        KnowledgeFact::Interval { .. } => "Range",
+        KnowledgeFact::Layout { .. } => "Layout",
+        KnowledgeFact::Measure(_) => "Measure",
+        KnowledgeFact::Dimension(_) => "Dimension",
+        KnowledgeFact::Classification(_) => "Classification",
+        KnowledgeFact::Nominal(_) => "Nominal",
+        KnowledgeFact::Obligation(_) => "Obligation",
+    }
+}
+
+fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
+    match fact {
+        KnowledgeFact::Interval { lo, hi } => fact_value(
+            kind,
+            "range",
+            std::iter::empty::<String>(),
+            Some(range_info(
+                i64::try_from(*lo).expect("reflected interval lower bound fits Int"),
+                i64::try_from(*hi).expect("reflected interval upper bound fits Int"),
+            )),
+            None,
+        ),
+        KnowledgeFact::Dimension(dimension) => fact_value(
+            kind,
+            "dimension",
+            std::iter::empty::<String>(),
+            None,
+            Some(dimension_info(dimension)),
+        ),
+        KnowledgeFact::Measure(measure) => fact_value_with_detail(
+            kind,
+            "measure",
+            std::iter::empty::<String>(),
+            measure_info(measure),
+            "measure",
+        ),
+        KnowledgeFact::Layout { bytes } => fact_value_with_detail(
+            kind,
+            "layout",
+            std::iter::empty::<String>(),
+            layout_fact_info(*bytes),
+            "layout",
+        ),
+        KnowledgeFact::Classification(name) => fact_value_with_detail(
+            kind,
+            "classification",
+            [name.clone()],
+            classification_info(name),
+            "classification",
+        ),
+        KnowledgeFact::Nominal(name) => fact_value_with_detail(
+            kind,
+            "nominal",
+            [name.clone()],
+            nominal_info(name),
+            "nominal",
+        ),
+        KnowledgeFact::Obligation(obligations) => fact_value_with_detail(
+            kind,
+            "obligation",
+            std::iter::empty::<String>(),
+            obligation_info(obligations),
+            "obligation",
+        ),
+    }
 }
 
 fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
@@ -248,48 +425,25 @@ fn type_dimensions(ty: &Type) -> Vec<CtValue> {
     }
 }
 
-fn type_range(ty: &Type) -> Option<(i64, i64)> {
-    match ty {
-        Type::IntN { signed, bits } => {
-            let (start, end) = crate::AST::int_range(*signed, *bits);
-            Some((i64::try_from(start).ok()?, i64::try_from(end).ok()?))
-        }
-        Type::Tagged { inner, .. } => type_range(inner),
-        _ => None,
-    }
-}
-
 fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
-    let mut facts = Vec::new();
-    if let Some((start, end)) = type_range(ty) {
-        facts.push(fact_info(
-            "Range",
-            "range",
-            format!("{path}.$range"),
-            fact_value(
-                "Range",
-                "range",
-                std::iter::empty::<String>(),
-                Some(range_info(start, end)),
-                None,
-            ),
-        ));
-    }
-    if let Some((_, dimension)) = ty.quantity_parts() {
-        facts.push(fact_info(
-            "Dimension",
-            "dimension",
-            format!("{path}.$dimension"),
-            fact_value(
-                "Dimension",
-                "dimension",
-                std::iter::empty::<String>(),
-                None,
-                Some(dimension_info(&dimension)),
-            ),
-        ));
-    }
-    facts
+    ty.knowledge_vector()
+        .iter()
+        .map(|entry| {
+            let kind = fact_kind_for(entry.plane, &entry.fact);
+            let name = kind.to_ascii_lowercase();
+            let suffix = if entry.path.is_empty() {
+                format!("${name}")
+            } else {
+                format!("{}.${name}", entry.path.join("."))
+            };
+            fact_info(
+                kind,
+                &name,
+                format!("{path}.{suffix}"),
+                knowledge_fact_value(kind, &entry.fact),
+            )
+        })
+        .collect()
 }
 
 fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
@@ -579,6 +733,19 @@ fn state_path(owner: &str, state: &str) -> String {
     }
 }
 
+/// A state identity is not a display-only path. Keep the canonical path for
+/// diagnostics, but expose owner and state as fields of a typed record.
+fn state_ref(owner: &str, state: &str) -> CtValue {
+    ct_struct(
+        "StateRef",
+        &[
+            ("owner", ct_str(owner)),
+            ("name", ct_str(state)),
+            ("path", ct_str(state_path(owner, state))),
+        ],
+    )
+}
+
 fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
     let transition = method.state_transition.as_ref()?;
     Some(ct_struct(
@@ -587,15 +754,15 @@ fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
             ("operation", ct_str(method.name.clone())),
             (
                 "from",
-                ct_str(
+                state_ref(
+                    owner,
                     transition
                         .from
                         .as_deref()
-                        .map(|state| state_path(owner, state))
-                        .unwrap_or_else(|| "_".to_string()),
+                        .unwrap_or("_"),
                 ),
             ),
-            ("to", ct_str(state_path(owner, &transition.to))),
+            ("to", state_ref(owner, &transition.to)),
         ],
     ))
 }
@@ -606,7 +773,15 @@ fn reflected_state_fact(owner: &str, state: &str) -> CtValue {
         "State",
         state,
         path.clone(),
-        fact_value("State", state, [path], None, None),
+        {
+            let mut value = fact_value("State", state, [path], None, None);
+            if let CtValue::Struct { fields, .. } = &mut value {
+                if let Some((_, field)) = fields.iter_mut().find(|(name, _)| name == "state") {
+                    *field = CtValue::Present(Box::new(state_ref(owner, state)));
+                }
+            }
+            value
+        },
     )
 }
 
@@ -681,7 +856,7 @@ pub fn build_struct_type_info_with_path(
                 "StateInfo",
                 &[
                     ("name", ct_str(state)),
-                    ("path", ct_str(format!("{}.State.{state}", s.name))),
+                    ("path", state_ref(&s.name, state)),
                 ],
             )
         })
@@ -1396,14 +1571,21 @@ mod tests {
         let CtValue::Struct { fields, .. } = info else {
             return;
         };
-        assert!(fields.iter().any(
-            |(name, value)| name == "from"
-                && matches!(value, CtValue::Str(path) if path == "Door.State.Closed")
-        ));
-        assert!(fields.iter().any(
-            |(name, value)| name == "to"
-                && matches!(value, CtValue::Str(path) if path == "Door.State.Open")
-        ));
+        let state_path = |value: &CtValue, expected: &str| {
+            matches!(
+                value,
+                CtValue::Struct { type_name, fields }
+                    if type_name == "StateRef"
+                        && fields.iter().any(|(name, value)|
+                            name == "path" && matches!(value, CtValue::Str(path) if path == expected))
+            )
+        };
+        assert!(fields
+            .iter()
+            .any(|(name, value)| name == "from" && state_path(value, "Door.State.Closed")));
+        assert!(fields
+            .iter()
+            .any(|(name, value)| name == "to" && state_path(value, "Door.State.Open")));
     }
 
     #[test]

@@ -426,7 +426,18 @@ pub(crate) fn core_fact_kind_variants(
 ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
     (enum_name == "FactKind").then(|| {
         let zero = Span::new(0, 0);
-        ["Effect", "State", "Tag", "Range", "Dimension"]
+        [
+            "Effect",
+            "State",
+            "Tag",
+            "Range",
+            "Dimension",
+            "Measure",
+            "Layout",
+            "Classification",
+            "Nominal",
+            "Obligation",
+        ]
             .into_iter()
             .map(|variant| (variant.to_string(), (zero, VariantPayload::Unit)))
             .collect()
@@ -828,13 +839,21 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "StateInfo" {
         return match field {
-            "name" | "path" => Some(Type::String),
+            "name" => Some(Type::String),
+            "path" => Some(Type::Named("StateRef".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "StateRef" {
+        return match field {
+            "owner" | "name" | "path" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "TransitionInfo" {
         return match field {
-            "operation" | "from" | "to" => Some(Type::String),
+            "operation" => Some(Type::String),
+            "from" | "to" => Some(Type::Named("StateRef".to_string())),
             _ => None,
         };
     }
@@ -853,6 +872,46 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "members" => Some(Type::List(Box::new(Type::String))),
             "range" => Some(Type::Option(Box::new(Type::Named(Syntax::TYPE_RANGE.to_string())))),
             "dimension" => Some(Type::Option(Box::new(Type::Named("DimensionInfo".to_string())))),
+            "measure" => Some(Type::Option(Box::new(Type::Named("MeasureInfo".to_string())))),
+            "layout" => Some(Type::Option(Box::new(Type::Named("LayoutFact".to_string())))),
+            "classification" => Some(Type::Option(Box::new(Type::Named("ClassificationInfo".to_string())))),
+            "nominal" => Some(Type::Option(Box::new(Type::Named("NominalInfo".to_string())))),
+            "obligation" => Some(Type::Option(Box::new(Type::Named("ObligationInfo".to_string())))),
+            "state" => Some(Type::Option(Box::new(Type::Named("StateRef".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "MeasureInfo" {
+        return match field {
+            "kind" => Some(Type::String),
+            "value" => Some(Type::Option(Box::new(Type::Int))),
+            "symbol" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "LayoutFact" {
+        return match field {
+            "bytes" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "ClassificationInfo" || type_name == "NominalInfo" {
+        return match field {
+            "name" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "ObligationParamInfo" {
+        return match field {
+            "name" | "zone" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "ObligationInfo" {
+        return match field {
+            "effect_bound" => Some(Type::List(Box::new(Type::String))),
+            "param_contract" => Some(Type::List(Box::new(Type::Named("ObligationParamInfo".to_string())))),
+            "variadic" => Some(Type::List(Box::new(Type::Bool))),
             _ => None,
         };
     }

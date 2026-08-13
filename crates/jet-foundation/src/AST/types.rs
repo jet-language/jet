@@ -388,7 +388,7 @@ impl KnowledgeVector {
                     {
                         return Some(entry.clone());
                     }
-                    if entry.plane != crate::Registry::TYPE_PLANE_OBLIGATION {
+                    if entry.plane != crate::Registry::type_plane("Obligation") {
                         return None;
                     }
                     // D-APILABEL1/D-VARIADIC1: this mixed plane contributes
@@ -462,7 +462,7 @@ impl KnowledgeVector {
     pub fn from_interval(lo: i64, hi: i64) -> Self {
         let mut vector = Self::new();
         vector.push(
-            crate::Registry::TYPE_PLANE_INTERVAL,
+            crate::Registry::type_plane("Interval"),
             KnowledgeFact::Interval {
                 lo: i128::from(lo),
                 hi: i128::from(hi),
@@ -982,11 +982,11 @@ impl Type {
             Type::IntN { signed, bits } => {
                 let (lo, hi) = int_range(*signed, *bits);
                 vector.push(
-                    crate::Registry::TYPE_PLANE_INTERVAL,
+                    crate::Registry::type_plane("Interval"),
                     KnowledgeFact::Interval { lo, hi },
                 );
                 vector.push(
-                    crate::Registry::TYPE_PLANE_LAYOUT,
+                    crate::Registry::type_plane("Layout"),
                     KnowledgeFact::Layout {
                         bytes: (*bits + 7) / 8,
                     },
@@ -1003,7 +1003,7 @@ impl Type {
                         Measure::symbol("length", name)
                     });
                 vector.push(
-                    crate::Registry::TYPE_PLANE_MEASURE,
+                    crate::Registry::type_plane("Measure"),
                     KnowledgeFact::Measure(measure),
                 );
             }
@@ -1019,7 +1019,7 @@ impl Type {
                 }
                 if let Some(obligations) = self.function_obligations() {
                     vector.push(
-                        crate::Registry::TYPE_PLANE_OBLIGATION,
+                        crate::Registry::type_plane("Obligation"),
                         KnowledgeFact::Obligation(obligations),
                     );
                 }
@@ -1027,20 +1027,20 @@ impl Type {
             Type::Quantity { base, dimension } => {
                 vector.extend_at(&["base".to_string()], &base.knowledge_vector());
                 vector.push(
-                    crate::Registry::TYPE_PLANE_DIMENSION,
+                    crate::Registry::type_plane("Dimension"),
                     KnowledgeFact::Dimension(dimension.clone()),
                 );
             }
             Type::ComputeDim(value) => {
                 vector.push(
-                    crate::Registry::TYPE_PLANE_MEASURE,
+                    crate::Registry::type_plane("Measure"),
                     KnowledgeFact::Measure(Measure::literal("shape", *value)),
                 );
             }
             Type::Tagged { marker, inner } if is_core_crypto(marker) => {
                 vector.extend_at(&["inner".to_string()], &inner.knowledge_vector());
                 vector.push(
-                    crate::Registry::TYPE_PLANE_NOMINAL,
+                    crate::Registry::type_plane("Nominal"),
                     KnowledgeFact::Nominal(marker.to_string()),
                 );
             }
@@ -1049,7 +1049,7 @@ impl Type {
                 // a structural path around the identity-bearing inner facts.
                 vector.extend(&inner.knowledge_vector());
                 vector.push(
-                    crate::Registry::TYPE_PLANE_CLASSIFICATION,
+                    crate::Registry::type_plane("Classification"),
                     KnowledgeFact::Classification(marker.to_string()),
                 );
             }
@@ -1071,7 +1071,7 @@ impl Type {
                 {
                     vector.push_at(
                         &["shape".to_string(), index.to_string()],
-                        crate::Registry::TYPE_PLANE_MEASURE,
+                        crate::Registry::type_plane("Measure"),
                         KnowledgeFact::Measure(Measure::literal("shape", dimension)),
                     );
                 }
@@ -1084,7 +1084,7 @@ impl Type {
                 };
                 if let Some(lanes) = lanes {
                     vector.push(
-                        crate::Registry::TYPE_PLANE_MEASURE,
+                        crate::Registry::type_plane("Measure"),
                         KnowledgeFact::Measure(Measure::literal("lane", lanes)),
                     );
                 }
@@ -2007,7 +2007,7 @@ mod tests {
         assert_ne!(length_key.identity_key(), length_value.identity_key());
         assert!(Type::Named("F32x4".to_string())
             .knowledge_vector()
-            .facts(crate::Registry::TYPE_PLANE_MEASURE)
+            .facts(crate::Registry::type_plane("Measure"))
             .any(|fact| matches!(
                 fact,
                 KnowledgeFact::Measure(Measure::Literal { kind, value })
