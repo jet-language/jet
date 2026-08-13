@@ -1,12 +1,7 @@
-// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — the runtime reflection floor.
-// `JetReflectValue` is the whole-value handle (`type_name`/`display` always
-// populated; `fields` non-empty only when the reflected value was a known
-// user struct — built entirely at the call site, `Codegen/TIR/emit.rs`
-// `("core.reflect", "of")`). `JetReflectField` is one struct field's name
-// and a nested `Value` handle for its typed value. Both are plain data — no
-// runtime type registry, no raw-pointer/audited-region casting of any kind
-// (I1): the call site builds the same recursively typed shape from its
-// already-known static type.
+// D-METAREFLECT1 / D-ANY-JAI1: `reflect.of(x)` is a runtime projection of
+// registered field rows. A field carries another `JetReflectValue`; text is a
+// projection (`display()`), never the semantic field storage. There is no
+// runtime type registry or raw-pointer/audited-region casting (I1).
 
 #[derive(Clone)]
 struct JetReflectValue {
@@ -23,6 +18,15 @@ struct JetReflectField {
 }
 
 impl JetReflectValue {
+    fn from_field<T: JetDisplay>(value: &T, type_name: &str, path: &str) -> Self {
+        Self {
+            type_name: type_name.to_string(),
+            path: path.to_string(),
+            display: value.jet_display(),
+            fields: Vec::new(),
+        }
+    }
+
     fn type_name(&self) -> String {
         self.type_name.clone()
     }
@@ -51,8 +55,13 @@ impl JetShow for JetReflectValue {
         format!("Value({})", self.type_name)
     }
 }
+impl JetDisplay for JetReflectValue {
+    fn jet_display(&self) -> String {
+        self.display()
+    }
+}
 impl JetShow for JetReflectField {
     fn jet_show(&self) -> String {
-        format!("Field({}: {})", self.name, self.value.display)
+        format!("Field({}: {})", self.name, self.value.display())
     }
 }

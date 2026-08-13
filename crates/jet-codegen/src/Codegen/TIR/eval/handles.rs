@@ -1,9 +1,12 @@
 //! Exhaustive THandleOp dispatch (#777).
+use std::collections::HashMap;
+
 use crate::AST::Type;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_mutating_with_type};
 use crate::Comptime::{CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;
+use jet_foundation::Reflection::ReflectionField;
 use super::unsupported;
 use super::browser;
 use std::sync::{Arc, Mutex};
@@ -187,19 +190,65 @@ fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
     })
 }
 
-fn reflect_child(value: &CtValue) -> CtValue {
-    let mut fields = vec![("value".to_string(), value.clone())];
-    if let CtValue::Struct {
-        fields: value_fields,
-        ..
-    } = value
-    {
+fn reflect_type_name(value: &CtValue) -> String {
+    value.jet_type().leaf_name()
+}
+
+fn reflection_rows<'a>(
+    value: &CtValue,
+    reflection_fields: Option<&'a HashMap<String, Vec<ReflectionField>>>,
+) -> Option<&'a [ReflectionField]> {
+    let Some(reflection_fields) = reflection_fields else {
+        return None;
+    };
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    reflection_fields
+        .get(type_name)
+        .or_else(|| {
+            reflection_fields.get(
+                type_name
+                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(type_name),
+            )
+        })
+        .map(Vec::as_slice)
+}
+
+fn reflect_path_for_value(
+    value: &CtValue,
+    reflect_paths: Option<&HashMap<String, String>>,
+) -> String {
+    let ty = value.jet_type();
+    match (&ty, reflect_paths) {
+        (Type::Named(name) | Type::Apply { name, .. }, Some(paths)) => paths
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| ty.name()),
+        _ => ty.name(),
+    }
+}
+
+fn reflect_value_carrier(
+    value: &CtValue,
+    reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
+    reflect_paths: Option<&HashMap<String, String>>,
+) -> CtValue {
+    let mut fields = vec![
+        ("value".to_string(), value.clone()),
+        (
+            "path".to_string(),
+            CtValue::Str(reflect_path_for_value(value, reflect_paths)),
+        ),
+    ];
+    if let Some(rows) = reflection_rows(value, reflection_fields) {
         fields.push((
             "field_names".to_string(),
             CtValue::List(
-                value_fields
+                rows
                     .iter()
-                    .map(|(name, _)| CtValue::Str(name.clone()))
+                    .map(|field| CtValue::Str(field.name.clone()))
                     .collect(),
             ),
         ));
@@ -208,10 +257,6 @@ fn reflect_child(value: &CtValue) -> CtValue {
         type_name: "__Reflect".to_string(),
         fields,
     }
-}
-
-fn reflect_type_name(value: &CtValue) -> String {
-    value.jet_type().leaf_name()
 }
 
 fn reflect_path(recv: &CtValue) -> Option<CtValue> {
@@ -223,7 +268,13 @@ fn reflect_path(recv: &CtValue) -> Option<CtValue> {
     }
 }
 
-fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
+fn reflect_handle(
+    recv: &CtValue,
+    method: &str,
+    span: Span,
+    reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
+    reflect_paths: Option<&HashMap<String, String>>,
+) -> Result<CtValue, Diagnostic> {
     match method {
         "type_name" => reflect_inner(recv)
             .map(|value| CtValue::Str(reflect_type_name(value)))
@@ -257,7 +308,17 @@ fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, D
                             type_name: "__ReflectField".to_string(),
                             fields: vec![
                                 ("name".to_string(), CtValue::Str(name)),
-                                ("value".to_string(), reflect_child(value)),
+                                // Keep the actual field value as the nested
+                                // runtime Value. `display()` is a later
+                                // projection, never the stored field value.
+                                (
+                                    "value".to_string(),
+                                    reflect_value_carrier(
+                                        value,
+                                        reflection_fields,
+                                        reflect_paths,
+                                    ),
+                                ),
                             ],
                         })
                     })
@@ -541,6 +602,8 @@ pub(super) fn eval_handle_with_type_and_sink(
     span: Span,
     resolved_ret: Option<&Type>,
     sink: Option<&Arc<Mutex<DevSink>>>,
+    reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
+    reflect_paths: Option<&HashMap<String, String>>,
 ) -> Result<CtValue, Diagnostic> {
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
@@ -1201,14 +1264,24 @@ pub(super) fn eval_handle_with_type_and_sink(
             Err(unsupported("handle `TerminalSessionResize`", span))
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
-        THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
-        THandleOp::ReflectValuePath => reflect_handle(recv, "path", span),
+        THandleOp::ReflectValueTypeName => {
+            reflect_handle(recv, "type_name", span, reflection_fields, reflect_paths)
+        }
+        THandleOp::ReflectValuePath => {
+            reflect_handle(recv, "path", span, reflection_fields, reflect_paths)
+        }
         // Handled before this context-free dispatch in `eval/exprs.rs`, where
         // the Display-aware evaluator is available.
         THandleOp::ReflectValueDisplay => Err(unsupported("reflect display evaluator", span)),
-        THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
-        THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
-        THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
+        THandleOp::ReflectValueFields => {
+            reflect_handle(recv, "fields", span, reflection_fields, reflect_paths)
+        }
+        THandleOp::ReflectFieldName => {
+            reflect_handle(recv, "name", span, reflection_fields, reflect_paths)
+        }
+        THandleOp::ReflectFieldValue => {
+            reflect_handle(recv, "value", span, reflection_fields, reflect_paths)
+        }
         THandleOp::TaskJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()

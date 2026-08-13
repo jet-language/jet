@@ -12,6 +12,7 @@ use crate::AST::{
 };
 
 use crate::AST::CtValue;
+use jet_foundation::Reflection::ReflectionField;
 
 #[derive(Debug, Clone, Default)]
 pub struct ProgramSemanticFacts {
@@ -813,11 +814,11 @@ fn format_method_sig(method: &Func) -> String {
 
 /// One reflected struct field (D-METAREFLECT1).
 pub fn build_field_info(field: &Field) -> CtValue {
-    build_field_info_with_vocabulary(field, None)
+    build_reflection_field_info(&ReflectionField::from_field(field), None)
 }
 
-fn build_field_info_with_vocabulary(
-    field: &Field,
+fn build_reflection_field_info(
+    field: &ReflectionField,
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
 ) -> CtValue {
     ct_struct(
@@ -827,7 +828,7 @@ fn build_field_info_with_vocabulary(
             ("ty", ct_str(field.ty.name())),
             (
                 "markers",
-                ct_list(marker_infos(&field.serde_markers, vocabulary)),
+                ct_list(marker_infos(&field.markers, vocabulary)),
             ),
             ("dimensions", ct_list(type_dimensions(&field.ty))),
             ("is_pub", ct_bool(field.is_pub)),
@@ -836,8 +837,8 @@ fn build_field_info_with_vocabulary(
                 ct_struct(
                     crate::Syntax::TYPE_SOURCE_SPAN,
                     &[
-                        ("start", CtValue::Int(field.name_span.start as i64)),
-                        ("end", CtValue::Int(field.name_span.end as i64)),
+                        ("start", CtValue::Int(field.span.start as i64)),
+                        ("end", CtValue::Int(field.span.end as i64)),
                     ],
                 ),
             ),
@@ -1293,9 +1294,10 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
     path: &str,
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
 ) -> CtValue {
-    let fields_info: Vec<CtValue> = s
-        .reflection_fields()
-        .map(|field| build_field_info_with_vocabulary(field, vocabulary))
+    let reflection_fields = jet_foundation::Reflection::fields(s);
+    let fields_info: Vec<CtValue> = reflection_fields
+        .iter()
+        .map(|field| build_reflection_field_info(field, vocabulary))
         .collect();
     let dimensions = s
         .reflection_fields()

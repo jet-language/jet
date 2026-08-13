@@ -80,6 +80,7 @@ use crate::Codegen::TIR::{
 use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Reflection::ReflectionField;
 
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
 pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
@@ -979,6 +980,9 @@ pub(super) struct EvalCtx<'a> {
     /// D-FIELDMEMO1=A: sema-owned source-to-memo edges shared with the
     /// interpreter invalidation adapter.
     pub(super) memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
+    /// Registered reflection rows shared with comptime reflection and runtime
+    /// projections. This is the only source for reflected field names.
+    pub(super) reflection_fields: HashMap<String, Vec<ReflectionField>>,
     /// Canonical typeable paths for runtime reflection.
     pub(super) reflect_paths: HashMap<String, String>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
@@ -1307,6 +1311,7 @@ struct EvalTaskConfig<'a> {
     repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
+    reflection_fields: HashMap<String, Vec<ReflectionField>>,
     reflect_paths: HashMap<String, String>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -1495,6 +1500,7 @@ impl<'a> EvalCtx<'a> {
             repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
             memo_dependencies: self.memo_dependencies.clone(),
+            reflection_fields: self.reflection_fields.clone(),
             reflect_paths: self.reflect_paths.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
@@ -1576,6 +1582,7 @@ impl<'a> EvalCtx<'a> {
             embed_inputs: None,
             struct_fields: config.struct_fields,
             memo_dependencies: config.memo_dependencies,
+            reflection_fields: config.reflection_fields,
             reflect_paths: config.reflect_paths,
             struct_field_types: config.struct_field_types,
             codec_migrations: config.codec_migrations,
@@ -3192,9 +3199,17 @@ fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String,
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
-                let fields = s
-                    .reflection_fields()
-                    .map(|f| (f.name.clone(), f.redact))
+                let reflection_fields = jet_foundation::Reflection::fields(s);
+                let fields = reflection_fields
+                    .into_iter()
+                    .map(|field| {
+                        let redact = s
+                            .fields
+                            .iter()
+                            .find(|candidate| candidate.name == field.name)
+                            .is_some_and(|candidate| candidate.redact);
+                        (field.name, redact)
+                    })
                     .collect::<Vec<(String, bool)>>();
                 for key in struct_metadata_keys(bundle, module_idx, &s.name) {
                     out.insert(key, fields.clone());
@@ -3542,6 +3557,7 @@ fn run_program_with_structs_on_stack(
         embed_inputs: None,
         struct_fields,
         memo_dependencies: program.memo_dependencies.clone(),
+        reflection_fields: program.reflection_fields.clone(),
         reflect_paths: program.reflect_paths.clone(),
         struct_field_types,
         codec_migrations: program.codec_migrations.clone(),
@@ -3645,6 +3661,7 @@ pub fn run_named_func_with_memos(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         memo_dependencies: program.memo_dependencies.clone(),
+        reflection_fields: program.reflection_fields.clone(),
         reflect_paths: program.reflect_paths.clone(),
         struct_field_types: program_struct_field_types(program),
         codec_migrations: program.codec_migrations.clone(),
@@ -3874,6 +3891,7 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         memo_dependencies: HashMap::new(),
+        reflection_fields: HashMap::new(),
         reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
@@ -4002,6 +4020,7 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         memo_dependencies: HashMap::new(),
+        reflection_fields: HashMap::new(),
         reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),

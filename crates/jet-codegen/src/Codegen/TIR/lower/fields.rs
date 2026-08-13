@@ -288,6 +288,13 @@ pub(crate) fn register_imported_struct_shapes(
                 )
             })
             .collect::<Vec<(String, Type)>>();
+        let reflection_fields = jet_foundation::Reflection::fields(definition)
+            .into_iter()
+            .map(|mut field| {
+                field.ty = qualify_imported_type(bundle, target, &owner, &field.ty);
+                field
+            })
+            .collect::<Vec<_>>();
         cx.type_names.insert(qualified.clone());
         cx.foreign_types.insert(qualified.clone(), rust_mod.clone());
         cx.struct_fields.insert(qualified.clone(), fields.clone());
@@ -309,6 +316,8 @@ pub(crate) fn register_imported_struct_shapes(
             cx.memo_dependencies
                 .insert(qualified.clone(), memo_dependencies);
         }
+        cx.reflection_fields
+            .insert(qualified.clone(), reflection_fields);
         if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
             cx.cloneable.insert(qualified.clone());
         }

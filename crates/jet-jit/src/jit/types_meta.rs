@@ -721,6 +721,8 @@ pub(crate) struct JitMeta<'a> {
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     memo_dependencies:
         &'a HashMap<String, HashMap<String, Vec<String>>>,
+    reflection_fields:
+        &'a HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     struct_type_params: &'a HashMap<String, Vec<String>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
@@ -743,6 +745,7 @@ impl<'a> JitMeta<'a> {
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
             memo_dependencies: &program.memo_dependencies,
+            reflection_fields: &program.reflection_fields,
             struct_type_params: &program.struct_type_params,
             enum_variants: &program.enum_variants,
             enum_variant_payload_types: &program.enum_variant_payload_types,
@@ -972,6 +975,13 @@ impl<'a> JitMeta<'a> {
             return Some((names.as_slice(), tys.as_slice()));
         }
         core_struct_layout(type_name)
+    }
+
+    pub(crate) fn reflection_fields(
+        &self,
+        type_name: &str,
+    ) -> Option<&[jet_foundation::Reflection::ReflectionField]> {
+        self.reflection_fields.get(type_name).map(Vec::as_slice)
     }
 
     pub(crate) fn struct_type_params(&self, type_name: &str) -> Option<&[String]> {

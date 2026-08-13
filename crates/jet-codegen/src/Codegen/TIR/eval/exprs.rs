@@ -3905,6 +3905,53 @@ impl<'a> EvalCtx<'a> {
         Ok(CtValue::List(out))
     }
 
+    /// Build the one runtime reflection carrier from the registered rows.
+    /// This is the interpreter projection of the same model the AOT emitter
+    /// and comptime `T.reflect()` read; storage fields never become the field
+    /// name source.
+    fn reflect_value(&self, value: CtValue, ty: &Type) -> CtValue {
+        let path = match ty {
+            Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
+                .reflect_paths
+                .get(type_name)
+                .cloned()
+                .unwrap_or_else(|| type_name.clone()),
+            _ => ty.name(),
+        };
+        let field_names = match ty {
+            Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
+                .reflection_fields
+                .get(type_name)
+                .or_else(|| {
+                    self.reflection_fields.get(
+                        type_name
+                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            .unwrap_or(type_name),
+                    )
+                })
+                .map(|fields| {
+                    CtValue::List(
+                        fields
+                            .iter()
+                            .map(|field| CtValue::Str(field.name.clone()))
+                            .collect(),
+                    )
+                }),
+            _ => None,
+        };
+        let mut fields = vec![
+            ("value".to_string(), value),
+            ("path".to_string(), CtValue::Str(path)),
+        ];
+        if let Some(field_names) = field_names {
+            fields.push(("field_names".to_string(), field_names));
+        }
+        CtValue::Struct {
+            type_name: "__Reflect".to_string(),
+            fields,
+        }
+    }
+
     fn eval_core_call_expr(
         &mut self,
         expr: &'a TExpr,
@@ -4126,46 +4173,7 @@ impl<'a> EvalCtx<'a> {
             let value = argv
                 .pop()
                 .ok_or_else(|| unsupported("reflect value", source_span))?;
-            let path = match &args[0].ty {
-                Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
-                    .reflect_paths
-                    .get(type_name)
-                    .cloned()
-                    .unwrap_or_else(|| type_name.clone()),
-                ty => ty.name(),
-            };
-            let field_names = match &args[0].ty {
-                Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
-                    .struct_fields
-                    .get(type_name)
-                    .or_else(|| {
-                        self.struct_fields.get(
-                            type_name
-                                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                .unwrap_or(type_name),
-                        )
-                    })
-                    .map(|fields| {
-                        CtValue::List(
-                            fields
-                                .iter()
-                                .map(|(name, _)| CtValue::Str(name.clone()))
-                                .collect(),
-                        )
-                    }),
-                _ => None,
-            };
-            let mut fields = vec![
-                ("value".to_string(), value),
-                ("path".to_string(), CtValue::Str(path)),
-            ];
-            if let Some(field_names) = field_names {
-                fields.push(("field_names".to_string(), field_names));
-            }
-            return Ok(CtValue::Struct {
-                type_name: "__Reflect".to_string(),
-                fields,
-            });
+            return Ok(self.reflect_value(value, &args[0].ty));
         }
         if module == "core.web" && matches!(method, "app" | "page") {
             return self.eval_web_core_call(method, argv);
@@ -5464,6 +5472,8 @@ impl<'a> EvalCtx<'a> {
                     self.span(),
                     Some(&expr.ty),
                     self.sink.as_ref(),
+                    Some(&self.reflection_fields),
+                    Some(&self.reflect_paths),
                 )?;
                 let http_json = matches!(
                     op,
@@ -7598,6 +7608,16 @@ impl<'a> EvalCtx<'a> {
                             ) {
                                 return Err(diagnostic);
                             }
+                            if module == "core.reflect"
+                                && method.name == "of"
+                                && args.len() == 1
+                            {
+                                let value = argv
+                                    .into_iter()
+                                    .next()
+                                    .ok_or_else(|| unsupported("reflect value", self.span()))?;
+                                return Ok(self.reflect_value(value, &args[0].value.ty));
+                            }
                             let value = apply_core_call_with_type(
                                 module,
                                 &method.name,
@@ -8657,6 +8677,23 @@ impl<'a> EvalCtx<'a> {
                 return Ok(format!("[{}]", rendered.join(", ")));
             }
         }
+        if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
+            let canonical_type_name = type_name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name);
+            for key in [
+                format!("{type_name}::display"),
+                format!("{canonical_type_name}::display"),
+            ] {
+                if let Some(func) = self.funcs.get(&key).copied() {
+                    let mut child = HashMap::new();
+                    child.insert("self".to_string(), v.clone());
+                    if let CtValue::Str(s) = self.run_func(func, Vec::new(), &mut child)? {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
         if let Some(text) = crate::Comptime::display_core_pure_value(v) {
             return Ok(text);
         }
@@ -8790,15 +8827,7 @@ impl<'a> EvalCtx<'a> {
         if let Some(text) = io_error_display() {
             return Ok(text);
         }
-        if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
-            let key = format!("{type_name}::display");
-            if let Some(func) = self.funcs.get(&key).copied() {
-                let mut child = HashMap::new();
-                child.insert("self".to_string(), v.clone());
-                if let CtValue::Str(s) = self.run_func(func, Vec::new(), &mut child)? {
-                    return Ok(s);
-                }
-            }
+        if let CtValue::Struct { .. } | CtValue::Enum { .. } = v {
             // I2: no user `display` — render Jet-source names, the same body AOT
             // `JetShow` uses for records. `jet_show` still mirrors Rust's mangled
             // derive for the internal differential corpus.

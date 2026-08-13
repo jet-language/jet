@@ -42,29 +42,6 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
-fn reflect_child(value: &CtValue) -> CtValue {
-    let mut fields = vec![("value".to_string(), value.clone())];
-    if let CtValue::Struct {
-        fields: value_fields,
-        ..
-    } = value
-    {
-        fields.push((
-            "field_names".to_string(),
-            CtValue::List(
-                value_fields
-                    .iter()
-                    .map(|(name, _)| CtValue::Str(name.clone()))
-                    .collect(),
-            ),
-        ));
-    }
-    CtValue::Struct {
-        type_name: "__Reflect".to_string(),
-        fields,
-    }
-}
-
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -769,28 +746,6 @@ pub fn apply_mutating_with_type(
 }
 
 /// Non-mutating methods on values.
-/// D-ANY-JAI1: the type name `reflect.of(x).type_name()` reports — Jet's
-/// beginner-facing names for the built-ins, the struct/enum's own name for
-/// everything else.
-fn ctvalue_type_name(v: &CtValue) -> String {
-    match v {
-        CtValue::Int(_) => "Int".to_string(),
-        CtValue::Float(value) => value.jet_type().show(),
-        CtValue::Bool(_) => "Bool".to_string(),
-        CtValue::Char(_) => "Char".to_string(),
-        CtValue::Str(_) => "String".to_string(),
-        CtValue::BigInt(_) => "BigInt".to_string(),
-        CtValue::Bytes(_) => "[U8]".to_string(),
-        CtValue::List(_) => "List".to_string(),
-        CtValue::Map(_) => "Map".to_string(),
-        CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
-        CtValue::Present(_) | CtValue::Failed(CtReport::Clean(_)) => "Option".to_string(),
-        CtValue::Failed(CtReport::Told(_)) => "Result".to_string(),
-        CtValue::Unit => "()".to_string(),
-        CtValue::Closure(_) => "Fn".to_string(),
-    }
-}
-
 /// D-FAIL-CARRIER1=A: read a middle state off an outcome, on either
 /// interpreter.
 ///
@@ -932,46 +887,6 @@ pub fn apply_method(
         // mutable tree (no shared/interior-mutable state in this value model),
         // so a deep clone is just `Clone::clone`.
         (v, "clone") => Ok(v.clone()),
-        // D-ANY-JAI1: `reflect.of(x)` accessors that don't need interpreter
-        // access (`.display` does — see `eval_method`). `__Reflect`/
-        // `__ReflectField` are `core.reflect`'s internal tags (never a real
-        // Jet type — see the comment on `("core.reflect", "of")`).
-        (CtValue::Struct { type_name, fields }, "type_name") if type_name == "__Reflect" => {
-            let inner = fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v);
-            Ok(CtValue::Str(
-                inner.map(ctvalue_type_name).unwrap_or_default(),
-            ))
-        }
-        (CtValue::Struct { type_name, fields }, "fields") if type_name == "__Reflect" => {
-            let inner = fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v);
-            Ok(CtValue::List(match inner {
-                Some(CtValue::Struct { fields: sf, .. }) => sf
-                    .iter()
-                    .map(|(n, v)| CtValue::Struct {
-                        type_name: "__ReflectField".to_string(),
-                        fields: vec![
-                            ("name".to_string(), CtValue::Str(n.clone())),
-                            ("value".to_string(), reflect_child(v)),
-                        ],
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            }))
-        }
-        (CtValue::Struct { type_name, fields }, "name") if type_name == "__ReflectField" => {
-            Ok(fields
-                .iter()
-                .find(|(n, _)| n == "name")
-                .map(|(_, v)| v.clone())
-                .unwrap_or(CtValue::Unit))
-        }
-        (CtValue::Struct { type_name, fields }, "value") if type_name == "__ReflectField" => {
-            Ok(fields
-                .iter()
-                .find(|(n, _)| n == "value")
-                .map(|(_, v)| v.clone())
-                .unwrap_or(CtValue::Unit))
-        }
         // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
         // failure. One carrier, so the payload rides through untouched and only
         // the report changes — the same move the prelude's

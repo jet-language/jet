@@ -132,6 +132,11 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// D-METAREFLECT1: the registered field rows shared by comptime and
+    /// runtime reflection. Layout consumers keep their own ABI map, while
+    /// reflection reads this metadata-bearing model.
+    pub(crate) reflection_fields:
+        HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     /// D-BOUND-EVOLVE1=A: published records carry one compiler-owned wire
     /// holder. The holder is not part of the Jet source schema.
     pub(crate) published_schemas: HashSet<String>,
@@ -3622,6 +3627,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        reflection_fields: HashMap::new(),
         published_schemas: HashSet::new(),
         reflect_paths: HashMap::new(),
         serde_wire_params: HashMap::new(),
@@ -4048,6 +4054,10 @@ pub(crate) fn build_cx_items(
                     s.reflection_fields()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
+                );
+                cx.reflection_fields.insert(
+                    s.name.clone(),
+                    jet_foundation::Reflection::fields(s),
                 );
                 // D-FIELDPOL1: computed field names, so TIR lowering routes a
                 // read of one to a getter call instead of a member access.

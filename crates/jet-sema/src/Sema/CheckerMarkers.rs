@@ -885,7 +885,14 @@ pub(crate) fn check_marker_vocabulary(
                 .iter()
                 .find(|fact| fact.marker.name_span == marker.name_span)
                 .expect("marker fact found by site lookup");
-            if !rule_allows_fact(application, rule_facts) {
+            // A visible `derive T.Name { … }` provider is the open half of
+            // the vocabulary. Its `#Name` request is legal at the provider's
+            // target sites even though it has no compiler-owned
+            // `APPLIED_RULES` row to query; closed compiler rows still use
+            // the authoritative site matrix below.
+            if crate::Policy::applied_rule(&marker.name).is_some()
+                && !rule_allows_fact(application, rule_facts)
+            {
                 diagnostics.push(crate::Policy::marker_wrong_site_error(
                     &marker.name,
                     site,

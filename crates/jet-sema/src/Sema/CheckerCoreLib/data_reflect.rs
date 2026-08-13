@@ -69,11 +69,10 @@ pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
     }
 }
 
-/// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s handle types. `Value` is the
+/// D-METAREFLECT1 / D-ANY-JAI1: `reflect.of(x)`'s handle types. `Value` is the
 /// whole-value handle; `.fields()` returns `[Field]` (only populated for a
-/// struct receiver — every other displayable shape gets an empty list,
-/// resolved at codegen from `cx.struct_fields`, I3: sema only decides the
-/// TYPES here, codegen does the per-call-site enumeration).
+/// struct receiver — every other displayable shape gets an empty list). A
+/// field's value is another typed `Value`; its display text is only a view.
 pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Option<Type> {
     match (type_name, method, n_args) {
         ("Value", "type_name", 0) => Some(Type::String),

@@ -153,6 +153,9 @@ pub struct JitProgram {
     /// invalidation adapter. Values are memo getter names, not policy.
     pub memo_dependencies:
         std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
+    /// D-METAREFLECT1: registered field rows shared with comptime reflection.
+    pub reflection_fields:
+        std::collections::HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     /// Canonical typeable paths used by interpreter reflection.
     pub reflect_paths: std::collections::HashMap<String, String>,
     /// Declared generic parameter names per struct, in source order.
@@ -1565,6 +1568,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
+    let mut reflection_fields = std::collections::HashMap::new();
     let mut struct_type_params = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
     let mut enum_variant_payload_types = std::collections::HashMap::new();
@@ -1628,6 +1632,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         add_published_schema_field_type(s, &mut types);
                         types
                     },
+                );
+                reflection_fields.insert(
+                    s.name.clone(),
+                    jet_foundation::Reflection::fields(s),
                 );
                 for field in &s.fields {
                     register_union_type(
@@ -1704,7 +1712,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     },
                                 );
                                 struct_field_types.insert(
-                                    name,
+                                    name.clone(),
                                     {
                                         let mut types = s
                                             .reflection_fields()
@@ -1713,6 +1721,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         add_published_schema_field_type(s, &mut types);
                                         types
                                     },
+                                );
+                                reflection_fields.insert(
+                                    name,
+                                    jet_foundation::Reflection::fields(s),
                                 );
                             }
                             Item::Enum(e) if e.type_params.is_empty() => {
@@ -1782,7 +1794,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             },
                         );
                         struct_field_types.insert(
-                            name,
+                            name.clone(),
                             {
                                 let mut types = s
                                     .reflection_fields()
@@ -1798,6 +1810,21 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 add_published_schema_field_type(s, &mut types);
                                 types
                             },
+                        );
+                        reflection_fields.insert(
+                            name,
+                            jet_foundation::Reflection::fields(s)
+                                .into_iter()
+                                .map(|mut field| {
+                                    field.ty = crate::Codegen::TIR::qualify_imported_type(
+                                        bundle,
+                                        module_idx,
+                                        &owner,
+                                        &field.ty,
+                                    );
+                                    field
+                                })
+                                .collect(),
                         );
                     }
                     for field in &s.fields {
@@ -1839,6 +1866,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     s.reflection_fields()
                                         .map(|field| field.ty.clone())
                                         .collect(),
+                                );
+                                reflection_fields.insert(
+                                    s.name.clone(),
+                                    jet_foundation::Reflection::fields(s),
                                 );
                                 for field in &s.fields {
                                     register_union_type(
@@ -1953,6 +1984,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         struct_fields,
         struct_field_types,
         memo_dependencies,
+        reflection_fields,
         reflect_paths,
         struct_type_params,
         enum_variants,

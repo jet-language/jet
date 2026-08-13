@@ -1158,7 +1158,7 @@ fn run() {
     print(v.path())         // the canonical typeable path, e.g. "reflect_value.Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
     loop f; v.fields() {
-        print("{f.name()} = {f.value().display()}")
+        print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
     }
 }
 ```
@@ -1174,12 +1174,18 @@ reflection keeps each field as a nested `Value`, not a pre-rendered string:
 | `.display()` | `() → String` | the same string `"{x}"` interpolation shows |
 | `.fields()` | `() → [Field]` | one entry per struct field; `[]` for anything else (primitives, enums, tuples, lists) |
 
-Each `Field` carries a name and its typed value:
+Each `Field` carries a name and another typed `Value`. Call `.display()` when
+text is needed; stringification is a view, not the stored field value:
 
 | Method | Signature | Returns |
 |--------|-----------|---------|
 | `.name()` | `() → String` | the field's declared name |
-| `.value()` | `() → Value` | the field's nested typed value; call `.display()` when text is needed |
+| `.value()` | `() → Value` | the typed field value |
+
+The field names and order are projected from the same registered field rows
+used by comptime `T.reflect()`. Compile-time type, marker, visibility, and span
+facts do not survive code generation because they guide generation; runtime
+type name, path, display, and typed field values do.
 
 A value that isn't `Display`-able (a closure, a `Shared<T>`) is **E0112** at
 the `reflect.of(...)` call site — the fix is the same as for a failed `"{x}"`

@@ -32,6 +32,7 @@ pub mod Policy;
 pub mod RingLayer;
 pub mod RegexSyntax;
 pub mod Registry;
+pub mod Reflection;
 pub mod SHA256;
 pub mod MatchScan;
 pub mod MemSentry;

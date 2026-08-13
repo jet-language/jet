@@ -2453,6 +2453,16 @@ the field list; each field carries `.name`/`.ty`/`.markers`/
 `.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
 is the leaf and `.path()` is the canonical path.
 
+The one registered reflection field row is the law for both views. Comptime
+keeps the row's `name`, `ty`, marker facts, visibility, and source span because
+those facts guide generated source before execution. Runtime keeps the same
+field names and order and projects each stored field as a typed `Value`; it
+keeps `type_name`, `path`, and display text because those facts describe the
+value that exists now. Comptime-only type metadata is erased after code
+generation, while runtime field values are never replaced by pre-stringified
+copies. The difference is therefore an intentional projection boundary, not a
+second metadata model.
+
 **D-LAYOUT-FACTS1=B — Focused compiler facts use `@`** *(ratified
 2026-08-03, spelling amended by D-ONCE-AT1=D)*: `T.@layout` is exactly the
 focused projection of `T.reflect().layout`, not a second metadata model. Users

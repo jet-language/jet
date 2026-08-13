@@ -2222,17 +2222,6 @@ pub fn apply_core_call_with_type(
                 &text, width, &fill,
             )))
         }
-        // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).
-        // `"__Reflect"`/`"__ReflectField"` are internal-only tags (like
-        // `"TypeInfo"`/`"Match"`/`"IOError"` elsewhere in this file) — never a
-        // real Jet type name a user can write, so no `Syntax.rs` entry (I7 is
-        // about user-typeable names). `.type_name`/`.fields` are plain reads
-        // (`Builtins::apply_method`); `.display` needs `&mut self` (it may
-        // run a user `Display` impl), so it's dispatched in `eval_method`.
-        ("core.reflect", "of") => Ok(CtValue::Struct {
-            type_name: "__Reflect".to_string(),
-            fields: vec![("value".to_string(), one(0)?.clone())],
-        }),
         // --- D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 (pure) ---
         ("core.encoding.hex", "encode") => {
             let bytes = as_bytes(one(0)?, span)?;

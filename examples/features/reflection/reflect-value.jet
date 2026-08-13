@@ -6,6 +6,19 @@
 // empty for anything else (primitives, enums, …).
 use core.reflect as reflect
 
+derive T.Summarize {
+    info :: T.reflect()
+    type_name :: info.name
+    first :: info.fields[0].name
+    second :: info.fields[1].name
+    emit("""
+impl @type_name {{
+    fn compile_field_names(self) => String = "@type_name: @first,@second"
+}}
+""")
+}
+
+#Summarize
 struct Point {
     x: Int
     y: Int
@@ -17,13 +30,13 @@ struct Point {
 
 fn run() {
     p :: Point.{x: 3, y: 4}
+    print(p.compile_field_names())
     v :: reflect.of(p)
     print(v.type_name())
     print(v.path())
     print(v.display())
     loop f, v.fields() {
-        print("{f.name()} = {f.value().display()}")
-        print(f.value().type_name())
+        print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
     }
     n :: reflect.of(42)
     print(n.type_name())

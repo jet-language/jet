@@ -1173,6 +1173,8 @@ impl<'a> EvalCtx<'a> {
                                 self.span(),
                                 None,
                                 self.sink.as_ref(),
+                                Some(&self.reflection_fields),
+                                Some(&self.reflect_paths),
                             )?;
                             let item = match next {
                                 CtValue::Present(value) => match *value {

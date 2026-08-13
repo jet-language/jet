@@ -1072,32 +1072,6 @@ impl<'a> Interp<'a> {
             evaluated_receiver = Some(recv);
         }
 
-        // D-ANY-JAI1: `reflect.of(x).display()` — same Display-impl-aware
-        // rendering `{x}`/`print(x)` use (`show_value`), so it needs `&mut
-        // self` and can't be a plain `apply_method` entry like `.type_name`/
-        // `.fields` just above it. Guarded specifically to the `__Reflect`
-        // wrapper — a *user* type's own `.display()` call (the method a
-        // `impl Type.Display` block defines) still falls through to the
-        // ordinary instance-method dispatch below, unaffected.
-        if method == "display" {
-            let peek = match evaluated_receiver.take() {
-                Some(value) => value,
-                None => self.eval(receiver, scope)?,
-            };
-            if let CtValue::Struct { type_name, fields } = &peek {
-                if type_name == "__Reflect" {
-                    let inner = fields
-                        .iter()
-                        .find(|(n, _)| n == "value")
-                        .map(|(_, v)| v.clone())
-                        .unwrap_or(CtValue::Unit);
-                    let s = self.show_value(&inner, span)?;
-                    return Ok(CtValue::Str(s));
-                }
-            }
-            evaluated_receiver = Some(peek);
-        }
-
         if matches!(method, "add" | "remove" | "ids") {
             let recv = match evaluated_receiver.take() {
                 Some(value) => value,
