@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35674,
+    "rev": 35681,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-12T22:18:10.886Z"
+    "completionCursor": "2026-08-12T23:41:41.981Z"
   },
   "epochs": [
     {
@@ -117013,7 +117013,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add .path while keeping .name as the leaf; choose the path only when a bare name is ambiguous. I9: one name ledger supplies every projection.",
       "blockedBy": [
@@ -117075,11 +117075,11 @@
         {
           "n": 3,
           "text": "All projections read the one name ledger, with focused reflection, diagnostic, AOT, jet run, and interpreter proof.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:18.857Z"
+          "evidence": "Tier proof on master: examples/features/comptime/reflect_paths byte-identical to expected/comptime/reflect_paths.out under default jet run, --release, --interpret (orchestrator ran, fresh cache); reflect suite 7/7 green; name-ledger unique-leaf/ambiguous-canonical diagnostic snapshots in tests/ui/reflect_name_ledger (610e11d7c); JIT/interpreter metadata reads the one ledger (TIR/mod.rs:1380)",
+          "at": "2026-08-13T00:01:23.604Z"
         }
       ],
       "refs": [
@@ -117093,8 +117093,9 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:57.132Z",
-      "updated": "2026-08-12T21:26:59.029Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-13T00:01:24.255Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T00:01:24.255Z"
     },
     {
       "id": "c03wyvdx",
@@ -126352,7 +126353,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Diagnose then fix both tiers for examples/features/types/dimensional_quantities.jet (golden exists, neither tier produces it). Default jet run exits 1 with E2201 — the dev-verb message ('jet dev needs a run function') firing from the run path is itself a defect: identify why entry detection fails for this file (the example predates script mode; check whether unit declarations confuse the implicit-run materialization in Sema/Bundle.rs:1342-1394). Release exits 101 with the I2 ICE 'typed IR does not cover (run)' at Codegen/Items.rs:2175 — same family as the spawn ICE e892acc21 fixed at :2172 on the integration branch; re-test after #1929 lands, then fix whatever construct remains uncovered in TIR lowering (sema must reject or TIR must cover; I3). NOTE: re-verify both symptoms on a fresh post-#1929 binary before coding — the probe used the stale 2026-08-11 binary.",
       "blockedBy": [],
@@ -126368,29 +126369,29 @@
         {
           "n": 1,
           "text": "examples/features/types/dimensional_quantities.jet produces its expected golden byte-identically under default jet run, jet run --release (AOT), and the interpreter (I9/I5)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:31.148Z"
+          "evidence": "Orchestrator verified on merged master: dimensional_quantities byte-identical to expected golden under default jet run, jet run --release (AOT), jet run --interpret, fresh cache (AOT lowering fix at TIR/emit/expressions.rs:1099, commit 83e63c76f)",
+          "at": "2026-08-13T00:00:56.851Z"
         },
         {
           "n": 2,
           "text": "The Items.rs 'typed IR does not cover (run)' ICE path for this construct is fixed in sema/TIR, not worked around; a targeted test covers the construct",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:31.582Z"
+          "evidence": "Items.rs typed-IR ICE for this construct fixed in sema/TIR (commits 26d5097cb + 83e63c76f) with targeted tests (TIR binder regression test tests.rs:121, arithmetic lowering test); release L0502 spans now anchor to real source lines 3:43/6:19/7:17 (Serde.rs:369, Units.rs:107)",
+          "at": "2026-08-13T00:00:57.418Z"
         },
         {
           "n": 3,
           "text": "jet run never reports the E2201 dev-verb message for a runnable file; if an entry-detection defect existed it has a regression test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:32.009Z"
+          "evidence": "jet run runs the example (no E2201 dev-verb message) on all three modes; default-argument TIR binder regression test added (call_args.rs:227)",
+          "at": "2026-08-13T00:00:57.952Z"
         }
       ],
       "refs": [],
@@ -126402,8 +126403,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T17:53:14.995Z",
-      "updated": "2026-08-12T18:21:09.144Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T00:00:58.619Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T00:00:58.619Z"
     },
     {
       "id": "c0m8yal5",
@@ -170070,6 +170072,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T00:01:24.256Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0ae3pqg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T00:01:23.605Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ae3pqg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T00:00:58.619Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0d1ge7t",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T00:00:57.952Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d1ge7t",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T00:00:57.419Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d1ge7t",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T00:00:56.851Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d1ge7t",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-12T23:41:41.987Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-12T23:41:41.981Z"
+    },
+    {
       "at": "2026-08-12T23:31:51.439Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -173518,55 +173569,6 @@
       "by": "fable-e3-audit",
       "action": "card.update",
       "ref": "c0fsjhdc",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:50.293Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0ai0h4w",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:27.496Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0t5khxi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:26.924Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:26.373Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:25.759Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:25.183Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0jeuiwf",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:24.608Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08yj420",
       "note": "milestoneId"
     }
   ],
