@@ -1014,7 +1014,7 @@ impl PackageFacts {
             })
             .filter_map(|file| file.relative.parent())
             .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("."))
-            .cloned()
+            .map(Path::to_path_buf)
             .collect::<Vec<_>>();
         files.retain(|file| {
             if nested_packages
