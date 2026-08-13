@@ -2607,7 +2607,7 @@ outcomes; `core.testing` has no separate benchmark evaluator.
 defining, running, skipping, and failing a test — spelled as a marker
 instead of a module function call (D-TESTKIT1).
 
-#### `jet test` — directory recursion, filters, shuffle, parallel runs
+#### `jet test` and `jet bench` — shared targets and filters
 
 `jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
 running every `.jet` file found, in sorted path order. A directory that has a
@@ -2627,6 +2627,11 @@ jet test <file> --filter=foo     # only run tests whose name contains "foo"
 jet test <file> --shuffle        # random (printed) order — order-dependence check
 jet test <file> --shuffle=42     # reproduce a specific shuffled order
 ```
+
+`jet bench <file|dir>` uses the same file, recursive-directory, and project
+targets. `--filter=foo` selects benchmark regions by name; benches always run
+serially for timing integrity. Test-only flags such as `--shuffle`, `--coverage`,
+and `--update-snapshots` do not apply to `jet bench`.
 
 #### `jet fuzz` — fuzz a property test
 

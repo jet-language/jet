@@ -1,4 +1,5 @@
 use super::*;
+use jet_foundation::JSON::JSONValue;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
 /// `json.canonical(x)?` when the enclosing function is fallible, otherwise
@@ -183,7 +184,7 @@ fn inspect_reserved_lists_keywords_teaching_words_and_sigils() {
     for word in ["copy", "mut", "take", "const", "unsafe"] {
         assert!(text.contains(word), "reserved report missing teaching-reserved word `{word}`: {text}");
     }
-    for sigil in ["::", ":=", "&", "^", "~", "$"] {
+    for sigil in ["::", ":=", "&", "^", "~", "@"] {
         assert!(text.contains(sigil), "reserved report missing sigil `{sigil}`: {text}");
     }
     assert!(text.contains("fn"), "reserved report missing a real keyword: {text}");
@@ -585,4 +586,76 @@ fn quiet_accepted_and_suppresses_budget_check_recap() {
         "jet budget check --quiet must suppress its recap line, got: {}",
         String::from_utf8_lossy(&quiet.stderr)
     );
+}
+
+#[test]
+fn bench_targets_filter_and_json_match_test_runner_contract() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = isolated_cwd("bench_runner_contract");
+    fs::create_dir_all(dir.join("nested")).unwrap();
+    let source = r#"fn run() {}
+
+#Test("needle") {
+    require_eq(1, 1)
+}
+
+#Test("other") {
+    require_eq(2, 2)
+}
+
+#Bench("needle") {
+    require_eq(1, 1)
+}
+
+#Bench("other") {
+    require_eq(2, 2)
+}
+"#;
+    fs::write(dir.join("root.jet"), source).unwrap();
+    fs::write(dir.join("nested/child.jet"), source).unwrap();
+
+    let tests = Command::new(jet())
+        .args(["test", ".", "--filter=needle"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(tests.status.success(), "test target failed: {}", String::from_utf8_lossy(&tests.stderr));
+    let test_stdout = String::from_utf8_lossy(&tests.stdout);
+    assert!(test_stdout.contains("needle"), "filtered test missing needle: {test_stdout}");
+    assert!(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}");
+
+    let benches = Command::new(jet())
+        .args(["bench", ".", "--filter=needle"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(benches.status.success(), "bench target failed:\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&benches.stdout), String::from_utf8_lossy(&benches.stderr));
+    let bench_stdout = String::from_utf8_lossy(&benches.stdout);
+    assert_eq!(bench_stdout.matches("ns/iter").count(), 2, "directory bench must run one selected region per file: {bench_stdout}");
+    assert!(bench_stdout.contains("root.jet::needle"), "human bench output must qualify region by path: {bench_stdout}");
+    assert!(bench_stdout.contains("nested/child.jet::needle"), "human bench output must include nested file path: {bench_stdout}");
+    assert!(!bench_stdout.contains("::other"), "filtered bench ran other: {bench_stdout}");
+
+    let json = Command::new(jet())
+        .args(["bench", ".", "--filter=needle", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(json.status.success(), "bench JSON target failed: {}", String::from_utf8_lossy(&json.stderr));
+    let json_stdout = String::from_utf8_lossy(&json.stdout);
+    let records: Vec<_> = json_stdout
+        .lines()
+        .map(|line| parse_json(line).unwrap_or_else(|_| panic!("bench JSON line does not parse: {line}")))
+        .collect();
+    assert_eq!(records.len(), 2, "JSON must contain one record per selected region: {json_stdout}");
+    for record in records {
+        let JSONValue::Object(record) = record else { panic!("bench JSON record is not an object") };
+        assert!(matches!(record.get("profile"), Some(JSONValue::String(profile)) if profile == "release"), "JSON record has wrong profile: {record:?}");
+        assert!(matches!(record.get("name"), Some(JSONValue::String(name)) if name.ends_with("::needle")), "JSON region name is not path-qualified: {record:?}");
+    }
 }

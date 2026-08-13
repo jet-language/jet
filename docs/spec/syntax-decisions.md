@@ -2639,6 +2639,15 @@ doctests; `EXPR // => VALUE` compares JetShow output (E2901).
 (ops/sec + ns/iter); the `benchmark` manifest target points `jet bench` at a
 package entry.
 
+**D-BENCH-PARITY1=B** *(ratified 2026-08-05, card #1452)*: `jet bench` and
+`jet test` share file, recursive-directory, and project targets. `jet bench`
+selects region names with `--filter=<substr>` and always runs serially for
+timing integrity. Test-only flags (`--shuffle`, `--coverage`, and
+`--update-snapshots`) stay off the bench surface. A multi-file human report
+uses one heading per file and path-qualified region names; `--json` emits one
+record per region. Future runner-surface changes apply to both commands or
+name an explicit carve-out.
+
 **D-COV1**: `jet test --coverage` — per-function HIT/MISS table; probes only
 in this mode, normal codegen byte-identical. **D-TOOL4**: snapshot testing
 with `-u`/`--update-snapshots`. **D-A11YGATE1**: accessibility issues are

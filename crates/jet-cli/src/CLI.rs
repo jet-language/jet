@@ -814,8 +814,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
     FlagSpec { long: "--scope", help: "with trust grant: choose user or repository scope" },
-    // D-TESTKIT1=A (c308 pass 2): filter/shuffle/serial for `jet test`.
-    FlagSpec { long: "--filter", help: "with test: only run tests whose name contains --filter=<substr>" },
+    // D-TESTKIT1=A / D-BENCH-PARITY1=B: the shared name-selection flag.
+    FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },
     FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by

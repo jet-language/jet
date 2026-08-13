@@ -9,7 +9,7 @@ use std::process::{exit, Command};
 use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
 
-use crate::CmdCompile::{build, stem};
+use crate::CmdCompile::{build, collect_source_files_recursive, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
 
@@ -2669,39 +2669,93 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
     exit(ExitCodes::USER_ERROR);
 }
 
-/// D-TEST1 / D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
-/// Builds the program, runs it with warmups and repeated trials, and reports
-/// statistically honest output: mean, stddev, and trial count.
-pub(crate) fn run_bench(file: &str, mode: OutputMode) {
-    let src = match fs::read_to_string(file) {
-        Ok(s) => s,
-        Err(_) => {
-            crate::cli_error!("E2105", "can't find the file `{}`", file);
+/// D-TOOL5 / D-BENCH-PARITY1=B: `jet bench` accepts one file, a recursive
+/// directory target, or a project root. Region benches stay serial because
+/// concurrent workloads would corrupt timing results.
+#[derive(Clone, Default)]
+pub(crate) struct BenchRunOpts {
+    /// `--filter=<substr>` selects benchmark region names after discovery.
+    pub(crate) filter: Option<String>,
+}
+
+const BENCH_PROFILE_LABEL: &str = "release";
+
+fn bench_path_label(path: &Path) -> String {
+    let mut label = path.to_string_lossy().replace('\\', "/");
+    while let Some(rest) = label.strip_prefix("./") {
+        label = rest.to_string();
+    }
+    label
+}
+
+pub(crate) fn run_bench(path: &str, opts: BenchRunOpts, mode: OutputMode) {
+    let target = Path::new(path);
+    if !target.exists() {
+        crate::cli_error!("E2105", "can't find the file `{}`", path);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let mut files = Vec::new();
+    if target.is_dir() {
+        collect_source_files_recursive(target, jet::Syntax::FILE_EXT, &mut files);
+        files.sort();
+        if files.is_empty() {
+            crate::cli_error!("E2104", "no .{} files in `{}` (searched subdirectories too)", jet::Syntax::FILE_EXT, path);
             exit(ExitCodes::USER_ERROR);
         }
-    };
-
-    // D-BENCH1: when the file declares `#Bench` blocks, time each region via
-    // the bench harness (its generated `main` reports ns/iter + ops/sec).
-    // Otherwise fall through to whole-program timing (the original behaviour).
-    if jet::has_bench_blocks(file) {
-        run_bench_regions(file, &src, mode);
-        return;
+    } else {
+        files.push(target.to_path_buf());
     }
 
-    let (rust_code, ffi_link, _capabilities) = match jet::compile_with_path(&src, file) {
-        Ok(out) => (out.rust, out.ffi, out.capabilities),
-        Err(diags) => {
-            report_problems(mode, file, &src, &diags);
-            exit(ExitCodes::USER_ERROR);
+    let multi_file = files.len() > 1;
+    let mut any_fail = false;
+    for file in files {
+        let shown = bench_path_label(&file);
+        if multi_file && !mode.json {
+            println!("== {shown} ==");
+        }
+        if !run_bench_file(&file, &shown, &opts, mode) {
+            any_fail = true;
+        }
+    }
+    exit(if any_fail {
+        ExitCodes::USER_ERROR
+    } else {
+        ExitCodes::OK
+    });
+}
+
+fn run_bench_file(path: &Path, shown: &str, opts: &BenchRunOpts, mode: OutputMode) -> bool {
+    let file = path.to_string_lossy();
+    let src = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read `{}`: {}", shown, error);
+            return false;
         }
     };
-    let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
+
+    // D-BENCH1: region files use the generated harness. A filter applies only
+    // to discovered regions; a file without regions contributes no result.
+    if jet::has_bench_blocks(&file) {
+        return run_bench_regions(&file, shown, &src, opts.filter.as_deref(), mode);
+    }
+    if opts.filter.is_some() {
+        return true;
+    }
+
+    let (rust_code, ffi_link, _capabilities) = match jet::compile_with_path(&src, &file) {
+        Ok(out) => (out.rust, out.ffi, out.capabilities),
+        Err(diags) => {
+            report_problems(mode, &file, &src, &diags);
+            return false;
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("bench_{}", stem(&file)));
     build(
-        file,
+        &file,
         &rust_code,
         bin.clone(),
-        BuildProfile::Default,
+        BuildProfile::Release,
         ffi_link.as_ref(),
         &[],
         false,
@@ -2716,12 +2770,10 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
     let warmups = 5u32;
     let trials = 20u32;
 
-    // Warmup runs.
     for _ in 0..warmups {
         Command::new(&bin).output().ok();
     }
 
-    // Timed trials.
     let mut times_ms: Vec<f64> = Vec::new();
     for _ in 0..trials {
         let t0 = std::time::Instant::now();
@@ -2731,57 +2783,98 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
             Ok(s) if s.success() => times_ms.push(elapsed),
             Ok(_) => {
                 eprintln!("bench: program exited with non-zero status during trial");
-                exit(ExitCodes::USER_ERROR);
+                return false;
             }
-            Err(e) => {
-                eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
-                exit(ExitCodes::USER_ERROR);
+            Err(error) => {
+                eprintln!("bench: couldn't run `{}`: {}", bin.display(), error);
+                return false;
             }
         }
     }
 
     let n = times_ms.len() as f64;
     let mean = times_ms.iter().sum::<f64>() / n;
-    let variance = times_ms.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / n;
+    let variance = times_ms.iter().map(|time| (time - mean).powi(2)).sum::<f64>() / n;
     let stddev = variance.sqrt();
-    let stem_name = stem(file);
+    let name = stem(&file);
 
     if mode.json {
         println!(
-            "{{\"name\":\"{}\",\"mean_ms\":{:.3},\"stddev_ms\":{:.3},\"trials\":{},\"warmups\":{}}}",
-            stem_name, mean, stddev, trials, warmups
+            "{{\"name\":{},\"file\":{},\"mean_ms\":{:.3},\"stddev_ms\":{:.3},\"trials\":{},\"warmups\":{},\"profile\":{}}}",
+            jet::Diagnostics::json_str(&name),
+            jet::Diagnostics::json_str(shown),
+            mean,
+            stddev,
+            trials,
+            warmups,
+            jet::Diagnostics::json_str(BENCH_PROFILE_LABEL),
         );
     } else {
         println!(
-            "{}  {:.2} ms ±{:.2}  ({} runs, {} warmup)",
-            stem_name, mean, stddev, trials, warmups
+            "{}  {:.2} ms ±{:.2}  ({} runs, {} warmup)  profile: {}",
+            name, mean, stddev, trials, warmups, BENCH_PROFILE_LABEL
         );
     }
+    true
 }
 
 /// D-BENCH1: build and run the per-region bench harness. The harness binary's
-/// `main` warms up, auto-scales, times each `#Bench` region, and prints a line
-/// per region (ns/iter + ops/sec), so this just compiles, runs it once, and
-/// relays its output.
-fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
-    if let Some(status) = crate::CmdBudget::reuse_bench_report(file) {
-        if status != 0 {
-            exit(ExitCodes::USER_ERROR);
+/// `main` auto-scales and records 20 serial samples per selected region.
+fn run_bench_regions(
+    file: &str,
+    shown: &str,
+    src: &str,
+    filter: Option<&str>,
+    mode: OutputMode,
+) -> bool {
+    if filter.is_none() && !mode.json {
+        if let Some(status) = crate::CmdBudget::reuse_bench_report(file) {
+            return status == 0;
         }
-        return;
     }
-    let evidence = collect_bench_evidence(file, src, mode, true);
+    let evidence = collect_bench_evidence_with_filter(file, src, mode, false, filter);
     for bench in &evidence {
-        let samples = bench.samples.iter().map(|(elapsed, iters)| *elapsed as f64 / *iters as f64).collect::<Vec<_>>();
+        let samples = bench
+            .samples
+            .iter()
+            .map(|(elapsed, iters)| *elapsed as f64 / *iters as f64)
+            .collect::<Vec<_>>();
         let n = samples.len() as f64;
         let mean = samples.iter().sum::<f64>() / n;
-        let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / n;
+        let variance = samples
+            .iter()
+            .map(|sample| (sample - mean) * (sample - mean))
+            .sum::<f64>()
+            / n;
         let ops = if mean > 0.0 { 1.0e9 / mean } else { 0.0 };
-        println!("{}  {:.1} ns/iter (\u{00b1}{:.1})  {:.0} ops/sec", bench.name, mean, variance.sqrt(), ops);
+        let name = format!("{shown}::{}", bench.name);
+        if mode.json {
+            println!(
+                "{{\"name\":{},\"file\":{},\"region\":{},\"mean_ns\":{:.1},\"stddev_ns\":{:.1},\"ops_per_sec\":{:.0},\"samples\":{},\"profile\":{}}}",
+                jet::Diagnostics::json_str(&name),
+                jet::Diagnostics::json_str(shown),
+                jet::Diagnostics::json_str(&bench.name),
+                mean,
+                variance.sqrt(),
+                ops,
+                samples.len(),
+                jet::Diagnostics::json_str(BENCH_PROFILE_LABEL),
+            );
+        } else {
+            println!(
+                "{}  {:.1} ns/iter (\u{00b1}{:.1})  {:.0} ops/sec  profile: {}",
+                name,
+                mean,
+                variance.sqrt(),
+                ops,
+                BENCH_PROFILE_LABEL
+            );
+        }
     }
-    if crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
-        exit(ExitCodes::USER_ERROR);
+    if filter.is_none() && crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
+        return false;
     }
+    true
 }
 
 #[derive(Clone, Debug)]
@@ -2796,7 +2889,22 @@ pub(crate) struct BenchEvidence {
 
 /// Shared `#Bench` executor for human bench output and BenchMeasurement.
 /// Wire rows are compiler-private; user-facing spelling stays `jet bench`.
-pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, relay_output: bool) -> Vec<BenchEvidence> {
+pub(crate) fn collect_bench_evidence(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    relay_output: bool,
+) -> Vec<BenchEvidence> {
+    collect_bench_evidence_with_filter(file, src, mode, relay_output, None)
+}
+
+fn collect_bench_evidence_with_filter(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    relay_output: bool,
+    filter: Option<&str>,
+) -> Vec<BenchEvidence> {
     let (rust_code, ffi_link) = match jet::compile_benches_with_path(file) {
         Ok(r) => r,
         Err(diags) => {
@@ -2809,7 +2917,7 @@ pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, re
         file,
         &rust_code,
         bin.clone(),
-        BuildProfile::Default,
+        BuildProfile::Release,
         ffi_link.as_ref(),
         &[],
         false,
@@ -2820,7 +2928,11 @@ pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, re
         // Benchmark build; not content-cached (race-safe via `build`'s temp path).
         None,
     );
-    let out = Command::new(&bin).output().unwrap_or_else(|e| {
+    let mut command = Command::new(&bin);
+    if let Some(filter) = filter {
+        command.env("JET_BENCH_FILTER", filter);
+    }
+    let out = command.output().unwrap_or_else(|e| {
         eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
@@ -3019,7 +3131,7 @@ pub(crate) fn collect_scene_evidence(
         file,
         &compiled.rust,
         bin.clone(),
-        BuildProfile::Default,
+        BuildProfile::Release,
         compiled.ffi.as_ref(),
         &[],
         false,

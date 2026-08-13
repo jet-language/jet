@@ -310,6 +310,21 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
 }
 
 #[test]
+fn test_and_bench_help_keep_shared_runner_flags_paired() {
+    let test_help = Command::new(jet()).args(["test", "--help"]).env("NO_COLOR", "1").output().unwrap();
+    let bench_help = Command::new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap();
+    assert!(test_help.status.success(), "jet test --help failed: {}", String::from_utf8_lossy(&test_help.stderr));
+    assert!(bench_help.status.success(), "jet bench --help failed: {}", String::from_utf8_lossy(&bench_help.stderr));
+    let test_help = String::from_utf8_lossy(&test_help.stdout);
+    let bench_help = String::from_utf8_lossy(&bench_help.stdout);
+    assert!(test_help.contains("--filter"), "test help lost shared filter flag: {test_help}");
+    assert!(bench_help.contains("--filter"), "bench help missing shared filter flag: {bench_help}");
+    for flag in ["--shuffle", "--coverage", "--update-snapshots", "--serial"] {
+        assert!(!bench_help.contains(flag), "bench help exposed test-only flag {flag}: {bench_help}");
+    }
+}
+
+#[test]
 fn bare_dev_uses_file_scoped_run() {
     let out = Command::new(jet()).args(["dev", "--no-color"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));

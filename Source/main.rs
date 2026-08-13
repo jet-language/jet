@@ -50,6 +50,7 @@ use CmdCompile::{
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
     run_eval, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
+    BenchRunOpts,
 };
 use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
@@ -479,6 +480,8 @@ usage:
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
   {bin} test  <file> --shuffle      run tests in a random (printed) order
   {bin} test  <file> --serial       run one test at a time (default: parallel)
+  {bin} bench <file|dir>            benchmark regions/programs (recurses into subdirs)
+  {bin} bench <file|dir> --filter=foo   only run benchmark regions whose name contains `foo`
   {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
   {bin} new   <name>                create a new project folder with package.jet
   {bin} new   <name> --annotated    same, with commented example deps
@@ -562,7 +565,7 @@ flags:
   --gc-trace                   with run/dev: record automatic-GC promotion evidence
   --trace-tiers                with run/dev: print per-function tier, reason, timing
   --color=auto|always|never    control color (auto: only on a terminal)
-  --filter=<substr>            with test: only run tests whose name contains it
+  --filter=<substr>            with test/bench: only run regions whose name contains it
   --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
   --serial                     with test: one test at a time (default: parallel)
   --iterations=<n>             with fuzz: case budget (default 1000)
@@ -992,6 +995,24 @@ fn check_flags(raw: &[String], subcmd: &str) {
     }
 }
 
+fn reject_bench_test_flags(argv: &[String]) {
+    let Some(flag) = argv.iter().find(|arg| {
+        matches!(arg.as_str(), "-u" | "--serial" | "--coverage" | "--shuffle")
+            || arg.starts_with("--shuffle=")
+            || arg.starts_with("--coverage=")
+            || arg.starts_with("--update-snapshots=")
+            || arg == "--update-snapshots"
+    }) else {
+        return;
+    };
+    crate::cli_error!(
+        @fix "E2104",
+        format!("`{flag}` applies only to `jet test`"),
+        format!("run `jet test <file> {flag}`")
+    );
+    exit(ExitCodes::USAGE);
+}
+
 fn reject_retired_gate_flags(argv: &[String], json: bool) {
     let Some(retirement) = jet::Syntax::retirement("allow-impure") else {
         return;
@@ -1335,6 +1356,9 @@ fn main() {
         }
         out
     };
+    let bench_filter = jet_argv
+        .iter()
+        .find_map(|a| a.strip_prefix("--filter=").map(str::to_string));
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
         // #1659 c2 (round 2): `jet self lsp --help`/`-h` must print help, not
@@ -1500,6 +1524,9 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     if !owns_flags {
         check_flags(jet_argv, cmd);
+    }
+    if cmd == "bench" {
+        reject_bench_test_flags(jet_argv);
     }
 
     // Commands with no required positional target.
@@ -2262,12 +2289,6 @@ fn main() {
     // D-CLI-BARE1=A: `-p <member>` picks a workspace member for the bare-entry
     // resolver below; declared here so its borrow outlives `target`.
     let bare_member_flag = flag_value(&raw, "-p");
-    // D-CLI-BARE1=A: owns the `String` a bare `bench` resolves to, so `target`
-    // (a `&str`) can borrow it — `run_compile_cmd`'s callers return before
-    // `target` is used, but `bench` falls through to the shared variable. Every
-    // other path either overwrites this or diverges before reading it back.
-    #[allow(unused_assignments)]
-    let mut bare_bench_entry = String::new();
     let target = match args.get(1) {
         Some(f) => f.as_str(),
         None => {
@@ -2283,8 +2304,26 @@ fn main() {
                                 return;
                             }
                             "bench" => {
-                                bare_bench_entry = entry_str;
-                                bare_bench_entry.as_str()
+                                // A bare bench is a project target, not only
+                                // the resolved run entry. This keeps its
+                                // discovery surface identical to `jet bench
+                                // <directory>` while preserving workspace
+                                // member selection from the shared resolver.
+                                let entry_dir = entry
+                                    .parent()
+                                    .filter(|path| !path.as_os_str().is_empty())
+                                    .unwrap_or_else(|| Path::new("."));
+                                let project = jet::Loader::find_manifest_root(entry_dir)
+                                    .unwrap_or_else(|| entry_dir.to_path_buf());
+                                let project = project.to_string_lossy();
+                                run_bench(
+                                    &project,
+                                    BenchRunOpts {
+                                        filter: bench_filter.clone(),
+                                    },
+                                    mode,
+                                );
+                                unreachable!("run_bench exits after the project walk")
                             }
                             _ => {
                                 // D-CLI1: use passthrough slice if `--` was present;
@@ -2439,7 +2478,19 @@ fn main() {
         }
         // D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
         "bench" => {
-            run_bench(target, mode);
+            let target_path = Path::new(target);
+            let resolved = if target_path.is_dir() {
+                target.to_string()
+            } else {
+                resolve_source_path(target)
+            };
+            run_bench(
+                &resolved,
+                BenchRunOpts {
+                    filter: bench_filter,
+                },
+                mode,
+            );
         }
         // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
         // parameterized `#Test fn` (D-TEST1's property-test form).

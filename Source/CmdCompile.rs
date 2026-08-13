@@ -1589,7 +1589,7 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     if p.is_dir() {
         let ext = jet::Syntax::FILE_EXT;
         let mut files: Vec<PathBuf> = Vec::new();
-        collect_test_files_recursive(p, ext, &mut files);
+        collect_source_files_recursive(p, ext, &mut files);
         files.sort();
         if files.is_empty() {
             crate::cli_error!("E2104", "no .{} files in `{}` (searched subdirectories too)", ext, path);
@@ -1614,10 +1614,11 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     });
 }
 
-/// D-TESTKIT1=A gap #2: walk every subdirectory under `dir`, collecting `.ext`
-/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped,
-/// as are reserved package/env/workspace/config files.
-fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+/// D-TESTKIT1=A gap #2 / D-BENCH-PARITY1=B: walk every subdirectory under
+/// `dir`, collecting `.ext` files. `build/` and dotdirs (`.git`, `.jet`'s own
+/// cache, etc.) are skipped, as are reserved package/env/workspace/config
+/// files. Test and bench runners share this target walk.
+pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -1628,7 +1629,7 @@ fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
             if name == "build" || name.starts_with('.') {
                 continue;
             }
-            collect_test_files_recursive(&path, ext, out);
+            collect_source_files_recursive(&path, ext, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some(ext)
             && !matches!(
                 path.file_name().and_then(|name| name.to_str()),
@@ -3792,11 +3793,7 @@ pub(crate) fn build(
                 jet::RuntimeCache::PreparedRuntime::inline(rust_code)
             }
             Err(jet::RuntimeCache::Error::Tool(_)) => {
-                eprintln!("error: couldn't find `rustc` on this machine");
-                eprintln!(
-                    " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
-                );
-                eprintln!(" fix: install Rust from https://rustup.rs, then try again");
+                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
                 exit(ExitCodes::USER_ERROR);
             }
         }

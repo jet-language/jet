@@ -1139,6 +1139,9 @@ keeps whole-program `jet bench` timing (5 warmup + 20 trials). The body call is
 `black_box`'d so the optimizer can't elide it. Example:
 `examples/features/tooling/bench.jet`; golden `examples/features/expected/105_bench.out`
 (the `jet run` `main` output) + structural check in `tests/jet_test.rs`.
+Bench compilation uses the optimized `release` profile. Human result lines and
+machine records carry `profile: release`; directory targets qualify region
+names with their source path.
 
 **Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
 `jet-timing.json` (load/sema/ffi/codegen µs + generated-Rust bytes), prints
@@ -2339,7 +2342,7 @@ to a useful `para_map` speedup depends on item count, callback cost, and the hos
 Run `jet bench examples/features/tooling/para_map_crossover_bench.jet` on the
 same machine as the workload before choosing between `map` and `para_map`.
 `jet bench` owns the optimized benchmark profile; do not compare its numbers
-with debug or release builds.
+with debug or default builds.
 
 The checked-in reference run (Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
 three invocations) first favored `para_map` at 256 items with callback cost 256;

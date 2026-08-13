@@ -3375,6 +3375,7 @@ pub fn emit_bundle_dbg(
         let ns = module.alias.clone();
         out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
+        out.push_str("use super::jet_stack_enter;\n");
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -3616,6 +3617,7 @@ pub fn emit_bundle_tests_cov(
         let module_path = mangle(&module.alias);
         out.push_str(&format!("mod {} {{\n", module_path));
         out.push_str(MOD_USE);
+        out.push_str("use super::jet_stack_enter;\n");
         out.push_str("use super::{jet_proof_record, jet_test_failure, jet_test_print};\n");
         if tests.iter().any(|test| {
             test.module.as_deref() == Some(module_path.as_str()) && !test.test.params.is_empty()
@@ -3873,6 +3875,7 @@ pub fn emit_bundle_fuzz(
         let ns = module.alias.clone();
         out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
+        out.push_str("use super::jet_stack_enter;\n");
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -4181,6 +4184,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         let ns = module.alias.clone();
         out.push_str(&format!("mod {} {{\n", mangle(&ns)));
         out.push_str(MOD_USE);
+        out.push_str("use super::jet_stack_enter;\n");
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -4334,6 +4338,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+    out.push_str("    let bench_filter = std::env::var(\"JET_BENCH_FILTER\").ok();\n");
     out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     for (i, bench) in benches.iter().enumerate() {
         let name = escape_rust_str(
@@ -4343,14 +4348,15 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
                 .expect("sema resolves every benchmark marker name before codegen"),
         );
         out.push_str(&format!(
-            "    {{\n        let (samples, allocations, iters) = jet_bench_{}();\n",
+            "    {{\n        let name = {};\n        if bench_filter.as_ref().map_or(true, |filter| name.contains(filter.as_str())) {{\n        let (samples, allocations, iters) = jet_bench_{}();\n",
+            name,
             i
         ));
-        out.push_str(&format!("        print!(\"JETBENCH1\\t{{}}\\t{{}}\", hex({}.as_bytes()), iters);\n", name));
+        out.push_str("        print!(\"JETBENCH1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
         out.push_str("        for sample in samples { print!(\"\\t{}\", sample); }\n        println!();\n");
-        out.push_str(&format!("        print!(\"JETALLOC1\\t{{}}\\t{{}}\", hex({}.as_bytes()), iters);\n", name));
+        out.push_str("        print!(\"JETALLOC1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
         out.push_str("        for (count, bytes) in allocations { print!(\"\\t{}:{}\", count, bytes); }\n        println!();\n");
-        out.push_str("    }\n");
+        out.push_str("        }\n    }\n");
     }
     out.push_str("}\n");
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
