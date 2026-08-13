@@ -1159,7 +1159,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
         }
         Item::FactDecl(value) => {
@@ -1168,7 +1168,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
         }
         Item::Func(f) => {

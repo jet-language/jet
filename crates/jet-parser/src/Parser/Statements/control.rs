@@ -2262,6 +2262,7 @@ impl<'a> Parser<'a> {
                     args_span,
                     body,
                     dot_span: marker.span,
+                    dsl: false,
                     span,
                 })
             }

@@ -1056,23 +1056,8 @@ impl<'a> Parser<'a> {
                 // D-META-USER1=A: a source-declared rule is a callable marker
                 // too. The parser cannot see declarations from imported files,
                 // so unknown names remain in the shared fact stream for the
-                // bundle registry to validate. Built-in rules keep their
-                // existing applicator checks.
-                if crate::Policy::applied_rule(&marker.name).is_some()
-                    && !Self::function_marker_has_applicator(&marker.name)
-                {
-                    return Err(Diagnostic::error(
-                        "E0355",
-                        format!(
-                            "`#{}` cannot attach through this function marker list",
-                            marker.name
-                        ),
-                        "the marker registry gives every marker exact sites and a typed signature"
-                            .to_string(),
-                        "remove the marker or move it to its registered site".to_string(),
-                        Some(marker.span),
-                    ));
-                }
+                // bundle registry to validate; the registry also owns site and
+                // applicator legality for built-in rows (D-VERDICT-1455-1).
                 if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
                     self.apply_unsafe_function_marker(&mut function, &marker)?;
                     unreachable!("a missing Unsafe reason always returns E3112");
