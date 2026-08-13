@@ -4019,7 +4019,7 @@ pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
             .any(|f| f.name == "run" && resident_safe_func(f, &names))
     } else {
         program.funcs.iter().any(|f| {
-                f.name == program.entry
+            f.name == program.entry
                 && f.params.is_empty()
                 && entry_return_supported(f.ret.as_ref())
                 && resident_safe_func(f, &names)
