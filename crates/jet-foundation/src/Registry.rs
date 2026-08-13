@@ -280,8 +280,8 @@ pub fn block_marker(
                         && declaration.target == Some(*span)
                         && matches!(
                             declaration.value,
-                            crate::Policy::PolicyValue::UnsafeTrack
-                                | crate::Policy::PolicyValue::UnsafeSkip
+                            crate::Policy::PolicyValue::Track
+                                | crate::Policy::PolicyValue::Skip
                         )
                 })
                 .map(|declaration| declaration.value.display())
