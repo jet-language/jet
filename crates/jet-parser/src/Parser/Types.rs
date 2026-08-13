@@ -749,6 +749,16 @@ impl<'a> Parser<'a> {
                             self.maybe_close_type_args(&format!("after `{name}<…>`"))?;
                             Type::Apply { name, args }
                         } else {
+                            if name.split('.').any(Syntax::is_comptime_name) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0119",
+                                    format!("`{name}` is a fact value, not a type"),
+                                    "facts classify values at compile time; they do not mint or select types"
+                                        .to_string(),
+                                    "read the fact in a compile-time value position instead".to_string(),
+                                    Some(start),
+                                ));
+                            }
                             Type::Named(name)
                         }
                     }

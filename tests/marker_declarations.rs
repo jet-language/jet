@@ -12,7 +12,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use jet::AST::{Item, MarkerDecl};
+use jet::AST::{Expr, Item, MarkerDecl, StrPart};
 use jet_foundation::Facts;
 use jet_foundation::Policy::{self, RuleSite};
 use jet_foundation::Registry;
@@ -65,7 +65,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
         let facts: Vec<&str> = declaration
             .params
             .iter()
-            .filter(|param| param.name.starts_with('$'))
+            .filter(|param| jet::Syntax::is_comptime_name(&param.name))
             .map(|param| param.name.as_str())
             .collect();
         assert!(
@@ -77,7 +77,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
         let written_arguments: Vec<&str> = declaration
             .params
             .iter()
-            .filter(|param| !param.name.starts_with('$'))
+            .filter(|param| !jet::Syntax::is_comptime_name(&param.name))
             .map(|param| param.name.as_str())
             .collect();
         let registered_arguments: Vec<&str> =
@@ -148,7 +148,7 @@ fn every_fact_row_carries_its_law_columns() {
     let declarations = Registry::fact_declarations();
     assert_eq!(
         parsed.iter().map(|declaration| declaration.name.as_str()).collect::<Vec<_>>(),
-        declarations.iter().map(|declaration| declaration.name).collect::<Vec<_>>(),
+        declarations.iter().map(|declaration| declaration.source_name).collect::<Vec<_>>(),
         "the real parser and the foundation reader must see the same fact rows"
     );
     assert_eq!(declarations.len(), written.len(), "every fact declaration is read");
@@ -168,13 +168,34 @@ fn every_fact_row_carries_its_law_columns() {
     for declaration in declarations {
         let source = written
             .iter()
-            .find(|source| source.starts_with(&format!("fact {}(", declaration.name)))
+            .find(|source| source.starts_with(&format!("fact {}(", declaration.source_name)))
             .unwrap_or_else(|| panic!("fact `{}` is not written", declaration.name));
         let row = rows
             .iter()
             .find(|row| row.name == declaration.name)
             .unwrap_or_else(|| panic!("fact `{}` has no registry row", declaration.name));
-        assert!(source.starts_with(&format!("fact {}(", declaration.name)));
+        assert!(source.starts_with(&format!("fact {}(", declaration.source_name)));
+        let parsed_declaration = parsed
+            .iter()
+            .find(|parsed| parsed.name == declaration.source_name)
+            .unwrap_or_else(|| panic!("fact `{}` has no parsed declaration", declaration.name));
+        let written_name = parsed_declaration
+            .params
+            .iter()
+            .find(|param| param.name == "@name")
+            .and_then(|param| param.value.as_deref())
+            .and_then(|value| match value {
+                Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
+                    Some(parts.iter().map(|part| match part {
+                        StrPart::Lit(text) => text.as_str(),
+                        StrPart::Interp(..) => unreachable!("checked literal fact name"),
+                    }).collect::<String>())
+                }
+                _ => None,
+            });
+        if let Some(written_name) = written_name {
+            assert_eq!(written_name, declaration.name, "fact @name column");
+        }
         for column in ["@holds:", "@safe:", "@gates:"] {
             assert!(source.contains(column), "`{}` must write `{column}`", declaration.name);
         }

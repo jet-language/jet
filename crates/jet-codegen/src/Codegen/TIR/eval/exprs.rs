@@ -29,6 +29,51 @@ use super::{
 
 struct EvalOptionValue(CtValue);
 
+/// D-FACT-READ1=A: project the typed plane fact from the reflected TypeInfo
+/// already bound by a derive body. This extends the existing compiler-fact
+/// reader; it does not create a second reflection representation.
+fn reflected_plane_fact(value: &CtValue, read: jet_foundation::Registry::FactRead) -> Option<CtValue> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_TYPE_INFO {
+        return None;
+    }
+    let field = |name: &str| fields.iter().find(|(key, _)| key == name).map(|(_, value)| value);
+    match read {
+        jet_foundation::Registry::FactRead::Range => {
+            let CtValue::List(facts) = field("facts")? else {
+                return None;
+            };
+            facts.iter().find_map(|fact| {
+                let CtValue::Struct { fields, .. } = fact else {
+                    return None;
+                };
+                let value = fields.iter().find(|(key, _)| key == "value").map(|(_, value)| value)?;
+                let CtValue::Struct { fields, .. } = value else {
+                    return None;
+                };
+                let CtValue::Present(range) = fields
+                    .iter()
+                    .find(|(key, _)| key == "range")
+                    .map(|(_, value)| value)?
+                else {
+                    return None;
+                };
+                Some((**range).clone())
+            })
+        }
+        jet_foundation::Registry::FactRead::Dimension => {
+            let CtValue::List(dimensions) = field("dimensions")? else {
+                return None;
+            };
+            dimensions.first().cloned()
+        }
+        jet_foundation::Registry::FactRead::States => field("states").cloned(),
+        _ => None,
+    }
+}
+
 impl crate::option_lift2::JetOptionValue for EvalOptionValue {
     type Item = CtValue;
 
@@ -5256,6 +5301,26 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("compute.vjp.grads", self.span()));
                     };
                     return self.call_callable(&grads, Vec::new());
+                }
+                if let Some(read) = jet_foundation::Registry::fact_read(field) {
+                    if !matches!(
+                        read,
+                        jet_foundation::Registry::FactRead::Layout
+                            | jet_foundation::Registry::FactRead::Name
+                            | jet_foundation::Registry::FactRead::Fields
+                    ) {
+                        return reflected_plane_fact(&r, read).ok_or_else(|| {
+                            crate::Sema::Diagnostics::render_registered(
+                                "E0302",
+                                format!("`{field}` has no fact on this reflected type"),
+                                "fact reads answer typed values held by the reflected subject"
+                                    .to_string(),
+                                "read the fact on a type that carries the registered plane"
+                                    .to_string(),
+                                Some(self.span()),
+                            )
+                        });
+                    }
                 }
                 // D-LAYOUT-FACTS1=B: `@layout` is a contextual projection of
                 // the TypeInfo value bound to a derive type parameter. It is

@@ -304,8 +304,8 @@ impl<'a> Parser<'a> {
                 )?;
                 let attr_name = marker.name.clone();
                 match attr_name.as_str() {
-                    "Static" => attrs.push(ConstAttr::ForceStatic),
-                    "Inline" => attrs.push(ConstAttr::ForceInline),
+                    Syntax::MARKER_STATIC => attrs.push(ConstAttr::ForceStatic),
+                    Syntax::MARKER_INLINE => attrs.push(ConstAttr::ForceInline),
                     "static" | "inline" => {
                         let replacement = crate::Policy::applied_rule(&attr_name)
                             .and_then(|row| match row.status {

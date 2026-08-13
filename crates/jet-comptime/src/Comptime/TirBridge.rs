@@ -16,6 +16,44 @@ fn reflected_struct_field<'a>(value: &'a CtValue, field: &str) -> Option<&'a CtV
     fields.iter().find(|(name, _)| name == field).map(|(_, value)| value)
 }
 
+/// D-FACT-READ1=A: expose the typed plane projection used by derive shape
+/// checks from the same reflected TypeInfo that the evaluator consumes.
+fn reflected_plane_field<'a>(
+    value: &'a CtValue,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<&'a CtValue> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_TYPE_INFO {
+        return None;
+    }
+    let field = |name: &str| fields.iter().find(|(key, _)| key == name).map(|(_, value)| value);
+    match read {
+        jet_foundation::Registry::FactRead::Range => {
+            let CtValue::List(facts) = field("facts")? else {
+                return None;
+            };
+            facts.iter().find_map(|fact| {
+                let value = reflected_struct_field(fact, "value")?;
+                let range = reflected_struct_field(value, "range")?;
+                match range {
+                    CtValue::Present(value) => Some(value.as_ref()),
+                    _ => None,
+                }
+            })
+        }
+        jet_foundation::Registry::FactRead::Dimension => {
+            let CtValue::List(dimensions) = field("dimensions")? else {
+                return None;
+            };
+            dimensions.first()
+        }
+        jet_foundation::Registry::FactRead::States => field("states"),
+        _ => None,
+    }
+}
+
 fn literal_index(expr: &Expr, globals: &HashMap<String, CtValue>) -> Option<usize> {
     match expr {
         Expr::Int(value, ..) => usize::try_from(*value).ok(),
@@ -50,6 +88,16 @@ fn reflected_value<'a>(
         }
         Expr::Field(base, field, _) => {
             let value = reflected_value(base, globals)?;
+            if let Some(read) = jet_foundation::Registry::fact_read(field) {
+                if !matches!(
+                    read,
+                    jet_foundation::Registry::FactRead::Layout
+                        | jet_foundation::Registry::FactRead::Name
+                        | jet_foundation::Registry::FactRead::Fields
+                ) {
+                    return reflected_plane_field(value, read);
+                }
+            }
             let field = if crate::Syntax::compiler_fact_member(field).is_some() {
                 let CtValue::Struct { type_name, .. } = value else {
                     return None;

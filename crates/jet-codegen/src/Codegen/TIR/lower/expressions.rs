@@ -3541,7 +3541,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 _ => false,
             };
-            if Syntax::compiler_fact_member(member).is_some() && compiler_fact_receiver {
+            if compiler_fact_receiver
+                && (Syntax::compiler_fact_member(member).is_some()
+                    || jet_foundation::Registry::fact_read(member).is_some())
+            {
                 let recv = lower_expr(receiver, cx, env);
                 return TExpr {
                     ty: compiler_fact_type(member),
@@ -5176,6 +5179,15 @@ fn compiler_fact_type(fact: &str) -> Type {
         f if f == Syntax::COMPILER_FACT_FIELDS => {
             Type::List(Box::new(Type::Named("FieldInfo".to_string())))
         }
+        f if f == Syntax::COMPILER_FACT_RANGE => Type::Named(Syntax::TYPE_RANGE.to_string()),
+        f if f == Syntax::COMPILER_FACT_DIMENSION => {
+            Type::Named("DimensionInfo".to_string())
+        }
+        f if f == Syntax::COMPILER_FACT_STATES => {
+            Type::List(Box::new(Type::Named("StateInfo".to_string())))
+        }
+        f if f == Syntax::COMPILER_FACT_EFFECTS => Type::Named("EffectInfo".to_string()),
+        f if f == Syntax::COMPILER_BUILD_FACT_PROFILE => Type::String,
         _ => Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
     }
 }

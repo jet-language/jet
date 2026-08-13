@@ -107,24 +107,24 @@ impl<'a> Parser<'a> {
                 self.emit_numeric_field_error(span);
                 return Ok(("0".to_string(), span));
             }
-            // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: a marked member after `.` is
-            // a compiler-owned fact, and the registry is closed. The mark is
-            // not a general user-member escape hatch.
+            // D-FACT-READ1=A / D-META-STAGE1=B: a marked member after `.` is a
+            // compiler-owned fact, and the registry is closed. The mark is not
+            // a general user-member escape hatch.
             if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
                 let (member, member_span) = self.expect_ident("in a compiler fact")?;
-                if Syntax::compiler_fact_member(&member).is_none() {
+                if Syntax::fact_read_kind(&member).is_none() {
                     return Err(Diagnostic::error(
                         "E0302",
                         format!("`{member}` is not a compiler-owned fact"),
                         format!(
                             "the compiler-owned facts are {}",
-                            Syntax::COMPILER_FACTS
+                            Syntax::FACT_READS
                                 .iter()
                                 .map(|(name, _)| format!("`{name}`"))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),
-                        "write `T.@layout`, `T.@name`, or `T.@fields`".to_string(),
+                        "write a registered fact read such as `T.@range`".to_string(),
                         Some(member_span),
                     ));
                 }

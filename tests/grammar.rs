@@ -19,6 +19,10 @@ const GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
 
 fn generated_section(path: &str) -> String {
     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    generated_section_from_text(path, &text)
+}
+
+fn generated_section_from_text(path: &str, text: &str) -> String {
     let start = text
         .find(GENERATED_START)
         .unwrap_or_else(|| panic!("{path} is missing {GENERATED_START}"));
@@ -32,6 +36,10 @@ fn generated_section(path: &str) -> String {
         .find('\n')
         .map_or(text.len(), |idx| end_marker + idx);
     text[line_start..line_end].to_string()
+}
+
+fn generated_section_matches(text: &str, path: &str, expected: &str) -> bool {
+    generated_section_from_text(path, text) == expected.trim_end()
 }
 
 #[test]
@@ -76,6 +84,25 @@ fn editor_grammars_match_generated_sections() {
             "{path} generated section drifted; run `jet self devtools grammars`"
         );
     }
+}
+
+#[test]
+fn seeded_tree_sitter_drift_fails_the_generated_section_guard() {
+    let path = "editors/tree-sitter/grammar.js";
+    let source = fs::read_to_string(path).unwrap();
+    let seeded = source.replacen(
+        GENERATED_END,
+        "// seeded generated-grammar drift\nEND GENERATED JET SYNTAX HIGHLIGHTS",
+        1,
+    );
+    assert!(
+        !generated_section_matches(
+            &seeded,
+            path,
+            &jet::Syntax::render_tree_sitter_generated_highlights(),
+        ),
+        "the seeded generated-tree-sitter drift must fail the same guard"
+    );
 }
 
 #[test]

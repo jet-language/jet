@@ -538,6 +538,7 @@ pub const TARGET_OS_WINDOWS: &str = "Windows";
 pub const BUILD_INFO: &str = "build";
 /// D-OSTARGET2=B: the `.os` field of the comptime `build` value.
 pub const BUILD_INFO_OS: &str = "os";
+pub const BUILD_INFO_PROFILE: &str = "profile";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
@@ -856,6 +857,11 @@ pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
 pub const COMPILER_FACT_LAYOUT: &str = "@layout";
 pub const COMPILER_FACT_NAME: &str = "@name";
 pub const COMPILER_FACT_FIELDS: &str = "@fields";
+pub const COMPILER_FACT_RANGE: &str = "@range";
+pub const COMPILER_FACT_DIMENSION: &str = "@dimension";
+pub const COMPILER_FACT_STATES: &str = "@states";
+pub const COMPILER_FACT_EFFECTS: &str = "@effects";
+pub const COMPILER_BUILD_FACT_PROFILE: &str = "@profile";
 /// Each compiler fact and the `TypeInfo` member it projects.
 pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_LAYOUT, "layout"),
@@ -863,8 +869,26 @@ pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_FIELDS, "fields"),
 ];
 
+/// D-FACT-READ1=A: every marked member accepted after `.` is owned by the one
+/// registry reader. The projection is used only for a reflected `TypeInfo`
+/// value in a derive body.
+pub const FACT_READS: &[(&str, &str)] = &[
+    (COMPILER_FACT_LAYOUT, "layout"),
+    (COMPILER_FACT_NAME, "name"),
+    (COMPILER_FACT_FIELDS, "fields"),
+    (COMPILER_FACT_RANGE, "range"),
+    (COMPILER_FACT_DIMENSION, "dimension"),
+    (COMPILER_FACT_STATES, "states"),
+    (COMPILER_FACT_EFFECTS, "effects"),
+    (COMPILER_BUILD_FACT_PROFILE, "profile"),
+];
+
 pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
     COMPILER_FACTS.iter().find_map(|(name, member)| (*name == fact).then_some(*member))
+}
+
+pub fn fact_read_kind(member: &str) -> Option<crate::Registry::FactRead> {
+    crate::Registry::fact_read(member)
 }
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";

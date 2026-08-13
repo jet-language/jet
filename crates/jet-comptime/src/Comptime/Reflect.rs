@@ -6,7 +6,7 @@
 //! view contains only derives lowered from them.
 
 use crate::AST::{
-    Dimension, DistinctDef, EnumDef, Field, Func, FunctionObligations, KnowledgeFact, Marker,
+    Dimension, DistinctDef, EnumDef, Expr, Field, Func, FunctionObligations, Item, KnowledgeFact, Marker,
     MaturityTag, Measure, StructDef, StructLayout, Type, TypeParam, UnitScaleProvenance,
     VariantPayload, ViewProvenance,
 };
@@ -172,7 +172,7 @@ fn optional_value(value: Option<CtValue>, ty: &str) -> CtValue {
 
 /// One typed dimension fact. Axes remain records, so `Length^1` is not a
 /// display-only string: callers can inspect the axis and exponent.
-fn dimension_info(dimension: &Dimension) -> CtValue {
+pub fn build_dimension_info(dimension: &Dimension) -> CtValue {
     let axes = dimension
         .axes()
         .map(|(name, exponent)| {
@@ -195,7 +195,7 @@ fn dimension_info(dimension: &Dimension) -> CtValue {
     )
 }
 
-fn range_info(start: i64, end: i64) -> CtValue {
+pub fn build_range_info(start: i64, end: i64) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_RANGE,
         &[("start", CtValue::Int(start)), ("end", CtValue::Int(end))],
@@ -465,7 +465,7 @@ fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
             kind,
             "range",
             std::iter::empty::<String>(),
-            Some(range_info(
+            Some(build_range_info(
                 i64::try_from(*lo).expect("reflected interval lower bound fits Int"),
                 i64::try_from(*hi).expect("reflected interval upper bound fits Int"),
             )),
@@ -476,7 +476,7 @@ fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
             "dimension",
             std::iter::empty::<String>(),
             None,
-            Some(dimension_info(dimension)),
+            Some(build_dimension_info(dimension)),
         ),
         KnowledgeFact::Measure(measure) => fact_value_with_detail(
             kind,
@@ -605,7 +605,7 @@ fn declared_function_facts(
 
 fn type_dimensions(ty: &Type) -> Vec<CtValue> {
     match ty {
-        Type::Quantity { dimension, .. } => vec![dimension_info(dimension)],
+        Type::Quantity { dimension, .. } => vec![build_dimension_info(dimension)],
         Type::Tagged { inner, .. } => type_dimensions(inner),
         _ => Vec::new(),
     }
@@ -643,7 +643,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
                 "Range",
                 "range",
                 std::iter::empty::<String>(),
-                Some(range_info(start, end)),
+                Some(build_range_info(start, end)),
                 None,
             ),
         ));
@@ -658,7 +658,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
                 "dimension",
                 [kind.name().to_string()],
                 None,
-                Some(dimension_info(dimension)),
+                Some(build_dimension_info(dimension)),
             ),
         ));
     }
@@ -927,7 +927,7 @@ fn state_path(owner: &str, state: &str) -> String {
 
 /// A state identity is not a display-only path. Keep the canonical path for
 /// diagnostics, but expose owner and state as fields of a typed record.
-fn state_ref(owner: &str, state: &str) -> CtValue {
+pub fn build_state_ref(owner: &str, state: &str) -> CtValue {
     ct_struct(
         "StateRef",
         &[
@@ -938,6 +938,121 @@ fn state_ref(owner: &str, state: &str) -> CtValue {
     )
 }
 
+/// Build the typed state values returned by `Type.@states`.
+pub fn build_state_refs(owner: &str, states: &[String]) -> CtValue {
+    ct_list(
+        states
+            .iter()
+            .map(|state| build_state_ref(owner, state))
+            .collect(),
+    )
+}
+
+/// Build the same state rows that the aggregate `TypeInfo.states` view uses.
+pub fn build_state_infos(owner: &str, states: &[String]) -> CtValue {
+    ct_list(
+        states
+            .iter()
+            .map(|state| {
+                ct_struct(
+                    "StateInfo",
+                    &[
+                        ("name", ct_str(state)),
+                        ("path", build_state_ref(owner, state)),
+                    ],
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Build the typed effect values returned by `fn.@effects`.
+pub fn build_effect_info(effects: &[String]) -> CtValue {
+    ct_struct(
+        "EffectInfo",
+        &[("values", ct_list(effects.iter().cloned().map(ct_str).collect()))],
+    )
+}
+
+/// D-FACT-READ1=A: resolve a direct fact read while top-level comptime
+/// bindings are evaluated. This pass runs before sema has built a module
+/// `TypeRegistry`, so it reads the same registered plane through the source
+/// declarations that will be registered moments later.
+pub fn fact_read_value(expr: &Expr, items: &[Item]) -> Option<CtValue> {
+    let Expr::Field(subject, member, _) = expr else {
+        return None;
+    };
+    let is_build_subject = matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
+    let read = if member == crate::Syntax::BUILD_INFO_PROFILE {
+        if !is_build_subject {
+            return None;
+        }
+        jet_foundation::Registry::fact_read(crate::Syntax::COMPILER_BUILD_FACT_PROFILE)?
+    } else {
+        jet_foundation::Registry::fact_read(member)?
+    };
+    let subject_name = match subject.as_ref() {
+        Expr::Ident(name, _) => name.as_str(),
+        _ => return (read == jet_foundation::Registry::FactRead::BuildProfile)
+            .then(|| CtValue::Str("dev".to_string())),
+    };
+    match read {
+        jet_foundation::Registry::FactRead::Range => items.iter().find_map(|item| match item {
+            Item::Distinct(def) if def.name == subject_name => def
+                .range
+                .map(|(start, end, _)| build_range_info(start, end)),
+            Item::UnitFamily(family) => family
+                .distinct_defs()
+                .into_iter()
+                .find(|def| def.name == subject_name)
+                .and_then(|def| def.range)
+                .map(|(start, end, _)| build_range_info(start, end)),
+            _ => None,
+        }),
+        jet_foundation::Registry::FactRead::Dimension => items.iter().find_map(|item| match item {
+            Item::Distinct(def) if def.name == subject_name => def
+                .quantity
+                .as_ref()
+                .map(|(dimension, _)| build_dimension_info(dimension)),
+            Item::UnitFamily(family) => family
+                .distinct_defs()
+                .into_iter()
+                .find(|def| def.name == subject_name)
+                .and_then(|def| def.quantity)
+                .map(|(dimension, _)| build_dimension_info(&dimension)),
+            _ => None,
+        }),
+        jet_foundation::Registry::FactRead::States => items.iter().find_map(|item| match item {
+            Item::StateDecl(decl) if decl.type_name == subject_name => Some(build_state_infos(
+                subject_name,
+                &decl.states.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(),
+            )),
+            _ => None,
+        }),
+        jet_foundation::Registry::FactRead::Effects => items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == subject_name => Some(build_effect_info(
+                &function
+                    .declared_effects
+                    .as_ref()
+                    .map(|effects| {
+                        effects
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+            )),
+            _ => None,
+        }),
+        jet_foundation::Registry::FactRead::BuildProfile => {
+            Some(CtValue::Str("dev".to_string()))
+        }
+        jet_foundation::Registry::FactRead::Layout
+        | jet_foundation::Registry::FactRead::Name
+        | jet_foundation::Registry::FactRead::Fields => None,
+    }
+}
+
 fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
     let transition = method.state_transition.as_ref()?;
     Some(ct_struct(
@@ -946,7 +1061,7 @@ fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
             ("operation", ct_str(method.name.clone())),
             (
                 "from",
-                state_ref(
+                build_state_ref(
                     owner,
                     transition
                         .from
@@ -954,7 +1069,7 @@ fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
                         .unwrap_or("_"),
                 ),
             ),
-            ("to", state_ref(owner, &transition.to)),
+            ("to", build_state_ref(owner, &transition.to)),
         ],
     ))
 }
@@ -969,7 +1084,7 @@ fn reflected_state_fact(owner: &str, state: &str) -> CtValue {
             let mut value = fact_value("State", state, [path], None, None);
             if let CtValue::Struct { fields, .. } = &mut value {
                 if let Some((_, field)) = fields.iter_mut().find(|(name, _)| name == "state") {
-                    *field = CtValue::Present(Box::new(state_ref(owner, state)));
+                    *field = CtValue::Present(Box::new(build_state_ref(owner, state)));
                 }
             }
             value
@@ -1048,7 +1163,7 @@ pub fn build_struct_type_info_with_path(
                 "StateInfo",
                 &[
                     ("name", ct_str(state)),
-                    ("path", state_ref(&s.name, state)),
+                    ("path", build_state_ref(&s.name, state)),
                 ],
             )
         })
@@ -1128,7 +1243,7 @@ pub fn build_distinct_type_info_with_path(
     let dimensions = d
         .quantity
         .as_ref()
-        .map(|(dimension, _)| vec![dimension_info(dimension)])
+        .map(|(dimension, _)| vec![build_dimension_info(dimension)])
         .unwrap_or_default();
     let (markers, expanded_markers) =
         type_level_marker_views(&d.type_markers, &[], &d.derives);
