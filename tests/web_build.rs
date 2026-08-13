@@ -2315,6 +2315,43 @@ fn web_hello_dom_shim_roundtrip() {
 }
 
 #[test]
+fn web_plain_run_loads_wasm_before_dom_print() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web startup golden (need rustc + node)");
+        return;
+    }
+    let src = r#"
+#Target(JS)
+fn hello() { print("hello, web") }
+
+fn run() {}
+"#;
+    let dir = build_web_fixture(
+        "plain_run_startup",
+        src,
+        "tests/fixtures/web_plain_run_startup.jet",
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("async function loadWasm()"),
+        "plain Wasm run needs loader:\n{js}"
+    );
+    assert!(
+        js.contains("const raw = wasm.jet_export_run();"),
+        "plain Wasm run must call its emitted export:\n{js}"
+    );
+    assert!(js.contains("jetDom.print(\"hello, web\")"), "JS print path missing:\n{js}");
+    let harness = r#"
+const { jet_main, hello } = await import("./app.js");
+await jet_main();
+hello();
+"#;
+    let stdout = run_node_harness(&dir, "plain_run_startup_harness.mjs", harness);
+    assert_eq!(stdout, "hello, web\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_reactive_dom_snapshot_roundtrip() {
     // Phase 7 (c134): a `reactive.signal` + `ui.reactive_render` render loop
     // over the null/DOM backend, compiled to JS and actually executed under
