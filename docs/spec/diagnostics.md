@@ -4,6 +4,8 @@ Error messages are the language's user interface. They are designed, not
 written; every change is reviewed against this file and pinned by a
 snapshot in tests/ui/.
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 ## The contract
 
 The complete typed row projection is generated at

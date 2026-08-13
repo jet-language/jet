@@ -2,6 +2,8 @@
 
 *First-principles audit of the whole corpus — every domain, every surface, every engine. 2026-08-07.*
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Executive summary
 
 This audit swept all of Jet at once: syntax, types, patterns, memory, authority, failure, concurrency, comptime, stdlib, modules, packages, CLI, dev loop, backend engines, examples, web, Canvas, the decision ledger, and the negative space between them. Fifteen domain readers and four cross-cut passes, every claim pinned to a file and line.
@@ -206,7 +208,7 @@ The mechanism's own ladder, since it touches user files: see it — every rewrit
 | `stream` | generator `Stream<T>`; codec reader/writer mode; file-line iteration; `Event<T>` "occurrence stream"; future `core.data` streams; two schedulers' internals | `Stream<T>` keeps the word. Codec mode is spelled `reader`/`writer` (it already is — the *prose* stops calling it streaming). Events are events. One spec page: "what Jet means by stream" **[B4]** |
 | `derive` | request a capability (body line, D-USERDERIVE1); request it (marker form); *define* a provider (`derive T.Trait {}`, D-METADERIVE1) | the marker form `#Comparable` is the one request spelling; the body line retires (element 5's mechanism, amending D-USERDERIVE1); the keyword keeps only D-METADERIVE1's meaning: *define a provider* **[B5]** |
 | `grant` | `#Grant` — scoped compile-time effect grant; `jet trust grant` — durable on-disk authorization | already settled, only unfinished: D-AUTHORITY-SCOPE1 deletes `#Grant` (`#Caps` carries scoped effects), and D-AUTHORITY-WORD1 retired "capability" — yet the handle type is still named `Capability` (`effects_surface.rs:131`) and the trust verb still says `grant`. Finish the ratified migration; no new decision needed **[ratified, finish]** |
-| `yield` | the suspension keyword; "yielding loop" prose for eager `->` comprehensions | the prose changes; comprehensions are "collecting loops." Zero code changes **[B4]** |
+| `yield` | the suspension keyword; "collecting loop" prose for eager `->` comprehensions | the prose changes; comprehensions are "collecting loops." Zero code changes **[B4]** |
 | `wasm` | `#Target(Wasm)` browser compute bucket; `target: plugin` sandbox kind | rename the plugin kind's user word to `sandbox` (it is about isolation, not the ISA) **[B6]** |
 | `schema` | 4 unrelated meanings across envelopes and manifests | falls out of element 4's one-envelope rule |
 

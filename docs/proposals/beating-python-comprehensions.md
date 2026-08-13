@@ -3,6 +3,8 @@
 Measured base: docs/audits/surface-frequency-audit-2026-08-04.md. Compiler
 checks in this proposal ran against today's `target/debug/jet`.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Words used here
 
 - **Comprehension** — one expression that walks a source, keeps some items, and

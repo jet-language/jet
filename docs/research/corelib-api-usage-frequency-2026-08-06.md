@@ -1,5 +1,7 @@
 # Core-library API usage frequency across languages and segments
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Date: 2026-08-06. Purpose: empirical evidence for which standard-library operations dominate
 real-world code, so Jet's prelude makes the most common operations the most frictionless.
 Languages covered: Python, JavaScript/TypeScript, Rust, Go, Java, Kotlin, Swift, C#, Ruby.
@@ -373,7 +375,7 @@ concurrently and collect, sleep, timeouts, channels/queues, locks (less common).
 **Friction signals:** function-color friction (sync/async split APIs) is the dominant
 complaint in Python/JS/Rust ecosystems; Go's goroutines avoid it and are consistently
 praised. Structured concurrency (task groups) is where Swift/Kotlin/Python converged.
-Jet already tracks this (yielding loops/taskgroups research).
+Jet already tracks this (collecting loops/taskgroups research).
 
 ### 9. Random
 

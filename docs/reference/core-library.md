@@ -1,5 +1,7 @@
 # Core library (`core`)
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 The Jet Core library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
 enough to write real command-line tools. Every fallible call returns a
@@ -2054,8 +2056,8 @@ newlines; malformed quote closure is an error rather than a partial row.
 `DataTree`, not a flat map), `to_string(value)`.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `DataTree`
-tree backs one whole-value and streaming adapter contract per format:
-stream pressure follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
+tree backs one whole-value and reader/writer adapter contract per format:
+reader/writer pressure follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 The exact signatures, defaults/ranges/accounting, tagged XML schemas, error
 paths/projections, canonical byte rules, strict decoder matrices, lifecycle,
 test vectors, and edition migrations are normative in
@@ -2102,7 +2104,7 @@ Each adapter is a full serde equivalent, not a lossy subset:
 **Current implementation boundary:** JSONL, the lossless tagged XML engine and
 pull handles, base32/base64url, and edition-split `json.canonical`
 (edition 2026: infallible prototype bytes; edition 2027: fallible RFC 8785 JCS)
-exist. XML whole and stream parsing enforce the exact XML 1.0 Fifth Edition
+exist. XML whole and reader parsing enforce the exact XML 1.0 Fifth Edition
 `Char` production for literal scalars and numeric references, with identical
 typed errors across every byte split. XML attribute and namespace values apply
 XML 1.0 line-end and whitespace normalization, including explicit general-entity
@@ -2128,7 +2130,7 @@ SAX-style tag control; Jet parses every format into one shared `DataTree`
 value instead, by design (D-SERDE13=B). `copy` and `clear` each have one
 witness language and no consistent competitor meaning.
 `core.encoding.csv`: `flush` already ships as `CSVWriter.flush`. `read`
-already ships as `CSVReader.next`, matching every other stream reader's
+already ships as `CSVReader.next`, matching every other reader's
 name above. `fieldsizelimit` already ships as the shared
 `EncodingLimits.max_item_bytes`, one cross-format limit instead of a
 CSV-only one.
@@ -2151,7 +2153,7 @@ sort, join, pivot, and collect enforce named ceilings. Invalid analytics
 instead of silent zeros or clamps. Numeric reducers use population variance
 (divide by `n`), Neumaier summation, and collapse signed zero to `+0.0` on
 output. Pivot cells use distinct `DataPivotCell` row/column keys.
-The stream pressure classification is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
+The reader/writer pressure classification is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 `data.csv<T>(text)` decodes CSV into `[T]` using the same `#Codable` model as
 `core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects

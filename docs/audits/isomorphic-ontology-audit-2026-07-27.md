@@ -1,5 +1,7 @@
 # Isomorphic ontology audit — 2026-07-27
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Prose in this note follows the `simple` skill. Code, decision IDs, paths, and
 Jet spellings stay exact.
 
@@ -11,7 +13,7 @@ Jet teaches a few core ideas with shared form.
 `=>` is the one callable arrow. It covers named functions, lambdas, methods, and
 effect ceilings. `Type.{ … }` is the one construction head for every literal
 kind. `loop` is the one iteration form for infinite, conditional, source, and
-yielding loops. `#Rule` applies metadata. `@` marks locations and sources.
+collecting loops. `#Rule` applies metadata. `@` marks locations and sources.
 
 The main risks are not missing features. They are shared glyphs with more than
 one job (`#`, `?`, `&`, `^`, `|`), and a few pairs that share meaning but not
@@ -170,7 +172,7 @@ false rhyme / absent.
 
 ### Family B — Control selection (`->` / `if` / `loop`)
 
-- Members: `if` arms, subjectless guards, yielding loop items, ordinary break
+- Members: `if` arms, subjectless guards, collecting loop items, ordinary break
   payloads.
 - Shared ontology: C14/C15/C16. Choose or produce the next control value.
 - Spellings: `->` marks selected or yielded values. Effect-only bodies omit the

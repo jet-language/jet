@@ -1,6 +1,8 @@
-# Yielding loops
+# Collecting loops
 
 **Status: ratified 2026-07-26.**
+
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
 Authority:
 
@@ -94,7 +96,7 @@ rows :: loop team, teams,
 }
 ```
 
-One header yields one flat List. An explicit inner yielding loop preserves
+One header yields one flat List. An explicit inner collecting loop preserves
 nesting:
 
 ```jet
@@ -106,7 +108,7 @@ Lockstep iteration stays explicit through `zip`.
 
 ## Result shape
 
-A yielding loop always returns an eager List:
+A collecting loop always returns an eager List:
 
 ```jet
 names :: loop user, users -> user.name
@@ -182,12 +184,12 @@ found :: loop {
 
 Dot exits are retired.
 
-## Exits from yielding loops
+## Exits from collecting loops
 
-For a yielding loop:
+For a collecting loop:
 
 - `break` returns the accumulated List;
-- `break(name)` returns the named yielding loop's accumulated List;
+- `break(name)` returns the named collecting loop's accumulated List;
 - `next` omits the current item;
 - `next(name)` omits the named loop's current item;
 - `break value` and `break(name, value)` are rejected.
@@ -226,10 +228,10 @@ The formatter never rewrites loops into adapters or adapters into loops.
 The implementation must register and snapshot diagnostics for:
 
 - a yield arrow on a non-finite loop;
-- a () yielding body;
-- a yielded path with no item;
+- a () body in a collecting loop;
+- a collecting path with no item;
 - incompatible item types;
-- an invalid break payload in a yielding loop;
+- an invalid break payload in a collecting loop;
 - incompatible ordinary-loop break payloads;
 - a named exit with no enclosing target;
 - a retired dot exit;
