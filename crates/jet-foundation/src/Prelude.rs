@@ -1,10 +1,12 @@
 //! Readable Core prelude registry (D-NAME-ALIAS1=A).
 //!
 //! The source file is the one human-readable home for ambient names. This
-//! module only parses its declarations into compiler facts; the facts do not
-//! implement any runtime behavior.
+//! module also owns small diagnostic kernels shared by every execution tier.
 
 use std::sync::LazyLock;
+
+use crate::AST::CtValue;
+use crate::Diagnostics::{Diagnostic, Span};
 
 pub const SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/core/prelude.jet");
 
@@ -41,6 +43,31 @@ pub fn entry(name: &str) -> Option<&'static Entry> {
 
 pub fn names() -> impl Iterator<Item = &'static str> {
     entries().iter().map(|entry| entry.name)
+}
+
+/// The one registered refusal for a construct that no evaluator can run yet.
+pub fn jet_e0956_unsupported(what: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E0956", &[("what", what)], Some(span))
+}
+
+/// The one `[U8]` conversion and rejection voice shared by every evaluator.
+pub fn jet_as_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    let reject = || jet_e0956_unsupported("this as_bytes call", span);
+
+    match value {
+        CtValue::Bytes(bytes) => Ok(bytes.clone()),
+        CtValue::List(items) => {
+            let mut bytes = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    CtValue::Int(value) if (0..=255).contains(value) => bytes.push(*value as u8),
+                    _ => return Err(reject()),
+                }
+            }
+            Ok(bytes)
+        }
+        _ => Err(reject()),
+    }
 }
 
 fn parse(source: &'static str) -> Vec<Entry> {
@@ -93,7 +120,9 @@ fn parse(source: &'static str) -> Vec<Entry> {
 
 #[cfg(test)]
 mod tests {
-    use super::{entry, entries, names, Target};
+    use super::{entry, entries, jet_as_bytes, names, Target};
+    use crate::AST::CtValue;
+    use crate::Diagnostics::Span;
 
     #[test]
     fn source_is_the_complete_ambient_registry() {
@@ -110,5 +139,25 @@ mod tests {
         assert_eq!(entry("embed_file").map(|entry| entry.target), Some(Target::Comptime));
         assert_eq!(entry("Clock").map(|entry| entry.target), Some(Target::Type));
         assert!(names().any(|name| name == "file_exists"));
+    }
+
+    #[test]
+    fn as_bytes_uses_one_shared_rejection() {
+        let span = Span::new(4, 7);
+        for value in [
+            CtValue::Int(1),
+            CtValue::List(vec![CtValue::Int(256)]),
+            CtValue::List(vec![CtValue::Str("not a byte".to_string())]),
+        ] {
+            let error = jet_as_bytes(&value, span)
+                .expect_err("invalid byte value must be rejected");
+            assert_eq!(error.code, "E0956");
+            assert_eq!(error.what, "`this as_bytes call` can't run at compile time yet");
+            assert_eq!(
+                error.why,
+                "the canonical TIR evaluator doesn't cover this construct yet"
+            );
+            assert_eq!(error.fix, "use a simpler form, or run via `jet build` / `jet run`");
+        }
     }
 }

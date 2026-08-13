@@ -152,7 +152,7 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
 pub use exprs::{stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    crate::Sema::Diagnostics::e0956_unsupported(what, span)
+    jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
 /// D-CONC-FAIL1=A: the evaluator turns a child diagnostic into the same

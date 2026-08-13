@@ -6,7 +6,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{as_int, cmp};
 use super::Diagnostics::{index_oob, unsupported};
-use crate::AST::{as_bytes, CtValue};
+use crate::AST::CtValue;
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 mod set_semantics {
     #[allow(unused_imports)]

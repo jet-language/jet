@@ -1087,7 +1087,7 @@ fn ambient_unit(result: Result<(), runtime::jet_std::EncodingError>) -> CtValue 
 }
 
 fn ambient_unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(what, span)
+    jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
 pub(crate) fn ambient_core_call(

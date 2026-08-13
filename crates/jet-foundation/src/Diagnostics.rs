@@ -350,14 +350,6 @@ impl Diagnostic {
         )
     }
 
-    pub fn e0956_unsupported(what: &str, span: Span) -> Self {
-        Self::from_row(
-            "E0956",
-            &[("what", what)],
-            Some(span),
-        )
-    }
-
     /// D-LAYOUT-FACTS1=B: physical byte values are optional facts. Tooling
     /// uses this registered diagnostic when the typed layout model carries a
     /// clean absence instead of printing an unexplained `unknown` value.
@@ -1289,7 +1281,7 @@ mod crypto_diagnostic_contract_tests {
         );
         assert_eq!(lint.fix, "write `total += …`");
 
-        let unsupported = Diagnostic::e0956_unsupported("a compiler fact", Span::new(0, 1));
+        let unsupported = crate::Prelude::jet_e0956_unsupported("a compiler fact", Span::new(0, 1));
         assert_eq!(unsupported.what, "`a compiler fact` can't run at compile time yet");
     }
 

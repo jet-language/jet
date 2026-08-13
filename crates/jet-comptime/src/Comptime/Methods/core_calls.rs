@@ -6,7 +6,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
-use crate::AST::{as_bytes, CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 use super::time_deadline_kernel;
 pub(super) use super::super::TextLite::IoErrorOperation;

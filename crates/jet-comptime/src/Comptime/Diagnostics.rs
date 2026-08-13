@@ -90,7 +90,7 @@ pub(super) fn early_return_sentinel(encoded_val: &str, span: Span) -> Diagnostic
 }
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(what, span)
+    jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
 pub(super) fn unsupported_expr(e: &Expr) -> Diagnostic {
