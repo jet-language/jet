@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1938,
-    "rev": 35686,
+    "rev": 35694,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-13T01:14:55.804Z"
+    "completionCursor": "2026-08-13T10:26:01.177Z"
   },
   "epochs": [
     {
@@ -107493,7 +107493,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-13T00:02:43.255Z",
+      "updated": "2026-08-13T10:33:07.183Z",
       "updatedBy": "orchestrator",
       "workOrder": 206
     },
@@ -117106,7 +117106,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Keep discard/internal/machine meanings singular, make dunder and sunder shapes intentionally meaningless, and remove inline mangling variants. I9: generated names stay diagnostic-only and consistent.",
       "blockedBy": [
@@ -117158,11 +117158,11 @@
         {
           "n": 3,
           "text": "Parser, formatter, diagnostics, traces, AOT, jet run, and interpreter show the same rule, with syntax and snapshot proof.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:19.313Z"
+          "evidence": "One underscore rule across surfaces on master 25066b9d2: canonical allocator guard green (generated_literals_use_the_canonical_allocator), diagnostic_snapshots 5/5 green under full env (ui+lint snapshot proof), golden suite green across AOT/jet run/interpreter, syntax spec section D-NAME-SIGIL1=A",
+          "at": "2026-08-13T10:32:44.330Z"
         }
       ],
       "refs": [
@@ -117176,8 +117176,9 @@
       "parentId": "c08uj0zl",
       "needsAcceptance": false,
       "created": "2026-08-08T19:04:58.917Z",
-      "updated": "2026-08-12T21:35:08.004Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-13T10:32:44.960Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T10:32:44.960Z"
     },
     {
       "id": "c0bxf5m7",
@@ -121400,7 +121401,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Owner verdict already given (2026-08-10, quoted in the card body): FFI namespace imports get no special grammar. Single-lib stays 'use c.lib as alias' (shipped, S59); multi-lib becomes 'use c.[lib1, lib2]' reusing the same selective-import .[ ] machinery card #1803 is building for ordinary namespaces, including aliases inside the list. Extend that same parser/resolver path (the one #1803's assignee is already working) to accept 'c' and every other foreign-language namespace S59 generalizes to, with no FFI-only parser branch. Update the formatter to emit and round-trip the list form, regenerate the tree-sitter grammar, and update examples. Proof: parser accepts use c.[raylib as rl, sqlite3] and equivalents for other foreign namespaces, E3204 (one bring-in per lib per file) is unchanged in meaning, fmt STABILITY stays green, and the grammar/examples are updated.",
       "blockedBy": [
@@ -121502,11 +121503,11 @@
         {
           "n": 7,
           "text": "`scripts/agent/jet-env cargo test --test fmt -- fmt_selective_import_d_selimport1_stability`, `scripts/agent/jet-env cargo test --test grammar -- editor_grammars_match_generated_sections`, and `scripts/agent/jet-env cargo test --test diagnostic_snapshots -- ui_snapshots` pass; the duplicate-import fixture emits registered `E3204`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:18:13.085Z"
+          "evidence": "diagnostic_snapshots 5/5 green on master 25066b9d2 under jet-env full (orchestrator ran); cffi 55/55 green including E3204 duplicate-import fixture with registered updated copy",
+          "at": "2026-08-13T10:32:59.935Z"
         }
       ],
       "refs": [],
@@ -121517,8 +121518,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T15:01:01.514Z",
-      "updated": "2026-08-12T20:49:52.595Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-13T10:33:06.544Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T10:33:06.544Z"
     },
     {
       "id": "c05bfqja",
@@ -122271,7 +122273,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "One hygienic generated-local allocator, then an emitter-wide sweep. User names mangle into the same __jet_ namespace the emitters hard-code (crates/jet-foundation/src/Names.rs:250/:393), so locals like __jet_v/__jet_k/__jet_item (TIR/emit/statements.rs:1091/:1140, TIR/emit/core_calls.rs:920, ~180 sites counted in the card body) can capture or shadow user bindings in generated Rust. Build the allocator at the TIR local-naming seam (Codegen/TIR/mod.rs:388, beside centralized TLocal construction at :415): fresh names outside the canonical user-mangle image (reserved-prefix law stays centralized in crates/jet-foundation/src/Syntax/predicates.rs:413). Sweep every hard-coded __jet_* emitter local through it. Prior art: the fixed emitter at TIR/emit/helpers.rs:168 documents the hygiene law at one site.",
       "blockedBy": [],
@@ -122305,11 +122307,11 @@
         {
           "n": 3,
           "text": "Affected golden examples remain byte-identical across AOT, default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:46.926Z"
+          "evidence": "Golden suite examples_compile_and_run green on master 25066b9d2 (orchestrator ran): every feature example byte-identical across AOT, default jet run, interpreter; three-tier spot checks on dimensional_quantities, returned_views, auth_sessions, reflect_paths all byte-identical",
+          "at": "2026-08-13T10:32:34.083Z"
         }
       ],
       "refs": [],
@@ -122317,8 +122319,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T18:21:33.083Z",
-      "updated": "2026-08-12T21:34:33.237Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-13T10:32:34.720Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T10:32:34.720Z"
     },
     {
       "id": "c00zl0f2",
@@ -170073,6 +170076,62 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T10:33:07.183Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T10:33:06.544Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c003lpmk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T10:32:59.935Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c003lpmk",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T10:32:44.960Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c03wyvdx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T10:32:44.330Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c03wyvdx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T10:32:34.720Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0890oah",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T10:32:34.084Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0890oah",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T10:26:01.177Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-13T10:26:01.177Z"
+    },
+    {
       "at": "2026-08-13T09:09:00.898Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -173514,62 +173573,6 @@
       "by": "fable-e3-audit",
       "action": "card.update",
       "ref": "c0weud0q",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:57.638Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0g8f8n8",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:57.072Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0b4fyko",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:56.502Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0199z6h",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:55.910Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0re71tf",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:55.360Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0c86cps",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:54.797Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0r5ljyr",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:54.244Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08wqdlb",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:53.687Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0oq7ycd",
       "note": "milestoneId"
     }
   ],
