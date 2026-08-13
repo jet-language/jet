@@ -430,14 +430,10 @@ pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 /// builds, replacing the silent `<stem>.html` filename convention.
 pub const MARKER_HTML: &str = "HTML";
 
-/// D-DSLBLOCK1=A (ratified 2026-07-06): `#SQL<Row> { ... }` — a stdlib-owned,
-/// checked DSL block. Third-party DSL block markers are not user-extensible.
+/// D-META-DSL1=A: `#SQL<Row> { ... }` — a checked text block whose row is
+/// declared in `Prelude/Markers.jet`; block legality comes from the one
+/// declaration registry, not a compiler whitelist.
 pub const DSL_BLOCK_SQL: &str = "SQL";
-
-/// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `HTML`
-/// reuses `MARKER_HTML`; block form (`#HTML { ... }`) is distinct from the
-/// existing file-level companion-page form (`#HTML("path.html")`).
-pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, MARKER_HTML];
 
 /// D-FFI-SH1=A: `Sh` is D-TYPEDTEXT1's argv-safe shell-command instance.
 pub const TYPE_SH: &str = "Sh";

@@ -5,12 +5,6 @@ pub fn is_applied_rule(name: &str) -> bool {
         .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
 }
 
-/// D-DSLBLOCK1=A: is `name` one of the stdlib-owned DSL block markers allowed
-/// to claim a checked syntax island?
-pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
-    STDLIB_DSL_BLOCK_MARKERS.contains(&name)
-}
-
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
 // keyword — the lexer resolves a literal's identifier suffix against
 // #UnitFamily members in scope (MARKER_UNIT_FAMILY, D-QUAL3). One fixed rule:
@@ -402,7 +396,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 }
 use super::core_surface::{
     CLOCK_TYPE, CORE_EMAIL_MODULE, CORE_MOD_MODULE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE,
-    KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR, STDLIB_DSL_BLOCK_MARKERS, TYPE_DATETIME, TYPE_ERR,
+    KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME, TYPE_ERR,
     TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
 };
 use super::effects_surface::KW_STATE_DECL;
