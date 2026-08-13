@@ -933,6 +933,7 @@ impl BuildContext {
             legacy_wrapper: spec.legacy_wrapper,
             plugin,
             variant_identity: spec.variant_identity,
+            compiler_owned: false,
         });
         Ok(ActionHandle {
             id,

@@ -1,5 +1,5 @@
 use super::actions_policy::{BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind};
-use super::cache_cas::{ActionCacheStatus, ActionOutcome};
+use super::cache_cas::{ActionCacheStatus, ActionOutcome, ContentDigest};
 use super::handles::{ActionId, PluginId, TargetId, TargetRef};
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
@@ -20,6 +20,30 @@ pub struct BuildPlan {
     pub default_profile: Option<String>,
     /// D-BUILDCTX-FLAGS1=A — effect names (`Exec`, `FS`, …)
     pub default_allows: Vec<String>,
+}
+
+/// One compiler-owned package artifact input to a generated compile action.
+/// The source digest is captured after the ordinary loader/parser/sema pass;
+/// dependency names become declared artifact-file inputs in the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompilerPackageSpec {
+    pub name: String,
+    pub source_digest: ContentDigest,
+    pub dependencies: Vec<String>,
+}
+
+impl CompilerPackageSpec {
+    pub fn new(
+        name: impl Into<String>,
+        source_digest: ContentDigest,
+        dependencies: Vec<String>,
+    ) -> Self {
+        CompilerPackageSpec {
+            name: name.into(),
+            source_digest,
+            dependencies,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +76,7 @@ pub struct BuildGraphAction {
     pub pools: Vec<BuildResourcePool>,
     pub legacy_wrapper: Option<LegacyWrapperKind>,
     pub plugin: Option<PluginId>,
+    pub compiler_owned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

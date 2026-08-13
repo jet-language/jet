@@ -38,6 +38,15 @@ pub struct BuildExecutionResult {
     pub probes: Vec<BuildProbeFact>,
 }
 
+/// Driver-owned implementation for a compiler action cache miss. The
+/// executor still owns declared-output validation, atomic restore, CAS capture,
+/// and action records.
+pub type CompilerActionRunner<'a> = dyn Fn(
+        &BuildAction,
+        &[ActionInputSnapshot],
+    ) -> Result<Vec<Vec<u8>>, String>
+    + Sync + 'a;
+
 #[derive(Debug)]
 pub enum BuildExecutionError {
     MissingGrant { action: String, capability: BuildCapability },
@@ -91,6 +100,43 @@ pub fn execute_build_plan_with_front_end_and_remote(
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
     remote_binding: Option<&RemoteBuildBinding>,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    execute_build_plan_with_front_end_and_remote_and_compiler(
+        plan,
+        project_root,
+        grants,
+        front_end,
+        remote_binding,
+        None,
+    )
+}
+
+/// Execute a plan with compiler-owned package actions. User actions retain
+/// the ordinary sandbox path; only compiler-owned cache misses call `runner`.
+pub fn execute_build_plan_with_front_end_and_compiler(
+    plan: &BuildPlan,
+    project_root: &Path,
+    grants: &BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
+    runner: &CompilerActionRunner<'_>,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    execute_build_plan_with_front_end_and_remote_and_compiler(
+        plan,
+        project_root,
+        grants,
+        front_end,
+        None,
+        Some(runner),
+    )
+}
+
+pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
+    plan: &BuildPlan,
+    project_root: &Path,
+    grants: &BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
+    remote_binding: Option<&RemoteBuildBinding>,
+    compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
     let selected_actions = plan.selected_action_ids().map_err(BuildExecutionError::InvalidGraph)?;
     for action in plan.actions.iter().filter(|action| selected_actions.contains(&action.id)) {
@@ -151,6 +197,7 @@ pub fn execute_build_plan_with_front_end_and_remote(
                                 probe_facts,
                                 front_end,
                                 remote_binding,
+                                compiler,
                             )
                         }))
                     })
@@ -220,29 +267,37 @@ fn execute_one_action(
     probe_facts: &[BuildProbeFact],
     front_end: FrontEndCompletion,
     remote_binding: Option<&RemoteBuildBinding>,
+    compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<ActionOutcome, BuildExecutionError> {
+    let cache_lookup_allowed = front_end.authorize_cache_lookup().is_ok();
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
     let remote_requested = remote_binding.is_some_and(RemoteBuildBinding::is_enabled);
-    let executable = resolve_program_path(plan, action.toolchain, &action.argv[0])
-        .or_else(|| {
-            // A remote cache hit also needs a stable command identity, but it
-            // must not require the local machine to have the target toolchain.
-            // The declared argv spelling is the remote identity fallback; a
-            // local miss still fails below instead of silently running it from
-            // PATH.
-            remote_requested
-                .then(|| PathBuf::from(&action.argv[0]))
-        })
-        .ok_or_else(|| BuildExecutionError::IO {
-            action: action.name.clone(),
-            detail: format!("tool {} was not found", action.argv[0]),
-        })?;
-    let executable_bytes = if executable.is_file() {
-        fs::read(&executable).map_err(|e| io_action(action, e))?
+    let (executable, executable_digest) = if action.is_compiler_owned() {
+        (
+            PathBuf::from("<jet-compiler>"),
+            ContentDigest::from_bytes(b"jet-compiler"),
+        )
     } else {
-        action.argv[0].as_bytes().to_vec()
+        let executable = resolve_program_path(plan, action.toolchain, &action.argv[0])
+            .or_else(|| {
+                // A remote cache hit also needs a stable command identity, but it
+                // must not require the local machine to have the target toolchain.
+                // The declared argv spelling is the remote identity fallback; a
+                // local miss still fails below instead of silently running it from
+                // PATH.
+                remote_requested.then(|| PathBuf::from(&action.argv[0]))
+            })
+            .ok_or_else(|| BuildExecutionError::IO {
+                action: action.name.clone(),
+                detail: format!("tool {} was not found", action.argv[0]),
+            })?;
+        let executable_bytes = if executable.is_file() {
+            fs::read(&executable).map_err(|e| io_action(action, e))?
+        } else {
+            action.argv[0].as_bytes().to_vec()
+        };
+        (executable, ContentDigest::from_bytes(&executable_bytes))
     };
-    let executable_digest = ContentDigest::from_bytes(&executable_bytes);
     let action_probe_names = action.probes.iter().map(|probe| plan.probes[probe.id.0].name.as_str()).collect::<BTreeSet<_>>();
     let effective_probe_facts = probe_facts.iter().filter(|fact| action_probe_names.contains(fact.name.as_str())).cloned().collect::<Vec<_>>();
     let key = plan.effective_action_key(
@@ -254,15 +309,19 @@ fn execute_one_action(
         &effective_probe_facts,
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
-    let remote = remote_for_action(plan, action, &key, grants, remote_binding)?;
+    let remote = if action.is_compiler_owned() {
+        None
+    } else {
+        remote_for_action(plan, action, &key, grants, remote_binding)?
+    };
     let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
         .map(|record| record.key);
     let mut restore_failure = None;
     if action.cache == ActionCache::Cached {
         // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
-        match front_end.authorize_cache_lookup() {
-            Ok(()) => match read_action_record(records, &record_path, key.clone()) {
+        if cache_lookup_allowed {
+            match read_action_record(records, &record_path, key.clone()) {
                 Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record) {
                     Ok(()) => {
                         write_last_rebuild_record(
@@ -280,14 +339,13 @@ fn execute_one_action(
                 },
                 Ok(None) => {}
                 Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
-            },
-            Err(_) => {
-                restore_failure = Some(CacheMissReason::FrontEndIncomplete);
             }
+        } else {
+            restore_failure = Some(CacheMissReason::FrontEndIncomplete);
         }
     }
     if action.cache == ActionCache::Cached
-        && front_end.authorize_cache_lookup().is_ok()
+        && cache_lookup_allowed
     {
         if let Some((transport, policy, _execute)) = &remote {
             match transport.download_action_record(&key, policy) {
@@ -359,6 +417,48 @@ fn execute_one_action(
                 "npm dependency-bearing imports require a provisioned locked dependency tree",
             ),
         ));
+    }
+
+    if action.is_compiler_owned() {
+        let runner = compiler.ok_or_else(|| BuildExecutionError::IO {
+            action: action.name.clone(),
+            detail: "compiler-owned action has no compiler runner".to_string(),
+        })?;
+        let bytes = runner(action, &snapshots).map_err(|detail| BuildExecutionError::IO {
+            action: action.name.clone(),
+            detail,
+        })?;
+        if bytes.len() != action.outputs.len() {
+            return Err(BuildExecutionError::IO {
+                action: action.name.clone(),
+                detail: format!(
+                    "compiler runner returned {} outputs for {} declarations",
+                    bytes.len(),
+                    action.outputs.len()
+                ),
+            });
+        }
+        for (output, bytes) in action.outputs.iter().zip(bytes) {
+            let path = resolve_under(project_root, output.as_str()).map_err(|e| io_action(action, e))?;
+            prepare_output_destination(project_root, &path).map_err(|e| io_action(action, e))?;
+            super::cache_cas::atomic_restore_file(project_root, &path, &bytes)
+                .map_err(|e| io_action(action, e))?;
+        }
+        let outcome = ActionOutcome::Succeeded { exit_code: 0 };
+        if action.cache == ActionCache::Cached {
+            let record = cas
+                .capture_declared_outputs(
+                    project_root,
+                    action,
+                    key.clone(),
+                    outcome,
+                    ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
+                )
+                .map_err(|e| io_action(action, e))?;
+            write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
+        }
+        write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
+        return Ok(outcome);
     }
 
     if let Some((transport, policy, true)) = &remote {
@@ -852,6 +952,13 @@ fn rebuild_status_code(status: ActionCacheStatus) -> &'static str {
     }
 }
 
+fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
+    match status {
+        ActionCacheStatus::Miss(reason) => reason,
+        ActionCacheStatus::Hit(_) => CacheMissReason::NoLocalActionRecord,
+    }
+}
+
 fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
     Some(match code {
         "hit-local" => ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
@@ -941,7 +1048,24 @@ pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Resu
                     format!("build output parent `{}` is not a directory", current.display()),
                 )),
                 Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&current)?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    match fs::create_dir(&current) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                            let metadata = fs::symlink_metadata(&current)?;
+                            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::PermissionDenied,
+                                    format!(
+                                        "build output parent `{}` is not a real directory",
+                                        current.display()
+                                    ),
+                                ));
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
                 Err(error) => return Err(error),
             }
         }

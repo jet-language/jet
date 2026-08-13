@@ -5,14 +5,17 @@ use jet::Comptime::Build::{
     ActionInputSnapshot, ActionKey, ActionOutputRecord, ActionResultRecord, BuildCapability,
     BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy,
     BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest,
-    FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
+    CompilerPackageSpec, FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind,
+    LegacyWrapperSpec, LinkerIdentity,
     LocalCas, LockRecord,
     PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest,
     RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
     RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof,
     ReproducibilityClass, SdkIdentity,
     SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
-    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, execute_build_plan_with_front_end_and_remote,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
+    execute_build_plan_with_front_end_and_compiler,
+    execute_build_plan_with_front_end_and_remote,
     read_packaged_file_bounded,
 };
 use std::fs;
@@ -2850,4 +2853,259 @@ fn front_end_completion_gates_cache_lookup() {
         .unwrap_err(),
         CacheBypassDenied::Diagnostics
     );
+}
+
+#[test]
+fn per_package_dependency_artifacts_restore_and_invalidate() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_package_actions_{}_{}",
+        std::process::id(),
+        "restore"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let make_plan = |identity: &str, target: &str, profile: &str, alpha_source: &[u8]| {
+        let mut context = BuildContext::new();
+        let app = context
+            .add_executable("app", TargetSpec::new().with_source("main.jet"))
+            .unwrap();
+        let mut plan = context.plan_with_default(app).unwrap();
+        plan.add_compiler_package_actions(
+            &[
+                CompilerPackageSpec::new(
+                    "alpha",
+                    ContentDigest::from_bytes(alpha_source),
+                    Vec::new(),
+                ),
+                CompilerPackageSpec::new(
+                    "app",
+                    ContentDigest::from_bytes(b"app"),
+                    vec!["alpha".to_string()],
+                ),
+            ],
+            identity,
+            target,
+            profile,
+        )
+        .unwrap();
+        plan
+    };
+    let plan = make_plan(
+        "jet-test-compiler@clean",
+        "native-test-target",
+        "debug",
+        b"alpha",
+    );
+
+    let compiler = |action: &jet::Comptime::Build::BuildAction, _snapshots: &[ActionInputSnapshot]| {
+        let source = action
+            .labels
+            .get("compiler.source-digest")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let identity = action
+            .labels
+            .get("compiler.identity")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let target = action
+            .labels
+            .get("compiler.target")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let profile = action
+            .labels
+            .get("compiler.profile")
+            .map(String::as_str)
+            .unwrap_or_default();
+        Ok(action
+            .outputs
+            .iter()
+            .map(|_| {
+                format!(
+                    "sealed:{action_name}:{source}:{identity}:{target}:{profile}",
+                    action_name = action.name.as_str()
+                )
+                .into_bytes()
+            })
+            .collect::<Vec<_>>())
+    };
+    let first = execute_build_plan_with_front_end_and_compiler(
+        &plan,
+        &root,
+        &std::collections::BTreeSet::new(),
+        FrontEndCompletion::all_complete(),
+        &compiler,
+    )
+    .unwrap();
+    assert_eq!(
+        first
+            .report
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                BuildExecutionEvent::Finished {
+                    outcome: ActionOutcome::Succeeded { .. },
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+
+    let second = execute_build_plan_with_front_end_and_compiler(
+        &plan,
+        &root,
+        &std::collections::BTreeSet::new(),
+        FrontEndCompletion::all_complete(),
+        &compiler,
+    )
+    .unwrap();
+    assert_eq!(second.report.metrics.cache_restored_actions, 2);
+    assert!(second.report.events.iter().all(|event| {
+        !matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action,
+                outcome: ActionOutcome::Succeeded { .. },
+            } if plan.action_handle(*action).and_then(|handle| plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+        )
+    }));
+
+    let rebuild_with = |field: &str, value: &str| {
+        let changed_plan = match field {
+            "compiler.identity" => make_plan(value, "native-test-target", "debug", b"alpha"),
+            "compiler.target" => make_plan("jet-test-compiler@clean", value, "debug", b"alpha"),
+            "compiler.profile" => make_plan("jet-test-compiler@clean", "native-test-target", value, b"alpha"),
+            _ => unreachable!(),
+        };
+        let rebuilt = execute_build_plan_with_front_end_and_compiler(
+            &changed_plan,
+            &root,
+            &std::collections::BTreeSet::new(),
+            FrontEndCompletion::all_complete(),
+            &compiler,
+        )
+        .unwrap();
+        assert_eq!(rebuilt.report.metrics.cache_restored_actions, 0);
+        assert_eq!(
+            rebuilt
+                .report
+                .events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    BuildExecutionEvent::Finished {
+                        outcome: ActionOutcome::Succeeded { .. },
+                        ..
+                    }
+                ))
+                .count(),
+            2
+        );
+    };
+    rebuild_with("compiler.identity", "jet-test-compiler@next");
+    rebuild_with("compiler.target", "aarch64-test-target");
+    rebuild_with("compiler.profile", "release");
+
+    let changed_source_plan = make_plan(
+        "jet-test-compiler@clean",
+        "native-test-target",
+        "debug",
+        b"alpha-v2",
+    );
+    let changed_source = execute_build_plan_with_front_end_and_compiler(
+        &changed_source_plan,
+        &root,
+        &std::collections::BTreeSet::new(),
+        FrontEndCompletion::all_complete(),
+        &compiler,
+    )
+    .unwrap();
+    assert_eq!(changed_source.report.metrics.cache_restored_actions, 0);
+    assert_eq!(
+        changed_source
+            .report
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                BuildExecutionEvent::Finished {
+                    outcome: ActionOutcome::Succeeded { .. },
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+
+    let dependency = plan
+        .actions()
+        .iter()
+        .find(|action| {
+            action
+                .labels
+                .get("compiler.package")
+                .is_some_and(|value| value == "alpha")
+        })
+        .unwrap();
+    let consumer = plan
+        .actions()
+        .iter()
+        .find(|action| {
+            action
+                .labels
+                .get("compiler.package")
+                .is_some_and(|value| value == "app")
+        })
+        .unwrap();
+    let dependency_output = dependency.outputs[0].clone();
+    let original = ActionInputSnapshot {
+        path: dependency_output.clone(),
+        digest: ContentDigest::from_bytes(b"sealed:alpha"),
+        byte_len: "sealed:alpha".len() as u64,
+    };
+    let changed = ActionInputSnapshot {
+        digest: ContentDigest::from_bytes(b"sealed:alpha-v2"),
+        byte_len: "sealed:alpha-v2".len() as u64,
+        ..original.clone()
+    };
+    let consumer_handle = plan.action_handle(consumer.id).unwrap();
+    assert_ne!(
+        plan.action_key_with_inputs(consumer_handle, &[original]).unwrap(),
+        plan.action_key_with_inputs(consumer_handle, &[changed]).unwrap()
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn compiler_package_identity_target_and_profile_force_rebuild_keys() {
+    fn key(identity: &str, target: &str, profile: &str) -> ActionKey {
+        let mut context = BuildContext::new();
+        let app = context
+            .add_executable("app", TargetSpec::new().with_source("main.jet"))
+            .unwrap();
+        let mut plan = context.plan_with_default(app).unwrap();
+        let handles = plan
+            .add_compiler_package_actions(
+                &[CompilerPackageSpec::new(
+                    "app",
+                    ContentDigest::from_bytes(b"source"),
+                    Vec::new(),
+                )],
+                identity,
+                target,
+                profile,
+            )
+            .unwrap();
+        plan.action_key(handles[0]).unwrap()
+    }
+
+    let base = key("jet-a", "x86_64-linux", "debug");
+    assert_ne!(base, key("jet-b", "x86_64-linux", "debug"));
+    assert_ne!(base, key("jet-a", "aarch64-linux", "debug"));
+    assert_ne!(base, key("jet-a", "x86_64-linux", "release"));
 }

@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -69,6 +70,53 @@ fn first_file_under(path: &Path) -> PathBuf {
         return path;
     }
     panic!("no cache blob under {}", path.display());
+}
+
+fn multi_dependency_fixture(name: &str) -> (PathBuf, PathBuf) {
+    let root = project(name);
+    let deps = root.join("deps");
+    let dep_a = deps.join("dep_a");
+    let dep_b = deps.join("dep_b");
+    fs::create_dir_all(&dep_a).unwrap();
+    fs::create_dir_all(&dep_b).unwrap();
+    write(
+        &root.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep_a: ./deps/dep_a, dep_b: ./deps/dep_b }\n",
+    );
+    write(
+        &dep_a.join("package.jet"),
+        "name: \"dep_a\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &dep_b.join("package.jet"),
+        "name: \"dep_b\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &dep_a.join("dep_a.jet"),
+        "pub fn value() => Int { return 1 }\n",
+    );
+    let dep_b_source = dep_b.join("dep_b.jet");
+    write(&dep_b_source, "pub fn value() => Int { return 2 }\n");
+    write(
+        &root.join("main.jet"),
+        r#"
+use dep_a
+use dep_b
+
+fn build(b: BuildContext) => BuildPlan ? {
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}
+
+fn run() { print(dep_a.value()); print(dep_b.value()) }
+"#,
+    );
+    (root, dep_b_source)
+}
+
+fn median_micros(samples: &mut [u128]) -> u128 {
+    samples.sort_unstable();
+    samples[samples.len() / 2]
 }
 
 #[test]
@@ -181,6 +229,7 @@ fn build(b: BuildContext) => BuildPlan ? {
     app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
     return b.plan(app)
 }
+
 "#,
     );
     let entry = root.join("main.jet");
@@ -194,6 +243,119 @@ fn build(b: BuildContext) => BuildPlan ? {
     assert_eq!(build.plan.targets()[0].name, "app");
     assert_eq!(build.generated.len(), 1);
     assert!(output.compile.rust.contains("package_message"));
+}
+
+#[test]
+fn multi_dependency_build_restores_every_unchanged_compiler_artifact() {
+    let (root, _) = multi_dependency_fixture("package-artifact-restore");
+    let entry = root.join("main.jet");
+
+    let first = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let first_build = first.build.expect("first dependency build should run");
+    let compiler_actions = first_build
+        .plan
+        .actions()
+        .iter()
+        .filter(|action| action.is_compiler_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(compiler_actions.len(), 3, "root plus two dependencies");
+    assert_eq!(first_build.execution.metrics.cache_restored_actions, 0);
+    assert_eq!(
+        first_build
+            .execution
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    action,
+                    outcome: ActionOutcome::Succeeded { .. },
+                } if first_build.plan.action_handle(*action).and_then(|handle| first_build.plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+            ))
+            .count(),
+        3
+    );
+
+    let second = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let second_build = second.build.expect("warm dependency build should run");
+    assert_eq!(second_build.execution.metrics.cache_restored_actions, 3);
+    assert_eq!(
+        second_build
+            .execution
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    action,
+                    outcome: ActionOutcome::RestoredFromCache,
+                } if second_build.plan.action_handle(*action).and_then(|handle| second_build.plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+            ))
+            .count(),
+        3
+    );
+    assert!(!second_build.execution.events.iter().any(|event| matches!(
+        event,
+        jet::Comptime::Build::BuildExecutionEvent::Finished {
+            action,
+            outcome: ActionOutcome::Succeeded { .. },
+        } if second_build.plan.action_handle(*action).and_then(|handle| second_build.plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+    )));
+    for action in second_build
+        .plan
+        .actions()
+        .iter()
+        .filter(|action| action.is_compiler_owned())
+    {
+        assert!(root.join(action.outputs[0].as_str()).is_file());
+    }
+}
+
+#[test]
+fn warm_dependency_cache_still_runs_frontend_diagnostics() {
+    let (root, dep_b_source) = multi_dependency_fixture("malformed-dependent-warm-cache");
+    let entry = root.join("main.jet");
+    let first = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let artifact = root.join(".jet/build-cache/package-artifacts/dep_b.sealed");
+    assert!(artifact.is_file(), "first build must seal dep_b");
+    let before = fs::read(&artifact).unwrap();
+
+    write(&dep_b_source, "pub fn value() => Int { return 2\n");
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
+    assert!(!errors.is_empty());
+    assert!(errors.iter().all(|diagnostic| diagnostic.code != "ICE"));
+    assert!(errors.iter().any(|diagnostic| diagnostic.code.starts_with('E')));
+    assert_eq!(fs::read(&artifact).unwrap(), before);
+    drop(first);
+}
+
+#[test]
+fn compiler_self_speed_reports_clean_and_incremental_medians() {
+    let (root, _) = multi_dependency_fixture("compiler-self-speed");
+    let entry = root.join("main.jet");
+    let mut clean = Vec::new();
+    for _ in 0..3 {
+        let _ = fs::remove_dir_all(root.join(".jet/build-cache"));
+        let start = Instant::now();
+        compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        clean.push(start.elapsed().as_micros());
+    }
+    let mut incremental = Vec::new();
+    for _ in 0..3 {
+        let start = Instant::now();
+        let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        let build = output.build.expect("incremental build should expose execution");
+        assert_eq!(build.execution.metrics.cache_restored_actions, 3);
+        incremental.push(start.elapsed().as_micros());
+    }
+    let clean_median = median_micros(&mut clean);
+    let incremental_median = median_micros(&mut incremental);
+    eprintln!(
+        "compiler self-speed: clean_median_us={} incremental_median_us={} samples=3",
+        clean_median, incremental_median
+    );
+    assert!(clean_median > 0);
+    assert!(incremental_median > 0);
 }
 
 #[test]

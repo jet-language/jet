@@ -6,11 +6,14 @@ use super::execution_helpers::{
     execution_metrics, execution_stages,
 };
 use super::execution_runtime::{BuildProbeFact, read_last_rebuild_record};
-use super::handles::{ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef, ToolchainHandle};
+use super::handles::{
+    ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef,
+    ToolchainHandle, ToolchainId,
+};
 use super::plan_graph::{
     BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
     BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphFile, BuildGraphSubject,
-    BuildGraphTarget, BuildPlan, FileOwnership, RebuildExplanation,
+    BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation,
 };
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
@@ -181,6 +184,202 @@ impl BuildPlan {
         self.actions.get(action.id.0)
     }
 
+    pub fn action_handle(&self, action: ActionId) -> Option<ActionHandle> {
+        self.actions.get(action.0).map(|_| ActionHandle {
+            id: action,
+            context: self.context,
+        })
+    }
+
+    /// Add the compiler-owned sealed package layer to an already evaluated
+    /// build plan. The generated actions use the same graph, key, and CAS
+    /// machinery as user actions; only their cache-miss execution is supplied
+    /// by the driver.
+    pub fn add_compiler_package_actions(
+        &mut self,
+        packages: &[CompilerPackageSpec],
+        compiler_identity: impl AsRef<str>,
+        target: impl AsRef<str>,
+        profile: impl AsRef<str>,
+    ) -> Result<Vec<ActionHandle>, BuildError> {
+        if packages.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let target_id = self
+            .default
+            .map(|target| target.id)
+            .or_else(|| self.targets.first().map(|target| target.id))
+            .ok_or(BuildError::UnknownTarget(TargetId(0)))?;
+        if self.targets.get(target_id.0).is_none() {
+            return Err(BuildError::UnknownTarget(target_id));
+        }
+        let toolchain_id = self
+            .toolchains
+            .first()
+            .map(|toolchain| toolchain.id)
+            .ok_or(BuildError::UnknownToolchain(ToolchainId(0)))?;
+
+        let mut output_by_package = BTreeMap::new();
+        let mut package_by_output = BTreeMap::new();
+        let mut dependencies_by_package = BTreeMap::new();
+        for package in packages {
+            if package.name.trim().is_empty() {
+                return Err(BuildError::EmptyActionName);
+            }
+            if output_by_package.contains_key(&package.name) {
+                return Err(BuildError::DuplicateActionName(format!(
+                    "compile-package:{}",
+                    package.name
+                )));
+            }
+            let output = BuildPath::new(format!(
+                ".jet/build-cache/package-artifacts/{}.sealed",
+                compiler_package_path_name(&package.name)
+            ))?;
+            if let Some(previous) = package_by_output.insert(output.clone(), package.name.clone()) {
+                return Err(BuildError::DuplicateActionName(format!(
+                    "compile-package:{} (output also belongs to {})",
+                    package.name, previous
+                )));
+            }
+            output_by_package.insert(package.name.clone(), output);
+            dependencies_by_package.insert(
+                package.name.clone(),
+                package.dependencies.iter().cloned().collect::<BTreeSet<_>>(),
+            );
+        }
+
+        for package in packages {
+            let action_name = format!("compile-package:{}", package.name);
+            if self.actions.iter().any(|action| action.name == action_name) {
+                return Err(BuildError::DuplicateActionName(action_name));
+            }
+
+            let output = output_by_package
+                .get(&package.name)
+                .cloned()
+                .ok_or_else(|| BuildError::CompilerPackageDependencyMissing {
+                    package: package.name.clone(),
+                    dependency: package.name.clone(),
+                })?;
+            if let Some(existing) = self.actions.iter().find(|action| {
+                action.outputs.iter().any(|existing_output| existing_output == &output)
+            }) {
+                return Err(BuildError::DuplicateBuildOutput {
+                    output: output.as_str().to_string(),
+                    first_action: existing.name.clone(),
+                    second_action: action_name,
+                });
+            }
+            if let Some(module) = self.generated_modules.iter().find(|module| module.path == output) {
+                return Err(BuildError::GeneratedModuleCycle {
+                    module: module.name.clone(),
+                    path: output.as_str().to_string(),
+                });
+            }
+        }
+
+        for (package, dependencies) in &dependencies_by_package {
+            for dependency in dependencies {
+                if !output_by_package.contains_key(dependency) {
+                    return Err(BuildError::CompilerPackageDependencyMissing {
+                        package: package.clone(),
+                        dependency: dependency.clone(),
+                    });
+                }
+            }
+        }
+
+        let mut remaining = dependencies_by_package.keys().cloned().collect::<BTreeSet<_>>();
+        while !remaining.is_empty() {
+            let ready = remaining
+                .iter()
+                .filter(|package| {
+                    dependencies_by_package
+                        .get(*package)
+                        .expect("compiler package dependency preflight")
+                        .iter()
+                        .all(|dependency| !remaining.contains(dependency))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if ready.is_empty() {
+                return Err(BuildError::ActionDependencyCycle);
+            }
+            for package in ready {
+                remaining.remove(&package);
+            }
+        }
+
+        let compiler_identity = compiler_identity.as_ref().to_string();
+        let target = target.as_ref().to_string();
+        let profile = profile.as_ref().to_string();
+        let mut handles = Vec::with_capacity(packages.len());
+        for package in packages {
+            let action_name = format!("compile-package:{}", package.name);
+            let inputs = dependencies_by_package[&package.name]
+                .iter()
+                .map(|dependency| {
+                    output_by_package
+                        .get(dependency)
+                        .cloned()
+                        .expect("compiler package dependency output preflight")
+                })
+                .collect::<Vec<_>>();
+            let output = output_by_package
+                .get(&package.name)
+                .cloned()
+                .expect("compiler package output preflight");
+            let id = ActionId(self.actions.len());
+            let mut labels = BTreeMap::new();
+            labels.insert("compiler.owner".to_string(), "jet".to_string());
+            labels.insert("compiler.package".to_string(), package.name.clone());
+            labels.insert(
+                "compiler.source-digest".to_string(),
+                package.source_digest.as_str().to_string(),
+            );
+            labels.insert(
+                "compiler.identity".to_string(),
+                compiler_identity.clone(),
+            );
+            labels.insert("compiler.target".to_string(), target.clone());
+            labels.insert("compiler.profile".to_string(), profile.clone());
+            self.actions.push(BuildAction {
+                id,
+                name: action_name,
+                inputs,
+                outputs: vec![output],
+                argv: vec!["jet-compiler".to_string(), package.name.clone()],
+                env: BTreeMap::new(),
+                env_allowlist: BTreeSet::new(),
+                caps: BTreeSet::new(),
+                cache: ActionCache::Cached,
+                kind: super::actions_policy::ActionKind::Compile,
+                toolchain: ToolchainHandle {
+                    id: toolchain_id,
+                    context: self.context,
+                },
+                probes: Vec::new(),
+                signing_identity: None,
+                labels,
+                helper_versions: BTreeMap::new(),
+                resource_pools: BTreeSet::new(),
+                legacy_wrapper: None,
+                plugin: None,
+                variant_identity: None,
+                compiler_owned: true,
+            });
+            let handle = ActionHandle {
+                id,
+                context: self.context,
+            };
+            self.targets[target_id.0].actions.push(handle);
+            handles.push(handle);
+        }
+        Ok(handles)
+    }
+
     pub fn action_key(&self, action: ActionHandle) -> Result<ActionKey, BuildError> {
         self.action_key_with_inputs(action, &[])
     }
@@ -345,6 +544,7 @@ impl BuildPlan {
                     pools: action_pools(action),
                     legacy_wrapper: action.legacy_wrapper,
                     plugin: action.plugin.map(|plugin| plugin.id),
+                    compiler_owned: action.compiler_owned,
                 })
                 .collect(),
             files: file_index
@@ -718,4 +918,21 @@ impl BuildPlan {
             })
             .collect())
     }
+}
+
+fn compiler_package_path_name(name: &str) -> String {
+    let mut out = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if out.is_empty() {
+        out.push_str("package");
+    }
+    out
 }

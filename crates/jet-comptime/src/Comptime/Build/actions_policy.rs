@@ -1454,6 +1454,16 @@ pub struct BuildAction {
     pub plugin: Option<PluginHandle>,
     /// Selected typed variant identity keyed into the CAS action key (E4-JP15).
     pub variant_identity: Option<String>,
+    /// Compiler-owned package compilation. These actions are created by the
+    /// driver after the ordinary front end completes; build source cannot
+    /// manufacture this owner bit.
+    pub compiler_owned: bool,
+}
+
+impl BuildAction {
+    pub fn is_compiler_owned(&self) -> bool {
+        self.compiler_owned
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

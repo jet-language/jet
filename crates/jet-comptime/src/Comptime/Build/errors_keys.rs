@@ -34,6 +34,7 @@ pub enum BuildError {
     EmptyProbeName,
     DuplicateTargetName(String),
     DuplicateActionName(String),
+    CompilerPackageDependencyMissing { package: String, dependency: String },
     DuplicateToolchainName(String),
     DuplicateSigningIdentityName(String),
     DuplicateProbeName(String),
@@ -101,6 +102,8 @@ pub(super) fn canonical_action_key(
     w.str(action.kind.as_str());
     w.str("observe-exact-source");
     w.bool(action.kind.observes_exact_source());
+    w.str("compiler-owned");
+    w.bool(action.compiler_owned);
     w.str("argv");
     w.vec_str(action.argv.iter().map(String::as_str));
     w.str("env-allowlist");
@@ -126,6 +129,24 @@ pub(super) fn canonical_action_key(
         w.str(snapshot.path.as_str());
         w.str(snapshot.digest.as_str());
         w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
+    }
+    w.str("dependency-artifact-snapshots");
+    for input in action
+        .inputs
+        .iter()
+        .filter(|path| path.as_str().starts_with(".jet/build-cache/package-artifacts/"))
+    {
+        w.str(input.as_str());
+        if let Some(snapshot) = inputs
+            .iter()
+            .find(|snapshot| snapshot.path.as_str() == input.as_str())
+        {
+            w.bool(true);
+            w.str(snapshot.digest.as_str());
+            w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
+        } else {
+            w.bool(false);
+        }
     }
     w.str("outputs");
     w.vec_str(action.outputs.iter().map(BuildPath::as_str));

@@ -945,6 +945,9 @@ fn build_error_text(error: &BuildError) -> String {
     match error {
         BuildError::DuplicateTargetName(name) => format!("target name `{name}` is registered twice"),
         BuildError::DuplicateActionName(name) => format!("action name `{name}` is registered twice"),
+        BuildError::CompilerPackageDependencyMissing { package, dependency } => format!(
+            "compiler package `{package}` depends on missing package artifact `{dependency}`"
+        ),
         BuildError::DuplicateToolchainName(name) => format!("toolchain name `{name}` is registered twice"),
         BuildError::DuplicateProbeName(name) => format!("probe name `{name}` is registered twice"),
         BuildError::InvalidPath(path) => {

@@ -5,6 +5,7 @@
 
 use crate::Diagnostics::{Diagnostic, Severity};
 use jet_pkg_model::Authority::AuthorityResolver;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 fn package_lints_deny(
@@ -1257,7 +1258,7 @@ pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
     format!("{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
         plan.default_target().map(|target| target.id().0.to_string()).unwrap_or_else(|| "null".to_string()),
         graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}", target.id.0, escape(&target.name), target.kind, target.deps.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), target.actions.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), strings(&target.files))).collect::<Vec<_>>().join(","),
-        graph.actions.iter().map(|action| { let real = &plan.actions()[action.id.0]; format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"provenance\":{}}}", action.id.0, escape(&action.name), strings(&action.inputs), strings(&action.outputs), strings(&action.caps.iter().map(|cap| cap.name().to_string()).collect::<Vec<_>>()), strings(&action.pools.iter().map(|pool| pool.as_str().to_string()).collect::<Vec<_>>()), escape(&plan.toolchains()[real.toolchain.id().0].name), strings(&real.probes.iter().map(|probe| plan.probes()[probe.id().0].name.clone()).collect::<Vec<_>>()), real.cache, strings(&plan.explain_action_named(&action.name).map(|fact| fact.provenance).unwrap_or_default())) }).collect::<Vec<_>>().join(","),
+        graph.actions.iter().map(|action| { let real = &plan.actions()[action.id.0]; format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"compiler_owned\":{},\"provenance\":{}}}", action.id.0, escape(&action.name), strings(&action.inputs), strings(&action.outputs), strings(&action.caps.iter().map(|cap| cap.name().to_string()).collect::<Vec<_>>()), strings(&action.pools.iter().map(|pool| pool.as_str().to_string()).collect::<Vec<_>>()), escape(&plan.toolchains()[real.toolchain.id().0].name), strings(&real.probes.iter().map(|probe| plan.probes()[probe.id().0].name.clone()).collect::<Vec<_>>()), real.cache, real.compiler_owned, strings(&plan.explain_action_named(&action.name).map(|fact| fact.provenance).unwrap_or_default())) }).collect::<Vec<_>>().join(","),
         graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}", escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()), file.consumers.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), file.targets.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join(","),
         plan.toolchains().iter().map(|tool| format!("{{\"name\":\"{}\",\"target\":\"{}\"}}", escape(&tool.name), escape(&tool.target_triple))).collect::<Vec<_>>().join(","),
         plan.probes().iter().map(|probe| format!("{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}", escape(&probe.name), probe.kind, probe.reproducibility)).collect::<Vec<_>>().join(","),
@@ -1326,6 +1327,7 @@ fn compile_bundle_path_build_inner(
         }
         (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
     };
+    let mut runtime_bundle_for_package = None;
     // D-BUILDSCOPE1: a package owns one optional build entry in `package.jet`.
     // Load that source through the same loader/sema/interpreter path as a
     // file-local entry, while retaining the ordinary runtime bundle for the
@@ -1436,6 +1438,7 @@ fn compile_bundle_path_build_inner(
         )]);
     }
     if let Some((package_path, package_source)) = package_entry {
+        runtime_bundle_for_package = Some(bundle);
         let package_path_string = package_path.to_string_lossy().into_owned();
         bundle = crate::Loader::load_entry_with_overlay(
             &package_path_string,
@@ -1681,7 +1684,7 @@ fn compile_bundle_path_build_inner(
         // output, action execution, and lock provenance.
         let base_dir = &bundle.project_root;
         let package = build_package_name(file)?;
-        let evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
+        let mut evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
             crate::BuildPluginHook::run_packaged_build_plugin,
             || crate::Comptime::run_build_entry_with_policy(
                 build,
@@ -1710,6 +1713,71 @@ fn compile_bundle_path_build_inner(
             build.name_span,
         )?;
         validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
+
+        let package_spec_bundle = runtime_bundle_for_package.as_ref().unwrap_or(&bundle);
+        let package_specs = if package_spec_bundle.dep_roots.is_empty() {
+            Vec::new()
+        } else {
+            compiler_package_specs(package_spec_bundle, &package)
+        };
+        let compiler_identity = format!(
+            "{}@{}#{}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+        );
+        let compiler_target = options
+            .cross_target
+            .clone()
+            .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
+        let compiler_profile = evaluated
+            .plan
+            .default_profile
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        if !package_specs.is_empty() && !evaluated.plan.targets().is_empty() {
+            evaluated
+                .plan
+                .add_compiler_package_actions(
+                    &package_specs,
+                    compiler_identity,
+                    &compiler_target,
+                    &compiler_profile,
+                )
+                .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+        }
+        let compiler_artifacts = package_specs
+            .iter()
+            .map(|spec| (spec.name.clone(), spec.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let compiler_runner = move |
+            action: &crate::Comptime::Build::BuildAction,
+            snapshots: &[crate::Comptime::Build::ActionInputSnapshot],
+        | {
+            let package_name = action
+                .labels
+                .get("compiler.package")
+                .ok_or_else(|| "compiler action has no package identity".to_string())?;
+            let spec = compiler_artifacts
+                .get(package_name)
+                .ok_or_else(|| format!("compiler package `{package_name}` was not prepared"))?;
+            let mut artifact = format!(
+                "jet.sealed-package.v1\npackage={}\nsource={}\ncompiler={}\ntarget={}\nprofile={}\n",
+                package_name,
+                spec.source_digest.as_str(),
+                action.labels.get("compiler.identity").map(String::as_str).unwrap_or_default(),
+                action.labels.get("compiler.target").map(String::as_str).unwrap_or_default(),
+                action.labels.get("compiler.profile").map(String::as_str).unwrap_or_default(),
+            );
+            for snapshot in snapshots {
+                artifact.push_str("dependency=");
+                artifact.push_str(snapshot.path.as_str());
+                artifact.push('=');
+                artifact.push_str(snapshot.digest.as_str());
+                artifact.push('\n');
+            }
+            Ok(vec![artifact.into_bytes()])
+        };
 
         let selected_actions = evaluated
             .plan
@@ -1793,12 +1861,13 @@ fn compile_bundle_path_build_inner(
         };
         let executed = if options.execute {
             let execution_grants = effective_grants(&options, &evaluated.plan);
-            crate::Comptime::Build::execute_build_plan_with_front_end_and_remote(
+            crate::Comptime::Build::execute_build_plan_with_front_end_and_remote_and_compiler(
                 &evaluated.plan,
                 &bundle.project_root,
                 &execution_grants,
                 crate::Comptime::Build::FrontEndCompletion::all_complete(),
                 options.remote.as_ref(),
+                Some(&compiler_runner),
             )
             .map_err(|error| vec![build_execution_diagnostic(error)])?
         } else {
@@ -1834,7 +1903,9 @@ fn compile_bundle_path_build_inner(
                 .plan
                 .actions()
                 .iter()
-                .filter(|action| selected_actions.contains(&action.id))
+                .filter(|action| {
+                    selected_actions.contains(&action.id) && !action.is_compiler_owned()
+                })
             {
                 for input in &action.inputs {
                     let path = normalize_project_path(&bundle.project_root, std::path::Path::new(input.as_str()));
@@ -2408,9 +2479,126 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
     })
 }
 
-/// Generated-source ownership follows the nearest package definition inside
-/// the active workspace boundary. A manifest-less workspace entry is anchored
-/// to canonical `run.jet`; only standalone files keep their historical stem.
+/// Package source ownership follows the nearest declared dependency root
+/// inside the active project boundary. The root package stays last so a
+/// dependency directory cannot be swallowed by the project-root prefix.
+fn compiler_package_specs(
+    bundle: &crate::AST::ProgramBundle,
+    root_name: &str,
+) -> Vec<crate::Comptime::Build::CompilerPackageSpec> {
+    let root = normalize_project_path(&bundle.project_root, &bundle.project_root);
+    let mut roots = vec![(root_name.to_string(), root.clone())];
+    let mut dependency_roots = bundle
+        .dep_roots
+        .iter()
+        .map(|(name, path)| {
+            (
+                name.clone(),
+                normalize_project_path(&bundle.project_root, path),
+            )
+        })
+        .collect::<Vec<_>>();
+    dependency_roots.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    for (name, path) in dependency_roots {
+        if path != root && !roots.iter().any(|(_, known)| known == &path) {
+            roots.push((name, path));
+        }
+    }
+    roots.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    if let Some(root_index) = roots.iter().position(|(_, path)| path == &root) {
+        let root_entry = roots.remove(root_index);
+        roots.push(root_entry);
+    }
+
+    let module_packages = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            let path = normalize_project_path(&bundle.project_root, &module.path);
+            roots
+                .iter()
+                .filter(|(_, package_root)| path.strip_prefix(package_root).is_ok())
+                .max_by_key(|(_, package_root)| package_root.components().count())
+                .map(|(name, _)| name.clone())
+        })
+        .collect::<Vec<_>>();
+
+    let mut source_parts = BTreeMap::<String, Vec<(String, String)>>::new();
+    for (index, module) in bundle.modules.iter().enumerate() {
+        let Some(package_name) = module_packages[index].as_ref() else {
+            continue;
+        };
+        let normalized_path = normalize_project_path(&bundle.project_root, &module.path);
+        let package_root = roots
+            .iter()
+            .find(|(name, _)| name == package_name)
+            .map(|(_, path)| path);
+        let relative = package_root
+            .and_then(|path| normalized_path.strip_prefix(path).ok())
+            .unwrap_or(normalized_path.as_path())
+            .display()
+            .to_string();
+        source_parts
+            .entry(package_name.clone())
+            .or_default()
+            .push((relative, module.source.clone()));
+    }
+
+    let mut dependencies = roots
+        .iter()
+        .map(|(name, _)| (name.clone(), BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let Some(owner) = module_packages[module_index].as_ref() else {
+            continue;
+        };
+        for import in &module.imports {
+            let Some(target_index) = bundle.name_ledger.import_target(module_index, import.span)
+            else {
+                continue;
+            };
+            let Some(Some(target)) = module_packages.get(target_index) else {
+                continue;
+            };
+            if target != owner {
+                dependencies
+                    .entry(owner.clone())
+                    .or_default()
+                    .insert(target.clone());
+            }
+        }
+    }
+
+    roots
+        .into_iter()
+        .map(|(name, _)| {
+            let mut bytes = b"jet.package-source.v1\0".to_vec();
+            let mut parts = source_parts.remove(&name).unwrap_or_default();
+            parts.sort_by(|left, right| left.0.cmp(&right.0));
+            if parts.is_empty() {
+                bytes.extend_from_slice(name.as_bytes());
+            } else {
+                for (path, source) in parts {
+                    bytes.extend_from_slice(&(path.len() as u64).to_be_bytes());
+                    bytes.extend_from_slice(path.as_bytes());
+                    bytes.extend_from_slice(&(source.len() as u64).to_be_bytes());
+                    bytes.extend_from_slice(source.as_bytes());
+                }
+            }
+            let package_dependencies = dependencies
+                .remove(&name)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            crate::Comptime::Build::CompilerPackageSpec::new(
+                name,
+                crate::Comptime::Build::ContentDigest::from_bytes(&bytes),
+                package_dependencies,
+            )
+        })
+        .collect()
+}
+
 fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
