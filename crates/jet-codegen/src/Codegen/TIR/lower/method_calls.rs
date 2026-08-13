@@ -5588,7 +5588,7 @@ fn lower_method_call_impl(
             };
             let f_t = match &args[0].expr {
                 Expr::Lambda(lam) => {
-                    super::take_scheduled_expr(&args[0].expr).unwrap_or_else(|| {
+                    super::take_scheduled_expr(&args[0].expr, cx).unwrap_or_else(|| {
                         let tl = lower_lambda_expecting(
                             lam,
                             cx,

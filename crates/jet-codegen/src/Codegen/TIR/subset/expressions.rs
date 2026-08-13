@@ -14,6 +14,7 @@ use crate::Codegen::TIR::is_prelude_struct_name;
 use crate::Codegen::TIR::method_call_in_subset;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_lit_constructible;
+use crate::Codegen::mangle_generated;
 use crate::Syntax;
 use std::collections::HashSet;
 
@@ -840,7 +841,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
 /// these names only while lowering that argument; accepting their shape here
 /// keeps the coverage proof aligned with that total lowering fact.
 fn is_binder_ref_name(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix("__jet_binder_ref_") else {
+    let Some(rest) = name.strip_prefix(&mangle_generated("binder_ref_")) else {
         return false;
     };
     let Some((site, slot)) = rest.split_once('_') else {

@@ -1,6 +1,6 @@
 use crate::AST::{AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Severity};
-use crate::Sema::Diagnostics::{edit_distance, is_task_type, type_fix_hint};
+use crate::Sema::Diagnostics::{edit_distance, field_read_to_clone, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use super::helpers::is_pod_uninit_type;
@@ -471,6 +471,7 @@ impl<'a> Checker<'a> {
             if !b.mutable
                 && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
                 && self.place_from_expr(&b.init).is_some()
+                && !field_read_to_clone(&b.init, self.registry, self.imports)
             {
                 let span = b.init.span();
                 let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
@@ -683,6 +684,10 @@ impl<'a> Checker<'a> {
             // completed sema, leaving its range metadata unresolved. Keep
             // view-bearing runtime values on the ordinary typed path.
             let skip_ct_view_bake = self.type_contains_view_boundary(&final_ty);
+            let skip_ct_field_read_bake = matches!(
+                &b.init,
+                Expr::Copy(inner, _) if field_read_to_clone(inner, self.registry, self.imports)
+            );
             // D-DECIMAL1: default-on float-money lint for money-like binding names.
             if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
                 self.diags.push(Diagnostic::lint(
@@ -729,7 +734,7 @@ impl<'a> Checker<'a> {
                     }
                     Err(d) => self.diags.push(d),
                 }
-            } else if !b.mutable && !skip_ct_view_bake {
+            } else if !b.mutable && !skip_ct_view_bake && !skip_ct_field_read_bake {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `$` demands a compile-time answer.

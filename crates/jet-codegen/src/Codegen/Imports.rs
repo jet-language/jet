@@ -305,12 +305,14 @@ pub(crate) fn foreign_type_map(
                 }
                 Item::UnitFamily(family) => {
                     for member in family.distinct_defs() {
-                        if bundle.name_ledger.visible(module_idx, target, &member.name) {
-                            if let Some(identity) =
-                                bundle.name_ledger.nominal_identity(target, &member.name)
-                            {
-                                map.insert(identity, rust_mod.clone());
-                            }
+                        // A public function may expose a private unit-family member in
+                        // its resolved signature. Codegen still needs the canonical Rust
+                        // module for that carrier; sema has already enforced source
+                        // visibility at the call boundary.
+                        if let Some(identity) =
+                            bundle.name_ledger.nominal_identity(target, &member.name)
+                        {
+                            map.insert(identity, rust_mod.clone());
                         }
                     }
                 }
@@ -370,12 +372,10 @@ pub(crate) fn foreign_type_map(
                 }
                 Item::UnitFamily(family) => {
                     for member in family.distinct_defs() {
-                        if bundle.name_ledger.visible(module_idx, target, &member.name) {
-                            if let Some(identity) =
-                                bundle.name_ledger.nominal_identity(target, &member.name)
-                            {
-                                map.insert(identity, rust_mod.clone());
-                            }
+                        if let Some(identity) =
+                            bundle.name_ledger.nominal_identity(target, &member.name)
+                        {
+                            map.insert(identity, rust_mod.clone());
                         }
                     }
                 }

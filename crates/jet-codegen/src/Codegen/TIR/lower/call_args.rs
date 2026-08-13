@@ -228,7 +228,7 @@ pub(crate) fn lower_one_call_arg(
     // slots. A plain worklist pass cannot install that mapping, so never reuse
     // its cached value here; lower the argument through the binder-aware path.
     let value = if a.flags.binder_refs.is_empty() {
-        super::take_scheduled_expr(&a.expr)
+        super::take_scheduled_expr(&a.expr, cx)
     } else {
         None
     }

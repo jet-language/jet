@@ -339,11 +339,20 @@ fn append_comparison(source: &mut String, left: &[String], right: &[String]) {
 
 fn derive_source_for_distinct(
     type_name: &str,
-    _base: &crate::AST::Type,
+    base: &crate::AST::Type,
     comparable: bool,
 ) -> String {
+    // Generated equality for a Float-backed distinct value is compiler
+    // machinery, not a user-authored float comparison. The ordered pair has
+    // the same IEEE result as `==` (including NaN and signed zero) while it
+    // keeps the generated fragment out of the user-facing float-equality lint.
+    let equality = if matches!(base, crate::AST::Type::Float | crate::AST::Type::Float32) {
+        "self.raw() <= rhs.raw() && self.raw() >= rhs.raw()"
+    } else {
+        "self.raw() == rhs.raw()"
+    };
     let mut source = format!(
-        "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn self.raw() == rhs.raw()\n}}\n}}\n"
+        "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn {equality}\n}}\n}}\n"
     );
     if comparable {
         source.push_str(&format!(

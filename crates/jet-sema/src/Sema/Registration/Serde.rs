@@ -371,13 +371,13 @@ fn reanchor_generated_items(items: &mut [Item], trigger_span: crate::Diagnostics
         match item {
             Item::Func(function) => {
                 for statement in &mut function.body {
-                    statement.for_each_expr_mut(|expr| expr.reanchor(trigger_span));
+                    statement.reanchor(trigger_span);
                 }
             }
             Item::Impl(implementation) => {
                 for method in &mut implementation.methods {
                     for statement in &mut method.body {
-                        statement.for_each_expr_mut(|expr| expr.reanchor(trigger_span));
+                        statement.reanchor(trigger_span);
                     }
                 }
             }

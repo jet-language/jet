@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{
-    clif_ty, fn_value_signature, func_has_receiver, func_signature,
+    clif_ty, fn_value_signature, func_has_receiver, func_signature, receiver_clif_ty,
     interrupt_callback_signature, jit_fn_name, JitMeta,
 };
 use super::JitRuntime;
@@ -1219,7 +1219,7 @@ fn lower_function(
             .declare_func_in_func(lctx.host.cell.frame_enter, lctx.b.func);
         lctx.b.ins().call(enter, &[]);
         if func_has_receiver(tir) {
-            let self_var = lctx.fresh_var(types::I64);
+            let self_var = lctx.fresh_var(receiver_clif_ty(tir, meta));
             lctx.b.def_var(self_var, param_vals[0]);
             lctx.vars.insert("self".to_string(), self_var);
             if let Some(owner_type) = self_type {

@@ -744,7 +744,13 @@ impl Cx {
     }
 
     fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
-        name.contains("::").then(|| name.to_string())
+        if name.contains("::") {
+            return Some(name.to_string());
+        }
+        if let Some((alias, leaf)) = name.split_once('.') {
+            return self.foreign_type_identity(alias, leaf);
+        }
+        self.foreign_type_identity("", name)
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -984,6 +990,116 @@ impl Cx {
     }
     pub(crate) fn type_contains_view(&self, ty: &Type) -> bool {
         self.type_contains_view_matching(ty, false)
+    }
+
+    /// A comptime value containing one of these edges cannot use the generic
+    /// `CtValue::serialize` path: serialization has no type context in which
+    /// to insert the `Box::new` required by Rust's recursive layout.
+    pub(crate) fn type_contains_boxed_edge(&self, ty: &Type) -> bool {
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Named(name) => {
+                    if cx.boxed_edges.iter().any(|(owner, _)| owner == name) {
+                        return true;
+                    }
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, field_ty)| contains(cx, field_ty, seen))
+                    });
+                    seen.remove(name);
+                    found
+                }
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(cx, arg, seen))
+                        || contains(cx, &Type::Named(name.clone()), seen)
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                    contains(cx, key, seen) || contains(cx, value, seen)
+                }
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, field_ty)| contains(cx, field_ty, seen)),
+                Type::FixedList { elem, .. } => contains(cx, elem, seen),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|param| contains(cx, param, seen))
+                        || ret.as_deref().is_some_and(|ret| contains(cx, ret, seen))
+                }
+                Type::Union(members) => members.iter().any(|member| contains(cx, member, seen)),
+                Type::Quantity { base, .. } => contains(cx, base, seen),
+                _ => false,
+            }
+        }
+
+        contains(self, ty, &mut HashSet::new())
+    }
+
+    /// `CtValue::serialize` has no expected-type context: it emits every list
+    /// as `Vec` and every integer as `i64`. Keep a folded value on the typed
+    /// source-lowering path when a struct or enum payload contains a shape
+    /// that serialization cannot preserve.
+    pub(crate) fn type_contains_typed_literal_edge(&self, ty: &Type) -> bool {
+        fn payload_contains(
+            cx: &Cx,
+            payload: &VariantPayload,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => contains(cx, ty, seen),
+                VariantPayload::Named(fields) => fields
+                    .iter()
+                    .any(|field| contains(cx, &field.ty, seen)),
+            }
+        }
+
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::IntN { .. } | Type::FixedList { .. } => true,
+                Type::Named(name) => {
+                    if !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, field_ty)| contains(cx, field_ty, seen))
+                    }) || cx.enum_variants.get(name).is_some_and(|variants| {
+                        variants
+                            .iter()
+                            .any(|(_, payload)| payload_contains(cx, payload, seen))
+                    });
+                    seen.remove(name);
+                    found
+                }
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(cx, arg, seen))
+                        || contains(cx, &Type::Named(name.clone()), seen)
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                    contains(cx, key, seen) || contains(cx, value, seen)
+                }
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, field_ty)| contains(cx, field_ty, seen)),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|param| contains(cx, param, seen))
+                        || ret.as_deref().is_some_and(|ret| contains(cx, ret, seen))
+                }
+                Type::Union(members) => members.iter().any(|member| contains(cx, member, seen)),
+                Type::Quantity { base, .. } => contains(cx, base, seen),
+                _ => false,
+            }
+        }
+
+        contains(self, ty, &mut HashSet::new())
     }
 
     pub(crate) fn type_contains_mutable_view(&self, ty: &Type) -> bool {
@@ -1923,7 +2039,7 @@ impl Cx {
             }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
-                let leaf = name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf);
+                let leaf = nominal_leaf(name);
                 format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
             }
             Type::Named(name) if name.contains('.') => {
@@ -2463,9 +2579,7 @@ impl Cx {
 
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
         if let Some(rust_mod) = self.foreign_types.get(type_name) {
-            let leaf = type_name
-                .rsplit_once('.')
-                .map_or(type_name, |(_, leaf)| leaf);
+            let leaf = nominal_leaf(type_name);
             return format!(
                 "{}{}::{}",
                 self.root_prefix,
@@ -4140,7 +4254,6 @@ pub(crate) fn build_cx_items(
     register_core_event_enums(&mut cx);
     let auto_derives = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     apply_auto_derives(&mut cx, &auto_derives);
-
     cx
 }
 
@@ -4577,7 +4690,7 @@ pub(crate) fn field_type_hashable(
     }
 }
 
-fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
+pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
     let mut boxed = HashSet::new();
     for f in &s.fields {
         walk_type_edge(
@@ -4667,7 +4780,7 @@ fn walk_type_edge(
         Type::Option(inner) | Type::List(inner) => {
             walk_type_edge(owner, edge, inner, stack, cx, boxed);
         }
-        Type::Map { key, value, .. } => {
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             walk_type_edge(owner, edge, key, stack, cx, boxed);
             walk_type_edge(owner, edge, value, stack, cx, boxed);
         }

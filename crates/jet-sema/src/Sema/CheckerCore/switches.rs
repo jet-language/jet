@@ -677,6 +677,20 @@ impl<'a> Checker<'a> {
             let subj_ty = self.infer(subject);
             let subj_name = match &*subject {
                 Expr::Ident(n, _) => Some(n.clone()),
+                // The parser gives pattern arms over a compound subject the
+                // compiler-private `it` subject (`pick() == { .Red -> ... }`).
+                // Fallible subjects used to be the only case that declared it,
+                // which left ordinary enum calls to be checked as a free name.
+                _ if arms.iter().any(|arm| {
+                    matches!(
+                        &arm.cond,
+                        Expr::PatternTest { subject, .. }
+                            if matches!(
+                                subject.as_ref(),
+                                Expr::Ident(name, _) if name == Syntax::KW_IT
+                            )
+                    )
+                }) => Some(Syntax::KW_IT.to_string()),
                 _ if subj_ty.as_ref().is_some_and(|t| t.is_fallible()) => {
                     Some(Syntax::KW_IT.to_string())
                 }

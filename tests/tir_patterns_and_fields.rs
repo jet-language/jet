@@ -326,7 +326,7 @@ fn run() {
     assert_eq!(stdout, "database\ndocs\nother\n");
 }
 
-/// c109 (B4): a user-enum variant if-let condition `if m == Ping(n) { } else { }`
+/// c109 (B4): a user-enum variant if-let condition `if m == .Ping(n) { } else { }`
 /// routes through the TIR and binds the payload, matching the old if-let baseline.
 #[test]
 fn user_enum_variant_if_let_condition() {
@@ -336,7 +336,7 @@ fn user_enum_variant_if_let_condition() {
     let src = "\
 enum Msg { Ping(Int) Pong }
 fn f(m: Msg) => Int {
-    if m == Ping(n) {
+    if m == .Ping(n) {
         return n
     } else {
         return -1
@@ -368,8 +368,8 @@ fn firstof(xs: [Int#3]) => Int {
     return xs[0]
 }
 fn run() {
-    print(firstof([double(1), double(2), double(3)]))
-    g :: Grid.{ row: [double(1), double(2), double(3)] }
+    print(firstof([Int#3].{ double(1), double(2), double(3) }))
+    g :: Grid.{ row: [Int#3].{ double(1), double(2), double(3) } }
     print(g.row[1])
 }
 ";
@@ -446,8 +446,8 @@ fn pick() => Light {
 }
 fn classify() => Int {
     if pick() == {
-        Red -> { return 1 }
-        Green -> { return 2 }
+        .Red -> { return 1 }
+        .Green -> { return 2 }
         else -> { return 0 }
     }
 }
@@ -480,8 +480,8 @@ fn build() => [Int] {
 }
 fn run() {
     $xs :: build()
-    print(\"{xs}\")
-    print(\"{xs[1]}\")
+    print(\"{$xs}\")
+    print(\"{$xs[1]}\")
 }
 ";
     let (code, stdout) = build_and_run("tir_comptime_local", src);
@@ -670,7 +670,7 @@ fn run() {
 /// c109: a field read off a comptime-const STRUCT value (`$pair_value :: Pair{…}`;
 /// `pair_value.left`) and an `==` against a comptime-const ENUM value (`$light_value ::
 /// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
-/// Rust value; the field read / comparison matches the old emitter baseline.
+/// Rust value; the field read / comparison uses the canonical Equatable hook.
 /// `main` routes through the TIR; runs to the round-trip output.
 #[test]
 fn field_read_and_eq_on_inlined_comptime_values() {
@@ -694,11 +694,11 @@ $light_value :: Light.Green
 fn run() {
     p :: Pair.{left: 7, right: \"seven\"}
     l :: Light.Green
-    print(\"{pair_value.left}\")
+    print(\"{$pair_value.left}\")
     print(\"{p.left}\")
-    print(\"{pair_value.right}\")
+    print(\"{$pair_value.right}\")
     print(\"{p.right}\")
-    print(\"{light_value == Light.Green}\")
+    print(\"{$light_value == Light.Green}\")
     print(\"{l == Light.Green}\")
 }
 ";
@@ -711,11 +711,11 @@ fn run() {
         "comptime struct field read not byte-exact:\n{}",
         out.rust
     );
-    // Byte-exact: `light_value == Light.Green` compares the inlined enum value.
+    // Byte-exact: user-enum equality routes through the canonical Equatable hook.
     assert!(
         out.rust
-            .contains("(__jet_Light::__jet_Green) == (__jet_Light::__jet_Green)"),
-        "comptime enum `==` not byte-exact:\n{}",
+            .contains("(__jet_Light::__jet_Green).equal(&(__jet_Light::__jet_Green))"),
+        "comptime enum equality hook not byte-exact:\n{}",
         out.rust
     );
     let (code, stdout) = build_and_run("tir_comptime_struct_enum_values", src);
@@ -724,7 +724,7 @@ fn run() {
 }
 
 /// c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
-/// slot (`if w == Some(_)`). The `_` binds nothing; the if-let head renders
+/// slot (`if w == .Some(_)`). The `_` binds nothing; the if-let head renders
 /// `if let __jet_Wrapper::__jet_Some(_) = __jet_w` byte-for-byte. `main` routes
 /// through the TIR; runs (the `Some(42)` value matches the wildcard).
 #[test]
@@ -739,7 +739,7 @@ enum Wrapper {
 }
 fn run() {
     w :: Wrapper.Some(42)
-    if w == Some(_) {
+    if w == .Some(_) {
         print(\"has value\")
     }
 }

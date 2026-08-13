@@ -1385,6 +1385,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         if module_idx == bundle.entry {
             continue;
         }
+        let imported_owner = bundle
+            .name_ledger
+            .module_identity(module_idx)
+            .expect("name ledger must contain every loaded module");
         let mut imported_cx = build_cx_items(
             &imported.items,
             &imported.source,
@@ -1460,8 +1464,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             crate::Syntax::TRAIT_DISPLAY,
                         );
                         lowered.name = format!(
-                            "{}.{}::{}",
-                            imported.alias, implementation.type_name, method.name
+                            "{}::{}::{}",
+                            imported_owner, implementation.type_name, method.name
                         );
                         funcs.push(lowered);
                     }

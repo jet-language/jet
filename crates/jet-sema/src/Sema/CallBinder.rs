@@ -305,7 +305,11 @@ fn rewrite(
             .map(|(slot, p)| {
                 (
                     p.name.to_string(),
-                    format!("__jet_binder_ref_{}_{}", call_span.start, slot),
+                    jet_foundation::Names::mangle_generated(&format!(
+                        "binder_ref_{}_{}",
+                        call_span.start,
+                        slot
+                    )),
                 )
             })
             .collect();

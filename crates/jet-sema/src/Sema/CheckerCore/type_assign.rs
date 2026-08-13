@@ -826,7 +826,7 @@ impl<'a> Checker<'a> {
             }
             match (want, got) {
                 (Type::Named(want_name), Type::Named(got_name)) => {
-                    self.same_struct_name_identity(want_name, got_name)
+                    self.same_declared_name_identity(want_name, got_name)
                 }
                 (
                     Type::Apply {
@@ -839,7 +839,7 @@ impl<'a> Checker<'a> {
                     },
                 ) => {
                     want_args.len() == got_args.len()
-                        && self.same_struct_name_identity(want_name, got_name)
+                        && self.same_declared_name_identity(want_name, got_name)
                         && want_args
                             .iter()
                             .zip(got_args)
@@ -949,7 +949,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        fn same_struct_name_identity(&self, want: &str, got: &str) -> bool {
+        fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
             let (want_ns, want_name) = Self::split_type_name(want);
             let (got_ns, got_name) = Self::split_type_name(got);
             let (Some(want_owner), Some(got_owner)) = (
@@ -958,10 +958,12 @@ impl<'a> Checker<'a> {
             ) else {
                 return false;
             };
-            self.struct_fields_of(want_owner, want_name).is_some()
-                && self.struct_fields_of(got_owner, got_name).is_some()
-                && want_owner == got_owner
-                && want_name == got_name
+            if want_owner != got_owner || want_name != got_name {
+                return false;
+            }
+            self.modules
+                .and_then(|modules| modules.get(want_owner))
+                .is_some_and(|module| module.registry.contains(want_name))
         }
 
         pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {

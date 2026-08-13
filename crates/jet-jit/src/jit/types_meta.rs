@@ -323,7 +323,8 @@ pub(crate) fn func_signature(
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
     if func_has_receiver(tir) {
-        sig.params.push(AbiParam::new(types::I64));
+        sig.params
+            .push(AbiParam::new(receiver_clif_ty(tir, meta)));
     }
     for (_, ty, convention) in &tir.params {
         if matches!(ty, Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
@@ -405,6 +406,25 @@ pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
         TFuncKind::TraitMethod { serde, .. } => *serde != Some(SerdeCodec::Decode),
         _ => false,
     }
+}
+
+/// Return the resident ABI for an instance receiver. Structs and opaque
+/// handles stay I64; numeric distinct receivers use their erased scalar ABI.
+/// The AOT receiver is a Rust reference, but the JIT passes the same value
+/// representation used by the rest of the TIR scalar operations.
+pub(crate) fn receiver_clif_ty(tir: &TFunc, meta: &JitMeta<'_>) -> types::Type {
+    let owner = match &tir.kind {
+        TFuncKind::Method { owner_type, .. } => Some(owner_type.clone()),
+        TFuncKind::TraitMethod { .. } => tir
+            .name
+            .split_once("::")
+            .map(|(owner, _)| Type::Named(owner.to_string())),
+        _ => None,
+    };
+    owner
+        .as_ref()
+        .and_then(|ty| meta.clif_ty(ty))
+        .unwrap_or(types::I64)
 }
 
 fn is_i64_option(ty: &Type) -> bool {
