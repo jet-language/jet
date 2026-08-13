@@ -478,7 +478,7 @@ pub(crate) fn emit_require_stop(
             let right_s = emit_tir_expr(right, cx);
             if cx.test_mode {
                 return jet_format!(
-                    "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ let {jet_prefix}msg = format!(\"expected {{}}, got {{}}\", {jet_prefix}right.jet_show(), {jet_prefix}left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
+                    "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ let {jet_prefix}msg = format!(\"expected {{}}, got {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{jet_prefix}msg)); }} }}",
                     file = escape_rust_str(&loc.file),
                     line = loc.line,
                     fn_name_esc = escape_rust_str(&loc.fn_name),
@@ -488,7 +488,7 @@ pub(crate) fn emit_require_stop(
                 );
             }
             jet_format!(
-                "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", {jet_prefix}left.jet_show(), {jet_prefix}right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                "{{ let {jet_prefix}left = ({left_s}); let {jet_prefix}right = ({right_s}); if !({jet_prefix}left == {jet_prefix}right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"expected: {{}}, got: {{}}\", {jet_prefix}right.jet_debug(), {jet_prefix}left.jet_debug()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,
                 file = escape_rust_str(&loc.file),
                 line = loc.line,

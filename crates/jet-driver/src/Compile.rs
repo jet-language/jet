@@ -61,7 +61,7 @@ impl Capabilities {
         };
         Capabilities {
             uses_network: any(&["core.net", "core.http", "core.watcher::port"]),
-            uses_file_io: any(&["core.io", "core.files", "core.path", "core.watcher"]),
+            uses_file_io: any(&["core.io", "core.files", "core.watcher"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
             uses_crypto: any(&["core.crypto", "core.auth"]),

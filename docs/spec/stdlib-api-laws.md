@@ -139,14 +139,18 @@ card #1574. The reference doc restructure rides that cutover.
   return a plain collection. `.lazy` gives the same vocabulary as a deferred
   view. Streams and file lines stay naturally lazy because they arrive over
   time.
-- **D-CORE-PATH1=A** — `Path` is a real type with `join` and other methods.
-  Every Core function that takes a path accepts a plain `String` or a `Path`.
-  The methods replace the `core.path` free functions.
+- **D-CORE-PATH1=A** — `Path` is a real prelude type with `join`, `parent`,
+  `extension`, `stem`, `normalize`, `walk`, and the other path methods. Every
+  Core function that takes a path accepts a plain `String` or a `Path`. Expert
+  APIs may require `Path` alone. The methods replace the `core.path` free
+  functions; no path-join operator exists.
 - **D-CORE-PRELUDE1=A** — the seven criteria become law: measured frequency,
   total and safe, names never semantics, no better home, first-hour coverage,
   one fixed set, and collision-conscious names. User shadowing wins with a
-  compiler warning. New names land only at epoch boundaries with a migration
-  lint, and the five safe additions ship.
+  compiler warning. New names land only at epoch boundaries and use the L2001
+  migration lint for older packages. Every entry is total or returns a result;
+  no implicit conversion enters the prelude. `Duration` and `Instant` are the
+  Time-family quantities from D-TYPE2-TIME1.
 - **D-CORE-PRELUDE2=B** — `read_file`, `write_file`, and `file_exists` join the
   prelude. Random stays in `core.math.random`.
 - **D-CORE-TREE1=A** — Core uses a consistent nested tree. It keeps

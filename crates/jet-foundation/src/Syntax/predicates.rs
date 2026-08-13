@@ -75,9 +75,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.solve",
     // D-DATA-SURFACE1=A: one beginner facade for typed tables, series, stats, and plots.
     "core.data",
-    // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
+    // E2-M7: streaming file handles and typed Path methods (D-IO2, D-CORE-PATH1).
     "core.files",
-    "core.path",
     // D-URL1=A: typed WHATWG-class URLs and MIME values.
     "core.url",
     "core.mime",

@@ -39,6 +39,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("manifest-identity", 7),
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
+    ("core-path-free-functions", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -253,6 +254,22 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if has_retired {
                     retired += 1;
                 } else if writes_interpolation_selector(&text, false) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "core-path-free-functions" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains("use core.path") || text.contains("core.path.") {
+                    retired += 1;
+                } else if text.contains("Path.from") || text.contains("Path.home") {
                     canonical += 1;
                 }
             }

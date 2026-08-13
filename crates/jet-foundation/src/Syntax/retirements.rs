@@ -106,6 +106,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         since: "2026-08-07",
         code: None,
     },
+    Retirement {
+        id: "core-path-free-functions",
+        retired: "core.path.join/parent/extension/normalize",
+        canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-PATH1",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
 ];
 
 /// The known package providers, in the order a ref may not put them.

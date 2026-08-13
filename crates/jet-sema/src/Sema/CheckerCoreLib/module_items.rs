@@ -573,7 +573,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "append",
         ],
         "core.watcher" => &["files", "process_pid", "port", "set"],
-        "core.path" => &["join", "parent", "extension", "normalize"],
         "core.url" => &[
             "parse",
             "from_parts",

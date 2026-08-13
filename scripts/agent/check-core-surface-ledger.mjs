@@ -176,6 +176,7 @@ const CONTAINER_ALIASES = {
   Sender: "core.tasks",
   Receiver: "core.tasks",
   Duration: "core.time",
+  Path: "core.files",
   // Civil-time types live in net_text_time.rs; their workflows are core.time.
   Date: "core.time",
   LocalDate: "core.time",
@@ -280,7 +281,7 @@ const CROSS_DOMAIN_DISTINCT = new Set([
   "trimstart", "trylock", "type", "typeassert", "typeof", "union", "unlock", "unquote",
   "unwrap", "unzip", "update", "urandom", "use", "userinfo", "utime", "valid",
   "validate", "value", "valueof", "values", "var", "verifyhostname", "verifymode", "version",
-  "wait", "with", "wrap", "write", "writebyte", "writelines", "writer", "writeto",
+  "wait", "waitall", "with", "wrap", "write", "writebyte", "writelines", "writer", "writeto",
   "xor", "zero", "zip",
 ]);
 
@@ -499,6 +500,7 @@ const TYPE_CONTAINER = {
   Digest512: "core.crypto",
   Clock: "core.time",
   Duration: "core.time",
+  Path: "core.files",
   Date: "core.time",
   LocalDate: "core.time",
   LocalTime: "core.time",
@@ -532,11 +534,11 @@ const TYPE_CONTAINER = {
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {
-  task_list_method_return: "TaskList",
   list_method_return: "List",
   iter_method_return: "Iter",
   view_method_return: "View",
   option_method_return: "Option",
+  result_method_return: "Result",
   map_method_return: "Map",
   string_method_return: "String",
   stopwatch_method_return: "Stopwatch",
@@ -1030,6 +1032,11 @@ function moduleInventory() {
   for (const arm of matchArms(body, "match module")) {
     if (!arm.rhs.includes("&[")) continue;
     const rawModules = quoted(arm.lhs).filter(moduleToken);
+    for (const match of arm.lhs.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
+      if (constants.has(match[1]) && moduleToken(constants.get(match[1]))) {
+        rawModules.push(constants.get(match[1]));
+      }
+    }
     if (rawModules.length === 0) continue;
     const members = resolveItems(arm.rhs, constants);
     for (const raw of rawModules) {
@@ -1061,6 +1068,23 @@ function moduleInventory() {
     rawModules: ["core.lang (Policy::RULE_ARG_DECLARATIONS)"],
     members: langMembers,
     sourceLine: lineAt(source, source.indexOf("core.lang")),
+  });
+
+  // `core.mem` is gated by a typed table instead of a match arm. Resolve the
+  // item constants from that table so the ledger follows the same source.
+  const syntaxSource = read("crates/jet-foundation/src/Syntax/core_surface.rs");
+  const memStart = syntaxSource.indexOf("pub const CORE_MEM_GATE_TIERS");
+  const memEnd = syntaxSource.indexOf("];", memStart) + 2;
+  const memBody = syntaxSource.slice(memStart, memEnd);
+  const memItems = new Set();
+  for (const match of memBody.matchAll(/\b([A-Z][A-Z0-9_]*)\b/g)) {
+    if (constants.has(match[1])) memItems.add(constants.get(match[1]));
+  }
+  entries.set("core.mem", {
+    module: "core.mem",
+    rawModules: ["core.mem (CORE_MEM_GATE_TIERS)"],
+    members: memItems,
+    sourceLine: lineAt(syntaxSource, memStart),
   });
 
   const predicates = read(PREDICATES_PATH);
@@ -1379,6 +1403,21 @@ function collectionInventory() {
         }
       }
     }
+    const pathBody = tableBody("path_method_return", civilSources);
+    if (!pathBody) {
+      throw new Error("path_method_return missing from net_text_time.rs");
+    }
+    const pathLine = lineAt(civilText, civilText.indexOf("fn path_method_return("));
+    tables.push({
+      function: "path_method_return:Path",
+      type: TYPE_CONTAINER.Path,
+      methods: Array.from(new Set(
+        quoted(pathBody).filter(function (name) {
+          return /^[a-z][a-z0-9_]*$/.test(name);
+        })
+      )).sort(),
+      sourceLine: pathLine,
+    });
   }
 
   // Several tables can own one container: core.compiler is spread across

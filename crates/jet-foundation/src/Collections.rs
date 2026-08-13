@@ -765,6 +765,15 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "system", 0) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
         }
+        (Type::Named(n), "now", 0) if n == crate::Syntax::CLOCK_TYPE => {
+            Some(Some(Type::Named("Instant".to_string())))
+        }
+        (Type::Named(n), "today", 0) if n == "Date" => {
+            Some(Some(Type::Named("Date".to_string())))
+        }
+        (Type::Named(n), "home", 0) if n == "Path" => {
+            Some(Some(Type::Named("Path".to_string())))
+        }
         (Type::Named(n), method, 1)
             if n == crate::Syntax::DURATION_TYPE
                 && crate::Syntax::DURATION_CONSTRUCTORS.contains(&method) =>

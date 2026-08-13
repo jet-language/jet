@@ -2,9 +2,8 @@
 use core.encoding as encoding
 use core.encoding.csv as csv
 use core.files as files
-use core.path as path
 
-fn write_catalog(path: String) {
+fn write_catalog(path: Path) {
     output :: files.create(path) ?? panic("create")
     writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(["ok", "true"]) ?? panic("record")
@@ -16,7 +15,7 @@ fn run() {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
     scratch :: files.temp_dir("jet-encoding-csv") ?? panic("temp_dir")
-    path :: path.join(scratch.path, "catalog.csv")
+    path :: Path.from(scratch.path).join("catalog.csv")
     write_catalog(path)
     input :: files.open(path) ?? panic("open")
     reader :: csv.reader(^input) ?? panic("reader")

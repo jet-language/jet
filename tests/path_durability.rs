@@ -24,20 +24,18 @@ fn normalize_is_lexical_rooted_and_platform_native() {
     let root = if cfg!(windows) { "C:/" } else { "/" };
     let windows_cases = if cfg!(windows) {
         r#"
-    print(path.normalize("C:../../leaf"))
-    print(path.normalize("//server/share/../../leaf"))"#
+    print(Path.from("C:../../leaf").normalize().to_string())
+    print(Path.from("//server/share/../../leaf").normalize().to_string())"#
     } else {
         ""
     };
     let src = format!(
         r#"
-use core.path as path
-
 fn run() {{
-    print(path.normalize("../../alpha/./beta/../gamma"))
-    print(path.normalize("{absolute}"))
-    print(path.normalize(""))
-    print(path.normalize("{root}")){windows_cases}
+    print(Path.from("../../alpha/./beta/../gamma").normalize().to_string())
+    print(Path.from("{absolute}").normalize().to_string())
+    print(Path.from("").normalize().to_string())
+    print(Path.from("{root}").normalize().to_string()){windows_cases}
 }}
 "#
     );
@@ -65,7 +63,7 @@ fn run() {{
 
 #[test]
 fn generated_normalizer_uses_platform_components() {
-    let src = "use core.path as path\n\nfn run() { print(path.normalize(\"a/../b\")) }\n";
+    let src = "fn run() { print(Path.from(\"a/../b\").normalize().to_string()) }\n";
     let out = jet::compile(src).expect("path normalize fixture should compile");
     assert!(out.rust.contains("std::path::Component::Prefix"));
     assert!(out.rust.contains("std::path::Component::RootDir"));
@@ -206,11 +204,9 @@ fn atomic_write_retries_collision_replaces_and_cleans_failed_temp() {
         r#"
 use core.files as fs
 use core.os as os
-use core.path as path
-
 fn run() {{
     root :: "{}"
-    stale :: path.join(root, ".jet_tmp_{{os.pid()}}_0")
+    stale :: Path.from(root).join(".jet_tmp_{{os.pid()}}_0")
     fs.write(stale, "stale") ?? panic("stale setup failed")
     bytes :: [U8].{{ 110, 101, 119 }}
     fs.write_atomic("{}", bytes) ?? panic("replacement failed")

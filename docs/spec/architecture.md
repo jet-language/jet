@@ -659,7 +659,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.measurement` | Compatibility alias | Route to `core.science.measurement`; do not add semantics. |
   | `core.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
   | `core.net` | Mixed | `Prelude/Core/NetPure.rs` owns IP/socket parse and field rules; sockets and DNS stay capability-bound. |
-  | `core.path` | Kernel | `Prelude/Core/Path.rs` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound. |
+  | `Path` / `core.files` | Kernel + Host | `Prelude/Core/Path.rs` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound and accepts `String | Path`. |
   | `core.perf` | Host | Runtime performance capability; comptime rejects unavailable calls. |
   | `core.process` | Host | Process capability boundary and REPL host adapter. |
   | `core.random` | Mixed | `Prelude/Core/SeededRandom.rs` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |

@@ -1034,6 +1034,7 @@ pub fn path_method_return(
         "parent" => Some(Some(Type::Option(Box::new(path())))),
         "extension" => Some(Some(Type::Option(Box::new(Type::String)))),
         "stem" => Some(Some(Type::Option(Box::new(Type::String)))),
+        "normalize" => Some(Some(path())),
         "to_string" => Some(Some(Type::String)),
         "write_atomic" => Some(Some(result_ty(unit_ty(), Type::String))),
         "walk" => Some(Some(Type::List(Box::new(path())))),

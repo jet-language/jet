@@ -21,6 +21,39 @@ fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) ->
         && !row.is_receiver()
         && row.effect().is_none()
 }
+
+/// Marshal typed Path values at the shared erased Core boundary. Strings stay
+/// strings, so this does not add an implicit conversion to the language.
+pub(super) fn normalize_path_args(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let Some(row) = jet_foundation::Syntax::core_call(module, method) else {
+        return Ok(args);
+    };
+    args.into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if !row.path_arg(index) {
+                return Ok(value);
+            }
+            let CtValue::Struct { type_name, fields } = &value else {
+                return Ok(value);
+            };
+            if type_name != "Path" {
+                return Ok(value);
+            }
+            let path = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                ("inner", CtValue::Str(path)) => Some(path.clone()),
+                _ => None,
+            });
+            path.map(CtValue::Str)
+                .ok_or_else(|| unsupported("malformed Path value", span))
+        })
+        .collect()
+}
 #[path = "core_calls/regex.rs"]
 mod regex;
 use self::regex::*;
@@ -39,10 +72,6 @@ mod encoding_base_kernel {
 
 mod fmt_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Fmt.rs");
-}
-
-mod path_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Path.rs");
 }
 
 mod seeded_random_kernel {
@@ -815,6 +844,7 @@ pub fn apply_core_call_with_type(
     repl_mode: bool,
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
+    let args = normalize_path_args(module, method, args, span)?;
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(
@@ -1541,12 +1571,6 @@ pub fn apply_core_call_with_type(
                 .map(CtValue::Str)
                 .collect(),
         )),
-        // --- core.path (pure) ---
-        ("core.path", "join") => {
-            let a = as_string(one(0)?, span)?.to_string();
-            let b = as_string(one(1)?, span)?.to_string();
-            Ok(CtValue::Str(path_kernel::jet_std_path_join(&a, &b)))
-        }
         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
         // --- core.event (shared TIR evaluator / deopt; mirrors AOT JetEvent*) ---
@@ -1561,18 +1585,6 @@ pub fn apply_core_call_with_type(
         }
         ("core.event", "async_result") => {
             crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
-        }
-        ("core.path", "parent") => {
-            let p = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(path_kernel::jet_std_path_parent(&p)))
-        }
-        ("core.path", "extension") => {
-            let p = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(path_kernel::jet_std_path_extension(&p)))
-        }
-        ("core.path", "normalize") => {
-            let p = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(path_kernel::jet_std_path_normalize(&p)))
         }
         // --- core.encoding.json ---
         ("core.encoding.json", "parse") => {

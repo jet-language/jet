@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static RESTART_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const AUTHORITY_SOURCE: &str = r#"
-use core.path as path
 use core.services as services
 use core.testing as testing
 use core.time as time
@@ -43,7 +42,7 @@ fn receipt_kind(receipt: ServiceReceipt) => String {
 
 fn run() {
     temp := testing.temp_dir("service-authority")
-    store :: path.join(temp, "authority.log")
+    store :: Path.from(temp).join("authority.log").to_string()
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("orders")
@@ -523,7 +522,6 @@ fn workflow_history_survives_process_restart() {
 }
 
 const SOURCE: &str = r#"
-use core.path as path
 use core.services as services
 use core.testing as testing
 
@@ -531,7 +529,7 @@ fn run() {
     tree := services.tree("delivery")
     services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-failure")
-    store_path :: path.join(temp, "delivery.state")
+    store_path :: Path.from(temp).join("delivery.state").to_string()
     store :: services.state_store(store_path) ?? panic("state store")
     services.set_state_event_log(&tree, store, "delivery-events", 1, "reversible") ?? panic("state")
     worker :: services.worker(&tree, "worker", 1) ?? panic("worker")
@@ -579,14 +577,13 @@ fn services_failure_paths_match_default_run() {
 }
 
 const STATE_AND_LIFECYCLE_SOURCE: &str = r#"
-use core.path as path
 use core.services as services
 use core.testing as testing
 
 fn run() {
     temp := testing.temp_dir("service-state")
     snapshot := services.tree("snapshot")
-    snapshot_store :: path.join(temp, "snapshot.state")
+    snapshot_store :: Path.from(temp).join("snapshot.state").to_string()
     snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
     services.set_state_snapshot(&snapshot, snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
     snapshot_worker :: services.worker(&snapshot, "worker", 2) ?? panic("snapshot worker")
@@ -597,7 +594,7 @@ fn run() {
     services.stop(&snapshot) ?? panic("snapshot stop")
 
     events := services.tree("events")
-    event_store :: path.join(temp, "events.state")
+    event_store :: Path.from(temp).join("events.state").to_string()
     event_authority :: services.state_store(event_store) ?? panic("event store")
     services.set_state_event_log(&events, event_authority, "events", 1, "reversible") ?? panic("event state")
     event_worker :: services.worker(&events, "worker", 2) ?? panic("event worker")
@@ -609,7 +606,7 @@ fn run() {
     services.stop(&events) ?? panic("event stop")
 
     workflow := services.tree("workflow")
-    workflow_store_path :: path.join(temp, "workflow.state")
+    workflow_store_path :: Path.from(temp).join("workflow.state").to_string()
     workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
     services.set_state_event_log(&workflow, workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
     workflow_worker :: services.worker(&workflow, "worker", 2) ?? panic("workflow worker")
@@ -684,7 +681,6 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
 /// No existing check combined the two surfaces on one tree, so the collision
 /// only showed up in an example.
 const DURABLE_PLUS_EVENT_LOG_SOURCE: &str = r#"
-use core.path as path
 use core.services as services
 use core.testing as testing
 
@@ -692,7 +688,7 @@ fn run() {
     tree := services.tree("app")
     services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("services-delivery-eventlog")
-    store_path :: path.join(temp, "state.log")
+    store_path :: Path.from(temp).join("state.log").to_string()
     store :: services.state_store(store_path) ?? panic("state store")
     services.set_state_event_log(&tree, store, "app-events", 1, "reversible") ?? panic("state")
     worker :: services.worker(&tree, "a", 4) ?? panic("worker")
@@ -734,14 +730,13 @@ fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
 /// typed error rather than a panic or a silently empty restore.
 const STATE_ADAPTER_SOURCE: &str = r#"
 use core.files as files
-use core.path as path
 use core.services as services
 use core.testing as testing
 
 fn run() {
     temp := testing.temp_dir("services-state-adapters")
 
-    snapshot_path :: path.join(temp, "snapshot.log")
+    snapshot_path :: Path.from(temp).join("snapshot.log").to_string()
     snap_tree := services.tree("snap")
     snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
     services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
@@ -750,7 +745,7 @@ fn run() {
     services.commit_snapshot(&snap_tree, "state-v1") ?? panic("commit")
     print("restored:{services.restore_snapshot(snap_tree) ?? panic("restore")}")
 
-    event_path :: path.join(temp, "events.log")
+    event_path :: Path.from(temp).join("events.log").to_string()
     log_tree := services.tree("log")
     log_store :: services.state_store(event_path) ?? panic("event store")
     services.set_state_event_log(&log_tree, log_store, "app-events", 1, "reversible") ?? panic("event adapter")

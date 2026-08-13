@@ -24,6 +24,10 @@ fn jet_path_from(s: &String) -> JetPath {
     }
 }
 
+fn jet_path_home() -> JetPath {
+    jet_path_from(&jet_std_path_home())
+}
+
 /// D-BOUND-HEAD1=A: encode each Path hole as one component, then use the
 /// existing infallible Path constructor.
 fn jet_typed_path_literal(literals: &[&str], holes: Vec<String>) -> JetPath {
@@ -49,6 +53,9 @@ fn jet_path_extension(p: &JetPath) -> JetOutcome<String, JetAbsent> {
 }
 fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
     jet_outcome_of(jet_std_path_stem_opt(&p.inner.to_string_lossy().to_string()))
+}
+fn jet_path_normalize(p: &JetPath) -> JetPath {
+    jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
 }
 
 static JET_ATOMIC_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
@@ -253,33 +260,12 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
     jet_atomic_sync_parent(dir).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &path_s, error))
 }
 fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
-    let mut result = Vec::new();
-    let mut stack = vec![p.inner.clone()];
-    let mut visited = std::collections::HashSet::new();
-    while let Some(dir) = stack.pop() {
-        let canonical = match std::fs::canonicalize(&dir) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if !visited.insert(canonical) {
-            continue; // symlink loop — skip
-        }
-        let rd = match std::fs::read_dir(&dir) {
-            Ok(rd) => rd,
-            Err(_) => continue,
-        };
-        for entry in rd {
-            let Ok(entry) = entry else { continue };
-            let path = entry.path();
-            result.push(JetPath {
-                inner: path.clone(),
-            });
-            if path.is_dir() {
-                stack.push(path);
-            }
-        }
-    }
-    result
+    jet_std_path_walk(&p.inner.to_string_lossy().into_owned())
+        .into_iter()
+        .map(|path| JetPath {
+            inner: std::path::PathBuf::from(path),
+        })
+        .collect()
 }
 // ─────────────────────────────────────────────────────────────────────────────
 

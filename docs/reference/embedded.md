@@ -35,7 +35,7 @@ permitted:
 | `core.mem` | `core.net` |
 | `core.random` | `core.tasks` |
 | `core.env` | `core.time` |
-| `core.path` | `core.http` |
+| `Path` values | `core.http` |
 | `core.crypto` | `core.log` |
 |             | `core.time` |
 

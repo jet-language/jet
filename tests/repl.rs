@@ -1242,11 +1242,11 @@ fn repl_core_json_parse_inline() {
 
 #[test]
 fn repl_core_path_join_inline() {
-    let inputs = &["use core.path as path", "path.join(\"a\", \"b\")"];
+    let inputs = &["Path.from(\"a\").join(\"b\").to_string()"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("a/b") || out.contains("a\\b"),
-        "path.join should work, got: {:?}",
+        "Path.join should work, got: {:?}",
         out
     );
 }

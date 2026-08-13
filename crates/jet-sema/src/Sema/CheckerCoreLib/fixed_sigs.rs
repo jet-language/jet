@@ -174,11 +174,12 @@ pub fn core_fixed_sig(
     let io = io_error_ty();
     let json = json_ty();
     let list_u8 = Type::List(Box::new(u8_ty()));
+    let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
-        ("core.files", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
+        ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io)))),
         ("core.files", "read_bytes") => Some((
-            vec![(read, Type::String)],
+            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
             Some(result_ty(list_u8, io_error_ty())),
         )),
         // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
@@ -187,78 +188,78 @@ pub fn core_fixed_sig(
         // collide with the streaming handle's `.append(text)` method in the same
         // `core.files` namespace.
         ("core.files", "write" | "append_all") => Some((
-            vec![(read, Type::String), (read, Type::String)],
+            vec![(read, path), (read, Type::String)],
             Some(io_unit),
         )),
-        ("core.files", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",
             "remove" | "create_dir" | "create_dir_all" | "remove_dir" | "remove_all",
         ) => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "stat") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
         )),
         ("core.files", "canonicalize" | "absolute") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(Type::String, io_error_ty())),
         )),
         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
         ("core.files", "list_dir") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("DirEntry".to_string()))),
                 io_error_ty(),
             )),
         )),
         ("core.files", "copy" | "rename") => Some((
-            vec![(read, Type::String), (read, Type::String)],
+            vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "copy_dir") => Some((
-            vec![(read, Type::String), (read, Type::String)],
+            vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "symlink" | "hard_link") => Some((
-            vec![(read, Type::String), (read, Type::String)],
+            vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "read_link") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(Type::String, io_error_ty())),
         )),
         ("core.files", "walk") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("WalkEntry".to_string()))),
                 io_error_ty(),
             )),
         )),
         ("core.files", "glob") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path)],
             Some(result_ty(Type::List(Box::new(Type::String)), io_error_ty())),
         )),
         ("core.files", "read_at") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            vec![(read, path), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(Type::List(Box::new(u8_ty())), io_error_ty())),
         )),
         ("core.files", "write_at") => Some((
             vec![
-                (read, Type::String),
+                (read, path),
                 (read, Type::Int),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "fsync") => Some((
-            vec![(read, Type::String)],
+            vec![(read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "write_atomic") => Some((
-            vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
+            vec![(read, path), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.files", "temp_dir") => Some((
@@ -273,14 +274,14 @@ pub fn core_fixed_sig(
             )),
         )),
         ("core.files", "lock") => Some((
-            vec![(read, Type::String)],
+            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
             Some(result_ty(
                 Type::Named("FileLock".to_string()),
                 io_error_ty(),
             )),
         )),
         ("core.watcher", "files") => Some((
-            vec![(read, Type::String)],
+            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
             Some(result_ty(
                 Type::Named("WatchHandle".to_string()),
                 io_error_ty(),
@@ -328,11 +329,11 @@ pub fn core_fixed_sig(
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
         ("core.io", "binread") => Some((
-            vec![(read, Type::String)],
+            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
             Some(result_ty(list_u8.clone(), io_error_ty())),
         )),
         ("core.io", "binwrite") => Some((
-            vec![(read, Type::String), (read, list_u8.clone())],
+            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())])), (read, list_u8.clone())],
             Some(result_ty(unit.clone(), io_error_ty())),
         )),
         // D-STDIN1=A: streaming line-by-line stdin.
@@ -391,13 +392,13 @@ pub fn core_fixed_sig(
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.os", "utime") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            vec![(read, path), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         ("core.os", "sync") => Some((vec![], None)),
         ("core.os", "stop") => Some((vec![(read, Type::Int)], None)),
         ("core.os", "set_current_dir") => {
-            Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
+            Some((vec![(read, path)], Some(result_ty(unit_ty(), io_error_ty()))))
         }
         ("core.os", "on_interrupt") => Some((
             vec![(
@@ -451,7 +452,7 @@ pub fn core_fixed_sig(
         )),
         ("core.os", "close_fd") => Some((vec![(read, Type::Int)], None)),
         ("core.os", "mkfifo") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
+            vec![(read, path), (read, Type::Int)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get(name)` — a decrypted repo
@@ -1607,21 +1608,13 @@ pub fn core_fixed_sig(
         )),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
-            vec![(read, string.clone())],
+            vec![(read, path.clone())],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
         ("core.files", "create") => Some((
-            vec![(read, string.clone())],
+            vec![(read, path)],
             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
         )),
-        // E2-M7: std.path helpers (D-IO1).
-        ("core.path", "join") => Some((
-            vec![(read, string.clone()), (read, string.clone())],
-            Some(string),
-        )),
-        ("core.path", "parent" | "extension" | "normalize") => {
-            Some((vec![(read, Type::String)], Some(Type::String)))
-        }
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.url", "parse") => Some((
             vec![(read, Type::String)],
