@@ -743,9 +743,6 @@ pub(crate) struct LocalInfo {
     param_conv: Option<AccessConvention>,
     /// Loop nesting depth where the name was declared (for move-in-loop).
     decl_loop_depth: usize,
-    /// Whether this local can cross a task/channel boundary. For ordinary
-    /// values this follows the type; for lambdas it also includes captures.
-    sendable: bool,
     /// Whether a function value has the thread-safe representation required by
     /// `core.os.on_interrupt`. Ordinary `fn` values use `Rc`; only named
     /// functions and already-proven callback-safe aliases may cross that

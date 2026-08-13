@@ -13,7 +13,7 @@ impl<'a> Checker<'a> {
             } else {
                 None
             };
-            self.declare(
+            self.declare_with_sendability(
                 name,
                 span,
                 LocalInfo {
@@ -22,7 +22,6 @@ impl<'a> Checker<'a> {
                     mutable,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
-                    sendable,
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
@@ -31,6 +30,7 @@ impl<'a> Checker<'a> {
                     constant_value: None,
                     invalid: false,
                 },
+                sendable,
             );
         }
     

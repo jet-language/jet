@@ -27,16 +27,6 @@ use std::sync::LazyLock;
 use crate::Diagnostics::{ReportMoment, Severity};
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
-/// Names of the type-v2 planes in the one registration table.
-pub const TYPE_PLANE_NOMINAL: &str = "Type.Nominal";
-pub const TYPE_PLANE_INTERVAL: &str = "Type.Interval";
-pub const TYPE_PLANE_LAYOUT: &str = "Type.Layout";
-pub const TYPE_PLANE_MEASURE: &str = "Type.Measure";
-pub const TYPE_PLANE_DIMENSION: &str = "Type.Dimension";
-pub const TYPE_PLANE_CLASSIFICATION: &str = "Type.Classification";
-pub const TYPE_PLANE_EXACTNESS: &str = "Type.Exactness";
-pub const TYPE_PLANE_OBLIGATION: &str = "Type.Obligation";
-
 /// What a row attaches to. This is the whole difference between the six uses
 /// of the one table, so `RowKind` is read off the target rather than stated
 /// twice.
@@ -942,12 +932,52 @@ pub fn row(name: &str) -> Option<&'static RegistryRow> {
     rows().iter().find(|row| row.name == name)
 }
 
-/// Type-plane rows come from the readable Prelude declarations.
-pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
+/// Resolve a type-plane source name through the Prelude fact declarations.
+/// The Rust compiler does not keep a second plane vocabulary: the readable
+/// `Facts.jet` rows are the only names that can succeed here.
+pub fn type_plane(source_name: &str) -> &'static str {
+    FACT_DECLARATIONS
+        .iter()
+        .find(|declaration| {
+            declaration.source_name == source_name
+                || declaration.name == source_name
+                || declaration
+                    .source_name
+                    .strip_prefix("Type")
+                    .is_some_and(|name| name == source_name)
+        })
+        .filter(|declaration| declaration.name.starts_with("Type."))
+        .map(|declaration| declaration.name)
+        .unwrap_or_else(|| panic!("unregistered type plane `{source_name}`"))
+}
+
+/// Every Prelude fact row, including type planes and compiler-owned facts.
+pub fn fact_rows() -> impl Iterator<Item = &'static RegistryRow> {
     fact_declarations()
         .iter()
-        .filter(|declaration| declaration.name.starts_with("Type."))
         .filter_map(|declaration| row(declaration.name))
+}
+
+/// Type-plane rows come from the readable Prelude declarations.
+pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
+    fact_rows().filter(|row| row.name.starts_with("Type."))
+}
+
+/// The closed `FactKind` view is a projection of the registered plane rows.
+/// `Type.Interval` is the one source name whose reflection kind is `Range`;
+/// every other plane uses its registered leaf name. Adding a plane therefore
+/// adds its typed reflection kind through the same source row.
+pub fn reflection_kind(name: &str) -> Option<&'static str> {
+    let row = row(name)?;
+    if row.kind() != RowKind::Plane {
+        return None;
+    }
+    if row.name == "Type.Interval" {
+        return Some("Range");
+    }
+    row.name
+        .strip_prefix("Type.")
+        .or(Some(row.name))
 }
 
 /// The drift guard for the two law columns (D-FACT-LAW1=B), and for the one
@@ -960,24 +990,22 @@ pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
 /// word nothing spells, and a name registered twice.
 pub fn law_violations() -> Vec<String> {
     let mut violations = check(rows());
-    for declaration in fact_declarations()
-        .iter()
-        .filter(|declaration| declaration.name.starts_with("Type."))
-    {
+    for declaration in fact_declarations() {
         let name = declaration.name;
         let matches: Vec<_> = rows().iter().filter(|row| row.name == name).collect();
         if matches.len() != 1 {
             violations.push(format!(
-                "type plane `{name}` has {} registry rows; one plane needs one row",
+                "fact `{name}` has {} registry rows; one fact needs one row",
                 matches.len()
             ));
             continue;
         }
         let row = matches[0];
-        if row.kind() != RowKind::Plane {
+        if row.target != declaration.target {
             violations.push(format!(
-                "type plane `{name}` is registered as `{}`",
-                row.kind().name()
+                "fact `{name}` target drifted from `{}` to `{}`",
+                declaration.target.kind().name(),
+                row.kind().name(),
             ));
         }
         if row.identity_bearing != declaration.identity_bearing {
@@ -1096,8 +1124,8 @@ fn truth_violations(row: &RegistryRow) -> Vec<String> {
 mod tests {
     use super::{
         diagnostic, diagnostic_registry_rows, diagnostic_rows, fact_declarations, law_violations,
-        row, rows, type_plane_rows,
-        RowKind, RowTarget, SafeDirection, TYPE_PLANE_INTERVAL, TYPE_PLANE_OBLIGATION,
+        row, rows, type_plane, type_plane_rows,
+        RowKind, RowTarget, SafeDirection,
         StructuredFix,
     };
 
@@ -1132,12 +1160,12 @@ mod tests {
     #[test]
     fn type_plane_rows_declare_identity_policy() {
         assert!(
-            row(TYPE_PLANE_INTERVAL)
+            row(type_plane("Interval"))
                 .expect("interval plane is registered")
                 .is_identity_bearing()
         );
         assert!(
-            !row(TYPE_PLANE_OBLIGATION)
+            !row(type_plane("Obligation"))
                 .expect("obligation plane is registered")
                 .is_identity_bearing()
         );

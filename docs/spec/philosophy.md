@@ -92,6 +92,31 @@ the engine stays its own, and the facts it publishes register as read-only rows
 each grade of power costs one written mark — but they are the prover's surface,
 not gates, and they never enter the ledger.
 
+### Fact ownership wall
+
+*(D-FACT-HOME1=A, D-FACT-OWN1=A.)*
+
+These facts are user-facing rows. Their values are typed and read-only where a
+prover supplies them:
+
+| Fact | User-facing home | Producer or owner |
+|---|---|---|
+| Sendability | send-safety checks and reflection | ownership prover |
+| Failure attribution | `report.$attribution` | diagnostic/report pipeline |
+| `#Track` origin | tracked binding reflection | provenance analysis |
+| View provenance | returned and stored view contracts | ownership prover |
+| Unit-scale provenance | unit conversion and API reflection | unit declaration |
+| Maturity | function metadata and tooling reflection | `#Meta` declaration |
+| Movedness | move diagnostics and tooling | ownership prover |
+
+These facts stay inside the checker. They are proof machinery, not user-facing
+rows:
+
+| Fact | Why it stays engine-side |
+|---|---|
+| Uninitialised-place tracking | The checker tracks which writes reach each place; it is not a published value fact. |
+| Exhaustiveness | The checker proves that a pattern table covers its cases; the proof state is not an API value. |
+
 ## The corpus law: say it once
 
 *(D-ONCE-LAW1=A, ratified 2026-08-07, card #1656.)*

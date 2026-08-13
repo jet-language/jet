@@ -424,11 +424,40 @@ pub(crate) fn core_lang_variants(
 pub(crate) fn core_fact_kind_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
-    (enum_name == "FactKind").then(|| {
-        let zero = Span::new(0, 0);
-        ["Effect", "State", "Tag", "Range", "Dimension"]
+    let variants: Vec<String> = match enum_name {
+        "FactKind" => {
+            let mut names = vec!["Effect", "State", "Tag"];
+            for row in jet_foundation::Registry::fact_rows()
+                .filter(|row| row.kind() == jet_foundation::Registry::RowKind::Plane)
+            {
+                if let Some(kind) = jet_foundation::Registry::reflection_kind(row.name) {
+                    if !names.contains(&kind) {
+                        names.push(kind);
+                    }
+                }
+            }
+            names.into_iter().map(str::to_string).collect()
+        }
+        "Maturity" => ["Experimental", "Tested", "Hardened"]
             .into_iter()
-            .map(|variant| (variant.to_string(), (zero, VariantPayload::Unit)))
+            .map(str::to_string)
+            .collect(),
+        "UnitScaleProvenanceKind" => [
+            "Rational",
+            "SymbolicPi",
+            "Conventional",
+            "Measured",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
+        _ => return None,
+    };
+    Some({
+        let zero = Span::new(0, 0);
+        variants
+            .into_iter()
+            .map(|variant| (variant, (zero, VariantPayload::Unit)))
             .collect()
     })
 }
@@ -828,13 +857,21 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "StateInfo" {
         return match field {
-            "name" | "path" => Some(Type::String),
+            "name" => Some(Type::String),
+            "path" => Some(Type::Named("StateRef".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "StateRef" {
+        return match field {
+            "owner" | "name" | "path" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "TransitionInfo" {
         return match field {
-            "operation" | "from" | "to" => Some(Type::String),
+            "operation" => Some(Type::String),
+            "from" | "to" => Some(Type::Named("StateRef".to_string())),
             _ => None,
         };
     }
@@ -851,8 +888,127 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "kind" => Some(Type::Named("FactKind".to_string())),
             "name" => Some(Type::String),
             "members" => Some(Type::List(Box::new(Type::String))),
-            "range" => Some(Type::Option(Box::new(Type::Named(Syntax::TYPE_RANGE.to_string())))),
-            "dimension" => Some(Type::Option(Box::new(Type::Named("DimensionInfo".to_string())))),
+            "range" => Some(Type::Option(Box::new(Type::Named(
+                Syntax::TYPE_RANGE.to_string(),
+            )))),
+            "dimension" => Some(Type::Option(Box::new(Type::Named(
+                "DimensionInfo".to_string(),
+            )))),
+            "measure" => Some(Type::Option(Box::new(Type::Named(
+                "MeasureInfo".to_string(),
+            )))),
+            "layout" => Some(Type::Option(Box::new(Type::Named(
+                "LayoutFact".to_string(),
+            )))),
+            "classification" => Some(Type::Option(Box::new(Type::Named(
+                "ClassificationInfo".to_string(),
+            )))),
+            "nominal" => Some(Type::Option(Box::new(Type::Named(
+                "NominalInfo".to_string(),
+            )))),
+            "obligation" => Some(Type::Option(Box::new(Type::Named(
+                "ObligationInfo".to_string(),
+            )))),
+            "state" => Some(Type::Option(Box::new(Type::Named("StateRef".to_string())))),
+            "sendability" => Some(Type::Option(Box::new(Type::Named(
+                "SendabilityInfo".to_string(),
+            )))),
+            "view_provenance" => Some(Type::Option(Box::new(Type::Named(
+                "ViewProvenanceInfo".to_string(),
+            )))),
+            "movedness" => Some(Type::Option(Box::new(Type::Named(
+                "MovednessInfo".to_string(),
+            )))),
+            "attribution" => Some(Type::Option(Box::new(Type::Named(
+                "AttributionInfo".to_string(),
+            )))),
+            "track_origin" => Some(Type::Option(Box::new(Type::Named(
+                "TrackOriginInfo".to_string(),
+            )))),
+            "unit_scale_provenance" => Some(Type::Option(Box::new(Type::Named(
+                "UnitScaleProvenanceInfo".to_string(),
+            )))),
+            "maturity" => Some(Type::Option(Box::new(Type::Named(
+                "MaturityInfo".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "MeasureInfo" {
+        return match field {
+            "kind" => Some(Type::String),
+            "value" => Some(Type::Option(Box::new(Type::Int))),
+            "symbol" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "LayoutFact" {
+        return match field {
+            "bytes" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "ClassificationInfo" || type_name == "NominalInfo" {
+        return match field {
+            "name" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "ObligationParamInfo" {
+        return match field {
+            "name" | "zone" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "ObligationInfo" {
+        return match field {
+            "effect_bound" => Some(Type::List(Box::new(Type::String))),
+            "param_contract" => Some(Type::List(Box::new(Type::Named(
+                "ObligationParamInfo".to_string(),
+            )))),
+            "variadic" => Some(Type::List(Box::new(Type::Bool))),
+            _ => None,
+        };
+    }
+    if type_name == "SendabilityInfo" || type_name == "MovednessInfo" {
+        return match field {
+            "known" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "ViewProvenanceInfo" {
+        return match field {
+            "sources" => Some(Type::List(Box::new(Type::String))),
+            "mutable" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "AttributionInfo" {
+        return match field {
+            "source" => Some(Type::String),
+            "code" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "TrackOriginInfo" {
+        return match field {
+            "tracked" => Some(Type::Bool),
+            "source" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "UnitScaleProvenanceInfo" {
+        return match field {
+            "kind" => Some(Type::Named("UnitScaleProvenanceKind".to_string())),
+            "value" | "source" | "uncertainty" => {
+                Some(Type::Option(Box::new(Type::String)))
+            }
+            _ => None,
+        };
+    }
+    if type_name == "MaturityInfo" {
+        return match field {
+            "level" => Some(Type::Named("Maturity".to_string())),
             _ => None,
         };
     }
@@ -877,13 +1033,18 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             "effects" => Some(Type::Named("EffectInfo".to_string())),
             "reaches_panic" => Some(Type::Bool),
+            "facts" => Some(Type::List(Box::new(Type::Named(
+                "FactInfo".to_string(),
+            )))),
             _ => None,
         };
     }
     if type_name == "PackageInfo" {
         return match field {
             "name" | "identity" => Some(Type::String),
-            "types" => Some(Type::List(Box::new(Type::Named(Syntax::TYPE_TYPE_INFO.to_string())))),
+            "types" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_TYPE_INFO.to_string(),
+            )))),
             "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
             _ => None,
         };
@@ -897,6 +1058,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "params" => Some(Type::List(Box::new(Type::String))),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
+            "facts" => Some(Type::List(Box::new(Type::Named(
+                "FactInfo".to_string(),
+            )))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,

@@ -46,7 +46,9 @@ fn parser_reads_the_fact_source_and_fixture() {
         .collect();
     let registry_names: Vec<_> = Registry::fact_declarations()
         .iter()
-        .map(|declaration| declaration.name)
+        // `$name` is the registered dotted identity for compiler planes;
+        // `source_name` is the ordinary fact identifier the parser sees.
+        .map(|declaration| declaration.source_name)
         .collect();
     assert_eq!(parsed_names, registry_names);
 

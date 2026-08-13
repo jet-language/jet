@@ -235,6 +235,7 @@ impl<'a> Checker<'a> {
                 return;
             }
             let depth = self.scope_depth();
+            let sendable = self.sendability_for(name);
             self.flow.narrow.set_at(
                 name,
                 depth,
@@ -244,7 +245,6 @@ impl<'a> Checker<'a> {
                     mutable: false,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
-                    sendable: true,
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
@@ -254,6 +254,7 @@ impl<'a> Checker<'a> {
                     invalid: false,
                 },
             );
+            self.flow.sendability.set_at(name, depth, sendable);
         }
 
         pub(crate) fn declare_condition_binding(
@@ -276,7 +277,6 @@ impl<'a> Checker<'a> {
                         mutable: false,
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
-                        sendable: true,
                         interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
@@ -701,7 +701,6 @@ impl<'a> Checker<'a> {
                             mutable: false,
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
-                            sendable: true,
                             interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,

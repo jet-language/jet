@@ -6,8 +6,9 @@
 //! view contains only derives lowered from them.
 
 use crate::AST::{
-    Dimension, DistinctDef, EnumDef, Field, Func, Marker, StructDef, StructLayout, Type, TypeParam,
-    VariantPayload,
+    Dimension, DistinctDef, EnumDef, Field, Func, FunctionObligations, KnowledgeFact, Marker,
+    MaturityTag, Measure, StructDef, StructLayout, Type, TypeParam, UnitScaleProvenance,
+    VariantPayload, ViewProvenance,
 };
 
 use crate::AST::CtValue;
@@ -201,8 +202,182 @@ fn range_info(start: i64, end: i64) -> CtValue {
     )
 }
 
+fn measure_info(measure: &Measure) -> CtValue {
+    let (kind, value, symbol) = match measure {
+        Measure::Literal { kind, value } => (kind.clone(), Some(CtValue::Int(*value as i64)), None),
+        Measure::Symbol { kind, name } => (kind.clone(), None, Some(ct_str(name.clone()))),
+    };
+    ct_struct(
+        "MeasureInfo",
+        &[
+            ("kind", ct_str(kind)),
+            ("value", optional_value(value, "Int")),
+            ("symbol", optional_value(symbol, "String")),
+        ],
+    )
+}
+
+fn layout_fact_info(bytes: u8) -> CtValue {
+    ct_struct("LayoutFact", &[("bytes", CtValue::Int(bytes as i64))])
+}
+
+fn classification_info(name: &str) -> CtValue {
+    ct_struct("ClassificationInfo", &[("name", ct_str(name))])
+}
+
+fn nominal_info(name: &str) -> CtValue {
+    ct_struct("NominalInfo", &[("name", ct_str(name))])
+}
+
+fn obligation_info(obligations: &FunctionObligations) -> CtValue {
+    let params = obligations
+        .param_contract
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|(name, zone)| {
+            ct_struct(
+                "ObligationParamInfo",
+                &[
+                    ("name", ct_str(name.clone())),
+                    ("zone", ct_str(format!("{zone:?}"))),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "ObligationInfo",
+        &[
+            (
+                "effect_bound",
+                ct_list(
+                    obligations
+                        .effect_bound
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .cloned()
+                        .map(ct_str)
+                        .collect(),
+                ),
+            ),
+            ("param_contract", ct_list(params)),
+            (
+                "variadic",
+                ct_list(
+                    obligations
+                        .variadic
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .copied()
+                        .map(ct_bool)
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+pub fn build_sendability_info(known: bool) -> CtValue {
+    ct_struct("SendabilityInfo", &[("known", ct_bool(known))])
+}
+
+pub fn build_movedness_info(moved: bool) -> CtValue {
+    ct_struct("MovednessInfo", &[("known", ct_bool(moved))])
+}
+
+pub fn build_attribution_info(source: &str, code: Option<&str>) -> CtValue {
+    ct_struct(
+        "AttributionInfo",
+        &[
+            ("source", ct_str(source)),
+            (
+                "code",
+                optional_value(code.map(|code| ct_str(code)), "String"),
+            ),
+        ],
+    )
+}
+
+pub fn build_track_origin_info(origin: Option<&str>) -> CtValue {
+    ct_struct(
+        "TrackOriginInfo",
+        &[
+            ("tracked", ct_bool(origin.is_some())),
+            (
+                "source",
+                optional_value(origin.map(ct_str), "String"),
+            ),
+        ],
+    )
+}
+
+pub fn build_view_provenance_info(provenance: &ViewProvenance) -> CtValue {
+    ct_struct(
+        "ViewProvenanceInfo",
+        &[
+            (
+                "sources",
+                ct_list(
+                    provenance
+                        .sources
+                        .iter()
+                        .map(|source| ct_str(source.canonical()))
+                        .collect(),
+                ),
+            ),
+            ("mutable", ct_bool(provenance.mutable)),
+        ],
+    )
+}
+
+pub fn build_unit_scale_provenance_info(provenance: &UnitScaleProvenance) -> CtValue {
+    let (kind, value, source, uncertainty) = match provenance {
+        UnitScaleProvenance::Rational => ("Rational", None, None, None),
+        UnitScaleProvenance::SymbolicPi {
+            numerator,
+            denominator,
+        } => (
+            "SymbolicPi",
+            Some(ct_str(format!("{numerator}/{denominator}"))),
+            None,
+            None,
+        ),
+        UnitScaleProvenance::Conventional { value, source } => {
+            ("Conventional", Some(ct_str(value)), Some(ct_str(source)), None)
+        }
+        UnitScaleProvenance::Measured {
+            central_value,
+            standard_uncertainty,
+            source,
+        } => (
+            "Measured",
+            Some(ct_str(central_value)),
+            Some(ct_str(source)),
+            Some(ct_str(standard_uncertainty)),
+        ),
+    };
+    ct_struct(
+        "UnitScaleProvenanceInfo",
+        &[
+            ("kind", typed_enum("UnitScaleProvenanceKind", kind)),
+            ("value", optional_value(value, "String")),
+            ("source", optional_value(source, "String")),
+            ("uncertainty", optional_value(uncertainty, "String")),
+        ],
+    )
+}
+
+pub fn build_maturity_info(maturity: MaturityTag) -> CtValue {
+    ct_struct(
+        "MaturityInfo",
+        &[("level", typed_enum("Maturity", maturity.as_str()))],
+    )
+}
+
 /// Names and paths remain strings because they are stable fact identities; the
-/// fact's meaning is carried by typed kind, members, range, and dimension.
+/// fact's meaning is carried by the closed kind and its typed detail record.
 fn fact_value(
     kind: &str,
     name: &str,
@@ -224,8 +399,152 @@ fn fact_value(
                 "dimension",
                 optional_value(dimension, "DimensionInfo"),
             ),
+            ("measure", optional_value(None, "MeasureInfo")),
+            ("layout", optional_value(None, "LayoutFact")),
+            (
+                "classification",
+                optional_value(None, "ClassificationInfo"),
+            ),
+            ("nominal", optional_value(None, "NominalInfo")),
+            ("obligation", optional_value(None, "ObligationInfo")),
+            ("state", optional_value(None, "StateRef")),
+            ("sendability", optional_value(None, "SendabilityInfo")),
+            (
+                "view_provenance",
+                optional_value(None, "ViewProvenanceInfo"),
+            ),
+            ("movedness", optional_value(None, "MovednessInfo")),
+            ("attribution", optional_value(None, "AttributionInfo")),
+            ("track_origin", optional_value(None, "TrackOriginInfo")),
+            (
+                "unit_scale_provenance",
+                optional_value(None, "UnitScaleProvenanceInfo"),
+            ),
+            ("maturity", optional_value(None, "MaturityInfo")),
         ],
     )
+}
+
+fn fact_value_with_detail(
+    kind: &str,
+    name: &str,
+    members: impl IntoIterator<Item = String>,
+    detail: CtValue,
+    detail_field: &str,
+) -> CtValue {
+    let mut value = fact_value(kind, name, members, None, None);
+    if let CtValue::Struct { fields, .. } = &mut value {
+        if let Some((_, field)) = fields
+            .iter_mut()
+            .find(|(field_name, _)| field_name == detail_field)
+        {
+            *field = CtValue::Present(Box::new(detail));
+        }
+    }
+    value
+}
+
+fn fact_kind_for(plane: &str, fact: &KnowledgeFact) -> &'static str {
+    let registered = jet_foundation::Registry::row(plane)
+        .unwrap_or_else(|| panic!("reflection found unregistered plane `{plane}`"));
+    assert_eq!(registered.kind(), jet_foundation::Registry::RowKind::Plane);
+    match fact {
+        KnowledgeFact::Interval { .. } => "Range",
+        KnowledgeFact::Layout { .. } => "Layout",
+        KnowledgeFact::Measure(_) => "Measure",
+        KnowledgeFact::Dimension(_) => "Dimension",
+        KnowledgeFact::Classification(_) => "Classification",
+        KnowledgeFact::Nominal(_) => "Nominal",
+        KnowledgeFact::Obligation(_) => "Obligation",
+    }
+}
+
+fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
+    match fact {
+        KnowledgeFact::Interval { lo, hi } => fact_value(
+            kind,
+            "range",
+            std::iter::empty::<String>(),
+            Some(range_info(
+                i64::try_from(*lo).expect("reflected interval lower bound fits Int"),
+                i64::try_from(*hi).expect("reflected interval upper bound fits Int"),
+            )),
+            None,
+        ),
+        KnowledgeFact::Dimension(dimension) => fact_value(
+            kind,
+            "dimension",
+            std::iter::empty::<String>(),
+            None,
+            Some(dimension_info(dimension)),
+        ),
+        KnowledgeFact::Measure(measure) => fact_value_with_detail(
+            kind,
+            "measure",
+            std::iter::empty::<String>(),
+            measure_info(measure),
+            "measure",
+        ),
+        KnowledgeFact::Layout { bytes } => fact_value_with_detail(
+            kind,
+            "layout",
+            std::iter::empty::<String>(),
+            layout_fact_info(*bytes),
+            "layout",
+        ),
+        KnowledgeFact::Classification(name) => fact_value_with_detail(
+            kind,
+            "classification",
+            [name.clone()],
+            classification_info(name),
+            "classification",
+        ),
+        KnowledgeFact::Nominal(name) => fact_value_with_detail(
+            kind,
+            "nominal",
+            [name.clone()],
+            nominal_info(name),
+            "nominal",
+        ),
+        KnowledgeFact::Obligation(obligations) => fact_value_with_detail(
+            kind,
+            "obligation",
+            std::iter::empty::<String>(),
+            obligation_info(obligations),
+            "obligation",
+        ),
+    }
+}
+
+fn registered_fact_kind(name: &str) -> Option<&'static str> {
+    jet_foundation::Registry::reflection_kind(name)
+}
+
+/// Reflect one row from the shared registration table. A row with no current
+/// producer still has a typed, absent payload; it never falls back to a
+/// display string or a private menu.
+pub fn build_registered_fact_info(name: &str) -> Option<CtValue> {
+    let row = jet_foundation::Registry::row(name)?;
+    let kind = registered_fact_kind(row.name)?;
+    let value = fact_value(
+        kind,
+        row.name,
+        std::iter::empty::<String>(),
+        None,
+        None,
+    );
+    let path = if row.name == "Attribution" {
+        "report.$attribution".to_string()
+    } else {
+        row.name.to_string()
+    };
+    Some(fact_info(kind, row.name, path, value))
+}
+
+pub fn build_registered_fact_infos() -> Vec<CtValue> {
+    jet_foundation::Registry::fact_rows()
+        .filter_map(|row| build_registered_fact_info(row.name))
+        .collect()
 }
 
 fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
@@ -240,6 +559,50 @@ fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
     )
 }
 
+fn declared_function_facts(
+    path: &str,
+    maturity: Option<MaturityTag>,
+    view_provenance: Option<&crate::AST::ViewProvenanceMap>,
+) -> Vec<CtValue> {
+    let mut facts = Vec::new();
+    if let Some(maturity) = maturity {
+        facts.push(fact_info(
+            "Maturity",
+            "maturity",
+            format!("{path}.$maturity"),
+            fact_value_with_detail(
+                "Maturity",
+                "maturity",
+                std::iter::empty::<String>(),
+                build_maturity_info(maturity),
+                "maturity",
+            ),
+        ));
+    }
+    if let Some(view_provenance) = view_provenance {
+        for (slot, provenance) in view_provenance {
+            let slot_name = if slot.is_empty() {
+                "return".to_string()
+            } else {
+                slot.join(".")
+            };
+            facts.push(fact_info(
+                "ViewProvenance",
+                "view_provenance",
+                format!("{path}.$view_provenance.{slot_name}"),
+                fact_value_with_detail(
+                    "ViewProvenance",
+                    "view_provenance",
+                    [slot_name],
+                    build_view_provenance_info(provenance),
+                    "view_provenance",
+                ),
+            ));
+        }
+    }
+    facts
+}
+
 fn type_dimensions(ty: &Type) -> Vec<CtValue> {
     match ty {
         Type::Quantity { dimension, .. } => vec![dimension_info(dimension)],
@@ -248,48 +611,25 @@ fn type_dimensions(ty: &Type) -> Vec<CtValue> {
     }
 }
 
-fn type_range(ty: &Type) -> Option<(i64, i64)> {
-    match ty {
-        Type::IntN { signed, bits } => {
-            let (start, end) = crate::AST::int_range(*signed, *bits);
-            Some((i64::try_from(start).ok()?, i64::try_from(end).ok()?))
-        }
-        Type::Tagged { inner, .. } => type_range(inner),
-        _ => None,
-    }
-}
-
 fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
-    let mut facts = Vec::new();
-    if let Some((start, end)) = type_range(ty) {
-        facts.push(fact_info(
-            "Range",
-            "range",
-            format!("{path}.@range"),
-            fact_value(
-                "Range",
-                "range",
-                std::iter::empty::<String>(),
-                Some(range_info(start, end)),
-                None,
-            ),
-        ));
-    }
-    if let Some((_, dimension)) = ty.quantity_parts() {
-        facts.push(fact_info(
-            "Dimension",
-            "dimension",
-            format!("{path}.@dimension"),
-            fact_value(
-                "Dimension",
-                "dimension",
-                std::iter::empty::<String>(),
-                None,
-                Some(dimension_info(&dimension)),
-            ),
-        ));
-    }
-    facts
+    ty.knowledge_vector()
+        .iter()
+        .map(|entry| {
+            let kind = fact_kind_for(entry.plane, &entry.fact);
+            let name = kind.to_ascii_lowercase();
+            let suffix = if entry.path.is_empty() {
+                format!("@{name}")
+            } else {
+                format!("{}.@{name}", entry.path.join("."))
+            };
+            fact_info(
+                kind,
+                &name,
+                format!("{path}.{suffix}"),
+                knowledge_fact_value(kind, &entry.fact),
+            )
+        })
+        .collect()
 }
 
 fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
@@ -476,6 +816,11 @@ pub fn build_method_info(method: &Func) -> CtValue {
                 .flat_map(|ty| type_dimensions(ty)),
         )
         .collect();
+    let facts = declared_function_facts(
+        &method.name,
+        method.maturity,
+        method.return_view_provenance.as_ref(),
+    );
     ct_struct(
         "MethodInfo",
         &[
@@ -493,6 +838,7 @@ pub fn build_method_info(method: &Func) -> CtValue {
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
             ("dimensions", ct_list(dimensions)),
+            ("facts", ct_list(facts)),
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
@@ -579,6 +925,19 @@ fn state_path(owner: &str, state: &str) -> String {
     }
 }
 
+/// A state identity is not a display-only path. Keep the canonical path for
+/// diagnostics, but expose owner and state as fields of a typed record.
+fn state_ref(owner: &str, state: &str) -> CtValue {
+    ct_struct(
+        "StateRef",
+        &[
+            ("owner", ct_str(owner)),
+            ("name", ct_str(state)),
+            ("path", ct_str(state_path(owner, state))),
+        ],
+    )
+}
+
 fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
     let transition = method.state_transition.as_ref()?;
     Some(ct_struct(
@@ -587,15 +946,15 @@ fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
             ("operation", ct_str(method.name.clone())),
             (
                 "from",
-                ct_str(
+                state_ref(
+                    owner,
                     transition
                         .from
                         .as_deref()
-                        .map(|state| state_path(owner, state))
-                        .unwrap_or_else(|| "_".to_string()),
+                        .unwrap_or("_"),
                 ),
             ),
-            ("to", ct_str(state_path(owner, &transition.to))),
+            ("to", state_ref(owner, &transition.to)),
         ],
     ))
 }
@@ -606,7 +965,15 @@ fn reflected_state_fact(owner: &str, state: &str) -> CtValue {
         "State",
         state,
         path.clone(),
-        fact_value("State", state, [path], None, None),
+        {
+            let mut value = fact_value("State", state, [path], None, None);
+            if let CtValue::Struct { fields, .. } = &mut value {
+                if let Some((_, field)) = fields.iter_mut().find(|(name, _)| name == "state") {
+                    *field = CtValue::Present(Box::new(state_ref(owner, state)));
+                }
+            }
+            value
+        },
     )
 }
 
@@ -681,7 +1048,7 @@ pub fn build_struct_type_info_with_path(
                 "StateInfo",
                 &[
                     ("name", ct_str(state)),
-                    ("path", ct_str(format!("{}.State.{state}", s.name))),
+                    ("path", state_ref(&s.name, state)),
                 ],
             )
         })
@@ -1176,6 +1543,11 @@ fn build_function_info(
 ) -> CtValue {
     let qualified = ledger_identity(&facts.name_ledger, module_idx, module, &func.name);
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
+    let declared_facts = declared_function_facts(
+        &qualified,
+        func.maturity,
+        func.return_view_provenance.as_ref(),
+    );
     ct_struct(
         "FunctionInfo",
         &[
@@ -1207,6 +1579,7 @@ fn build_function_info(
                 "reaches_panic",
                 ct_bool(facts.reaches_panic.contains(&qualified)),
             ),
+            ("facts", ct_list(declared_facts)),
         ],
     )
 }
@@ -1396,14 +1769,21 @@ mod tests {
         let CtValue::Struct { fields, .. } = info else {
             return;
         };
-        assert!(fields.iter().any(
-            |(name, value)| name == "from"
-                && matches!(value, CtValue::Str(path) if path == "Door.State.Closed")
-        ));
-        assert!(fields.iter().any(
-            |(name, value)| name == "to"
-                && matches!(value, CtValue::Str(path) if path == "Door.State.Open")
-        ));
+        let state_path = |value: &CtValue, expected: &str| {
+            matches!(
+                value,
+                CtValue::Struct { type_name, fields }
+                    if type_name == "StateRef"
+                        && fields.iter().any(|(name, value)|
+                            name == "path" && matches!(value, CtValue::Str(path) if path == expected))
+            )
+        };
+        assert!(fields
+            .iter()
+            .any(|(name, value)| name == "from" && state_path(value, "Door.State.Closed")));
+        assert!(fields
+            .iter()
+            .any(|(name, value)| name == "to" && state_path(value, "Door.State.Open")));
     }
 
     #[test]

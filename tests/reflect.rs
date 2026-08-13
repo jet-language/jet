@@ -2,11 +2,13 @@
 
 mod common;
 
-use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtReport, CtValue};
+use jet::Comptime::{
+    build_distinct_type_info, build_registered_fact_info, build_struct_type_info, CtReport, CtValue,
+};
 use jet::Diagnostics::Span;
 use jet::AST::{
     AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone,
-    QuantityKind, StructDef, Type, TypeParam,
+    InternalTag, QuantityKind, StructDef, TagMarker, Type, TypeParam,
 };
 
 fn span() -> Span {
@@ -343,6 +345,112 @@ fn distinct_capability_marker_is_visible_in_reflection() {
 }
 
 #[test]
+fn registered_type_planes_reflect_as_typed_values() {
+    let mut fields = Vec::new();
+    for (name, ty) in [
+        (
+            "bounded",
+            Type::IntN {
+                signed: true,
+                bits: 8,
+            },
+        ),
+        (
+            "shape",
+            Type::FixedList {
+                elem: Box::new(Type::Int),
+                len: 4,
+                len_symbol: None,
+            },
+        ),
+        (
+            "quantity",
+            Type::Quantity {
+                base: Box::new(Type::Int),
+                dimension: Dimension::base("Length"),
+            },
+        ),
+        (
+            "classified",
+            Type::Tagged {
+                marker: TagMarker::User("Audited".to_string()),
+                inner: Box::new(Type::Int),
+            },
+        ),
+        (
+            "nominal",
+            Type::Tagged {
+                marker: TagMarker::Internal(InternalTag::CoreCryptoNominal),
+                inner: Box::new(Type::Named("Secret".to_string())),
+            },
+        ),
+        (
+            "callable",
+            Type::Fn {
+                params: vec![Type::Int],
+                ret: Some(Box::new(Type::Int)),
+                effect_bound: None,
+                param_contract: Some(vec![("value".to_string(), ParamZone::Either)]),
+                call_metadata: None,
+                return_view_provenance: None,
+            },
+        ),
+    ] {
+        let mut field = field(name, "Int", true);
+        field.ty = ty;
+        fields.push(field);
+    }
+    let info = build_struct_type_info(&StructDef {
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Planes".to_string(),
+        name_span: span(),
+        type_params: Vec::new(),
+        fields,
+        methods: Vec::new(),
+        trait_impls: Vec::new(),
+        derives: Vec::new(),
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: None,
+        is_single_use: false,
+        single_use_span: None,
+        layout: None,
+        layout_span: None,
+        serde_markers: Vec::new(),
+        type_markers: Vec::new(),
+        is_must_use: false,
+        must_use_span: None,
+        validate_block: Vec::new(),
+        validate_span: None,
+    });
+    let CtValue::List(facts) = struct_field(&info, "facts") else {
+        panic!("facts");
+    };
+    for expected in [
+        "Range",
+        "Layout",
+        "Measure",
+        "Dimension",
+        "Classification",
+        "Nominal",
+        "Obligation",
+    ] {
+        let fact = facts
+            .iter()
+            .find(|fact| {
+                matches!(
+                    struct_field(fact, "kind"),
+                    CtValue::Enum { variant, .. } if variant == expected
+                )
+            })
+            .unwrap_or_else(|| panic!("missing typed `{expected}` fact in {facts:?}"));
+        assert!(matches!(struct_field(fact, "value"), CtValue::Struct { .. }));
+    }
+}
+
+#[test]
 fn range_and_dimension_facts_are_typed_records() {
     let info = build_distinct_type_info(
         &DistinctDef {
@@ -419,4 +527,29 @@ fn range_and_dimension_facts_are_typed_records() {
         struct_field(struct_field(dimension, "value"), "range"),
         CtValue::Failed(CtReport::Clean(_))
     ));
+}
+
+#[test]
+fn orphan_fact_rows_are_typed_and_readable() {
+    for (name, kind) in [
+        ("Sendability", "Sendability"),
+        ("Attribution", "Attribution"),
+        ("TrackOrigin", "TrackOrigin"),
+        ("ViewProvenance", "ViewProvenance"),
+        ("UnitScaleProvenance", "UnitScaleProvenance"),
+        ("Maturity", "Maturity"),
+    ] {
+        let info = build_registered_fact_info(name).expect("registered orphan fact");
+        assert!(matches!(
+            struct_field(&info, "kind"),
+            CtValue::Enum { variant, .. } if variant == kind
+        ));
+        assert!(matches!(struct_field(&info, "value"), CtValue::Struct { .. }));
+        if name == "Attribution" {
+            assert!(matches!(
+                struct_field(&info, "path"),
+                CtValue::Str(path) if path == "report.$attribution"
+            ));
+        }
+    }
 }

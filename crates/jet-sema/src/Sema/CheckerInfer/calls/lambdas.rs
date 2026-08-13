@@ -164,7 +164,7 @@ use std::collections::HashSet;
                     }
                     let cap = self
                         .lookup(name)
-                        .map(|i| (i.ty.clone(), i.sendable, i.param_conv))
+                        .map(|i| (i.ty.clone(), self.sendability_for(name), i.param_conv))
                         .or_else(|| self.consts.get(name).map(|t| (t.clone(), true, None)));
                     let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
                         continue;
@@ -436,7 +436,6 @@ use std::collections::HashSet;
                         mutable: self.lambda_param_mutable,
                         param_conv: Some(AccessConvention::Read),
                         decl_loop_depth: self.loop_depth,
-                        sendable: true,
                         interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
