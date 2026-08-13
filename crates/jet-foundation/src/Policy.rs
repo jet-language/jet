@@ -252,7 +252,8 @@ pub struct AppliedRule {
     /// diagnostic explain it (`#FFI` → E3220, `#RenameAll` → E2409).
     pub owns_menu: bool,
     /// One extra legal site that opens only when a companion rule sits on the
-    /// same target. `#Doc` is a field rule that also describes a `#Job`.
+    /// same target. `#Doc` describes CLI fields/types/variants and can also
+    /// describe a `#Job`.
     pub companion_site: Option<CompanionSite>,
     pub status: RuleStatus,
     pub inherits: bool,
@@ -904,6 +905,8 @@ mod tests {
             ("Test", RuleSite::Test),
             ("Bench", RuleSite::Bench),
             ("Job", RuleSite::Function),
+            ("Doc", RuleSite::Type),
+            ("Doc", RuleSite::Variant),
         ];
         for (name, site) in legal {
             assert!(super::rule_allows(name, site), "#{name} at {site:?}");

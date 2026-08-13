@@ -272,7 +272,7 @@ pub(crate) fn run_compile_cmd(
             report_problems(mode, file, &src, &lints);
         }
         if mode.json && lints.is_empty() {
-            print!("{}", jet::render_all_json(file, &src, &[]));
+            print!("{}", jet::Diagnostics::render_success_json(file));
         } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
@@ -2336,7 +2336,11 @@ pub(crate) fn run_fmt(
                 }
             }
         }
-        exit(ExitCodes::USAGE);
+        exit(if check_only {
+            ExitCodes::USER_ERROR
+        } else {
+            ExitCodes::USAGE
+        });
     }
 
     // Root for root-relative path display in --check output.

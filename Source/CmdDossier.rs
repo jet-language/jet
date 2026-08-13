@@ -192,8 +192,18 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         .join(",");
     let commands = command.commands.iter().map(|subcommand| {
         let inputs = subcommand.inputs.iter().map(&input_json).collect::<Vec<_>>().join(",");
-        format!("{{\"name\":{},\"inputs\":[{}]}}", json_string(&subcommand.name), inputs)
+        let description = subcommand
+            .description
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string());
+        format!("{{\"name\":{},\"description\":{},\"inputs\":[{}]}}", json_string(&subcommand.name), description, inputs)
     }).collect::<Vec<_>>().join(",");
+    let description = command
+        .description
+        .as_deref()
+        .map(json_string)
+        .unwrap_or_else(|| "null".to_string());
     let completion = command
         .completion_words()
         .iter()
@@ -201,9 +211,10 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"source\":{},\"entry_type\":{},\"inputs\":[{}],\"commands\":[{}],\"completion_words\":[{}]}}",
+        "{{\"source\":{},\"entry_type\":{},\"description\":{},\"inputs\":[{}],\"commands\":[{}],\"completion_words\":[{}]}}",
         json_string(&format!("fn run(args: {})", command.entry_type)),
         json_string(&command.entry_type),
+        description,
         inputs,
         commands,
         completion,
@@ -215,11 +226,17 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         return "command schema\n  none (plain fn run() or non-command target)\n".to_string();
     };
     let mut out = format!("command schema\n  entry: fn run(args: {})\n", command.entry_type);
+    if let Some(description) = &command.description {
+        out.push_str(&format!("  description: {description}\n"));
+    }
     for input in &command.inputs {
         write_command_input(&mut out, input, "  ");
     }
     for subcommand in &command.commands {
         out.push_str(&format!("  command {}\n", subcommand.name));
+        if let Some(description) = &subcommand.description {
+            out.push_str(&format!("    description: {description}\n"));
+        }
         for input in &subcommand.inputs {
             write_command_input(&mut out, input, "    ");
         }

@@ -1908,10 +1908,11 @@ front-end `.jet` diagnostics).
 
 Decision D-REPORT-MACHINE1 defines one schema for every machine-readable
 report. `render_all_json` emits JSON Lines. Each report is one complete
-`jet.report/v1` object followed by `\n`. An empty report batch emits no bytes.
-The output never contains ANSI bytes.
+`jet.report/v1` object followed by `\n`. A clean `jet check --json` emits one
+success object with `status: "ok"`, `ok: true`, and an empty `diagnostics`
+array. The output never contains ANSI bytes.
 
-Every report has these fields:
+Every diagnostic report has these fields:
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -1930,10 +1931,24 @@ Every report has these fields:
 | `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
 | `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
+The clean-check success object has these additional fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `status` | string | Always `ok` for a clean check. |
+| `ok` | boolean | Always `true` for a clean check. |
+| `diagnostics` | array | Always empty for a clean check. |
+
 Example; real output stays on one line:
 
 ```json
 {"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
+```
+
+A clean check prints:
+
+```json
+{"schema":"jet.report/v1","moment":"compile","status":"ok","ok":true,"diagnostics":[],"file":"hello.jet"}
 ```
 
 `cause` is machine data, not a second prose channel. A root report has an empty

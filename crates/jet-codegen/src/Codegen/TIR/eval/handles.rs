@@ -38,6 +38,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ArgsSpecRepeat => "ArgsSpecRepeat",
         THandleOp::ArgsSpecRequiredOption => "ArgsSpecRequiredOption",
         THandleOp::ArgsSpecPositional => "ArgsSpecPositional",
+        THandleOp::ArgsSpecDescription => "ArgsSpecDescription",
         THandleOp::ArgsSpecSubcommand => "ArgsSpecSubcommand",
         THandleOp::ArgsSpecVersion => "ArgsSpecVersion",
         THandleOp::ArgsSpecCompletion => "ArgsSpecCompletion",
@@ -883,6 +884,7 @@ pub(super) fn eval_handle_with_type(
             Err(unsupported("handle `ArgsSpecRequiredOption`", span))
         }
         THandleOp::ArgsSpecPositional => Err(unsupported("handle `ArgsSpecPositional`", span)),
+        THandleOp::ArgsSpecDescription => Err(unsupported("handle `ArgsSpecDescription`", span)),
         THandleOp::ArgsSpecSubcommand => Err(unsupported("handle `ArgsSpecSubcommand`", span)),
         THandleOp::ArgsSpecVersion => Err(unsupported("handle `ArgsSpecVersion`", span)),
         THandleOp::ArgsSpecCompletion => Err(unsupported("handle `ArgsSpecCompletion`", span)),

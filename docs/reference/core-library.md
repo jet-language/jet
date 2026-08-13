@@ -1071,6 +1071,7 @@ returns a new one:
 | `.repeat(name, help, meta)` | `(String, String, String) → ArgsSpec` | repeatable string option |
 | `.positional(name, help)` | `(String, String) → ArgsSpec` | required positional |
 | `.subcommand(name, help, spec)` | `(String, String, ArgsSpec) → ArgsSpec` | subcommand with its own nested spec |
+| `.description(text)` | `(String) → ArgsSpec` | program description shown below `Usage:`; preserves embedded line breaks |
 | `.version(text)` | `(String) → ArgsSpec` | enables `--version` |
 | `.completion(shell)` | `(String) → String` | shell completion text for bash/zsh/fish-style generators |
 | `.help()` | `() → String` | formatted help text with defaults, env fallbacks, choices, and subcommands |

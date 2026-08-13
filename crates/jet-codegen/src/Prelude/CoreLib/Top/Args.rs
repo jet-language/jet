@@ -55,6 +55,7 @@ enum JetArgValueKind {
 struct JetArgsSpec {
     entries: Vec<JetArgKind>,
     prog: String,
+    description: Option<String>,
     version: Option<String>,
 }
 
@@ -76,6 +77,12 @@ fn jet_args_program_name(prog: &str) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or(prog)
         .to_string()
+}
+
+/// Normalize a source-file argv[0] to the name used by its built program.
+fn jet_args_source_program_name(prog: &str) -> String {
+    let name = jet_args_program_name(prog);
+    name.strip_suffix(".jet").unwrap_or(&name).to_string()
 }
 
 fn jet_args_program(mut spec: JetArgsSpec, prog: &str) -> JetArgsSpec {
@@ -112,6 +119,11 @@ impl JetArgsSpec {
             s.push_str(" [options]");
         }
         s.push('\n');
+        if let Some(description) = &self.description {
+            s.push('\n');
+            s.push_str(description);
+            s.push('\n');
+        }
         // D-CLI-POS1: Arguments (positionals) before Options (flags).
         if !positionals.is_empty() {
             s.push('\n');
@@ -206,8 +218,14 @@ fn jet_args_spec() -> JetArgsSpec {
     JetArgsSpec {
         entries: Vec::new(),
         prog,
+        description: None,
         version: None,
     }
+}
+
+fn jet_args_description(mut spec: JetArgsSpec, description: &String) -> JetArgsSpec {
+    spec.description = Some(description.clone());
+    spec
 }
 
 fn jet_args_flag(mut spec: JetArgsSpec, name: &String, help: &String) -> JetArgsSpec {

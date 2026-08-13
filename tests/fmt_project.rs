@@ -467,6 +467,27 @@ fn parse_error_exits_2_not_1() {
     );
 }
 
+/// `jet fmt --check` parse errors use the same user-error code as `jet check`.
+#[test]
+fn check_parse_error_exits_1_like_check() {
+    let dir = tmpdir(&line!().to_string());
+    let _f = write(&dir, "bad.jet", INVALID);
+
+    let fmt = Command::new(jet())
+        .args(["fmt", "--check", "bad.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let check = Command::new(jet())
+        .args(["check", "bad.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    assert_eq!(fmt.status.code(), Some(jet::ExitCodes::USER_ERROR));
+    assert_eq!(check.status.code(), Some(jet::ExitCodes::USER_ERROR));
+}
+
 /// `vendor/` and other IGNORED_DIRS are skipped during no-arg discovery.
 #[test]
 fn ignore_vendor_dir_on_discovery() {

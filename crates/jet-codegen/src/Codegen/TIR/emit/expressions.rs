@@ -3807,6 +3807,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(0),
                     a(1)
                 ),
+                THandleOp::ArgsSpecDescription => format!(
+                    "{}jet_args_description({}, &({}))",
+                    root,
+                    recv,
+                    a(0)
+                ),
                 THandleOp::ArgsSpecSubcommand => format!(
                     "{}jet_args_subcommand({}, &({}), &({}), {})",
                     root,

@@ -30,8 +30,12 @@ mod runtime {
         Spec(jet_args_program(jet_args_spec(), prog))
     }
 
+    pub(super) fn description(spec: Spec, description: &str) -> Spec {
+        Spec(jet_args_description(spec.0, &description.to_string()))
+    }
+
     pub(super) fn program_name(prog: &str) -> String {
-        jet_args_program_name(prog)
+        jet_args_source_program_name(prog)
     }
 
     pub(super) fn flag(spec: Spec, name: &str, help: &str) -> Spec {
@@ -185,8 +189,11 @@ fn struct_fields(items: &[Item], name: &str) -> Option<Vec<(String, Type)>> {
     )
 }
 
-fn build_spec(inputs: &[CLIInputSchema], prog: &str) -> Spec {
-    let mut spec = empty_spec(prog);
+fn build_spec(inputs: &[CLIInputSchema], description: Option<&str>, prog: &str) -> Spec {
+    let mut spec = empty_spec(&program_name(prog));
+    if let Some(description) = description {
+        spec = runtime::description(spec, description);
+    }
     for input in inputs {
         let flag_name = input.flag.clone();
         let help = input.builder_help();
@@ -330,13 +337,24 @@ fn decode_struct(
 }
 
 fn print_usage(schema: &CLICommandSchema, prog: &str) {
-    let mut out = format!(
-        "Usage: {} <command> [options]\n\nCommands:\n",
-        program_name(prog)
-    );
+    let mut out = format!("Usage: {} <command> [options]\n\n", program_name(prog));
+    if let Some(description) = &schema.description {
+        out.push_str(description);
+        out.push_str("\n\n");
+    }
+    out.push_str("Commands:\n");
     for cmd in &schema.commands {
-        out.push_str("  ");
-        out.push_str(&cmd.name);
+        if let Some(summary) = cmd
+            .description
+            .as_deref()
+            .and_then(|description| description.lines().next())
+            .filter(|summary| !summary.is_empty())
+        {
+            out.push_str(&format!("  {:<20} {}", cmd.name, summary));
+        } else {
+            out.push_str("  ");
+            out.push_str(&cmd.name);
+        }
         out.push('\n');
     }
     Concurrency::with_runtime_mut(|rt| {
@@ -391,10 +409,14 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
             .iter()
             .find(|c| c.name == sub)
             .expect("schema command");
-        let nested_prog = format!("{} {}", argv[0], sub);
+        let nested_prog = format!("{} {}", program_name(&argv[0]), sub);
         let mut rest = vec![nested_prog.clone()];
         rest.extend_from_slice(&argv[2..]);
-        let spec = build_spec(&cmd_schema.inputs, &nested_prog);
+        let spec = build_spec(
+            &cmd_schema.inputs,
+            cmd_schema.description.as_deref(),
+            &nested_prog,
+        );
         let parsed = match parse(&spec, &rest) {
             Ok(p) => p,
             Err(e) => {
@@ -429,7 +451,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
 
     // Struct typed entry.
     let prog = argv.first().map(String::as_str).unwrap_or("program");
-    let spec = build_spec(&plan.schema.inputs, prog);
+    let spec = build_spec(&plan.schema.inputs, plan.schema.description.as_deref(), prog);
     let parsed = match parse(&spec, &argv) {
         Ok(p) => p,
         Err(e) => {

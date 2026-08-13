@@ -75,6 +75,45 @@ fn run(cmd: Cmd) {}
 }
 
 #[test]
+fn documented_subcommands_are_projected_into_the_dossier_schema() {
+    let dir = isolated_cwd("shape_cli_documented_dossier");
+    fs::write(
+        dir.join("commands.jet"),
+        r#"#CLI
+struct ServeArgs {}
+#CLI
+struct ImportArgs {}
+#Doc("Manage the service")
+enum Cmd {
+    #Doc("Start the service") Serve(ServeArgs)
+    #Doc("Import one data file") Import(ImportArgs)
+}
+fn run(cmd: Cmd) {}
+"#,
+    )
+    .unwrap();
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "commands.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "documented dossier failed: {}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    let json = String::from_utf8(dossier.stdout).unwrap();
+    for fact in [
+        "\"description\":\"Manage the service\"",
+        "\"name\":\"serve\",\"description\":\"Start the service\"",
+        "\"name\":\"import\",\"description\":\"Import one data file\"",
+        "\"completion_words\":[\"--help\",\"serve\",\"import\"]",
+    ] {
+        assert!(json.contains(fact), "documented dossier omitted {fact}: {json}");
+    }
+}
+
+#[test]
 fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
     let dir = isolated_cwd("shape_cli_help_program_name");
     fs::write(
@@ -444,6 +483,23 @@ fn check_json_golden() {
 }
 
 #[test]
+fn clean_check_json_golden() {
+    let dir = isolated_cwd("check_json_clean");
+    fs::write(dir.join("clean.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .args(["check", "clean.jet", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stderr.is_empty(), "clean JSON check wrote stderr: {:?}", out.stderr);
+    check_snapshot(
+        "check_json_clean.txt",
+        &scrub(&String::from_utf8_lossy(&out.stdout), &dir.join("clean.jet")),
+    );
+}
+
+#[test]
 fn build_json_golden() {
     let p = bad_file(&line!().to_string());
     let out = Command::new(jet())
@@ -570,6 +626,23 @@ fn explain_runtime_stop_golden() {
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         check_snapshot(&format!("explain_{code}.txt"), &stdout);
     }
+}
+
+#[test]
+fn explain_golden_e0003() {
+    let out = Command::new(jet())
+        .arg("explain")
+        .arg("E0003")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "jet explain E0003 should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("What this means:"), "{stdout}");
+    assert!(stdout.contains("Why Jet enforces it:"), "{stdout}");
+    assert!(stdout.contains("How to fix it:"), "{stdout}");
+    assert!(stdout.contains("Example:"), "{stdout}");
+    assert!(!stdout.contains("longer explanation will land"), "{stdout}");
+    check_snapshot("explain_E0003.txt", &stdout);
 }
 
 #[test]

@@ -59,3 +59,53 @@ fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
         let _ = fs::remove_dir_all(cache);
     }
 }
+
+#[test]
+fn documented_cli_help_matches_aot_and_default_jet_run() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("cli_docs_parity");
+    let source = scratch.join("subcommands.jet");
+    fs::copy(
+        root.join("examples/features/cli/subcommands.jet"),
+        &source,
+    )
+    .expect("copy CLI example");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "subcommands.jet"])
+        .current_dir(&scratch.path)
+        .output()
+        .expect("build CLI example");
+    assert!(
+        build.status.success(),
+        "AOT CLI build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = scratch.join("build/subcommands");
+
+    for args in [["--help"].as_slice(), ["serve", "--help"].as_slice()] {
+        let aot = Command::new(&binary)
+            .args(args)
+            .current_dir(&scratch.path)
+            .output()
+            .expect("run AOT CLI help");
+        let mut run_args = vec!["run", "subcommands.jet", "--"];
+        run_args.extend_from_slice(args);
+        let jit = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(&run_args)
+            .current_dir(&scratch.path)
+            .output()
+            .expect("run default CLI help");
+        assert!(aot.status.success(), "AOT help failed: {}", String::from_utf8_lossy(&aot.stderr));
+        assert!(jit.status.success(), "default `jet run` help failed: {}", String::from_utf8_lossy(&jit.stderr));
+        assert_eq!(aot.stdout, jit.stdout, "AOT and default `jet run` help differ for {args:?}");
+        let help = String::from_utf8_lossy(&aot.stdout);
+        if args == ["--help"] {
+            assert!(help.contains("Manage the service."), "{help}");
+            assert!(help.contains("serve                Start the service and listen for requests"), "{help}");
+            assert!(help.contains("import               Import one data file"), "{help}");
+        } else {
+            assert!(help.contains("Start the service and listen for requests"), "{help}");
+        }
+    }
+}

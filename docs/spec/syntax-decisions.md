@@ -149,8 +149,9 @@ no `pub` required; it is fallible by default. An expert may pin
 `fn run() ? E`. **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
-(`#CLI`/`#Doc("...")` markers, bracket form matching `#Codable`); an
-`enum` param derives subcommands. There is no Jet `main` entry and no
+(`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`);
+an entry `enum` may use `#Doc("...")` on the enum and its variants for the
+program description and subcommand summaries. There is no Jet `main` entry and no
 variadic entry signature. Raw argv access stays explicit inside `fn run()`
 via `core.args`/`core.io.args`. See docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. The

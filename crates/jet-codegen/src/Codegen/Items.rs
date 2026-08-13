@@ -481,6 +481,11 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
 
     let mut spec_body = String::new();
     spec_body.push_str(&format!("    let __s = {root}jet_args_spec();\n"));
+    if let Some(description) = &schema.description {
+        spec_body.push_str(&format!(
+            "    let __s = {root}jet_args_description(__s, &{description:?}.to_string());\n"
+        ));
+    }
     let mut decode_lines = String::new();
 
     // CLISchema is the checked projection shared with `jet inspect dossier`.
@@ -842,7 +847,16 @@ fn emit_cli_subcommand_entry(
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
     let usage_lines = cmd_names
         .iter()
-        .map(|c| format!("  {c}"))
+        .map(|c| {
+            let summary = schema
+                .commands
+                .iter()
+                .find(|command| command.name == *c)
+                .and_then(|command| command.description.as_deref())
+                .and_then(|description| description.lines().next())
+                .filter(|summary| !summary.is_empty());
+            summary.map_or_else(|| format!("  {c}"), |summary| format!("  {c:<20} {summary}"))
+        })
         .collect::<Vec<_>>()
         .join("\\n");
 
@@ -864,17 +878,37 @@ fn emit_cli_subcommand_entry(
         );
         let spec_name = cli_helper_name("spec", payload_name);
         let decode_name = cli_helper_name("decode", payload_name);
+        let spec_init = schema
+            .commands
+            .iter()
+            .find(|command| command.name == v.name.to_lowercase())
+            .and_then(|command| command.description.as_deref())
+            .map_or_else(
+                || format!(
+                    "            let __spec = jet_args_program({helper_prefix}{spec_name}(), &__rest[0]);\n"
+                ),
+                |description| {
+                    format!(
+                        "            let __spec = jet_args_description(jet_args_program({helper_prefix}{spec_name}(), &__rest[0]), &{description:?}.to_string());\n"
+                    )
+                },
+            );
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}{spec_name}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n{spec_init}            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
-            spec_name = spec_name,
             decode_name = decode_name,
+            spec_init = spec_init,
         ));
     }
     let _ = cx;
 
+    let root_description = schema
+        .description
+        .as_deref()
+        .map(|description| format!("{description}\n\n"))
+        .unwrap_or_default();
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        let __prog = jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"));\n        println!(\"Usage: {{}} <command> [options]\\n\\nCommands:\\n{usage}\", __prog);\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        let __prog = jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"));\n        let __description = {root_description:?};\n        println!(\"Usage: {{}} <command> [options]\\n\\n{{}}Commands:\\n{usage}\", __prog, __description);\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),

@@ -1300,6 +1300,7 @@ fn mk() {
         assert!(handle_method_op("ArgsSpec", "flag", 2).is_some());
         assert!(handle_method_op("ArgsSpec", "option", 3).is_some());
         assert!(handle_method_op("ArgsSpec", "positional", 2).is_some());
+        assert!(handle_method_op("ArgsSpec", "description", 1).is_some());
         assert!(handle_method_op("ArgsSpec", "help", 0).is_some());
         assert!(handle_method_op("ArgsSpec", "parse", 1).is_some());
         assert!(handle_method_op("ParsedArgs", "flag", 1).is_some());

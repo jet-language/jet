@@ -4777,6 +4777,8 @@ pub enum THandleOp {
     ArgsSpecRequiredOption,
     /// D-ARGS1: ArgsSpec `.positional(name, help)` → `(recv).positional(&a0, &a1)` → `JetArgsSpec`.
     ArgsSpecPositional,
+    /// D-CLI-DOCS1: ArgsSpec `.description(text)` → `(recv).description(&a0)` → `JetArgsSpec`.
+    ArgsSpecDescription,
     ArgsSpecSubcommand,
     ArgsSpecVersion,
     ArgsSpecCompletion,

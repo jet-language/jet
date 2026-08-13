@@ -730,6 +730,15 @@ pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     out
 }
 
+/// Render the explicit success result for a clean --json check.
+pub fn render_success_json(file: &str) -> String {
+    format!(
+        "{{\"schema\":{},\"moment\":\"compile\",\"status\":\"ok\",\"ok\":true,\"diagnostics\":[],\"file\":{}}}\n",
+        json_str(REPORT_SCHEMA),
+        json_str(&machine_report_path(file)),
+    )
+}
+
 /// Count reports whose explicit cause chain names each report. A transitive
 /// dependent counts once, so a consumer can rank root reports without
 /// rebuilding the graph from report text.

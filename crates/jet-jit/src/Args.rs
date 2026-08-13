@@ -122,6 +122,11 @@ mod runtime {
         push_spec(jet_args_spec())
     }
 
+    pub(super) extern "C" fn jet_jit_args_description(h: i64, description: i64) -> i64 {
+        let spec = jet_args_description(take_spec(h), &clone_string(description));
+        replace_spec(h, spec)
+    }
+
     pub(super) extern "C" fn jet_jit_args_flag(h: i64, name: i64, help: i64) -> i64 {
         let spec = jet_args_flag(take_spec(h), &clone_string(name), &clone_string(help));
         replace_spec(h, spec)
@@ -340,6 +345,7 @@ host_fns! {
 
     }
     spec: "jet_jit_args_spec" => runtime::jet_jit_args_spec: nullary;
+    description: "jet_jit_args_description" => runtime::jet_jit_args_description: binary;
     flag: "jet_jit_args_flag" => runtime::jet_jit_args_flag: ternary;
     flag_short: "jet_jit_args_flag_short" => runtime::jet_jit_args_flag_short: quaternary;
     option: "jet_jit_args_option" => runtime::jet_jit_args_option: quaternary;
@@ -362,7 +368,6 @@ host_fns! {
     parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
     parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }
-
 
 
 
