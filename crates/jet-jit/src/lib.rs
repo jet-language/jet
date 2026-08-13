@@ -20,7 +20,6 @@ pub mod Job {
 
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
-
 /// #1633: one canonical listing per JIT host symbol.
 ///
 /// Each per-module host-symbol table used to write every symbol four times:
