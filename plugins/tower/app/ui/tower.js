@@ -13,6 +13,9 @@ let S = null;                 // projected state from /api/state
 let VIEW = 'now';
 let openCard = null;
 let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false, focusCompare = false;
+let closedCache = null;        // full done/archived cards for one board revision
+let closedRequest = null;
+const detailCache = new Map();
 const pick = {};              // decisionId -> tentative option key
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -120,6 +123,11 @@ function applyState(next, { own = false } = {}) {
     if (!uiBusy()) return location.reload();
     pending = next; S = { ...next, boot: S.boot }; return;
   }
+  if (S && next.meta.rev !== S.meta.rev) {
+    closedCache = null;
+    closedRequest = null;
+    detailCache.clear();
+  }
   const changed = !S || next.meta.rev !== S.meta.rev;
   if (own) { S = next; renderPreservingScroll(); return; }
   if (!changed) { S = next; renderBeacon(); return; }          // nothing new — cheap refresh only
@@ -195,7 +203,22 @@ async function refresh() {
 }
 
 // ---- derived --------------------------------------------------------------
-const cardById = (id) => S.cards.find(c => c.id === id);
+function closedMetadata() {
+  return S?.closed?.rev === S?.meta?.rev ? (S.closed.cards || []) : [];
+}
+function cachedClosedCards() {
+  return closedCache?.rev === S?.meta?.rev ? closedCache.cards : [];
+}
+function boardCards(showClosed = false) {
+  return showClosed ? [...(S.cards || []), ...cachedClosedCards()] : (S.cards || []);
+}
+function allCards() {
+  const byId = new Map((S.cards || []).map(c => [c.id, c]));
+  for (const c of closedMetadata()) if (!byId.has(c.id)) byId.set(c.id, c);
+  for (const c of cachedClosedCards()) byId.set(c.id, c);
+  return [...byId.values()];
+}
+const cardById = (id) => allCards().find(c => c.id === id);
 const ticket = (c) => '#' + (c.num ?? '');
 const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
@@ -224,8 +247,8 @@ const verifyQueue = () => ownerVerifyQueue(S.cards);
 const queueNotices = () => {
   const { done, messages } = buildDoneMessageQueue({
     cursor: S.meta.completionCursor,
-    cards: S.cards || [],
-    questions: S.questions || [],
+    cards: [...(S.cards || []), ...closedMetadata()],
+    questions: [...(S.questions || []), ...(S.closed?.messages || [])],
   });
   return [
     ...messages.map(message => ({ ...message, type: 'message' })),
@@ -364,8 +387,8 @@ function doneMessageBlock() {
   }
   const { done, messages } = buildDoneMessageQueue({
     cursor,
-    cards: S.cards || [],
-    questions: S.questions || [],
+    cards: [...(S.cards || []), ...closedMetadata()],
+    questions: [...(S.questions || []), ...(S.closed?.messages || [])],
   });
   if (!done.length && !messages.length) return null;
   const node = el(renderDoneMessageQueue({ done, messages, since: cursor }));
@@ -564,10 +587,25 @@ const archivedCountCache = {};
 async function archivedCountFor(epochId) {
   if (archivedCountCache[epochId] != null) return archivedCountCache[epochId];
   try {
-    const j = await (await fetch(`/api/history?epoch=${encodeURIComponent(epochId)}`)).json();
+    const j = await (await fetch(`/api/history?epoch=${encodeURIComponent(epochId)}&count=1`)).json();
     archivedCountCache[epochId] = j.count || 0;
   } catch { archivedCountCache[epochId] = 0; }
   return archivedCountCache[epochId];
+}
+
+async function loadClosedCards() {
+  if (!S) return [];
+  if (closedCache?.rev === S.meta.rev) return closedCache.cards;
+  if (closedRequest) return closedRequest;
+  const rev = S.meta.rev;
+  closedRequest = (async () => {
+    const r = await fetch('/api/closed');
+    if (!r.ok) throw new Error(`closed cards request failed: ${r.status}`);
+    const payload = await r.json();
+    if (S?.meta?.rev === rev && payload.rev === rev) closedCache = { rev, cards: payload.cards || [] };
+    return payload.cards || [];
+  })().finally(() => { closedRequest = null; });
+  return closedRequest;
 }
 
 // #464/#merge: Board = Radar's body (roadmap ledger × ops table: per-epoch
@@ -688,9 +726,16 @@ function renderRadarBody() {
   if (!body) return;
   const focused = document.activeElement === $('#radar-filter');
   body.innerHTML = '';
+  if (radarShowClosed && closedCache?.rev !== S.meta.rev) {
+    body.appendChild(el('<p class="epoch__goal">Loading closed cards…</p>'));
+    loadClosedCards().then(() => { if (radarShowClosed) renderRadarBody(); })
+      .catch(() => { if (radarShowClosed) body.innerHTML = '<p class="epoch__goal">Closed cards unavailable.</p>'; });
+    return;
+  }
   const needle = radarFilterText.trim().toLowerCase();
   const cardsMode = isOpen('radar-cards', false);
-  const radar = boardEpochs(S.radar || [], S.epochs, S.cards, S.milestones, radarShowClosed);
+  const cards = boardCards(radarShowClosed);
+  const radar = boardEpochs(S.radar || [], S.epochs, cards, S.milestones, radarShowClosed);
 
   // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
   // on milestoneId already pins the epoch. Render one flat list, no sections —
@@ -701,14 +746,14 @@ function renderRadarBody() {
   if (radarMilestone && !drill) radarMilestone = null;
   if (drill) {
     body.appendChild(milestoneFilterBar(drill));
-    const hits = S.cards.filter(c => radarMatches(c, needle));
+    const hits = cards.filter(c => radarMatches(c, needle));
     body.appendChild(hits.length ? radarList('mile:' + drill.id, hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
 
   // Sidequests: their own section — off-plan work, not part of any epoch.
-  const sq = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
+  const sq = cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
@@ -718,7 +763,7 @@ function renderRadarBody() {
   for (const r of radar) body.appendChild(radarEpochSection(r, needle, cardsMode));
 
   // Frozen: parked on purpose, any track — its own section, collapsed by default.
-  const fz = S.cards.filter(c => c.phase === 'frozen');
+  const fz = cards.filter(c => c.phase === 'frozen');
   if (fz.length) body.appendChild(radarListSection('radar-frozen', 'Frozen', 'parked on purpose', fz.filter(c => radarMatches(c, needle)), fz.length, cardsMode, false));
 
   if (focused) $('#radar-filter')?.focus();
@@ -817,7 +862,7 @@ function radarEpochSection(r, needle, cardsMode) {
       body.appendChild(ledgerLine);
       archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
 
-      const active = S.cards.filter(c => c.epoch === r.id && c.track !== 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
+      const active = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
       const activeShown = active.filter(c => radarMatches(c, needle));
       body.appendChild(el(`<div class="radar__subhead">${radarShowClosed ? 'Cards' : 'Active'}</div>`));
       body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no cards'}</p>`));
@@ -926,10 +971,38 @@ function opsRow(c) {
 }
 
 // ---- card modal ------------------------------------------------------------------
-function showDetail(id) {
+const isFullCard = (card) => card && ['body', 'log', 'criteria', 'decisions', 'questions'].every(k => k in card);
+
+async function showDetail(id) {
   openCard = id;
-  const c = cardById(id);
+  const summary = cardById(id);
+  if (!summary) return closeDetail();
+  const key = `${S.meta.rev}:${summary.id}`;
+  const cached = detailCache.get(key);
+  if (cached) return renderDetail(cached);
+  if (!isFullCard(summary)) {
+    const m = $('#detail');
+    m.innerHTML = '<div class="modal__panel"><div class="modal__body"><p class="prose">Loading card…</p></div></div>';
+    m.hidden = false; $('#scrim').hidden = false;
+    try {
+      const r = await fetch(`/api/card?id=${encodeURIComponent(summary.id)}`);
+      if (!r.ok) throw new Error(`card request failed: ${r.status}`);
+      const payload = await r.json();
+      if (openCard !== id || S.meta.rev !== payload.rev) return;
+      detailCache.set(key, payload.card);
+      return renderDetail(payload.card);
+    } catch (err) {
+      toast('card detail unavailable', true);
+      return;
+    }
+  }
+  return renderDetail(summary);
+}
+
+function renderDetail(c) {
   if (!c) return closeDetail();
+  openCard = c.id;
+  const id = c.id;
   const m = $('#detail');
   const phaseLabel = (S.phases.find(p => p.id === c.phase) || {}).label || c.phase;
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
@@ -1095,7 +1168,9 @@ function facetBody(d, fk) {
 }
 // question state of a ballot: '' | 'open' (awaiting an answer) | 'answered'
 function qState(d) {
-  const qs = ((cardById(d.cardId) || {}).questions || []).filter(q => q.decisionId === d.id);
+  const cardQuestions = (cardById(d.cardId) || {}).questions || [];
+  const qs = [...cardQuestions, ...(S.questions || []), ...(S.closed?.messages || [])]
+    .filter(q => q.cardId === d.cardId && q.decisionId === d.id);
   if (!qs.length) return '';
   return qs.some(q => q.status === 'open') ? 'open' : 'answered';
 }
@@ -1116,7 +1191,7 @@ function renderFocus() {
   const pickedIds = focusIds.filter(id => pick[id]);
   const facets = availFacets(d);
   if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
-  const qs = c ? c.questions.filter(q => q.decisionId === d.id) : [];
+  const qs = c ? (c.questions || []).filter(q => q.decisionId === d.id) : [];
 
   f.innerHTML = `
     <div class="focustop">
@@ -1555,7 +1630,7 @@ function paletteItems(q) {
   const items = [];
   for (const v of VIEWS) if (!q || hit(v.name)) items.push({ label: `view · ${v.name}`, act: () => go(v.id) });
   for (const d of openGenericDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
-  for (const c of S.cards) {
+  for (const c of allCards()) {
     if (c.phase === 'done' && q.length < 2) continue;
     if (!q || hit('#' + c.num + ' ' + c.title)) items.push({ label: `card · #${c.num} ${c.title.slice(0, 60)} (${c.phase})`, act: () => showDetail(c.id) });
   }
@@ -1618,5 +1693,5 @@ loadDocsIndex().then(() => { if (S) renderChrome(); }).catch(() => {});
 // deep links: ?focus=<decisionId> opens focus mode, ?open=<cardId|#n> a card
 const qs = new URLSearchParams(location.search);
 if (qs.get('focus') && S) focusAll(qs.get('focus'));
-if (qs.get('open') && S) { const c = S.cards.find(x => x.id === qs.get('open') || '#' + x.num === qs.get('open')); if (c) showDetail(c.id); }
+if (qs.get('open') && S) { const c = allCards().find(x => x.id === qs.get('open') || '#' + x.num === qs.get('open')); if (c) showDetail(c.id); }
 if (qs.get('legend')) openLegend();

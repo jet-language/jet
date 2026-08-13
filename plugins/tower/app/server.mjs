@@ -11,7 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { readdirSync, existsSync } from 'node:fs';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { UI, readJSON } from './paths.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
@@ -33,7 +34,40 @@ const jsonBody = async (req) => {
   try { return buf.length ? JSON.parse(buf.toString('utf8')) : {}; }
   catch { throw new TowerError('E_INVALID', 'body is not valid JSON'); }
 };
-const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+
+function etagFor(data, key = 'body') {
+  const digest = createHash('sha256').update(data).digest('hex').slice(0, 16);
+  return `"tower-${key}-${digest}"`;
+}
+
+export function encodeResponse(data, { revision = null, key = 'body', gzip = true } = {}) {
+  const raw = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+  const compressed = gzip ? gzipSync(raw) : raw;
+  return { raw, compressed, etag: etagFor(raw, revision == null ? key : `rev-${revision}`) };
+}
+
+function sendBytes(req, res, code, data, { contentType = 'application/octet-stream', revision = null, cacheControl = 'private, no-cache' } = {}) {
+  const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const etag = etagFor(raw, revision == null ? 'body' : `rev-${revision}`);
+  const common = { 'content-type': contentType, etag, 'cache-control': cacheControl, vary: 'Accept-Encoding' };
+  const supplied = String(req?.headers?.['if-none-match'] || '');
+  if (supplied.split(',').map(x => x.trim()).includes(etag)) {
+    res.writeHead(304, common);
+    return res.end();
+  }
+  const acceptsGzip = /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
+  const compressed = acceptsGzip ? gzipSync(raw) : raw;
+  if (acceptsGzip) common['content-encoding'] = 'gzip';
+  common['content-length'] = compressed.length;
+  res.writeHead(code, common);
+  res.end(compressed);
+}
+
+const revisionOf = (obj) => obj?.meta?.rev ?? obj?.rev ?? obj?.state?.meta?.rev ?? null;
+const send = (res, code, obj, options = {}) => sendBytes(
+  res.__towerReq, res, code, Buffer.from(JSON.stringify(obj)),
+  { contentType: 'application/json', revision: options.revision ?? revisionOf(obj) },
+);
 
 // ---- SSE live stream --------------------------------------------------------
 // BOOT identifies this server process; clients reload (when idle) if it
@@ -60,10 +94,11 @@ const START_VERSION = computeVersion(TOWER_ROOT);
 // what this server last saw — surfaced, never overwritten.
 const noteSeen = (store, rev) => { if (rev != null && rev > (store.serveSeenRev ?? 0)) store.serveSeenRev = rev; };
 const projected = (store) => {
-  const p = { ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` };
+  const p = { ...db.projectBoard(store.load(), store.config, store.loadHistory()), boot: BOOT, cli: `node ${TOWER_BIN}` };
   noteSeen(store, p.meta?.rev);
   return p;
 };
+const closedProjected = (store) => db.projectClosed(store.load(), store.config, store.loadHistory());
 const sseClients = new Set();
 function broadcast(store) {
   if (!sseClients.size) return;
@@ -180,8 +215,7 @@ function authed(req, res, token, url) {
   const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
   if (cookie === token || bearer === token) return true;
   if (req.method === 'GET' && !url.pathname.startsWith('/api/') && (req.headers.accept || '').includes('text/html')) {
-    res.writeHead(401, { 'content-type': 'text/html' });
-    res.end(UNLOCK_HTML);
+    sendBytes(req, res, 401, Buffer.from(UNLOCK_HTML), { contentType: 'text/html', cacheControl: 'private, no-store' });
     return false;
   }
   send(res, 401, { error: 'E_AUTH', message: 'unauthorized — unlock this device with the access key (auth.token in .tower/secrets.json)' });
@@ -201,11 +235,14 @@ async function serveStatic(req, res) {
       // source even when the running process (START_VERSION) hasn't caught
       // up yet. See version.mjs + the stale-banner logic in tower.js.
       const html = data.toString('utf8').replace('__TOWER_VERSION__', computeVersion(TOWER_ROOT));
-      res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
-      return res.end(html);
+      return sendBytes(req, res, 200, Buffer.from(html), {
+        contentType: MIME['.html'], cacheControl: 'private, no-cache',
+      });
     }
-    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
-    res.end(data);
+    return sendBytes(req, res, 200, data, {
+      contentType: MIME[extname(file)] || 'application/octet-stream',
+      cacheControl: 'public, no-cache',
+    });
   } catch { res.writeHead(404); res.end('not found'); }
 }
 
@@ -231,6 +268,7 @@ export function serve(store, port = 7878, open = false) {
   noteSeen(store, store.load().meta.rev);
 
   const server = createServer(async (req, res) => {
+    res.__towerReq = req;
     try {
       const url = new URL(req.url, 'http://x');
       const ok = authed(req, res, token, url);
@@ -247,6 +285,15 @@ export function serve(store, port = 7878, open = false) {
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
+      if (req.method === 'GET' && url.pathname === '/api/card') {
+        const s = store.load();
+        const card = db.projectCard(s, url.searchParams.get('id') || url.searchParams.get('card'), store.loadHistory());
+        if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${url.searchParams.get('id') || url.searchParams.get('card')}` });
+        return send(res, 200, { rev: s.meta.rev, card }, { revision: s.meta.rev });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/closed') {
+        return send(res, 200, closedProjected(store));
+      }
       // #522 — belt+braces to the self-restart watcher: `start` is what
       // THIS process loaded at boot; `current` is a fresh read of what's on
       // disk right now. A mismatch means the process needs a restart.
@@ -255,17 +302,19 @@ export function serve(store, port = 7878, open = false) {
         return send(res, 200, { start: START_VERSION, current, stale: current !== START_VERSION });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
-        return send(res, 200, store.load().events.slice(0, Number(url.searchParams.get('limit') || 50)));
+        const s = store.load();
+        return send(res, 200, s.events.slice(0, Number(url.searchParams.get('limit') || 50)), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/messages') {
-        return send(res, 200, db.listMessages(store.load(), {
+        const s = store.load();
+        return send(res, 200, db.listMessages(s, {
           cardId: url.searchParams.get('card') || undefined,
           status: url.searchParams.has('status') ? url.searchParams.get('status') : 'open',
-        }));
+        }), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/stream') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-        res.write(`event: state\ndata: ${JSON.stringify(store.project())}\n\n`);
+        res.write(`event: state\ndata: ${JSON.stringify(projected(store))}\n\n`);
         sseClients.add(res);
         const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 20_000);
         req.on('close', () => { clearInterval(ping); sseClients.delete(res); });
@@ -277,7 +326,9 @@ export function serve(store, port = 7878, open = false) {
         const epoch = url.searchParams.get('epoch');
         const h = store.loadHistory();
         const cards = epoch ? h.cards.filter(c => c.epoch === epoch) : h.cards;
-        return send(res, 200, { cards, count: cards.length });
+        const revision = store.load().meta.rev;
+        if (url.searchParams.get('count') === '1') return send(res, 200, { count: cards.length }, { revision });
+        return send(res, 200, { cards, count: cards.length }, { revision });
       }
       if (req.method === 'GET' && url.pathname === '/api/next') {
         const q = url.searchParams;
@@ -285,7 +336,8 @@ export function serve(store, port = 7878, open = false) {
           : q.get('burndown') === '1' || q.get('scope') === 'burndown' ? 'burndown'
           : undefined;
         const limit = Number(q.get('limit') || (scope === 'ready-across' ? 50 : 5));
-        return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }));
+        const s = store.load();
+        return send(res, 200, db.nextCards(s, { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }), { revision: s.meta.rev });
       }
       // Docs — durable markdown under docs/ + pinned scratchpad.
       if (req.method === 'GET' && url.pathname === '/api/docs') {
@@ -319,7 +371,7 @@ export function serve(store, port = 7878, open = false) {
         const s = store.load();
         const history = store.loadHistory();
         const docsRoot = join(dirname(store.dataDir), 'docs');
-        return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }));
+        return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }), { revision: s.meta.rev });
       }
       // #462 — one-shot agent work packet. ?card=&agent=&claim=0|1 (claim
       // only takes effect when both an agent AND claim=1 are given).
@@ -342,7 +394,7 @@ export function serve(store, port = 7878, open = false) {
           card = db.findCard(s, card.id);
           broadcast(store);
         }
-        return send(res, 200, db.buildBrief(s, card.id));
+        return send(res, 200, db.buildBrief(s, card.id), { revision: s.meta.rev });
       }
       // ---- writes ----
       if (req.method === 'POST' && url.pathname === '/api/undo') {
