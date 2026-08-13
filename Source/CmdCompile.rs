@@ -1700,17 +1700,6 @@ pub(crate) struct TestRunOpts {
     pub(crate) serial: bool,
 }
 
-pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
-    run_test_opts(
-        path,
-        TestRunOpts {
-            update_snapshots,
-            ..Default::default()
-        },
-        mode,
-    )
-}
-
 /// `jet test [--release] [--trace-tiers] [--coverage] [--filter=<substr>]
 /// [--shuffle[=<seed>]] [--serial]`.
 /// With `coverage`, the harness is built with function/branch probes (D-COV1) and

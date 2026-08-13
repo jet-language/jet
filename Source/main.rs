@@ -47,7 +47,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_jobs, run_test, run_test_opts,
+    run_fuzz, run_new, run_job_entry, run_jobs, run_test_opts,
     run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
