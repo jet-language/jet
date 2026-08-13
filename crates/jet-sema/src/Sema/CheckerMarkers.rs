@@ -379,7 +379,7 @@ pub(crate) fn resolve_static_rule_products(
                     base_dir,
                     &globals,
                     core_imports,
-                    false,
+                    crate::Policy::GateSet::default(),
                     0,
                     None,
                 );
