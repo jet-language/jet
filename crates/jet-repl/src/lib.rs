@@ -742,6 +742,14 @@ impl Session {
         self.item_srcs.join("\n")
     }
 
+    /// Notebook declarations are file-wide even when cells execute out of order.
+    pub(crate) fn replace_notebook_items(&mut self, item_srcs: Vec<String>) {
+        if self.item_srcs != item_srcs {
+            self.item_srcs = item_srcs;
+            rebuild_funcs(self);
+        }
+    }
+
     /// Accumulated `use …;` import lines, one per line, with a trailing newline
     /// when non-empty so they sit cleanly above the items in a synthetic program.
     pub(crate) fn import_src(&self) -> String {
@@ -1286,6 +1294,10 @@ fn looks_like_item(text: &str) -> bool {
         || t.starts_with("impl ")
         || t.starts_with("const ")
         || t.starts_with("module ")
+}
+
+pub(crate) fn is_item_input(text: &str) -> bool {
+    looks_like_item(normalize_repl_input(text).trim())
 }
 
 /// D-CTCORE1: project accepted Core aliases from sema's name ledger. The

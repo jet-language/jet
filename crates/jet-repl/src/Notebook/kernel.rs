@@ -1,12 +1,14 @@
 //! One shared REPL session observed by first-party, Canvas lens, and Jupyter.
 
 use super::document::{CellKind, JetNotebook};
-use super::eval::{evaluate_step, EvalResult};
+use super::eval::{evaluate_step_with_items, EvalResult};
 use super::trust::{
     decide_render, grant_active, ActiveRequest, MimeBundle, RenderDecision, TrustStore,
     POLICY_VERSION,
 };
-use crate::{ReplFlags, ReplPolicy, RerunPlan, Session, ReplTurn, ReplTurnStatus};
+use crate::{
+    is_item_input, ReplFlags, ReplPolicy, RerunPlan, Session, ReplTurn, ReplTurnStatus,
+};
 use jet_foundation::SHA256;
 use std::path::{Path, PathBuf};
 
@@ -149,12 +151,22 @@ impl Kernel {
             cell.source.clone()
         };
 
+        let item_srcs = self
+            .notebook
+            .cells
+            .iter()
+            .filter(|cell| cell.kind == CellKind::Jet && is_item_input(&cell.source))
+            .map(|cell| cell.source.clone())
+            .collect();
+        self.session.replace_notebook_items(item_srcs);
+
         let mut authorizer = self.policy.authorizer(None);
-        let eval = evaluate_step(
+        let eval = evaluate_step_with_items(
             &mut self.session,
             &source,
             &self.base_dir,
             &mut authorizer,
+            true,
         );
         self.execution_count = self.execution_count.saturating_add(1);
         let bundle = MimeBundle {

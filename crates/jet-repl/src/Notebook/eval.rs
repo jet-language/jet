@@ -67,6 +67,17 @@ pub fn evaluate_step(
     base_dir: &Path,
     authorizer: &mut dyn Comptime::ReplAuthorizer,
 ) -> EvalResult {
+    evaluate_step_with_items(session, input, base_dir, authorizer, false)
+}
+
+/// Run one input after the notebook has supplied its complete declaration set.
+pub(crate) fn evaluate_step_with_items(
+    session: &mut Session,
+    input: &str,
+    base_dir: &Path,
+    authorizer: &mut dyn Comptime::ReplAuthorizer,
+    notebook_items_preloaded: bool,
+) -> EvalResult {
     jet_driver::boot_tir_eval();
     let normalized = normalize_repl_input(input);
     let trimmed = normalized.trim();
@@ -148,7 +159,10 @@ pub fn evaluate_step(
         }
 
         InputKind::Item(src) => {
-            let bundle = match type_check_item(session, &src) {
+            let bundle = match type_check_item(
+                session,
+                if notebook_items_preloaded { "" } else { &src },
+            ) {
                 Ok(bundle) => bundle,
                 Err(errors) => {
                     for d in &errors {
@@ -171,7 +185,9 @@ pub fn evaluate_step(
                     };
                 }
             };
-            session.item_srcs.push(src);
+            if !notebook_items_preloaded {
+                session.item_srcs.push(src);
+            }
             rebuild_funcs(session);
             update_core_imports_from_ledger(&bundle, &mut session.core_imports);
             out.push_str("ok\n");

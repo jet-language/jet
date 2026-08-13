@@ -40,6 +40,66 @@ fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
 }
 
 #[test]
+fn script_helper_below_call_and_mutual_recursion_keep_statement_order() {
+    let source = r#"
+print("start")
+limit :: 2
+print(limit)
+print(even(limit + 2))
+print("end")
+
+fn even(n: Int) => Bool {
+    return if n == 0 -> true else -> odd(n - 1)
+}
+
+fn odd(n: Int) => Bool {
+    return if n == 0 -> false else -> even(n - 1)
+}
+"#;
+    let expected = "start\n2\ntrue\nend\n";
+    let dir = common::unique_tmp("jet_script_order");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(&file, source).unwrap();
+    let path = file.to_str().unwrap();
+
+    let outcomes = [
+        ("jit", jet::Interpreter::run_jit_once(path)),
+        (
+            "interpreter",
+            jet::Interpreter::run_interpreter_once_with_args(path, &[]),
+        ),
+        ("dev-jit", jet::Interpreter::dev_iteration(path, false, false)),
+        (
+            "dev-interpreter",
+            jet::Interpreter::dev_iteration(path, false, true),
+        ),
+    ];
+    for (tier, outcome) in outcomes {
+        let jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } = outcome
+        else {
+            panic!("{tier} did not run the script: {outcome:?}");
+        };
+        assert_eq!(stdout, expected, "{tier} stdout");
+        assert!(stderr.is_empty(), "{tier} stderr: {stderr}");
+        assert_eq!(exit_code, 0, "{tier} exit code");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_script_order_aot", "main", source);
+        assert_eq!(code, 0, "AOT exit code: {stderr}");
+        assert_eq!(stdout, expected, "AOT stdout");
+        assert!(stderr.is_empty(), "AOT stderr: {stderr}");
+    }
+}
+
+#[test]
 fn unannotated_run_is_fallible_by_default_and_reports_at_the_edge() {
     let source = r#"
 fn step() => Int ? {

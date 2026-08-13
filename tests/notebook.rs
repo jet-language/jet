@@ -11,6 +11,75 @@ use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
 
 #[test]
+fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
+    let mut kernel = Kernel::open(None, "entry-order-test");
+    let caller = kernel
+        .notebook
+        .add_cell(
+            CellKind::Jet,
+            "fn caller() => Int { return helper().value }",
+        )
+        .id
+        .clone();
+    let helper = kernel
+        .notebook
+        .add_cell(
+            CellKind::Jet,
+            "fn helper() => Answer { return Answer.{ value: 42 } }",
+        )
+        .id
+        .clone();
+    let answer_type = kernel
+        .notebook
+        .add_cell(CellKind::Jet, "struct Answer { value: Int }")
+        .id
+        .clone();
+    let binding = kernel
+        .notebook
+        .add_cell(CellKind::Jet, "answer :: 7")
+        .id
+        .clone();
+    let read = kernel
+        .notebook
+        .add_cell(CellKind::Jet, "print(answer)")
+        .id
+        .clone();
+
+    assert!(
+        kernel
+            .execute_cell(ClientKind::FirstParty, &caller)
+            .unwrap()
+            .ok(),
+        "caller must see later helper/type declarations"
+    );
+    assert!(kernel
+        .execute_cell(ClientKind::FirstParty, &helper)
+        .unwrap()
+        .ok());
+    assert!(kernel
+        .execute_cell(ClientKind::FirstParty, &answer_type)
+        .unwrap()
+        .ok());
+
+    assert!(
+        !kernel
+            .execute_cell(ClientKind::FirstParty, &read)
+            .unwrap()
+            .ok(),
+        "state cells must not see a later binding"
+    );
+    assert!(kernel
+        .execute_cell(ClientKind::FirstParty, &binding)
+        .unwrap()
+        .ok());
+    let output = kernel
+        .execute_cell(ClientKind::FirstParty, &read)
+        .unwrap();
+    assert!(output.ok());
+    assert!(output.bundle.text_plain.contains('7'));
+}
+
+#[test]
 fn shared_session_identical_stale_rules_across_clients() {
     let mut kernel = Kernel::open(None, "env-test");
     let a = kernel
