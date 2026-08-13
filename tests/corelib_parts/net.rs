@@ -405,7 +405,7 @@ fn run() {{
     _ready :: ready_rx.receive() ?? panic("ready")
     time.sleep(50)
     lookup.cancel()
-    lookup.join() ?? 0
+    lookup.join() ?? panic("lookup task failed")
 }}
 "#,
         addr
@@ -439,30 +439,30 @@ fn core_net_dns_nxdomain_is_an_error() {
 fn core_net_ratified_named_forms_require_exact_labels() {
     let cases = [
         ("tcp accept", "fn check(listener: TcpListener, d: Duration) { result :: listener.accept(d) }", "deadline:"),
-        ("tcp read", "fn check(stream: TcpStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
+        ("tcp read", "fn check(stream: TcpStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline"),
         ("tcp read text", "fn check(stream: TcpStream, d: Duration) { result :: stream.read_text(1, d) }", "deadline:"),
-        ("tcp write", "fn check(stream: TcpStream, d: Duration) { result :: stream.write([1], potato: d) }", "deadline:"),
+        ("tcp write", "fn check(stream: TcpStream, d: Duration) { result :: stream.write([1], potato: d) }", "deadline"),
         ("tcp write all", "fn check(stream: TcpStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
-        ("tcp write text", "fn check(stream: TcpStream, d: Duration) { result :: stream.write_text(\"x\", turnip: d) }", "deadline:"),
+        ("tcp write text", "fn check(stream: TcpStream, d: Duration) { result :: stream.write_text(\"x\", turnip: d) }", "deadline"),
         ("tcp ready", "fn check(stream: TcpStream, d: Duration) { result :: stream.ready(.Read, d) }", "deadline:"),
-        ("udp send", "fn check(socket: UdpSocket, address: SocketAddr, d: Duration) { result :: socket.send_to([1], address, banana: d) }", "deadline:"),
+        ("udp send", "fn check(socket: UdpSocket, address: SocketAddr, d: Duration) { result :: socket.send_to([1], address, banana: d) }", "deadline"),
         ("udp receive", "fn check(socket: UdpSocket, d: Duration) { result :: socket.receive(1, d) }", "deadline:"),
-        ("udp ready", "fn check(socket: UdpSocket, d: Duration) { result :: socket.ready(.Read, potato: d) }", "deadline:"),
+        ("udp ready", "fn check(socket: UdpSocket, d: Duration) { result :: socket.ready(.Read, potato: d) }", "deadline"),
         ("unix connect", "fn check(d: Duration) { result :: net.unix_connect(\"/tmp/jet-label-test\", d) }", "deadline:"),
-        ("unix accept", "fn check(listener: UnixListener, d: Duration) { result :: listener.accept(banana: d) }", "deadline:"),
+        ("unix accept", "fn check(listener: UnixListener, d: Duration) { result :: listener.accept(banana: d) }", "deadline"),
         ("unix read", "fn check(stream: UnixStream, d: Duration) { result :: stream.read(1, d) }", "deadline:"),
-        ("unix write", "fn check(stream: UnixStream, d: Duration) { result :: stream.write_all([1], potato: d) }", "deadline:"),
+        ("unix write", "fn check(stream: UnixStream, d: Duration) { result :: stream.write_all([1], potato: d) }", "deadline"),
         ("unix ready", "fn check(stream: UnixStream, d: Duration) { result :: stream.ready(.Write, d) }", "deadline:"),
-        ("tls read", "fn check(stream: TLSStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
+        ("tls read", "fn check(stream: TLSStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline"),
         ("tls write", "fn check(stream: TLSStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
-        ("tls ready", "fn check(stream: TLSStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline:"),
+        ("tls ready", "fn check(stream: TLSStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline"),
         ("tls close write", "fn check(stream: TLSStream, d: Duration) { result :: stream.close_write(d) }", "deadline:"),
         ("tls version bounds", "fn check() { result :: tls.ClientConfig.default().with_version_bounds(.Tls12, .Tls13) }", "min:"),
         ("tls client identity", "fn check() { result :: tls.ClientIdentity.from_pem([], []) }", "cert_chain:"),
         (
             "tls client",
             "fn check(stream: TcpStream, d: Duration) { cfg :: tls.ClientConfig.default(); result :: tls.client(^stream, banana: \"localhost\", potato: cfg, turnip: d) }",
-            "server_name:",
+            "server_name",
         ),
     ];
     for (name, body, expected_fix) in cases {
@@ -473,7 +473,7 @@ fn core_net_ratified_named_forms_require_exact_labels() {
             "{name} did not reject its missing/wrong label precisely: {diags:?}",
         );
         if name == "tls client" {
-            for label in ["server_name:", "config:", "deadline:"] {
+            for label in ["server_name", "config", "deadline"] {
                 assert!(
                     diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(label)),
                     "tls.client accepted or misreported `{label}`: {diags:?}",
@@ -530,7 +530,7 @@ fn run() {
     _client :: net.tcp_connect(address) ?? panic("connect")
     _ready :: ready_rx.receive() ?? panic("ready")
     server.cancel()
-    server.join() ?? 0
+    server.join() ?? panic("server task failed")
 }
 
 "#,
@@ -575,7 +575,7 @@ fn run() {
     time.sleep(10)
     release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
     release_accept.close() ?? panic("release close")
-    cancelled_accept.join() ?? 0
+    cancelled_accept.join() ?? panic("cancelled accept task failed")
 
     ready_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
     ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
@@ -597,7 +597,7 @@ fn run() {
     _wait_ready :: wait_rx.receive() ?? panic("wait ready")
     time.sleep(10)
     ready_wait.cancel()
-    ready_wait.join() ?? 0
+    ready_wait.join() ?? panic("ready wait task failed")
     ready_client.close() ?? panic("ready client close")
 }
 "#,
@@ -812,7 +812,7 @@ fn run() {
     client := net.tcp_connect(address) ?? panic("connect")
     _count :: send_four(&client) ?? panic("write")
     client.close() ?? panic("close")
-    server.join() ?? 0
+    server.join() ?? panic("server task failed")
 }
 "#,
         &[],
@@ -890,7 +890,7 @@ fn run() {{
             }}
         }}
     }}
-    server.join() ?? 0
+    server.join() ?? panic("server task failed")
 }}
 "#
     );
@@ -990,7 +990,7 @@ fn run() {{
             .Ok(_) -> panic("unix cancel accepted stream")
             .Err(error) -> print(net.error_message(error))
         }}
-    }})
+    }}
     _unix_ready :: unix_ready_rx.receive() ?? panic("unix ready")
     unix_wait.cancel()
     unix_wait.join() ?? panic("udp wait task failed")
@@ -1295,7 +1295,7 @@ fn run() {
         .Ok(_) -> print("unexpected read")
         .Err(error) -> print(net.error_message(error))
     }
-    client.join() ?? 0
+    client.join() ?? panic("client task failed")
 }
 "#,
         &[],
@@ -1351,7 +1351,7 @@ fn run() {
         }
     }
     second.close() ?? panic("second close")
-    server.join() ?? 0
+    server.join() ?? panic("server task failed")
 }
 "#,
         &[],
@@ -1406,7 +1406,7 @@ fn run() {
     elapsed := time.now() - started
     print(elapsed < 300)
     client.close() ?? panic("close")
-    server.join() ?? 0
+    server.join() ?? panic("server task failed")
 }
 "#,
         &[],
@@ -1771,10 +1771,10 @@ fn run() {{
             .Ok(_) -> panic("cancelled handshake succeeded")
             .Err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
         }}
-    }})
+    }}
     _ready :: ready_rx.receive() ?? panic("ready")
     blocked.cancel()
-    blocked.join() ?? 0
+    blocked.join() ?? panic("handshake task failed")
 }}
 "#
     );

@@ -533,6 +533,9 @@ pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 pub(super) fn display(value: &CtValue) -> Option<String> {
+    if let Some(text) = io_error_display(value) {
+        return Some(text);
+    }
     match value {
         CtValue::List(values) => {
             let values = values
@@ -802,6 +805,95 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
         CtValue::Unit => Some(String::new()),
         CtValue::Closure(_) => None,
     }
+}
+
+/// D-NET-IOERROR1: the interpreter marshals the packed IOError shape through
+/// the same Prelude renderer used by AOT and resident JIT tiers.
+fn io_error_display(value: &CtValue) -> Option<String> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return None;
+    };
+    let type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    if type_name != "IOError" {
+        return None;
+    }
+    let variant = match variant
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(variant.as_str())
+    {
+        "InvalidInput" => 0,
+        "NotFound" => 1,
+        "PermissionDenied" => 2,
+        "TimedOut" => 3,
+        "Cancelled" => 4,
+        "Closed" => 5,
+        "Protocol" => 6,
+        "Other" => 7,
+        _ => return None,
+    };
+    let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {
+        return None;
+    };
+    let type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    if type_name != "IOContext" {
+        return None;
+    }
+    let field = |wanted: &str| {
+        fields.iter().find_map(|(name, value)| {
+            (name == wanted
+                || name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    == Some(wanted))
+                .then_some(value)
+        })
+    };
+    let CtValue::Enum {
+        variant: operation_variant,
+        ..
+    } = field("operation")?
+    else {
+        return None;
+    };
+    let operation = match operation_variant
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(operation_variant.as_str())
+    {
+        "Read" => 0,
+        "Write" => 1,
+        "Flush" => 2,
+        "Connect" => 3,
+        "Accept" => 4,
+        "Close" => 5,
+        "Resolve" => 6,
+        "Codec" => 7,
+        _ => return None,
+    };
+    let optional_text = |wanted: &str| {
+        field(wanted).and_then(|value| match value {
+            CtValue::Present(inner) => match inner.as_ref() {
+                CtValue::Str(text) => Some(Some(text.as_str())),
+                _ => None,
+            },
+            CtValue::Failed(CtReport::Clean(_)) => Some(None),
+            CtValue::Str(text) => Some(Some(text.as_str())),
+            _ => None,
+        })
+    };
+    Some(jet_foundation::StructuralDebug::jet_show_io_error(
+        variant,
+        operation,
+        optional_text("resource")?,
+        optional_text("cause")?,
+    ))
 }
 
 fn path_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
