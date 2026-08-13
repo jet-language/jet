@@ -520,6 +520,10 @@ pub fn render_datatree_for_tir(value: &CtValue) -> String {
     JSONInterp::render_json_pretty(value, false, 0)
 }
 
+pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
+    JSONInterp::render_json_pretty(value, true, 0)
+}
+
 /// TIR/JIT bridge for the canonical whole-value CBOR parser.
 ///
 /// Keep options validation, limits, deterministic-form checks, and error

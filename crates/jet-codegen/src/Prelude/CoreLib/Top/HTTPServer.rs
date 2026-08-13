@@ -666,11 +666,8 @@ impl JetHTTPMux {
     }
 }
 
-fn jet_http_mux_middleware<F>(mux: &JetHTTPMux, middleware: F)
-where
-    F: Fn(JetHTTPHandler) -> JetHTTPHandler + Send + Sync + 'static,
-{
-    mux.1.lock().unwrap().push(std::sync::Arc::new(middleware));
+fn jet_http_mux_middleware(mux: &JetHTTPMux, middleware: JetHTTPMiddleware) {
+    mux.1.lock().unwrap().push(middleware);
 }
 
 fn jet_http_mux_new() -> JetHTTPMux {
@@ -4466,7 +4463,10 @@ fn jet_http_srv_request_id(next: JetHTTPHandler) -> JetHTTPHandler {
 }
 
 fn jet_http_srv_install_request_id(mux: &JetHTTPMux) {
-    jet_http_mux_middleware(mux, jet_http_srv_request_id);
+    jet_http_mux_middleware(
+        mux,
+        std::sync::Arc::new(jet_http_srv_request_id) as JetHTTPMiddleware,
+    );
 }
 
 // ── D-HTTP-HANDLER-MW1=A: nested core.http.middleware Handler wrappers ───────
@@ -4658,7 +4658,10 @@ fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTP
 /// D-HTTP-CORS1=A: install the policy on a mux. No call means no CORS headers.
 fn jet_http_srv_install_cors(mux: &JetHTTPMux, policy: &JetHTTPCorsPolicy) {
     let policy = policy.clone();
-    jet_http_mux_middleware(mux, move |next| jet_http_mw_cors(&policy, next));
+    jet_http_mux_middleware(
+        mux,
+        std::sync::Arc::new(move |next| jet_http_mw_cors(&policy, next)) as JetHTTPMiddleware,
+    );
 }
 
 fn jet_http_gzip_stored(input: &[u8]) -> Vec<u8> {

@@ -54,7 +54,7 @@ use crate::Codegen::tuple_fields_plain;
 use crate::Codegen::tuple_struct_name;
 use crate::Diagnostics::Span;
 use crate::Syntax;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 
 fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
@@ -216,6 +216,7 @@ impl Default for ExprWorklistCache {
 thread_local! {
     static EXPR_WORKLIST_CACHE: RefCell<ExprWorklistCache> =
         RefCell::new(ExprWorklistCache::default());
+    static EXPR_COMPTIME_CACHE_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 fn expr_key(expr: &Expr, cx: &Cx) -> (usize, usize) {
@@ -363,6 +364,46 @@ fn expr_cache_end() {
 
 struct ExprCacheOwner {
     owns_cache: bool,
+}
+
+// D-CTCACHE1: comptime lowering can recursively invoke TIR while an outer
+// executable lowering worklist is active. Keep the two AST-pointer caches
+// separate; otherwise a comptime-shaped expression can be consumed later by
+// runtime lowering under a different Cx and environment.
+struct ExprComptimeCacheGuard {
+    saved: Option<ExprWorklistCache>,
+}
+
+impl ExprComptimeCacheGuard {
+    fn enter(env: &LowerEnv) -> Self {
+        if env.fn_name != "__ct" {
+            return Self { saved: None };
+        }
+        let nested = EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
+            let nested = depth.get() > 0;
+            depth.set(depth.get() + 1);
+            nested
+        });
+        if nested {
+            return Self { saved: None };
+        }
+        let saved = EXPR_WORKLIST_CACHE.with(|cache| {
+            std::mem::take(&mut *cache.borrow_mut())
+        });
+        Self { saved: Some(saved) }
+    }
+}
+
+impl Drop for ExprComptimeCacheGuard {
+    fn drop(&mut self) {
+        if self.saved.is_some() {
+            let saved = self.saved.take().expect("comptime cache guard owns cache");
+            EXPR_WORKLIST_CACHE.with(|cache| *cache.borrow_mut() = saved);
+        }
+        EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
+            depth.set(depth.get().saturating_sub(1));
+        });
+    }
 }
 
 impl Drop for ExprCacheOwner {
@@ -1166,8 +1207,57 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
     expr_cache_take(root, cx).expect("expression worklist lost its root")
 }
 
+/// D-TAG1: recognize a leaf unit variant reached through a grouped value path
+/// such as `Damage.Fire.Burn`. The AST shape is a field chain, but the Rust
+/// value is one flat enum variant (`__jet_Damage::__jet_Fire__Burn`).
+pub(crate) fn grouped_enum_unit_variant(
+    cx: &Cx,
+    receiver: &Expr,
+    member: &str,
+    is_bound: impl Fn(&str) -> bool,
+) -> Option<(String, String)> {
+    fn collect_path(expr: &Expr, path: &mut Vec<String>) -> bool {
+        match expr {
+            Expr::Ident(name, _) => {
+                path.push(name.clone());
+                true
+            }
+            Expr::Field(base, member, _) => {
+                if !collect_path(base, path) {
+                    return false;
+                }
+                path.push(member.clone());
+                true
+            }
+            Expr::Paren(inner, _) => collect_path(inner, path),
+            _ => false,
+        }
+    }
+
+    let mut path = Vec::new();
+    if !collect_path(receiver, &mut path) {
+        return None;
+    }
+    path.push(member.to_string());
+    let enum_name = path.first()?.clone();
+    if path.len() < 3 || is_bound(&enum_name) {
+        return None;
+    }
+    let variant = path[1..].join(".");
+    if cx.variant_owner.get(&variant).map(String::as_str) != Some(enum_name.as_str()) {
+        return None;
+    }
+    let is_unit = cx.enum_variants.get(&enum_name).is_some_and(|variants| {
+        variants.iter().any(|(name, payload)| {
+            name == &variant && matches!(payload, crate::AST::VariantPayload::Unit)
+        })
+    });
+    is_unit.then_some((enum_name, variant))
+}
+
 #[inline(never)]
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let _comptime_cache_guard = ExprComptimeCacheGuard::enter(env);
     // Keep expression descent off the native stack. Value-if and inline-loop nodes
     // use the same continuation worklist as every other expression.
     let e = strip_expr_parens(e);
@@ -2946,41 +3036,54 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
             // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
             // wrap provided scalars in `Some(…)`.
-            if type_name.ends_with(".Patch")
-                && cx
-                    .patchable
-                    .iter()
-                    .any(|b| format!("{b}.Patch") == *type_name)
-            {
-                let provided: std::collections::HashMap<_, _> =
-                    fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
-                let all = cx.struct_fields.get(type_name).cloned().unwrap_or_default();
-                let tfields = all
-                    .iter()
-                    .map(|(fname, fty)| {
-                        let te = if let Some(fe) = provided.get(fname.as_str()) {
-                            let inner = lower_expr(fe, cx, env);
-                            TExpr {
-                                ty: fty.clone(),
-                                kind: TExprKind::Present(Box::new(inner)),
-                            }
-                        } else {
-                            TExpr {
-                                ty: fty.clone(),
-                                kind: TExprKind::Absent,
-                            }
-                        };
-                        (fname.clone(), te, false)
-                    })
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
+            if let Some(base_name) = type_name.strip_suffix(".Patch") {
+                // TIR's entry-module shape table contains source structs, not
+                // sema's synthetic patch item. Reconstruct that one derived
+                // shape from the base fields, preserving the computed-field
+                // exclusion owned by the patchable sema pass.
+                let all = cx.struct_fields.get(base_name).map(|base_fields| {
+                    base_fields
+                        .iter()
+                        .filter(|(name, _)| {
+                            !cx.computed_fields
+                                .get(base_name)
+                                .is_some_and(|computed| computed.contains(name))
+                        })
+                        .map(|(name, field_ty)| {
+                            (name.clone(), Type::Option(Box::new(field_ty.clone())))
+                        })
+                        .collect::<Vec<_>>()
+                });
+                if let Some(all) = all {
+                    let provided: std::collections::HashMap<_, _> =
+                        fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
+                    let tfields = all
+                        .iter()
+                        .map(|(fname, fty)| {
+                            let te = if let Some(fe) = provided.get(fname.as_str()) {
+                                let inner = lower_expr(fe, cx, env);
+                                TExpr {
+                                    ty: fty.clone(),
+                                    kind: TExprKind::Present(Box::new(inner)),
+                                }
+                            } else {
+                                TExpr {
+                                    ty: fty.clone(),
+                                    kind: TExprKind::Absent,
+                                }
+                            };
+                            (fname.clone(), te, false)
+                        })
+                        .collect();
+                    return TExpr {
+                        ty: Type::Named(type_name.clone()),
+                        kind: TExprKind::StructLit {
+                            fields: tfields,
+                            extra: None,
+                            as_trait: None,
+                        },
+                    };
+                }
             }
             // I3: sema already proved this literal names a real struct. A local
             // name passes through unchanged; only a foreign import needs its
@@ -3064,6 +3167,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         recv: Box::new(recv),
                         field: member.clone(),
                         boxed: false,
+                    },
+                };
+            }
+            if let Some((enum_type, variant)) = grouped_enum_unit_variant(
+                cx,
+                receiver,
+                member,
+                |name| env.ty_of(name).is_some(),
+            ) {
+                return TExpr {
+                    ty: Type::Named(enum_type.clone()),
+                    kind: TExprKind::EnumLit {
+                        enum_type,
+                        variant,
+                        payload: TEnumPayload::Unit,
                     },
                 };
             }

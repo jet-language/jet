@@ -191,6 +191,12 @@ impl<'a> Checker<'a> {
         ty: &Type,
     ) -> bool {
         use crate::AST::{CtReport, CtValue};
+        // D-PATCH1: patch literals are intentionally partial source values.
+        // Their runtime carrier completes omitted fields, so a raw comptime
+        // struct would erase that shape and emit missing/mismatched fields.
+        if matches!(ty, Type::Named(name) if name.ends_with(".Patch")) {
+            return false;
+        }
         if !self.ct_value_is_emittable(value) {
             return false;
         }
@@ -703,6 +709,7 @@ impl<'a> Checker<'a> {
             {
                 // D-CTIO1: the path law already reported against the call.
             } else if b.is_comptime {
+                let is_patch_binding = matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
                 let globals = self.current_ct_globals();
                 // D-META-EFFECT1: pass core_imports so the interpreter can
                 // resolve effect-approved Core calls (e.g. `math.sqrt(x)`).
@@ -728,13 +735,16 @@ impl<'a> Checker<'a> {
                         if self.ct_value_fits_binding(&v, &final_ty) {
                             b.ct = Some(v.clone());
                         }
-                        self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                        if !is_patch_binding {
+                            self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                        }
                         // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
                         self.ct_embed_inputs.extend(inputs);
                     }
                     Err(d) => self.diags.push(d),
                 }
             } else if !b.mutable && !skip_ct_view_bake && !skip_ct_field_read_bake {
+                let is_patch_binding = matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `$` demands a compile-time answer.
@@ -777,7 +787,9 @@ impl<'a> Checker<'a> {
                     if self.ct_value_fits_binding(&v, &final_ty) {
                         b.ct = Some(v.clone());
                     }
-                    self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                    if !is_patch_binding {
+                        self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                    }
                 }
             }
             if b.name == "_" {

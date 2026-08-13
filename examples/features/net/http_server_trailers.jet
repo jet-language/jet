@@ -3,36 +3,41 @@ use core.http.server as http_server
 use core.net as net
 use core.tasks as tasks
 
+fn handle_trailers(req: HTTPRequest) => HTTPResponse ? HTTPError {
+    body :: req.body().text(1024) ?? panic("body")
+    // Request trailers are available only after Body reaches EOF.
+    trailers :: req.trailers() ?? panic("trailers")
+    response :: http_server.response(200, body)
+    return response.trailers(^trailers)
+}
+
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
-    mux.post("/", (req: HTTPRequest) => {
-        body :: req.body().text(1024) ?? panic("body")
-        // Request trailers are available only after Body reaches EOF.
-        trailers :: req.trailers() ?? panic("trailers")
-        response :: http_server.response(200, body)
-        return response.trailers(^trailers)
-    })
-    serving :: task http_server.serve_once_listener(listener, mux) ?? panic("serve")
-    stream :: net.tcp_connect(addr) ?? panic("connect")
-    request := "".bytes()
+    mux.post("/", (req: HTTPRequest) => handle_trailers(req))
+    wire_stream :: net.tcp_connect(addr) ?? panic("connect")
+    raw_request := "".bytes()
     loop line,
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
-        loop byte, line.bytes() { request.push(byte) }
-        request.push(13)
-        request.push(10)
+        loop byte, line.bytes() { raw_request.push(byte) }
+        raw_request.push(13)
+        raw_request.push(10)
     }
-    stream.write_all(request) ?? panic("write")
-    response := ""
+    raw_response := ""
+    chunk := ""
+    server_task :: task {
+        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    wire_stream.write_all(raw_request) ?? panic("write")
     loop _, 0..32 {
-        part :: stream.read_text(8192) ?? panic("read")
-        if part == "" { break }
-        response = "{response}{part}"
+        chunk = wire_stream.read_text(8192) ?? panic("read")
+        if chunk == "" { break }
+        raw_response = "{raw_response}{chunk}"
     }
-    print(response.contains("Trailer: X-Trace"))
-    print(response.contains("X-Trace: first"))
-    print(response.contains("x-trace: second"))
-    print(response.contains("body"))
-    serving.join() ?? panic("server failed")
+    print(raw_response.contains("Trailer: X-Trace"))
+    print(raw_response.contains("X-Trace: first"))
+    print(raw_response.contains("x-trace: second"))
+    print(raw_response.contains("body"))
+    server_task.join() ?? panic("server failed")
 }

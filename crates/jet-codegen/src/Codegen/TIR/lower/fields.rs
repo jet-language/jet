@@ -378,6 +378,12 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     let Type::Named(type_name) = recv_ty else {
         return None;
     };
+    if type_name == "VjpRun"
+        && !cx.type_names.contains(type_name)
+        && matches!(member, "value" | "pull" | "grads")
+    {
+        return Some(member.to_string());
+    }
     // User structs named Point/Rect/Size/MigrationStatus keep `__jet_<field>`
     // lowering (c133 M1 precedent; D-MIGRATE3=A extends it to `MigrationStatus`).
     let ui_name_collision = matches!(
@@ -402,6 +408,12 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         return None;
     }
     let known = match type_name.as_str() {
+        // `Err` and `GameFrame` are Prelude-owned carriers.  Their Rust
+        // fields stay plain even when a lowered expression has already been
+        // mapped to the carrier's Rust name.
+        n if n == Syntax::TYPE_ERR || n == "JetErr" => {
+            matches!(member, "message" | "code" | "cause")
+        }
         "ProcessResult" => matches!(
             member,
             "code" | "output" | "errors" | "success" | "signal" | "timed_out"
@@ -479,6 +491,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "HTTPRequest" | "HTTPResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
+        "HTTPShutdownReport" => {
+            matches!(member, "accepted" | "overloaded" | "completed" | "cancelled")
+        }
         "TLSPeerIdentity" => {
             matches!(member, "verified_server_name" | "leaf" | "certificate_chain")
         }
@@ -494,7 +509,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
                 | "issuer"
         ),
         "GameScene" => matches!(member, "assets" | "input"),
-        "GameFrame" => matches!(member, "index" | "input"),
+        "GameFrame" | "JetGameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
         "FieldError" => matches!(member, "path" | "reason"),
@@ -530,6 +545,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         _ => false,
     };
     if known {
+        if type_name == "HTTPShutdownReport" {
+            return Some(format!("user_{member}"));
+        }
         Some(member.to_string())
     } else {
         None
@@ -739,6 +757,16 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
         return match field {
             "assets" => Some(Type::Named("GameAssets".to_string())),
             "input" => Some(Type::Named("GameInputMap".to_string())),
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_ERR {
+        return match field {
+            "message" => Some(Type::String),
+            "code" => Some(Type::Option(Box::new(Type::String))),
+            "cause" => Some(Type::Option(Box::new(Type::Named(
+                Syntax::TYPE_ERR.to_string(),
+            )))),
             _ => None,
         };
     }

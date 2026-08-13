@@ -1809,7 +1809,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let mut binds = Vec::new();
             for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
                 let elem_rust = mangle(&e.name).to_string();
-                let field_rust = mangle(fname).to_string();
+                let field_rust = crate::Codegen::TIR::core_struct_field_rust_name(cx, &init.ty, fname)
+                    .unwrap_or_else(|| mangle(fname).to_string());
                 binds.push((elem_rust, field_rust));
                 env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
             }
@@ -2025,11 +2026,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 binding_ty.is_some_and(|ty| cx.type_contains_boxed_edge(ty));
             let skip_ct_typed_literal_bake = binding_ty
                 .is_some_and(|ty| cx.type_contains_typed_literal_edge(ty));
+            // Enum literals need the TIR enum-prefix resolver: a comptime enum
+            // serialization preserves the Jet dotted variant (`Fire.Burn`) but
+            // does not know the flat Rust variant spelling.
+            let skip_ct_enum_bake =
+                matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
             if b.ct.is_some()
                 && !skip_ct_list_bake
                 && !skip_ct_view_bake
                 && !skip_ct_boxed_bake
                 && !skip_ct_typed_literal_bake
+                && !skip_ct_enum_bake
             {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init_ty = b
@@ -2259,6 +2266,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             };
             let slot = if is_resource {
                 TLocal::user(&binding_name).through_ref()
+            } else if kw == "let mut" {
+                TLocal::user(&binding_name).as_mutable()
             } else {
                 TLocal::user(&binding_name)
             };

@@ -37,6 +37,21 @@ struct GoldenEnv {
     update_expected: bool,
 }
 
+/// Keep golden's compiler and embedded-runtime caches private to this test
+/// process. The normal caches are intentionally shared by `jet` invocations,
+/// but parallel test binaries can delete or republish artifacts while a
+/// release example is linking them. Golden examples must prove generated code,
+/// not depend on another suite's cache timing.
+struct GoldenRuntimeCache {
+    path: PathBuf,
+}
+
+impl Drop for GoldenRuntimeCache {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
     let stderr = String::from_utf8_lossy(stderr);
     stderr.contains("symbol lookup error")
@@ -81,12 +96,28 @@ fn examples_compile_and_run() {
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
     // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example links `-lgtk-4`
     // via `pkg-config gtk4`. Only build+run it where gtk4 dev headers exist
-    // (the nix dev shell); elsewhere the front-end check still runs.
+    // (the nix dev shell).
     let have_gtk = Command::new("pkg-config")
         .args(["--exists", "gtk4"])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    let runtime_cache = std::env::temp_dir().join(format!(
+        "jet-golden-runtime-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos()
+    ));
+    let build_cache = runtime_cache.join("build-cache");
+    let ffi_cache = runtime_cache.join("ffi");
+    std::env::set_var("JET_CACHE_DIR", &build_cache);
+    std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
+    std::env::set_var("JET_RUNTIME_CACHE_DIR", &runtime_cache);
+    let _runtime_cache = GoldenRuntimeCache {
+        path: runtime_cache,
+    };
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -235,6 +266,13 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
+    // The source itself names `c.gtk4`, so the front end cannot inspect this
+    // example without the same capability required by its native build.
+    if entry.stem == "ui/ui_native_linux" && !env.have_gtk {
+        eprintln!("note: skipping examples/features/{}.jet golden (need gtk4)", entry.stem);
+        return;
+    }
+
     let src = fs::read_to_string(&entry.path).unwrap();
     let stem = entry.stem.as_str();
     let uses_ffi_bridge = matches!(
@@ -292,7 +330,10 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         || stem == "lowlevel/inline_c"
         || stem == "lowlevel/inline_asm"
         || stem == "lowlevel/unsafe_obligations"
+        || stem == "lowlevel/mmio_board_write"
         || stem == "memory/rawptr"
+        || stem == "memory/pin"
+        || stem == "io/os_process_control"
         || stem == "effects/single_use_discard"
         || stem == "memory/uninit"
         || stem == "crypto/crypto_migration"
@@ -530,6 +571,30 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         eprintln!(
             "note: skipping examples/features/{} golden (need provisioned compiler toolchain)",
             entry.stem
+        );
+        return;
+    }
+    // These examples exercise the real foreign-language inspection path. The
+    // source fixture is still valid when a host does not provision that
+    // language tool, so use the same capability-gated skip shape as the GTK
+    // and raylib examples instead of turning an environmental absence into a
+    // golden failure.
+    let tool = match language {
+        "go" => "go",
+        "fortran" => "gfortran",
+        "java" => "javac",
+        "cs" => "dotnet",
+        _ => unreachable!("binder language has no provisioned tool"),
+    };
+    let have_tool = Command::new(tool)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !have_tool {
+        eprintln!(
+            "note: skipping examples/features/{} golden (need provisioned {})",
+            entry.stem, tool
         );
         return;
     }

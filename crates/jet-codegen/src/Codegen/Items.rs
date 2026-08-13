@@ -615,12 +615,14 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
     for f in s.fields.iter().filter(|f| f.computed.is_none()) {
         let m = mangle(&f.name);
         apply_fields.push(format!(
-            "{m}: __p.{m}.clone().unwrap_or_else(|| self.{m}.clone())"
+            "{m}: __p.{m}.clone().unwrap_or_else(|_| self.{m}.clone())"
         ));
         diff_fields.push(format!(
-            "{m}: if __new.{m} != __old.{m} {{ Some(__new.{m}) }} else {{ None }}"
+            "{m}: if __new.{m} != __old.{m} {{ Ok(__new.{m}) }} else {{ Err(JetAbsent) }}"
         ));
-        merge_fields.push(format!("{m}: __other.{m}.or_else(|| self.{m}.clone())"));
+        merge_fields.push(format!(
+            "{m}: __other.{m}.clone().or_else(|_| self.{m}.clone())"
+        ));
     }
 
     out.push_str(&format!("impl {base_rust} {{\n"));

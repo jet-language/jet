@@ -115,7 +115,7 @@ impl PartialEq for JetTensor {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum JetComputeError {
+pub enum JetComputeError {
     InvalidShape(String),
     RankMismatch(String),
     OutOfBounds(String),
@@ -204,7 +204,7 @@ enum JetComputeTransformResult {
 
 struct JetComputeVjpRun<R> {
     pub value: JetTensor,
-    pub pull: std::rc::Rc<dyn Fn(JetTensor) -> R>,
+    pub pull: std::rc::Rc<dyn Fn(&JetTensor) -> R>,
     pub grads: std::rc::Rc<dyn Fn() -> R>,
 }
 
@@ -2710,7 +2710,9 @@ fn jet_compute_reverse(
         };
         *slot = Some(jet_compute_untracked(seed));
     }
-    for index in (0..nodes.len()).rev() {
+    // The input nodes are leaves. Keep their accumulated cotangents in place
+    // for the final result; only reverse-propagate through operation nodes.
+    for index in (inputs.len()..nodes.len()).rev() {
         let Some(cot) = cotangents[index].take() else {
             continue;
         };

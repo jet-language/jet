@@ -447,6 +447,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if member == "clone" {
                 return false;
             }
+            if crate::Codegen::TIR::grouped_enum_unit_variant(
+                cx,
+                receiver,
+                member,
+                |name| locals.contains(name),
+            )
+            .is_some()
+            {
+                return true;
+            }
             // c109 Phase 4: a *unit* enum literal reaches codegen as a `Field` whose
             // receiver is the enum-name ident (sema only re-types it; it does NOT
             // rewrite the node — only payload literals become `Expr::EnumLit`). The

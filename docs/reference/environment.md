@@ -21,6 +21,7 @@ one exists instead of adding another spelling for the same job.
 | --- | --- | --- |
 | `JET_BENCH_VERBOSE` | `1` | Prints per-sample benchmark output. |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
+| `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for the `jet env hook` auto-activation hook: set it to suppress automatic activation in the current shell and drop any env the hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
 | `JET_FUZZ_ITERATIONS` | non-negative integer | Sets the generated fuzz-case limit. |

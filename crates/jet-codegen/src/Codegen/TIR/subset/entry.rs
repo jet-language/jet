@@ -68,7 +68,7 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // that is neither a local/param binding nor a builtin is a program-level
     // reference (const or fn-value), which the subset excludes.
     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
+    f.body.iter().all(|statement| stmt_in_subset(statement, cx, &mut locals))
 }
 
 /// c109: is a `#Test` block body fully inside the TIR subset? A test body is a bare

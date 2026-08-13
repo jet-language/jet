@@ -97,30 +97,43 @@ pub(in super::super) fn expand_builtin_derive_items(
             continue;
         };
         for item in generated.drain(..) {
-            let Item::Impl(implementation) = item else {
-                continue;
-            };
-            if has_trait_impl(items, &type_name, implementation.trait_name.as_deref()) {
-                continue;
-            }
-            if attach_to_type {
-                if let Some(target) = items.iter_mut().find_map(|item| match item {
-                    Item::Struct(s) if s.name == type_name => Some(&mut s.trait_impls),
-                    Item::Enum(e) if e.name == type_name => Some(&mut e.trait_impls),
-                    _ => None,
-                }) {
-                    let Some(trait_name) = implementation.trait_name else {
-                        continue;
-                    };
-                    target.push(crate::AST::TraitImplBlock {
-                        trait_name,
-                        trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
-                        methods: implementation.methods,
-                        assoc_type_impls: implementation.assoc_type_impls,
-                    });
+            match item {
+                Item::Func(function) => {
+                    // Recursive enum equality uses a generated free helper so its
+                    // structural `==` calls do not recurse through `equal` itself.
+                    // Keep that helper in the ordinary item table; dropping it here
+                    // would leave the attached implementation calling an unknown name.
+                    if !items.iter().any(|item| {
+                        matches!(item, Item::Func(existing) if existing.name == function.name)
+                    }) {
+                        items.push(Item::Func(function));
+                    }
                 }
-            } else {
-                items.push(Item::Impl(implementation));
+                Item::Impl(implementation) => {
+                    if has_trait_impl(items, &type_name, implementation.trait_name.as_deref()) {
+                        continue;
+                    }
+                    if attach_to_type {
+                        if let Some(target) = items.iter_mut().find_map(|item| match item {
+                            Item::Struct(s) if s.name == type_name => Some(&mut s.trait_impls),
+                            Item::Enum(e) if e.name == type_name => Some(&mut e.trait_impls),
+                            _ => None,
+                        }) {
+                            let Some(trait_name) = implementation.trait_name else {
+                                continue;
+                            };
+                            target.push(crate::AST::TraitImplBlock {
+                                trait_name,
+                                trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
+                                methods: implementation.methods,
+                                assoc_type_impls: implementation.assoc_type_impls,
+                            });
+                        }
+                    } else {
+                        items.push(Item::Impl(implementation));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -210,7 +223,7 @@ fn derive_source_for_fields(
         ));
         for field in fields {
             source.push_str(&format!(
-                "if self.{field} < rhs.{field} {{ return Ordering.Less }}\nif self.{field} > rhs.{field} {{ return Ordering.Greater }}\n"
+                "if self.{field} < rhs.{field} {{ return Ordering.Less }} else {{}}\nif self.{field} > rhs.{field} {{ return Ordering.Greater }} else {{}}\n"
             ));
         }
         source.push_str("return Ordering.Equal\n}\n}\n");
@@ -226,33 +239,80 @@ fn derive_source_for_enum(
 ) -> String {
     let mut source = String::new();
     if equatable {
-        source.push_str(&format!(
-            "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\n"
-        ));
-        append_enum_dispatch(&mut source, variants, |source, left, right, _, _, same| {
-            if same {
-                source.push_str(&format!("return {}\n", equality_expression(left, right)));
-            } else {
-                source.push_str("return false\n");
+        let recursive = variants.iter().any(|variant| match &variant.payload {
+            crate::AST::VariantPayload::Unit => false,
+            crate::AST::VariantPayload::Single(ty, _) => {
+                matches!(ty, crate::AST::Type::Named(name) if name == type_name)
             }
+            crate::AST::VariantPayload::Named(fields) => fields.iter().any(|field| {
+                matches!(&field.ty, crate::AST::Type::Named(name) if name == type_name)
+            }),
         });
-        source.push_str("return false\n}\n}\n");
+        if recursive {
+            // A recursive payload must be compared through a helper outside the
+            // Equatable hook.  The ordinary `==` spelling is deliberately rejected
+            // inside `equal` because it dispatches back to this same hook; the
+            // helper keeps the structural recursion while leaving the hook body a
+            // plain call.
+            let helper = format!("_jet_derive_equal_{type_name}");
+            source.push_str(&format!(
+                "fn {helper}(left: {type_name}, right: {type_name}) => Bool {{\n"
+            ));
+            append_enum_dispatch(
+                &mut source,
+                variants,
+                "left",
+                "right",
+                |source, left, right, _, _, same| {
+                    if same {
+                        source.push_str(&format!("return {}\n", equality_expression(left, right)));
+                    } else {
+                        source.push_str("return false\n");
+                    }
+                },
+            );
+            source.push_str(&format!(
+                "return false\n}}\nimpl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn {helper}(self, rhs)\n}}\n}}\n"
+            ));
+        } else {
+            source.push_str(&format!(
+                "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\n"
+            ));
+            append_enum_dispatch(
+                &mut source,
+                variants,
+                "self",
+                "rhs",
+                |source, left, right, _, _, same| {
+                    if same {
+                        source.push_str(&format!("return {}\n", equality_expression(left, right)));
+                    } else {
+                        source.push_str("return false\n");
+                    }
+                },
+            );
+            source.push_str("return false\n}\n}\n");
+        }
     }
     if comparable {
         source.push_str(&format!(
             "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\n"
         ));
-        append_enum_dispatch(&mut source, variants, |source, left, right, left_index, right_index, same| {
-            if same {
-                append_comparison(source, left, right);
-            } else if left_index < right_index {
-                source.push_str(
-                    "return Ordering.Less\n"
-                );
-            } else {
-                source.push_str("return Ordering.Greater\n");
-            }
-        });
+        append_enum_dispatch(
+            &mut source,
+            variants,
+            "self",
+            "rhs",
+            |source, left, right, left_index, right_index, same| {
+                if same {
+                    append_comparison(source, left, right);
+                } else if left_index < right_index {
+                    source.push_str("return Ordering.Less\n");
+                } else {
+                    source.push_str("return Ordering.Greater\n");
+                }
+            },
+        );
         source.push_str("return Ordering.Equal\n}\n}\n");
     }
     source
@@ -261,15 +321,17 @@ fn derive_source_for_enum(
 fn append_enum_dispatch(
     source: &mut String,
     variants: &[crate::AST::Variant],
+    left_subject: &str,
+    right_subject: &str,
     mut body: impl FnMut(&mut String, &[String], &[String], usize, usize, bool),
 ) {
-    source.push_str("if self == {\n");
+    source.push_str(&format!("if {left_subject} == {{\n"));
     for (left_index, left_variant) in variants.iter().enumerate() {
         let left = payload_bindings(&left_variant.payload, "left");
         source.push_str(".");
         source.push_str(&left_variant.name);
         append_pattern_slots(source, &left);
-        source.push_str(" -> {\nif rhs == {\n");
+        source.push_str(&format!(" -> {{\nif {right_subject} == {{\n"));
         for (right_index, right_variant) in variants.iter().enumerate() {
             let right = payload_bindings(&right_variant.payload, "right");
             source.push_str(".");
@@ -331,7 +393,7 @@ fn equality_expression(left: &[String], right: &[String]) -> String {
 fn append_comparison(source: &mut String, left: &[String], right: &[String]) {
     for (left, right) in left.iter().zip(right) {
         source.push_str(&format!(
-            "if {left} < {right} {{ return Ordering.Less }}\nif {left} > {right} {{ return Ordering.Greater }}\n"
+            "if {left} < {right} {{ return Ordering.Less }} else {{}}\nif {left} > {right} {{ return Ordering.Greater }} else {{}}\n"
         ));
     }
     source.push_str("return Ordering.Equal\n");
@@ -356,7 +418,7 @@ fn derive_source_for_distinct(
     );
     if comparable {
         source.push_str(&format!(
-            "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\nif self.raw() < rhs.raw() {{ return Ordering.Less }}\nif self.raw() > rhs.raw() {{ return Ordering.Greater }}\nreturn Ordering.Equal\n}}\n}}\n"
+            "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\nif self.raw() < rhs.raw() {{ return Ordering.Less }} else {{}}\nif self.raw() > rhs.raw() {{ return Ordering.Greater }} else {{}}\nreturn Ordering.Equal\n}}\n}}\n"
         ));
     }
     source

@@ -1105,22 +1105,22 @@
         }
 
         /// D-POOLID-API1=A: removes the slot `id` names, bumping its generation
-        /// so any other copy of `id` becomes stale — mirrors `Map.remove`'s
-        /// `Option<T>` convention (a miss returns `None`, not a panic).
-        pub fn remove(&mut self, id: JetId<T>) -> Option<T> {
+        /// so any other copy of `id` becomes stale — mirrors the Jet optional
+        /// carrier convention (a miss returns an absent outcome, not a panic).
+        pub fn remove(&mut self, id: JetId<T>) -> JetOutcome<T, JetAbsent> {
             let idx = id.index as usize;
             let occupied = matches!(
                 self.slots.get(idx),
                 Some(JetPoolSlot::Occupied(g, _)) if *g == id.generation
             );
             if !occupied {
-                return None;
+                return Err(JetAbsent);
             }
             let next_gen = id.generation.wrapping_add(1);
             let old = std::mem::replace(&mut self.slots[idx], JetPoolSlot::Vacant(next_gen));
             self.free.push(idx);
             match old {
-                JetPoolSlot::Occupied(_, v) => Some(v),
+                JetPoolSlot::Occupied(_, v) => Ok(v),
                 JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
             }
         }

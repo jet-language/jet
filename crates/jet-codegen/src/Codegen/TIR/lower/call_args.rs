@@ -66,6 +66,25 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
     }
 }
 
+/// Compare element types at the fixed-list to growable-list boundary.
+///
+/// `Int` is the canonical signed 64-bit integer. Keep this comparison
+/// structural: a narrower or unsigned integer must never be widened without
+/// an explicit conversion.
+pub(crate) fn fixed_list_elem_compatible(actual: &Type, want: &Type) -> bool {
+    fn canonical(ty: &Type) -> Type {
+        match ty.erased_carrier() {
+            Type::IntN {
+                signed: true,
+                bits: 64,
+            } => Type::Int,
+            ty => ty,
+        }
+    }
+
+    canonical(actual) == canonical(want)
+}
+
 /// c109 Phase 13: the type of a lambda's body (its return), used for a `spawn`ed
 /// closure's `Task<T>` element type. Block bodies use the tail expression/return
 /// (same rule as sema), not `Unit`.
@@ -233,6 +252,34 @@ pub(crate) fn lower_one_call_arg(
         None
     }
     .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
+    // A worklist cache may have lowered a local identifier before an earlier
+    // binding's refined type was installed in the sequential environment.
+    // Refresh local reads from that environment before resolving boundary
+    // conversions such as `[T#N]` to `[T]`.
+    let value = match (&a.expr, value.kind) {
+        (Expr::Ident(name, _), TExprKind::Local(local)) => env
+            .ty_of(name)
+            .map(|ty| TExpr {
+                ty,
+                kind: TExprKind::Local(local.clone()),
+            })
+            .unwrap_or(TExpr {
+                ty: value.ty,
+                kind: TExprKind::Local(local),
+            }),
+        (_, kind) => TExpr {
+            ty: value.ty,
+            kind,
+        },
+    };
+    // Decide this before `preserve_typed_list_shape` retags the local read to
+    // the callee's growable-list type. The source expression is still the
+    // fixed array at this point.
+    let widen_to_vec = matches!(
+        (&value.ty, conv.as_ref().map(|(_, t)| t)),
+        (Type::FixedList { elem: arg_elem, .. }, Some(Type::List(param_elem)))
+            if fixed_list_elem_compatible(arg_elem, param_elem)
+    );
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
     let value = match (&conv, value) {
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
@@ -271,13 +318,6 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => None,
     };
-    // D-FIXARR1: when a [T#N] (Rust [T; N]) is passed where a [T] (Vec<T>) is expected,
-    // widen by copying into a growable list (`.to_vec()`).
-    let widen_to_vec = matches!(
-        (&value.ty, conv.as_ref().map(|(_, t)| t)),
-        (Type::FixedList { elem: arg_elem, .. }, Some(Type::List(param_elem)))
-            if arg_elem == param_elem
-    );
     // D-UNIONTYPE1=A: member → union inject at the call boundary.
     let widen_to_union = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
         (got, Some(want @ Type::Union(members))) if members.iter().any(|m| m == got) => {

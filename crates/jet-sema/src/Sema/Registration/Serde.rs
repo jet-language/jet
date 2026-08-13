@@ -53,12 +53,12 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                 let key = serde_source_field_key(&s.serde_markers, f);
                 if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN) {
                     source.push_str(&format!(
-                        "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop (key, value), entries {{ out[key] = value }} }}\n",
+                        "nested :: self.{}.encode()\nif nested == {{ .Object(entries) -> {{ loop (key, value), entries {{ out[key] = value }} }} else -> {{}} }}\n",
                         f.name
                     ));
                 } else if matches!(f.ty, Type::Option(_)) {
                     source.push_str(&format!(
-                        "if self.{} == Val(value) {{ out[{:?}] = (~value).encode() }}\n",
+                        "if (~self.{}) == {{ .Val(value) -> {{ out[{:?}] = (~value).encode() }} else -> {{}} }}\n",
                         f.name, key
                     ));
                 } else {
@@ -83,7 +83,7 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             // optional/default fallbacks turn a scalar/array root into a
             // successfully decoded record, or hide the root shape error.
             source.push_str(
-                "jet_serde_is_object := false\nif (~tree) == .Object(jet_serde_root_entries) { jet_serde_is_object = true }\nif !jet_serde_is_object { return Err([FieldError.{ path: \"\", reason: \"expected an object\" }]) }\n",
+                "jet_serde_is_object := false\nif (~tree) == { .Object(jet_serde_root_entries) -> { jet_serde_is_object = true } else -> {} }\nif { !jet_serde_is_object -> { return Err([FieldError.{ path: \"\", reason: \"expected an object\" }]) } else -> {} }\n",
             );
             if deny_unknown && !has_flatten {
                 let keys = s.fields.iter()
@@ -92,7 +92,7 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                     .collect::<Vec<_>>()
                     .join(", ");
                 source.push_str(&format!(
-                    "if (~tree) == .Object(entries) {{ loop (key, value), entries {{ if ![{keys}].contains(key) {{ jet_serde_errors.push(FieldError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
+                    "if (~tree) == {{ .Object(entries) -> {{ loop (key, value), entries {{ if {{ ![{keys}].contains(key) -> {{ jet_serde_errors.push(FieldError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} else -> {{}} }} }} }} else -> {{}} }}\n"
                 ));
             }
             let mut field_values = Vec::new();
@@ -143,34 +143,34 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                 field_values.push(format!("{}: {}", f.name, value));
             }
             if !required_presence.is_empty() {
-                source.push_str("if (~tree) == .Object(jet_serde_presence_entries) {\n");
+                source.push_str("if (~tree) == { .Object(jet_serde_presence_entries) -> {\n");
                 for (missing_var, _) in &required_presence {
                     source.push_str(&format!("{missing_var} = true\n"));
                 }
                 source.push_str("loop (jet_serde_presence_key, jet_serde_presence_value), jet_serde_presence_entries {\n");
                 for (missing_var, key) in &required_presence {
                     source.push_str(&format!(
-                        "if jet_serde_presence_key == {key:?} {{ {missing_var} = false }}\n"
+                        "if {{ jet_serde_presence_key == {key:?} -> {{ {missing_var} = false }} else -> {{}} }}\n"
                     ));
                 }
-                source.push_str("}\n}\n");
+                source.push_str("}\n} else -> {} }\n");
             }
             for (index, (result, _, missing_var, key)) in decoded_results.iter().enumerate() {
                 source.push_str(&format!(
-                    "if (~{result}) == .Err(jet_serde_field_errors_{index}) {{ {} }}\n",
+                    "if (~{result}) == {{ .Err(jet_serde_field_errors_{index}) -> {{ {} }} else -> {{}} }}\n",
                     if let (Some(missing_var), Some(key)) = (missing_var, key) {
                         format!(
-                            "if {missing_var} {{ jet_serde_errors.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else {{ loop jet_serde_field_error_{index}, jet_serde_field_errors_{index} {{ jet_serde_errors.push(jet_serde_field_error_{index}) }} }}"
+                            "if {{ {missing_var} -> {{ jet_serde_errors.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else -> {{ loop jet_serde_field_error_{index}, jet_serde_field_errors_{index} {{ jet_serde_errors.push(jet_serde_field_error_{index}) }} }} }}"
                         )
                     } else {
                         format!("loop jet_serde_field_error_{index}, jet_serde_field_errors_{index} {{ jet_serde_errors.push(jet_serde_field_error_{index}) }}")
                     }
                 ));
             }
-            source.push_str("if jet_serde_errors.is_empty() {\n");
+            source.push_str("if { jet_serde_errors.is_empty() -> {\n");
             for (index, (result, _, _, _)) in decoded_results.iter().enumerate() {
                 source.push_str(&format!(
-                    "if (~{result}) == .Ok(jet_serde_decoded_value_{index}) {{\n"
+                    "if (~{result}) == {{ .Ok(jet_serde_decoded_value_{index}) -> {{\n"
                 ));
             }
             source.push_str(&format!(
@@ -187,9 +187,9 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                 source.push_str(&format!("return {target}.validate(decoded)\n"));
             }
             for _ in &decoded_results {
-                source.push_str("}\n");
+                source.push_str("} else -> {} }\n");
             }
-            source.push_str("}\nreturn Err(jet_serde_errors)\n");
+            source.push_str("} else -> {} }\nreturn Err(jet_serde_errors)\n");
             source.push_str("}\n}\n");
         }
         let trigger_span = s.derives.iter()
@@ -282,7 +282,7 @@ fn expand_builtin_enum_serde(
             };
             source.push_str(&format!("{pattern} -> {{ return {value} }}\n"));
         }
-        source.push_str("}\n}\n}\n");
+        source.push_str("else -> {}\n}\n}\n}\n");
     }
     if dec {
         source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n", e.name));
@@ -307,7 +307,7 @@ fn expand_builtin_enum_serde(
                     None
                 };
                 source.push_str(&format!(
-                    "if tag_value == {wire:?} {{ {} }}\n",
+                "if {{ tag_value == {wire:?} -> {{ {} }} else -> {{}} }}\n",
                     serde_enum_decode_return(&target, v, payload_source, single_segment)
                 ));
             }
@@ -317,7 +317,7 @@ fn expand_builtin_enum_serde(
                 match &v.payload {
                     crate::AST::VariantPayload::Unit => {
                         let wire = serde_enum_variant_key(v);
-                        source.push_str(&format!("if (~tree) == .Text(variant_name) {{ if variant_name == {wire:?} {{ return Ok({target}.{}) }} }}\n", v.name));
+                        source.push_str(&format!("if (~tree) == {{ .Text(variant_name) -> {{ if {{ variant_name == {wire:?} -> {{ return Ok({target}.{}) }} else -> {{}} }} }} else -> {{}} }}\n", v.name));
                     }
                     _ => {
                         let wire = serde_enum_variant_key(v);
@@ -328,7 +328,7 @@ fn expand_builtin_enum_serde(
                         match &v.payload {
                             crate::AST::VariantPayload::Single(t, _) => {
                                 let decoded = format!("decoded_{variant_index}");
-                                object_arms.push_str(&format!("{decoded} := FieldError.under({wire:?}, {candidate}.decode<{}>())\nif {decoded} == .Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
+                                object_arms.push_str(&format!("{decoded} := FieldError.under({wire:?}, {candidate}.decode<{}>())\nif {decoded} == {{ .Ok(decoded_value) -> {{ return Ok({target}.{}(decoded_value)) }} else -> {{}} }}\n", serde_type_source(t), v.name));
                             }
                             crate::AST::VariantPayload::Named(_) => {
                                 object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate, None)));
@@ -535,7 +535,7 @@ fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
 }
 
 fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
-    if guarded { format!("if {src}.decode<{}>() == .Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src, None)) }
+    if guarded { format!("if {src}.decode<{}>() == {{ .Ok(v0) -> {{ {} }} else -> {{}} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src, None)) }
     else { serde_enum_decode_return(target, v, src, None) }
 }
 
@@ -566,7 +566,7 @@ fn serde_enum_decode_return(
             values.push((field.name.clone(), value));
             required_presence.push((missing, field.name.clone()));
         }
-        out.push_str(&format!("if (~{src}) == .Object(jet_serde_enum_{}_presence) {{\n", v.name));
+        out.push_str(&format!("if (~{src}) == {{ .Object(jet_serde_enum_{}_presence) -> {{\n", v.name));
         for (missing, _) in &required_presence {
             out.push_str(&format!("{missing} = true\n"));
         }
@@ -574,21 +574,21 @@ fn serde_enum_decode_return(
         out.push_str(&format!("{}_presence {{\n", v.name));
         for (missing, key) in &required_presence {
             out.push_str(&format!(
-                "if jet_serde_enum_presence_key == {key:?} {{ {missing} = false }}\n"
+                "if {{ jet_serde_enum_presence_key == {key:?} -> {{ {missing} = false }} else -> {{}} }}\n"
             ));
         }
-        out.push_str("}\n}\n");
+        out.push_str("}\n} else -> {} }\n");
         for (index, result) in results.iter().enumerate() {
             let (missing, key) = &required_presence[index];
             out.push_str(&format!(
-                "if (~{result}) == .Err(jet_serde_enum_{}_errors_{index}) {{ if {missing} {{ {errors}.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else {{ loop jet_serde_enum_{}_error_{index}, jet_serde_enum_{}_errors_{index} {{ {errors}.push(jet_serde_enum_{}_error_{index}) }} }} }}\n",
+                "if (~{result}) == {{ .Err(jet_serde_enum_{}_errors_{index}) -> {{ if {{ {missing} -> {{ {errors}.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else -> {{ loop jet_serde_enum_{}_error_{index}, jet_serde_enum_{}_errors_{index} {{ {errors}.push(jet_serde_enum_{}_error_{index}) }} }} }} }} else -> {{}} }}\n",
                 v.name, v.name, v.name, v.name,
             ));
         }
-        out.push_str(&format!("if {errors}.is_empty() {{\n"));
+        out.push_str(&format!("if {{ {errors}.is_empty() -> {{\n"));
         for (index, result) in results.iter().enumerate() {
             out.push_str(&format!(
-                "if (~{result}) == .Ok(jet_serde_enum_{}_value_{}) {{\n",
+                "if (~{result}) == {{ .Ok(jet_serde_enum_{}_value_{}) -> {{\n",
                 v.name, fields[index].name,
             ));
         }
@@ -602,9 +602,9 @@ fn serde_enum_decode_return(
             v.name, fields,
         ));
         for _ in &results {
-            out.push_str("}\n");
+            out.push_str("} else -> {} }\n");
         }
-        out.push_str("}\n");
+        out.push_str("} else -> {} }\n");
         out
     } else {
         let cons = serde_enum_decode_constructor(target, v, src, single_segment);
@@ -680,13 +680,13 @@ fn serde_ordered_object_source(
         let key = serde_source_field_key(container, field);
         if matches!(field.ty, Type::Option(_)) {
             let value = format!("serde_value_{index}");
-            out.push_str(&format!("if self.{} == Val({value}) {{\n", field.name));
+            out.push_str(&format!("if (~self.{}) == {{\n.Val({value}) -> {{\n", field.name));
             pairs.push(format!("{key:?}: (~{value}).encode()"));
             emit(container, fields, index + 1, pairs, out);
             pairs.pop();
-            out.push_str("} else {\n");
+            out.push_str("}\nelse -> {\n");
             emit(container, fields, index + 1, pairs, out);
-            out.push_str("}\n");
+            out.push_str("}\n}\n");
         } else {
             pairs.push(format!("{key:?}: self.{}.encode()", field.name));
             emit(container, fields, index + 1, pairs, out);
