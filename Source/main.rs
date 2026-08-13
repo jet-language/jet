@@ -48,7 +48,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_job_entry, run_jobs, run_test_opts,
+    run_fuzz, run_new, run_jobs, run_test_opts,
     run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
@@ -1239,30 +1239,6 @@ fn main() {
     } else {
         profile_flag
     };
-    // D-JPK-TASKRUN1: `jet run --job <name>` / `--job=<name>`.
-    let job_name: Option<String> = {
-        let mut found = None;
-        let mut i = 0;
-        while i < jet_argv.len() {
-            let a = &jet_argv[i];
-            if let Some(value) = a.strip_prefix("--job=") {
-                found = Some(value.to_string());
-                break;
-            }
-            if a == "--job" {
-                found = Some(
-                    jet_argv
-                        .get(i + 1)
-                        .filter(|value| !value.starts_with('-'))
-                        .cloned()
-                        .unwrap_or_default(),
-                );
-                break;
-            }
-            i += 1;
-        }
-        found
-    };
     let output_name: Option<String> = {
         let mut found = None;
         let mut i = 0;
@@ -1309,7 +1285,7 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" {
+            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" {
                 skip_next = true;
                 continue;
             }
@@ -2587,14 +2563,6 @@ fn main() {
                 target.to_string()
             };
             if cmd == "run" {
-                if let Some(job) = job_name.as_deref() {
-                    if job.is_empty() {
-                        crate::cli_error!(@fix "E2104", "`--job` needs a job name", format!("write `jet run --job <name> <file.{}>`", jet::Syntax::FILE_EXT));
-                        exit(ExitCodes::USAGE);
-                    }
-                    run_job_entry(&resolved, job, &program_args, mode, &setting_overrides);
-                    return;
-                }
                 // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
                 // aware engine; `jet dev` keeps the richer swap/overlay surface.
                 if run_wants_watch(&raw) {
