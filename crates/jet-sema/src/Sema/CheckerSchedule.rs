@@ -54,8 +54,8 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
             "write a minute between `00` and `59`, e.g. `#Every(\"03:00\")`.",
         ),
         EveryScheduleError::DynamicValue => (
-            "a task schedule must be known at compile time",
-            "the marker argument has the right type, but task discovery needs one fixed cadence.",
+            "a job schedule must be known at compile time",
+            "the marker argument has the right type, but job discovery needs one fixed cadence.",
             "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.",
         ),
     };
@@ -63,11 +63,11 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
 }
 
 /// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1).
-fn e0928_reserved_task_name(name: &str, span: Span) -> Diagnostic {
+fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
     let reserved = Syntax::TASK_RESERVED_LIFECYCLE.join(", ");
     Diagnostic::error(
         "E0928",
-        format!("`{name}` is a built-in lifecycle verb, not a task name"),
+        format!("`{name}` is a built-in lifecycle verb, not a job name"),
         format!(
             "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
              a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1)."
@@ -82,13 +82,13 @@ fn e0928_reserved_task_name(name: &str, span: Span) -> Diagnostic {
 
 /// D-JPK-TASKRUN1: reject `#Job fn run|dev|build|test`. Called alongside the
 /// `#Every` value check during registration.
-pub(crate) fn check_task_marker(f: &Func) -> Vec<Diagnostic> {
+pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_task {
         return Vec::new();
     }
     if Syntax::TASK_RESERVED_LIFECYCLE.contains(&f.name.as_str()) {
         let span = f.task_span.unwrap_or(f.name_span);
-        return vec![e0928_reserved_task_name(&f.name, span)];
+        return vec![e0928_reserved_job_name(&f.name, span)];
     }
     Vec::new()
 }
@@ -99,7 +99,7 @@ pub(crate) fn check_task_marker(f: &Func) -> Vec<Diagnostic> {
 /// handled by the parser, so this is the value check alone. Also runs the
 /// D-JPK-TASKRUN1 reserved-name check for `#Job`.
 pub(crate) fn check_every_marker(f: &Func) -> Vec<Diagnostic> {
-    let mut diags = check_task_marker(f);
+    let mut diags = check_job_marker(f);
     let Some(every) = &f.every else {
         return diags;
     };

@@ -309,9 +309,9 @@ fn report_collide(theme: &Theme, bin: &str, task: &str, path: &Path, raw: &str) 
         .unwrap_or_else(|| path.display().to_string());
     theme.error_coded(
         Syntax::TOOL_DIAG_COLLIDE,
-        &format!("`{bin}` is already a task in {rel}"),
+        &format!("`{bin}` is already a job in {rel}"),
         &format!(
-            "the project task `{task}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE / D-JPK-TOOLRUN1)."
+            "the project job `{task}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE / D-JPK-TOOLRUN1)."
         ),
         &format!(
             "install under a different bin name  ->  jetpack tool install {raw} {} <other>\n     or just run it once                  ->  jetpack tool run {raw}",

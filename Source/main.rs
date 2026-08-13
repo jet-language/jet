@@ -44,7 +44,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_task_entry, run_tasks, run_test, run_test_opts,
+    run_fuzz, run_new, run_job_entry, run_jobs, run_test, run_test_opts,
     run_web_app_dev_entry, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
@@ -473,7 +473,7 @@ usage:
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
   {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
-  {bin} tasks [-p member]           list project `#Job` functions
+  {bin} jobs  [-p member]           list project `#Job` functions
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
@@ -551,6 +551,7 @@ flags:
   --sbom                       with build: write an SPDX SBOM beside the binary
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
+  --job <name>                 with run: run a named `#Job fn`
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
   --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
   --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
@@ -767,11 +768,11 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
             skip_next = false;
             continue;
         }
-        if matches!(arg.as_str(), "-p" | "--task" | "--output" | "--gate") {
+        if matches!(arg.as_str(), "-p" | "--job" | "--output" | "--gate") {
             skip_next = true;
             continue;
         }
-        if arg.starts_with("--task=") || arg.starts_with("--output=") {
+        if arg.starts_with("--job=") || arg.starts_with("--output=") {
             continue;
         }
         if arg == "-" || !arg.starts_with('-') {
@@ -1251,17 +1252,17 @@ fn main() {
     } else {
         profile_flag
     };
-    // D-JPK-TASKRUN1: `jet run --task <name>` / `--task=<name>`.
-    let task_name: Option<String> = {
+    // D-JPK-TASKRUN1: `jet run --job <name>` / `--job=<name>`.
+    let job_name: Option<String> = {
         let mut found = None;
         let mut i = 0;
         while i < jet_argv.len() {
             let a = &jet_argv[i];
-            if let Some(v) = a.strip_prefix("--task=") {
+            if let Some(v) = a.strip_prefix("--job=") {
                 found = Some(v.to_string());
                 break;
             }
-            if a == "--task" {
+            if a == "--job" {
                 if let Some(v) = jet_argv.get(i + 1).filter(|s| !s.starts_with('-')) {
                     found = Some(v.clone());
                 } else {
@@ -1309,7 +1310,7 @@ fn main() {
     // other dash-flag including short forms like `-u` / `-v` so they never become
     // the file target (D-TOOL4). D-CLI-BARE1=A: `-p <member>` also swallows its
     // value — a workspace member name is never a positional file/program arg.
-    // D-JPK-TASKRUN1: `--task <name>` swallows its value the same way.
+    // D-JPK-TASKRUN1: `--job <name>` swallows its value the same way.
     let args: Vec<&String> = {
         let mut out = Vec::new();
         let mut skip_next = false;
@@ -1318,11 +1319,11 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--task" || a == "--output" || a == "--gate" {
+            if a == "-p" || a == "--job" || a == "--output" || a == "--gate" {
                 skip_next = true;
                 continue;
             }
-            if a.starts_with("--task=") {
+            if a.starts_with("--job=") {
                 continue;
             }
             if a.starts_with("--output=") {
@@ -1490,7 +1491,7 @@ fn main() {
     // pinned `jet` toolchain before any manifest-driven verb runs. A running
     // `jet` in the pinned channel runs natively; a genuine version mismatch
     // realizes the pinned prebuilt (never a source build) and re-execs into it.
-    if matches!(cmd, "run" | "build" | "test" | "check" | "tasks") {
+    if matches!(cmd, "run" | "build" | "test" | "check" | "jobs") {
         maybe_dispatch_pinned_toolchain(&raw);
     }
 
@@ -1572,12 +1573,12 @@ fn main() {
             print!("{}", usage());
             exit(ExitCodes::OK);
         }
-        "tasks" => {
+        "jobs" => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let member_flag = flag_value(&raw, "-p");
-            let entry = resolve_bare_entry("tasks", &cwd, member_flag)
+            let entry = resolve_bare_entry("jobs", &cwd, member_flag)
                 .unwrap_or_else(|| missing_bare_entry("run", &cwd));
-            run_tasks(&entry.to_string_lossy(), mode);
+            run_jobs(&entry.to_string_lossy(), mode);
             return;
         }
         "doctor" => {
@@ -2516,15 +2517,15 @@ fn main() {
             } else {
                 target.to_string()
             };
-            // D-JPK-TASKRUN1: `jet run --task <name> <file>` swaps the named
+            // D-JPK-TASKRUN1: `jet run --job <name> <file>` swaps the named
             // `#Job fn` in as the entry before codegen (same path as `fn dev`).
             if cmd == "run" {
-                if let Some(task) = task_name.as_deref() {
-                    if task.is_empty() {
-                        crate::cli_error!(@fix "E2104", "`--task` needs a task name", format!("write `jet run --task <name> <file.{}>`", jet::Syntax::FILE_EXT));
+                if let Some(job) = job_name.as_deref() {
+                    if job.is_empty() {
+                        crate::cli_error!(@fix "E2104", "`--job` needs a job name", format!("write `jet run --job <name> <file.{}>`", jet::Syntax::FILE_EXT));
                         exit(ExitCodes::USAGE);
                     }
-                    run_task_entry(&resolved, task, &program_args, mode);
+                    run_job_entry(&resolved, job, &program_args, mode);
                     return;
                 }
                 // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
@@ -2974,8 +2975,8 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 Some((_, entry)) => Some(entry.clone()),
                 None => {
                     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
-                    if cmd == "tasks" {
-                        crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("list tasks for one of: {}", names.join(", ")));
+                    if cmd == "jobs" {
+                        crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("list jobs for one of: {}", names.join(", ")));
                     } else {
                         crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("pick one of: {}", names.join(", ")));
                     }
@@ -2987,8 +2988,8 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             1 => return Some(runnable.into_iter().next().unwrap().1),
             n if n >= 2 => {
                 let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
-                if cmd == "tasks" {
-                    crate::cli_error!(@full "E2104", format!("`jet tasks` is ambiguous — this workspace has {} members with entry files", names.len()), format!("tasks are listed for one member at a time: {}", names.join(", ")), "pick one with `jet tasks -p <member>`");
+                if cmd == "jobs" {
+                    crate::cli_error!(@full "E2104", format!("`jet jobs` is ambiguous — this workspace has {} members with entry files", names.len()), format!("jobs are listed for one member at a time: {}", names.join(", ")), "pick one with `jet jobs -p <member>`");
                     exit(ExitCodes::USAGE);
                 }
                 crate::cli_error!(@full "E2104", format!("`jet {cmd}` is ambiguous — {} workspace members can run", names.len()), format!("this workspace declares multiple runnable members: {}", names.join(", ")), format!("pick one with `jet {cmd} -p <member>`, or run its file directly"));

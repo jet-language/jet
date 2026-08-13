@@ -1,4 +1,4 @@
-//! D-JPK-TASKRUN1 (card #476): `jetpack run <task>` discovers `#Job fn`s.
+//! D-JPK-TASKRUN1 (card #476): `jetpack run <job>` discovers `#Job fn`s.
 
 use std::fs;
 use std::process::Command;
@@ -19,21 +19,21 @@ fn write_main(dir: &std::path::Path, src: &str) {
 }
 
 #[test]
-fn jet_run_task_invokes_marked_fn() {
-    let scratch = Scratch::new("jet-task");
+fn jet_run_job_invokes_marked_fn() {
+    let scratch = Scratch::new("jet-job");
     write_main(
         &scratch.path,
         r#"
 #Job
 fn greet() {
-    print("hello-task")
+        print("hello-job")
 }
 fn run() { print("run-entry") }
 "#,
     );
     let entry = scratch.path.join("main.jet");
     let out = jet()
-        .args(["run", "--task=greet", entry.to_str().unwrap()])
+        .args(["run", "--job=greet", entry.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(
@@ -43,18 +43,18 @@ fn run() { print("run-entry") }
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("hello-task"),
+        stdout.contains("hello-job"),
         "stdout: {stdout}"
     );
     assert!(
         !stdout.contains("run-entry"),
-        "must not run fn run when --task is set: {stdout}"
+        "must not run fn run when --job is set: {stdout}"
     );
 }
 
 #[test]
-fn jetpack_run_task_and_unknown_lists_declared() {
-    let scratch = Scratch::new("jpk-task");
+fn jetpack_run_job_and_unknown_lists_declared() {
+    let scratch = Scratch::new("jpk-job");
     write_main(
         &scratch.path,
         r#"
@@ -69,6 +69,7 @@ fn seed() {
 fn run() {}
 "#,
     );
+    fs::copy(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
 
     let ok = jetpack()
         .args(["run", "greet", "--no-color"])
@@ -96,19 +97,19 @@ fn run() {}
     assert_eq!(bad.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&bad.stderr);
     assert!(stderr.contains("E1294"), "stderr: {stderr}");
-    assert!(stderr.contains("no task named `deploy`"), "stderr: {stderr}");
+    assert!(stderr.contains("no job named `deploy`"), "stderr: {stderr}");
     assert!(
-        stderr.contains("declared tasks:") && stderr.contains("greet") && stderr.contains("seed"),
+        stderr.contains("declared jobs:") && stderr.contains("greet") && stderr.contains("seed"),
         "stderr: {stderr}"
     );
 }
 
 #[test]
-fn jet_run_task_leaf_stays_callable_from_sibling() {
+fn jet_run_job_leaf_stays_callable_from_sibling() {
     // D-JPK-TASKRUN1: dependency = plain call. Selecting leaf `greet` as
     // entry must not rename it away — sibling `seed`'s `greet()` must not
-    // die with E0102, and both tasks must run.
-    let scratch = Scratch::new("task-dep");
+    // die with E0102, and both jobs must run.
+    let scratch = Scratch::new("job-dep");
     write_main(
         &scratch.path,
         r#"
@@ -128,12 +129,12 @@ fn run() { print("run-entry") }
     let path = entry.to_str().unwrap();
 
     let greet = jet()
-        .args(["run", "--task=greet", path])
+        .args(["run", "--job=greet", path])
         .output()
         .unwrap();
     assert!(
         greet.status.success(),
-        "leaf --task=greet must not E0102; stderr: {}",
+        "leaf --job=greet must not E0102; stderr: {}",
         String::from_utf8_lossy(&greet.stderr)
     );
     let greet_out = String::from_utf8_lossy(&greet.stdout);
@@ -148,7 +149,7 @@ fn run() { print("run-entry") }
     );
 
     let seed = jet()
-        .args(["run", "--task=seed", path])
+        .args(["run", "--job=seed", path])
         .output()
         .unwrap();
     assert!(
@@ -164,8 +165,8 @@ fn run() { print("run-entry") }
 }
 
 #[test]
-fn jet_run_task_typed_cli_args() {
-    let scratch = Scratch::new("task-cli");
+fn jet_run_job_typed_cli_args() {
+    let scratch = Scratch::new("job-cli");
     write_main(
         &scratch.path,
         r#"
@@ -184,7 +185,7 @@ fn run() {}
     let out = jet()
         .args([
             "run",
-            "--task=migrate",
+            "--job=migrate",
             entry.to_str().unwrap(),
             "--",
             "--to",

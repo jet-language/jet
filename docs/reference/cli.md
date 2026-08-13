@@ -1,8 +1,8 @@
 # Jet command line
 
-## Project tasks
+## Project jobs
 
-Mark a top-level function with `#Job` to make it a project task. Use `#Doc` to add one help line.
+Mark a top-level function with `#Job` to make it a project job. Use `#Doc` to add one help line.
 
 ```jet
 #[Job, Doc("Seed local data"), Every(5min)]
@@ -11,14 +11,14 @@ fn seed() {
 }
 ```
 
-Run `jet tasks` in the project directory to list all declared tasks. Scheduled tasks also show their `#Every` schedule.
+Run `jet jobs` in the project directory to list all declared jobs. Scheduled jobs also show their `#Every` schedule.
 
 ```text
-$ jet tasks
+$ jet jobs
 seed  Seed local data (every 5min)
 ```
 
-Run a task with `jet run --task seed`. Cross-task dependencies are ordinary function calls.
+Run a job with `jet run --job seed`. Cross-job dependencies are ordinary function calls.
 
-In a workspace, use `jet tasks -p member` to list tasks for one member.
-A bare `jet tasks` names the members when the choice is ambiguous.
+In a workspace, use `jet jobs -p member` to list jobs for one member.
+A bare `jet jobs` names the members when the choice is ambiguous.

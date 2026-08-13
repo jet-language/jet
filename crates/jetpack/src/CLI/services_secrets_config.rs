@@ -135,7 +135,7 @@ fn run_before_start_tasks(
             positional: vec![task.clone()],
             command: None,
         };
-        let code = super::run_enter_dev::run_project_task(
+        let code = super::run_enter_dev::run_project_job(
             theme,
             &task_parsed,
             roots,
@@ -228,7 +228,7 @@ fn run_lifecycle_hooks_with_mode(
                 positional: vec![task.clone()],
                 command: None,
             };
-            let code = super::run_enter_dev::run_project_task_with_mode(
+            let code = super::run_enter_dev::run_project_job_with_mode(
                 theme,
                 &task_parsed,
                 roots,
@@ -1129,13 +1129,13 @@ pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
 
 /// D-JPK-TASKRUN1: top-level `#Job fn` names in the project entry (sorted).
 /// Parse failure → empty list (real diagnostics surface when jet compiles).
-pub(super) fn list_project_tasks(file: &Path) -> Vec<String> {
-    project_task_names(file).unwrap_or_default()
+pub(super) fn list_project_jobs(file: &Path) -> Vec<String> {
+    project_job_names(file).unwrap_or_default()
 }
 
-/// Return task names when the entry can be parsed. `None` preserves the
+/// Return job names when the entry can be parsed. `None` preserves the
 /// compiler's own diagnostic path for unreadable or malformed entries.
-fn project_task_names(file: &Path) -> Option<Vec<String>> {
+fn project_job_names(file: &Path) -> Option<Vec<String>> {
     let Ok(src) = std::fs::read_to_string(file) else {
         return None;
     };
@@ -1159,18 +1159,18 @@ fn project_task_names(file: &Path) -> Option<Vec<String>> {
     Some(names)
 }
 
-/// Distinguish a parsed entry with no matching task from an entry whose
+/// Distinguish a parsed entry with no matching job from an entry whose
 /// syntax must be diagnosed by the compiler handoff.
-pub(super) fn project_task_declared(file: &Path, task: &str) -> Option<bool> {
-    project_task_names(file).map(|names| names.iter().any(|name| name == task))
+pub(super) fn project_job_declared(file: &Path, job: &str) -> Option<bool> {
+    project_job_names(file).map(|names| names.iter().any(|name| name == job))
 }
 
-/// D-TASK-META1: return the checked static metadata for one task. A parse
+/// D-TASK-META1: return the checked static metadata for one job. A parse
 /// failure is intentionally treated as absence here; the compiler invocation
 /// below remains the source of the complete diagnostic.
-pub(super) fn project_task_metadata(
+pub(super) fn project_job_metadata(
     file: &Path,
-    task: &str,
+    job: &str,
 ) -> Option<crate::AST::TaskMetadata> {
     let src = std::fs::read_to_string(file).ok()?;
     let (toks, diags) = crate::Lexer::lex(&src);
@@ -1179,7 +1179,7 @@ pub(super) fn project_task_metadata(
     }
     let prog = crate::Parser::parse(&toks).ok()?;
     prog.items.iter().find_map(|item| match item {
-        crate::AST::Item::Func(function) if function.name == task && function.is_task => {
+        crate::AST::Item::Func(function) if function.name == job && function.is_task => {
             function.task_metadata.clone()
         }
         _ => None,

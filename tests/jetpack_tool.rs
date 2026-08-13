@@ -744,7 +744,7 @@ fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
 }
 
 #[test]
-fn tool_install_task_collision_is_e1297_snapshot() {
+fn tool_install_job_collision_is_e1297_snapshot() {
     // The collision guidance must teach the canonical email-order ref.
     let root = Scratch::new("tool-collide-root");
     let proj = Scratch::new("tool-collide-proj");
@@ -788,7 +788,7 @@ fn tool_install_task_collision_is_e1297_snapshot() {
         .find("\n  error[E1297]")
         .map(|idx| &stderr[idx..])
         .unwrap_or(&stderr);
-    assert_jetos_stderr_snapshot("tool_task_collide", diagnostic);
+    assert_jetos_stderr_snapshot("tool_job_collide", diagnostic);
     assert!(
         !home
             .join(".jet/bin")

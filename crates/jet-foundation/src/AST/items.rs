@@ -1015,7 +1015,7 @@ pub struct Func {
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
     /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Job fn` — a top-level
-    /// function Jet can invoke by name (`jet run --task <name> <entry>`).
+    /// function Jet can invoke by name (`jet run --job <name> <entry>`).
     /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
@@ -1294,7 +1294,7 @@ pub enum EveryScheduleError {
     /// `MM` is outside `00`..=`59`.
     MinuteOutOfRange,
     /// A runtime expression has the right type but cannot define a static
-    /// task schedule.
+    /// job schedule.
     DynamicValue,
 }
 

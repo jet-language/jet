@@ -297,6 +297,22 @@ fn top_level_help_flag_prints_full_usage() {
     }
 }
 
+#[test]
+fn top_level_help_lists_job_vocabulary_only() {
+    let out = Command::new(jet())
+        .arg("help")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "help failed: {:?}", out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("jobs"), "help must list `jet jobs`: {stdout}");
+    assert!(stdout.contains("--job"), "help must list `--job`: {stdout}");
+    assert!(!stdout.contains("tasks"), "retired task CLI vocabulary leaked: {stdout}");
+    let retired_flag = format!("--{}", "task");
+    assert!(!stdout.contains(&retired_flag), "retired job flag leaked: {stdout}");
+}
+
 /// #1659 criterion 2: `jet <cmd> --help`/`-h` works for a command that used
 /// to hit the generic E2102 "unknown flag" — it neither runs the command nor
 /// errors, and names the command in its own help text.

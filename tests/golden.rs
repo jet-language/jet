@@ -261,10 +261,10 @@ fn golden_uses_release_run(stem: &str) -> bool {
 }
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
-    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Job` entry
+    // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
     // paths — leaf `greet` stays callable while sibling `seed` calls it.
-    if entry.stem == "devloop/task_runner" {
-        check_task_runner_tasks(entry, env);
+    if entry.stem == "devloop/job_runner" {
+        check_job_runner_jobs(entry, env);
         return;
     }
 
@@ -694,26 +694,26 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// I5 for `examples/features/devloop/task_runner.jet`: compile+run both
-/// `#Job` entries via `compile_with_entry` (same path as `jet run --task`).
-fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
+/// I5 for `examples/features/devloop/job_runner.jet`: compile+run both
+/// `#Job` entries via `compile_with_entry` (same path as `jet run --job`).
+fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
     let path = entry.path.to_str().expect("example path is utf8");
-    for (task, expected_name) in [("greet", "task_runner.greet"), ("seed", "task_runner.seed")] {
-        let compiled = match jet::compile_with_entry(path, task) {
+    for (job, expected_name) in [("greet", "job_runner.greet"), ("seed", "job_runner.seed")] {
+        let compiled = match jet::compile_with_entry(path, job) {
             Ok(c) => c,
             Err(diags) => panic!(
-                "task_runner --task={task} failed the front end:\n{}",
+                "job_runner --job={job} failed the front end:\n{}",
                 jet::render_diagnostics(&entry.shown, &src, &diags)
             ),
         };
         assert!(
             !strip_vetted_prelude_modules(&compiled.rust).contains("unsafe"),
-            "generated Rust for task_runner --task={task} contains ungated `unsafe`"
+            "generated Rust for job_runner --job={job} contains ungated `unsafe`"
         );
         assert!(
             compiled.rust.contains("fn main()"),
-            "generated Rust for task_runner --task={task} has no fn main"
+            "generated Rust for job_runner --job={job} has no fn main"
         );
         if !env.have_rustc {
             continue;
@@ -722,14 +722,14 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
         let rs = dir.join(format!(
             "jet_golden_{}_{}_{}.rs",
             std::process::id(),
-            "devloop_task_runner",
-            task
+            "devloop_job_runner",
+            job
         ));
         let bin = dir.join(format!(
             "jet_golden_{}_{}_{}",
             std::process::id(),
-            "devloop_task_runner",
-            task
+            "devloop_job_runner",
+            job
         ));
         let mut rustc = Command::new("rustc");
         add_generated_rust(
@@ -751,13 +751,13 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
         let out = rustc.output().unwrap();
         assert!(
             out.status.success(),
-            "I2 violated: rustc rejected task_runner --task={task}:\n{}",
+            "I2 violated: rustc rejected job_runner --job={job}:\n{}",
             String::from_utf8_lossy(&out.stderr)
         );
         let run = Command::new(&bin).output().unwrap();
         assert!(
             run.status.success(),
-            "task_runner --task={task} failed at runtime:\nstdout: {}\nstderr: {}",
+            "job_runner --job={job} failed at runtime:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );
@@ -776,10 +776,10 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
             let expected = fs::read_to_string(&out_path).unwrap();
             if actual != expected {
                 panic!(
-                    "output mismatch for task_runner --task={task}:\n{}",
+                    "output mismatch for job_runner --job={job}:\n{}",
                     unified_diff(
                         &format!("examples/features/expected/devloop/{expected_name}.out"),
-                        &format!("examples/features/devloop/task_runner --task={task} stdout"),
+                        &format!("examples/features/devloop/job_runner --job={job} stdout"),
                         &expected,
                         &actual,
                     )

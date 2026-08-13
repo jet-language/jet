@@ -198,7 +198,7 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 /// task automatically. The caller has already filtered to `Func::is_task`
 /// fns pulled from this same checked bundle, so a missing name here is an
 /// internal-tooling mismatch, not a source error.
-pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
+pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {

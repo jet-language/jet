@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::{add_generated_rust, have_rustc, panic_message, test_worker_count, FfiBridgeLock};
-use jet::Interpreter::{dev_iteration, dev_run_bundle, run_jit_once, run_named_task, RunOutcome};
+use jet::Interpreter::{dev_iteration, dev_run_bundle, run_jit_once, run_named_job, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
@@ -1219,28 +1219,28 @@ fn hidden_generic_constructor_default_dev_matches_aot() {
     assert_eq!(stats.manifested, 0);
 }
 
-fn check_task_runner_interpreter(root: &PathBuf, file: &str) {
-    let mut bundle = jet::Loader::load_entry(file).expect("task_runner loads");
+fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
+    let mut bundle = jet::Loader::load_entry(file).expect("job_runner loads");
     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    assert!(errors.is_empty(), "task_runner front end: {errors:?}");
-    for (task, expected_name) in [
-        ("greet", "task_runner.greet"),
-        ("seed", "task_runner.seed"),
+    assert!(errors.is_empty(), "job_runner front end: {errors:?}");
+    for (job, expected_name) in [
+        ("greet", "job_runner.greet"),
+        ("seed", "job_runner.seed"),
     ] {
         let expected = fs::read_to_string(
             root.join(format!("examples/features/expected/devloop/{expected_name}.out")),
         )
         .unwrap_or_else(|_| panic!("missing expected/devloop/{expected_name}.out"));
-        match run_named_task(&bundle, task, false) {
+        match run_named_job(&bundle, job, false) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout, expected,
-                "interpreter --task={task} differs from golden"
+                "interpreter --job={job} differs from golden"
             ),
             RunOutcome::Problems(diags) => panic!(
-                "interpreter --task={task} did not run: {:?}",
+                "interpreter --job={job} did not run: {:?}",
                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
             ),
         }
@@ -1248,9 +1248,9 @@ fn check_task_runner_interpreter(root: &PathBuf, file: &str) {
 }
 
 #[test]
-fn task_runner_named_tasks_match_expected_golden() {
+fn job_runner_named_jobs_match_expected_golden() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    check_task_runner_interpreter(&root, &example_path("devloop/task_runner"));
+    check_job_runner_interpreter(&root, &example_path("devloop/job_runner"));
 }
 
 /// Every example that runs in the interpreter and has a checked-in
@@ -1264,13 +1264,13 @@ fn interpreter_matches_expected_golden() {
     let mut checked = 0usize;
     for stem in interpreter_example_stems() {
         let file = example_path(&stem);
-        // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
+        // D-JPK-TASKRUN1 / R12 (card #476): job_runner's meaningful entries are
         // its `#Job` fns, not the `fn run()` usage hint. Mirror golden.rs's
-        // AOT `--task` battery on the interpreter tier via `run_named_task`,
-        // proving the same TIR dispatches each task identically. The bare
+        // AOT `--job` battery on the interpreter tier via `run_named_job`,
+        // proving the same TIR dispatches each job identically. The bare
         // `fn run()` output is not a golden.
-        if stem == "devloop/task_runner" {
-            check_task_runner_interpreter(&root, &file);
+        if stem == "devloop/job_runner" {
+            check_job_runner_interpreter(&root, &file);
             checked += 2;
             continue;
         }
@@ -9679,7 +9679,7 @@ fn run() {
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
 /// consumer. `scheduled_tasks` must enumerate every `#Job #Every(…)` fn
 /// with its resolved schedule (and skip a plain `#Job fn` with no
-/// `#Every(…)`), and `run_named_task` must actually execute one by name
+/// `#Every(…)`), and `run_named_job` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
 /// the loop's per-tick logic without the long-running file watcher, same
 /// spirit as `dev_iteration` itself (see the module doc above).
@@ -9726,12 +9726,12 @@ fn schedule_every_dev_loop_consumer() {
     );
 
     // Actually invoking a named task runs it like an ordinary call.
-    match jet::Interpreter::run_named_task(&bundle, "prune_sessions", false) {
+    match jet::Interpreter::run_named_job(&bundle, "prune_sessions", false) {
         RunOutcome::Ran { stdout, exit_code, .. } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout, "pruning sessions\n");
         }
-        RunOutcome::Problems(diags) => panic!("run_named_task failed: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("run_named_job failed: {diags:?}"),
     }
 }
 

@@ -952,14 +952,14 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     exit(child_exit_code(status));
 }
 
-/// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
-/// the named `#Job fn` as the entry via a synthetic `fn run { task(…) }`
-/// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps
+/// D-JPK-TASKRUN1 (card #476): `jet run --job <name> <file>` — compile with
+/// the named `#Job fn` as the entry via a synthetic `fn run { job(…) }`
+/// wrapper (same `compile_with_entry` path `fn dev()` uses; the job keeps
 /// its source name so plain-call deps stay resolvable), then run the binary
 /// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
-pub(crate) fn run_task_entry(
+pub(crate) fn run_job_entry(
     file: &str,
-    task: &str,
+    job: &str,
     program_args: &[&String],
     mode: OutputMode,
 ) {
@@ -970,15 +970,15 @@ pub(crate) fn run_task_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let declared = list_task_names(&src);
+    let declared = list_job_names(&src);
     // Parse failures still flow through `compile_with_entry`, which owns the
     // full source diagnostic. Successful discovery is the E1294 authority.
     let is_marked = declared
         .as_ref()
-        .map(|tasks| tasks.iter().any(|item| item.name == task))
+        .map(|jobs| jobs.iter().any(|item| item.name == job))
         .unwrap_or(true);
     if !is_marked {
-        let declared = declared.expect("successful task discovery");
+        let declared = declared.expect("successful job discovery");
         let list = if declared.is_empty() {
             "(none)".to_string()
         } else {
@@ -990,19 +990,19 @@ pub(crate) fn run_task_entry(
         };
         let diag = jet::Diagnostics::Diagnostic::error(
             "E1294",
-            format!("no task named `{task}`"),
-            format!("`jet run --task` / `jetpack run` only invoke functions marked `#Job` (D-JPK-TASKRUN1)."),
+            format!("no job named `{job}`"),
+            format!("`jet run --job` / `jetpack run` only invoke functions marked `#Job` (D-JPK-TASKRUN1)."),
             "mark a function `#Job` to make it runnable, or check the spelling.".to_string(),
             None,
         )
-        .with_detail(format!("declared tasks: {list}\n"));
+        .with_detail(format!("declared jobs: {list}\n"));
         report_problems(mode, file, &src, &[diag]);
         exit(ExitCodes::USER_ERROR);
     }
-    if let Ok(tasks) = &declared {
-        if let Some(reason) = tasks
+    if let Ok(jobs) = &declared {
+        if let Some(reason) = jobs
             .iter()
-            .find(|item| item.name == task)
+            .find(|item| item.name == job)
             .and_then(|item| item.metadata.as_ref())
             .and_then(|metadata| {
                 metadata
@@ -1011,11 +1011,11 @@ pub(crate) fn run_task_entry(
                     .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
             })
         {
-            println!("skipping task `{task}`: {reason}");
+            println!("skipping job `{job}`: {reason}");
             return;
         }
     }
-    let out = match jet::compile_with_entry(file, task) {
+    let out = match jet::compile_with_entry(file, job) {
         Ok(out) => out,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
@@ -1042,7 +1042,7 @@ pub(crate) fn run_task_entry(
         None,
         None,
         mode,
-        // Task entry-swap is a one-shot; skip content-cache (same as `run_dev_entry`).
+        // Job entry-swap is a one-shot; skip content-cache (same as `run_dev_entry`).
         None,
     );
     let mut run_cmd = Command::new(&bin);
@@ -1057,7 +1057,7 @@ pub(crate) fn run_task_entry(
 }
 
 #[derive(Debug)]
-struct TaskListing {
+struct JobListing {
     name: String,
     doc: Option<String>,
     schedule: Option<String>,
@@ -1092,9 +1092,9 @@ fn schedule_text(marker: &jet::AST::EveryMarker) -> Option<String> {
     }
 }
 
-/// D-TASKS-LIST1=A: one lex+parse source for E1294 and `jet tasks`.
+/// D-TASKS-LIST1=A: one lex+parse source for E1294 and `jet jobs`.
 /// Source order, `#Doc`, and `#Every` metadata all come from this program.
-fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::Diagnostic>> {
+fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Diagnostic>> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
@@ -1113,7 +1113,7 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
                             && application.marker.name == jet::Syntax::MARKER_DOC
                     })
                     .and_then(|application| marker_string(&application.marker));
-                Some(TaskListing {
+                Some(JobListing {
                     name: f.name.clone(),
                     doc,
                     schedule: f.every.as_ref().and_then(schedule_text),
@@ -1125,32 +1125,32 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
         .collect())
 }
 
-pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
+pub(crate) fn run_jobs(file: &str, mode: OutputMode) {
     let src = fs::read_to_string(file).unwrap_or_else(|_| {
         crate::cli_error!("E2105", "can't find the file `{file}`");
         exit(ExitCodes::USER_ERROR);
     });
-    let tasks = list_task_names(&src).unwrap_or_else(|diags| {
+    let jobs = list_job_names(&src).unwrap_or_else(|diags| {
         report_problems(mode, file, &src, &diags);
         exit(ExitCodes::USER_ERROR);
     });
-    if tasks.is_empty() {
-        println!("No tasks declared.");
+    if jobs.is_empty() {
+        println!("No jobs declared.");
         return;
     }
-    let width = tasks.iter().map(|task| task.name.len()).max().unwrap_or(0);
-    for task in tasks {
-        let mut detail = task.doc.unwrap_or_default();
-        if let Some(schedule) = task.schedule {
+    let width = jobs.iter().map(|job| job.name.len()).max().unwrap_or(0);
+    for job in jobs {
+        let mut detail = job.doc.unwrap_or_default();
+        if let Some(schedule) = job.schedule {
             if !detail.is_empty() {
                 detail.push(' ');
             }
             detail.push_str(&format!("(every {schedule})"));
         }
         if detail.is_empty() {
-            println!("{}", task.name);
+            println!("{}", job.name);
         } else {
-            println!("{:<width$}  {}", task.name, detail);
+            println!("{:<width$}  {}", job.name, detail);
         }
     }
 }

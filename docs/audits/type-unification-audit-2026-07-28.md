@@ -416,7 +416,7 @@ for the built-ins too (`#Comparable` derives `Comparable`). The rule for
 future markers: a rule that derives trait X is spelled `#X`; a rule that is
 not a derive may not take a trait's name. Optional renames if the owner
 wants the two worst collisions gone: serde's `#Tag("type")` (three meanings
-of "tag" today) and scheduled `#Task fn` vs `Task<T>`.
+of "tag" today) and scheduled `#Job fn` vs `Task<T>`.
 
 **Evidence.** `Comparable` is a trait (`effects_surface.rs:220`), a marker
 (`Policy.rs:556`), and a capability bundle (D-CAPBUNDLE1). `#Codable` ≡

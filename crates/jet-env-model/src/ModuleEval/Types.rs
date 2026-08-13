@@ -175,7 +175,7 @@ pub struct DevServicePlan {
     pub watch: Vec<String>,
     /// Service names that must be healthy before this service starts.
     pub after: Vec<String>,
-    /// Ordinary `#Task` names to run successfully immediately before start.
+    /// Ordinary `#Job` names to run successfully immediately before start.
     pub before_start: Vec<String>,
     /// Named sockets reserved by the service.
     pub sockets: Vec<String>,

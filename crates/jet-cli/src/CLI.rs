@@ -375,8 +375,8 @@ pub const COMMANDS: &[CommandSpec] = &[
         exhaustive: false,
     },
     CommandSpec {
-        name: "tasks",
-        summary: "List project tasks",
+        name: "jobs",
+        summary: "List project jobs",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -745,13 +745,13 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: favor a smaller binary" },
     // D-JPK-TASKRUN1 (card #476): run a `#Job fn` instead of `fn run`.
-    FlagSpec { long: "--task", help: "with run: run a named `#Job fn`" },
+    FlagSpec { long: "--job", help: "with run: run a named `#Job fn`" },
     FlagSpec { long: "--output", help: "with run: run a named build output" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
-    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/tasks: pick a workspace member by name" },
+    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/jobs: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
     FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in

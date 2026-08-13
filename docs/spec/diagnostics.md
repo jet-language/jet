@@ -802,7 +802,7 @@ renumbered, and no new `W` code may be allocated.
 | E1287 | jetpack | `jet os vm run` needs a proved installed disk (D-JOS-VMRUN1) |
 | E1288 | jetpack | the GNOME desktop package is missing (D-JOS-DESKTOP1) |
 | E1289 | jetpack | a NixOS import failed or would overwrite output (D-JOS-NIXIMPORT1) |
-| E1294 | jet / jetpack | `jet run --task <name>` / `jetpack run <name>` names no `#Job fn` in the entry (D-JPK-TASKRUN1, card #476) |
+| E1294 | jet / jetpack | `jet run --job <name>` / `jetpack run <name>` names no `#Job fn` in the entry (D-JPK-TASKRUN1, card #476) |
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
@@ -1873,10 +1873,10 @@ front-end `.jet` diagnostics).
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
 | E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `package.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
-| E1294 | no task named `{name}`. | `jet run --task <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared tasks. |
+| E1294 | no job named `{name}`. | `jet run --job <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared jobs. |
 | E1295 | git ref `{ref}` not found. | `--affected-since` (D-JPK-SELECTOR1=C) diffs workspace member input hashes against a git baseline; that ref must resolve to a commit. | Pass a real branch, tag, or commit (a did-you-mean is offered when a close match exists). |
 | E1296 | `{flag}` is not a Jet workspace selector. | D-JPK-SELECTOR1=C rejects pnpm-style `--filter` pattern DSLs; Jet scopes workspace commands with exact `-p <member>` and computed `--affected` / `--affected-since <ref>` only. | Use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`. |
-| E1297 | `` `{bin}` is already a task in {path} `` | JPK-TOOL-COLLIDE (D-JPK-TOOLRUN1): `jetpack tool install` would project `{bin}` onto `~/.jet/bin`, but this project already declares `#Job fn {bin}` — the project task wins here, so the global tool would be shadowed. | Install under a different bin name with `jetpack tool install <ref> --as <other>`, or run once with `jetpack tool run <ref>`. |
+| E1297 | `` `{bin}` is already a job in {path} `` | JPK-TOOL-COLLIDE (D-JPK-TOOLRUN1): `jetpack tool install` would project `{bin}` onto `~/.jet/bin`, but this project already declares `#Job fn {bin}` — the project job wins here, so the global tool would be shadowed. | Install under a different bin name with `jetpack tool install <ref> --as <other>`, or run once with `jetpack tool run <ref>`. |
 | E1298 | `` tool provider `{source}` isn't available yet `` | JPK-TOOL-PROVIDER (D-JPK-TOOLRUN1): `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `nixpkgs` and `github`; local paths are bare. | Use a built-in ref (`name@nixpkgs`, `owner/repo@github`) or a bare local path, or wait for the `{source}` provider to land. |
 | E1299 | store path rejected: `{path}` | Hangar Store v2 path law (E4-JP1) records POSIX byte names and rejects Windows reserved names, trailing `.`/` ` aliases, `.`/`..`, and ASCII case-fold collisions among siblings. Unicode normalization is never applied implicitly. | Rename the entry to a portable store path with no reserved names, no trailing `.`/` `, and no case-fold collision with a sibling. |
 | E1315 | hangar ingest aborted / digest mismatch | Race-safe no-follow ingest re-stats open handles and aborts if the source mutates; unsupported special files and semantic xattrs (without an explicit platform artifact kind) are rejected; verify re-hashes and compares the envelope digest. | Re-run ingest against a stable tree, or quarantine and re-ingest from a trusted source. |
@@ -2095,7 +2095,7 @@ the marker before its declaration.
 
 `#Every(…)` names when a `#Job fn` runs (D-JPK-TASKRUN1); `#Job` itself
 only marks a top-level function, because a task needs a free-standing name
-`jet run --task <name> <entry>` can invoke.
+`jet run --job <name> <entry>` can invoke.
 
 | What | Why | Fix |
 |------|-----|-----|
@@ -2168,4 +2168,4 @@ is a collision, not a task.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |
+| `` `{name}` is a built-in lifecycle verb, not a job name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |

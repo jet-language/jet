@@ -3947,7 +3947,7 @@ pub fn compile_fuzz(
 /// (I3: codegen stays dumb; sema never special-cases any entry name other
 /// than `"run"` — see `Registration.rs`/`Bundle.rs`'s `funcs.get("run")`).
 /// The selected function keeps its source name so callers (D-JPK-TASKRUN1
-/// plain-call task deps) still resolve. Same path serves `jet run --task`.
+/// plain-call task deps) still resolve. Same path serves `jet run --job`.
 /// Native only — never freestanding/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
 /// an ordinary value like `core.web.devserver`, nothing more).

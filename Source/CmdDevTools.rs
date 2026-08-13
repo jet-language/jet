@@ -148,7 +148,7 @@ fn sync_persist_bindings(
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
 /// schedule-as-code — check every `#Job #Every(…)` fn in `bundle` against
 /// `clock`, and run whichever are due through the same interpreter tier the
-/// rest of the dev loop uses (`jet::Interpreter::run_named_task`). This is
+/// rest of the dev loop uses (`jet::Interpreter::run_named_job`). This is
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
 /// jetos timer projection are the production/OS consumers of the identical
 /// `#Every(…)` declaration — see the D-SCHEDULE1 row in
@@ -166,9 +166,9 @@ fn run_due_tasks(
     }
     for name in clock.due(&tasks) {
         if !mode.quiet {
-            println!("\n— due task `{}` —", name);
+            println!("\n— due job `{}` —", name);
         }
-        match jet::Interpreter::run_named_task(bundle, &name, try_anyway) {
+        match jet::Interpreter::run_named_job(bundle, &name, try_anyway) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -177,7 +177,7 @@ fn run_due_tasks(
                 print!("{stdout}");
                 eprint!("{stderr}");
                 if exit_code != 0 {
-                    eprintln!("task `{name}` exited with code {exit_code}");
+                    eprintln!("job `{name}` exited with code {exit_code}");
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
@@ -188,7 +188,7 @@ fn run_due_tasks(
     }
 }
 
-/// D-SCHEDULE1: per-task last-run bookkeeping for the due-task tick. An
+/// D-SCHEDULE1: per-job last-run bookkeeping for the due-job tick. An
 /// `Interval` schedule tracks the `Instant` it last ran; a `DailyAt`
 /// schedule tracks the UTC day index (days since the Unix epoch) it last
 /// ran, so it fires once inside its matching minute, not on every 120ms
@@ -208,8 +208,8 @@ impl TaskClock {
         }
     }
 
-    /// Which task names are due right now — records the firing so the same
-    /// task doesn't fire again on the very next tick.
+    /// Which job names are due right now — records the firing so the same
+    /// job doesn't fire again on the very next tick.
     pub(crate) fn due(&mut self, tasks: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
         let unix_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

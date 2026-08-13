@@ -1001,7 +1001,7 @@ fn evaluate_env_fields(
                 Diagnostic::error(
                     "E1333",
                     format!("environment lifecycle declaration is invalid: {error}"),
-                    "lifecycle fields use typed dotenv, unset, task names, and hook records".to_string(),
+                    "lifecycle fields use typed dotenv, unset, job names, and hook records".to_string(),
                     "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, or `reload: .Prompt`".to_string(),
                     Some(*span),
                 )

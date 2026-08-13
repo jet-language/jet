@@ -714,7 +714,7 @@ impl<'a> EvalCtx<'a> {
                                         .name("jet-tir-task".to_string())
                                         .stack_size(8 * 1024 * 1024)
                                         .spawn_scoped(threads, move || {
-                                            Self::run_task_job(job_config, job)
+                                            Self::run_eval_job(job_config, job)
                                         })
                                         .expect("evaluator task worker");
                                 }

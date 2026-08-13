@@ -2783,7 +2783,8 @@ the D-FFI-PY1 precedent):**
   first `java.*` call; classes are opaque handles; checked exceptions
   surface as `T ? JavaError`; JVM provisioned by jetpack (I6).
 - **D-FFI-DOTNET1=A**: `cs.*` (C#/F#) — hostfxr/hostpolicy embed; .NET
-  Tasks bridge to Jet tasks at the boundary; NuGet as jetpack provider.
+  Tasks bridge to Jet's concurrency runtime at the boundary; NuGet as jetpack
+  provider.
 - **D-FFI-FORTRAN1=A**: `fortran.*` — ISO_C_BINDING bridge via gfortran;
   arrays cross as `[T]`/`Tensor<T>` with explicit column-major facts
   recorded in the binding (order mismatch is a checked error, never a
@@ -5498,20 +5499,26 @@ Bare `jet self lsp` is E2101 before external-command discovery, preserves follow
 argv in its replacement, exits 2, and never starts a server. Help, palette,
 man pages, and completions advertise only canonical grouped spellings.
 
-**D-JPK-TASKRUN1=A — tasks are `#Job fn`**: a task is an ordinary Jet
+**D-JPK-TASKRUN1=A — named entries are `#Job fn`**: a job is an ordinary Jet
 function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
-parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain
+parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
 function call, no separate DAG syntax. Invoked canonically with `jet run
---task <name> <entry>`; `jetpack run <name>` is the Jetpack engine bridge.
-`run`, `dev`, `build`, `test` remain reserved lifecycle verb names a task
+--job <name> <entry>`; `jetpack run <name>` is the Jetpack engine bridge.
+`run`, `dev`, `build`, `test` remain reserved lifecycle verb names a job
 cannot reuse.
+
+**D-JOB-NAME1=A — one word for named auxiliary entries** *(ratified
+2026-08-05, card #1448)*: the marker and every command use `job`. The
+canonical CLI is `jet run --job <name> <entry>` and `jet jobs`; retired
+spellings have no alias or fallback. Help, completions, diagnostics, docs,
+examples, and tests use the same vocabulary.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
 (D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1);
 `#Every("03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
-due tasks in the dev loop, the service runtime (D-SERVICE1) schedules
+due jobs in the dev loop, the service runtime (D-SERVICE1) schedules
 them in production, a jetos generation projects them as timer units.
 Complex calendars (cron expressions, timezones, jitter) stay with the
 runtime API or jetos timers; operator-side cadence overrides live at the
@@ -5519,16 +5526,16 @@ jetos/service layer with explain provenance.
 
 *Shipped 2026-07-12 (card #505, slice 2)*: `#Job fn` (D-JPK-TASKRUN1) and
 `#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
-dev`'s watch loop runs due tasks on their own schedule (UTC for
+dev`'s watch loop runs due jobs on their own schedule (UTC for
 `#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
 
 *Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Job fn
-run|dev|build|test` (E0928); `jet run --task <name> <entry>` dispatches an
+run|dev|build|test` (E0928); `jet run --job <name> <entry>` dispatches an
 `#Job fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
-(D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
-args reuse D-CLIFLAG1 once the task is the entry. Entry dispatch injects a
-synthetic `fn run { task(…) }` wrapper so the selected `#Job fn` keeps its
+(D-JPK-DISPATCH1); unknown names list declared jobs (E1294). Typed job
+args reuse D-CLIFLAG1 once the job is the entry. Entry dispatch injects a
+synthetic `fn run { job(…) }` wrapper so the selected `#Job fn` keeps its
 name — a sibling's plain-call dependency (ballot: dependency = plain
 function call) does not die with E0102. D-SERVICE1 still has no typed
 builder/worker/group to carry a schedule into a service runtime — that
@@ -5539,7 +5546,7 @@ executes a package binary ephemerally across all providers (generalizing the
 nix-only `jetpack run pkg@nixpkgs` bridge); `jetpack tool install <ref>`
 adds it to the user's default generation (D-JPK-PROFILE1) and projects its
 bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
-manage them. A name collision with a project-local task (D-JPK-TASKRUN1)
+manage them. A name collision with a project-local job (D-JPK-TASKRUN1)
 is a checked error naming both.
 
 *Shipped 2026-07-12 (card #477)*: `jetpack tool run|install|list|uninstall`

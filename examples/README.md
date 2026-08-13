@@ -55,9 +55,9 @@ hoc pick:
   for a web example, not plain stdout. Read by `tests/web_build.rs` and
   `tests/web_examples_doc.rs`.
 - `<stem>.seed.out` / `<stem>.greet.out` — an example with more than one
-  named `#Job` task (D-JPK-TASKRUN1) uses the task name as the suffix,
-  keyed per task rather than per stream. Read by `tests/golden.rs` and
-  `tests/dev.rs` for `devloop/task_runner`.
+  named `#Job` job (D-JPK-TASKRUN1) uses the job name as the suffix,
+  keyed per job rather than per stream. Read by `tests/golden.rs` and
+  `tests/dev.rs` for `devloop/job_runner`.
 - `<stem>.test.out` — the pinned report from running `jet test` on the
   example itself, not the example's own stdout. Read by `tests/jet_test.rs`.
 - `<stem>.fuzz.out` — the pinned report from running `jet fuzz` on the

@@ -283,8 +283,8 @@ data — the same spelling in every framework.
 Headline features other package managers ship, answered from existing law —
 nothing silent:
 
-- **Scripts / task runner** (npm scripts, cargo xtask): ratified — `#Task fn`
-  beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run --task <name> <entry>`,
+- **Scripts / job runner** (npm scripts, cargo xtask): ratified — `#Job fn`
+  beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run --job <name> <entry>`,
   scheduled with `#Every(…)` (D-SCHEDULE1). No new surface needed.
 - **Feature flags / conditional compilation** (cargo features): ratified —
   `Build.{ features }` in build profiles (D-BUILDPROFILE1) plus comptime
@@ -697,7 +697,7 @@ A solo dev folds forever; a team shards fully; same semantics.
 | System (jetos) | block | `config.jet` (OSHOST1) | any file / split → `config.jet` |
 | Image (OCI) | block | discovered role file | any file / split |
 | Fleet | block | discovered role file | any file / split |
-| Tasks / scripts | `#Task fn` (ratified) | same | same |
+| Tasks / scripts | `#Job fn` (ratified) | same | same |
 | Single-file U7 | preserved | preserved | preserved |
 | Teach in one page | **easiest** | hardest | medium (+ `split`) |
 | Structural flexibility (philosophy) | **worst** | partial | **best** |

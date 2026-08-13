@@ -677,7 +677,7 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
 }
 
 /// D-SCHEDULE1, amended by D-MARKER-NAME-HYGIENE1=A: `#Job fn` — a top-level
-/// function Jet can invoke by name with `jet run --task` (D-JPK-TASKRUN1),
+/// function Jet can invoke by name with `jet run --job` (D-JPK-TASKRUN1),
 /// living beside `fn run()`. Bare marker, no arguments.
 pub const KW_JOB: &str = "Job";
 

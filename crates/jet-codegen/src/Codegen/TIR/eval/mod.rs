@@ -1490,7 +1490,7 @@ impl<'a> EvalCtx<'a> {
                                 .name("jet-tir-task".to_string())
                                 .stack_size(8 * 1024 * 1024)
                                 .spawn_scoped(threads, move || {
-                                    Self::run_task_job(job_config, job)
+                                    Self::run_eval_job(job_config, job)
                                 })
                                 .expect("evaluator task worker");
                         }
@@ -1506,7 +1506,7 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
-    fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
+    fn run_eval_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
         let _permit = job.permit;
         crate::scheduler::jet_scheduler_set_task_control(Some(job.control.clone()));
         let _deadline = job

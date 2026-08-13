@@ -200,7 +200,7 @@ Ranked by damage to a person finishing a real job.
 
 Smaller notes: `--help` usage line prints the absolute binary path instead
 of the program name (wrong-default, cosmetic); no `confirm`/`choose`/
-`input_secret` prompts (domain-blind, CLI); `jet tasks` discovery only via
+`input_secret` prompts (domain-blind, CLI); `jet jobs` discovery only via
 the unknown-task error; literal regex patterns pay a `Result` + panic tax
 that a comptime check could remove; length-prefixed binary reads force an
 explicit `Int.from_u16` widen; heavy ndarray/FFT work is an accepted

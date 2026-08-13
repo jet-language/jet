@@ -224,6 +224,22 @@ fn static_product_site(site: crate::Policy::RuleSite) -> bool {
     )
 }
 
+fn rule_allows_fact(
+    application: &crate::AST::AppliedRuleApplication,
+    facts: &[crate::AST::AppliedRuleApplication],
+) -> bool {
+    let Some(site) = application.site else {
+        return true;
+    };
+    let companions = application.target.into_iter().flat_map(|target| {
+        facts
+            .iter()
+            .filter(move |other| other.target == Some(target))
+            .map(|other| other.marker.name.as_str())
+    });
+    crate::Policy::rule_allows_with_companions(&application.marker.name, site, companions)
+}
+
 fn materialize_static_marker_values(
     items: &mut [Item],
     validated: &HashMap<usize, ValidatedRuleArguments>,
@@ -355,10 +371,7 @@ pub(crate) fn resolve_static_rule_products(
         let Some(site) = application.site else {
             continue;
         };
-        if application
-            .site
-            .is_some_and(|_| !crate::Policy::rule_allows(&marker.name, site))
-        {
+        if !rule_allows_fact(application, &facts) {
             diags.push(crate::Policy::marker_wrong_site_error(
                 &marker.name,
                 site,
@@ -767,7 +780,11 @@ pub(crate) fn check_marker_vocabulary(
             .find(|fact| fact.marker.name_span == marker.name_span)
             .and_then(|fact| fact.site)
         {
-            if !crate::Policy::rule_allows(&marker.name, site) {
+            let application = rule_facts
+                .iter()
+                .find(|fact| fact.marker.name_span == marker.name_span)
+                .expect("marker fact found by site lookup");
+            if !rule_allows_fact(application, rule_facts) {
                 diagnostics.push(crate::Policy::marker_wrong_site_error(
                     &marker.name,
                     site,

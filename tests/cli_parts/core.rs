@@ -233,21 +233,21 @@ fn lua_bind_rejects_generated_fixed_abi_names() {
 }
 
 #[test]
-fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projects() {
-    let project = isolated_cwd("tasks_project");
+fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects() {
+    let project = isolated_cwd("jobs_project");
     fs::write(
         project.join("package.jet"),
-        "name: \"task_runner\"\nversion: \"0.1.0\"\n",
+        "name: \"job_runner\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(
         project.join("run.jet"),
-        include_str!("../../examples/features/devloop/task_runner.jet"),
+        include_str!("../../examples/features/devloop/job_runner.jet"),
     )
     .unwrap();
 
     let listed = Command::new(jet())
-        .arg("tasks")
+        .arg("jobs")
         .current_dir(&project)
         .env("NO_COLOR", "1")
         .output()
@@ -260,11 +260,11 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     );
     assert_eq!(
         String::from_utf8(listed.stdout).unwrap(),
-        "greet  Say hello from a project task\nseed   Seed local data (every 5min)\n"
+        "greet  Say hello from a project job\nseed   Seed local data (every 5min)\n"
     );
 
     let unknown = Command::new(jet())
-        .args(["run", "--task", "missing", "run.jet"])
+        .args(["run", "--job", "missing", "run.jet"])
         .current_dir(&project)
         .env("NO_COLOR", "1")
         .output()
@@ -273,20 +273,20 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     assert!(!unknown.status.success(), "{unknown_stderr}");
     assert!(unknown_stderr.contains("E1294"), "{unknown_stderr}");
     assert!(
-        unknown_stderr.contains("declared tasks: greet, seed"),
+        unknown_stderr.contains("declared jobs: greet, seed"),
         "{unknown_stderr}"
     );
 
     let help = Command::new(jet()).arg("help").output().unwrap();
     assert!(help.status.success());
     assert!(
-        String::from_utf8_lossy(&help.stdout).contains("jet tasks"),
-        "jet help must list task discovery"
+        String::from_utf8_lossy(&help.stdout).contains("jet jobs"),
+        "jet help must list job discovery"
     );
 
-    let outside = isolated_cwd("tasks_outside_project");
-    let tasks_error = Command::new(jet())
-        .arg("tasks")
+    let outside = isolated_cwd("jobs_outside_project");
+    let jobs_error = Command::new(jet())
+        .arg("jobs")
         .current_dir(&outside)
         .env("NO_COLOR", "1")
         .output()
@@ -297,12 +297,12 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(tasks_error.status.code(), run_error.status.code());
-    assert_eq!(tasks_error.stderr, run_error.stderr);
+    assert_eq!(jobs_error.status.code(), run_error.status.code());
+    assert_eq!(jobs_error.stderr, run_error.stderr);
 
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
-    let workspace = isolated_cwd("tasks_workspace");
+    let workspace = isolated_cwd("jobs_workspace");
     fs::remove_dir_all(&workspace).unwrap();
     copy_dir_all(&fixture, &workspace);
     let hello = workspace.join("packages/hello/hello.jet");
@@ -313,7 +313,7 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     fs::write(&hello, hello_source).unwrap();
 
     let ambiguous = Command::new(jet())
-        .arg("tasks")
+        .arg("jobs")
         .current_dir(&workspace)
         .env("NO_COLOR", "1")
         .output()
@@ -321,7 +321,7 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     let ambiguous_stderr = String::from_utf8_lossy(&ambiguous.stderr);
     assert_eq!(ambiguous.status.code(), Some(2), "{ambiguous_stderr}");
     assert!(
-        ambiguous_stderr.contains("`jet tasks` is ambiguous"),
+        ambiguous_stderr.contains("`jet jobs` is ambiguous"),
         "{ambiguous_stderr}"
     );
     assert!(
@@ -329,13 +329,13 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
         "{ambiguous_stderr}"
     );
     assert!(
-        ambiguous_stderr.contains("jet tasks -p <member>")
+        ambiguous_stderr.contains("jet jobs -p <member>")
             && !ambiguous_stderr.contains("jet run"),
         "{ambiguous_stderr}"
     );
 
     let selected = Command::new(jet())
-        .args(["tasks", "-p", "hello"])
+        .args(["jobs", "-p", "hello"])
         .current_dir(&workspace)
         .env("NO_COLOR", "1")
         .output()

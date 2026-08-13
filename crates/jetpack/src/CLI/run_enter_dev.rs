@@ -5,8 +5,8 @@ use super::realize::{
     RunPlan,
 };
 use super::services_secrets_config::{
-    find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
-    project_task_declared, project_task_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
+    find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_jobs,
+    project_job_declared, project_job_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
     run_lifecycle_hooks_silent,
     validate_declared_secrets,
     wait_for_services_ready,
@@ -30,10 +30,10 @@ use crate::Trust;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// `jetpack run [<ref>|<task>] [-- cmd…]`
+/// `jetpack run [<ref>|<job>] [-- cmd…]`
 ///
 /// D-JPK-TASKRUN1: a bare first positional that names a `#Job fn` in the
-/// project entry runs that task (via `jet run --task <name> <entry>`). Package
+/// project entry runs that job (via `jet run --job <name> <entry>`). Package
 /// refs (`source:pkg`, workspace members) keep the existing realize path.
 pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
@@ -107,13 +107,13 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 
     let entry = find_project_entry(&project_dir);
-    let declared_tasks = list_project_tasks(&entry);
+    let declared_jobs = list_project_jobs(&entry);
 
     // Prefer a project `#Job` over package-ref classification when the first
     // positional is a bare name (no `@source` suffix).
     if let Some(raw) = parsed.positional.first() {
-        if !raw.contains(Syntax::REF_PROVIDER_AT) && declared_tasks.iter().any(|t| t == raw) {
-            return run_project_task(theme, parsed, &roots, &project_dir, &entry, raw);
+        if !raw.contains(Syntax::REF_PROVIDER_AT) && declared_jobs.iter().any(|t| t == raw) {
+            return run_project_job(theme, parsed, &roots, &project_dir, &entry, raw);
         }
     }
 
@@ -138,16 +138,16 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             }
             Err(_) => {
-                // Bare unknown name + declared tasks → E1290 (list them).
-                if !raw.contains(Syntax::REF_PROVIDER_AT) && !declared_tasks.is_empty() {
-                    let list = declared_tasks.join(", ");
+                // Bare unknown name + declared jobs → E1290 (list them).
+                if !raw.contains(Syntax::REF_PROVIDER_AT) && !declared_jobs.is_empty() {
+                    let list = declared_jobs.join(", ");
                     theme.error_coded(
                         "E1294",
-                        &format!("no task named `{raw}`"),
+                        &format!("no job named `{raw}`"),
                         "`jetpack run <name>` invokes a `#Job fn` in the project entry (D-JPK-TASKRUN1).",
                         "mark a function `#Job` to make it runnable, or check the spelling.",
                     );
-                    theme.detail(&format!("declared tasks: {list}"));
+                    theme.detail(&format!("declared jobs: {list}"));
                     return 2;
                 }
                 return 2;
@@ -202,8 +202,8 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// D-JPK-TASKRUN1: realize the project env (when present), then shell out to
-/// `jet run --task <name> <entry> -- <task-args>` (D-JPK-DISPATCH1).
-pub(super) fn run_project_task(
+/// `jet run --job <name> <entry> -- <job-args>` (D-JPK-DISPATCH1).
+pub(super) fn run_project_job(
     theme: &Theme,
     parsed: &Parsed,
     roots: &Store::Roots,
@@ -211,10 +211,10 @@ pub(super) fn run_project_task(
     entry: &Path,
     task: &str,
 ) -> i32 {
-    run_project_task_with_mode(theme, parsed, roots, project_dir, entry, task, false, false)
+    run_project_job_with_mode(theme, parsed, roots, project_dir, entry, task, false, false)
 }
 
-pub(super) fn run_project_task_with_mode(
+pub(super) fn run_project_job_with_mode(
     theme: &Theme,
     parsed: &Parsed,
     roots: &Store::Roots,
@@ -224,27 +224,27 @@ pub(super) fn run_project_task_with_mode(
     clean: bool,
     silent: bool,
 ) -> i32 {
-    if project_task_declared(entry, task) == Some(false) {
-        let declared_tasks = list_project_tasks(entry);
+    if project_job_declared(entry, task) == Some(false) {
+        let declared_jobs = list_project_jobs(entry);
         theme.error_coded(
             "E1294",
-            &format!("no task named `{task}`"),
-            "lifecycle task names must refer to a declared top-level #Job function.",
-            "declare the task with #Job, or remove it from the environment lifecycle.",
+            &format!("no job named `{task}`"),
+            "lifecycle job names must refer to a declared top-level #Job function.",
+            "declare the job with #Job, or remove it from the environment lifecycle.",
         );
-        if !declared_tasks.is_empty() {
-            theme.detail(&format!("declared tasks: {}", declared_tasks.join(", ")));
+        if !declared_jobs.is_empty() {
+            theme.detail(&format!("declared jobs: {}", declared_jobs.join(", ")));
         }
         return 2;
     }
-    let metadata = project_task_metadata(entry, task).unwrap_or_default();
+    let metadata = project_job_metadata(entry, task).unwrap_or_default();
     if let Some(reason) = task_skip_reason(metadata.skip.as_ref()) {
-        theme.status(&format!("skipping task {}: {}", theme.bold(task), reason));
+        theme.status(&format!("skipping job {}: {}", theme.bold(task), reason));
         return 0;
     }
 
     let has_env = EnvFile::path_in(project_dir).is_file();
-    // Env is optional for task-only projects. A task may still add package
+    // Env is optional for job-only projects. A job may still add package
     // metadata, in which case it is composed through the same RunPlan path as
     // `jet env` rather than by mutating PATH in this dispatcher.
     let mut plan = if has_env {
@@ -316,7 +316,7 @@ pub(super) fn run_project_task_with_mode(
         Err(message) => {
             theme.error_coded(
                 "E1330",
-                &format!("task `{task}` has an unsafe cwd"),
+                &format!("job `{task}` has an unsafe cwd"),
                 &message,
                 "use a project-relative path without `..`.",
             );
@@ -326,8 +326,8 @@ pub(super) fn run_project_task_with_mode(
     if !task_cwd.is_dir() {
         theme.error_coded(
             "E1330",
-            &format!("task `{task}` has a non-directory cwd"),
-            &format!("task cwd `{}` is not a directory", task_cwd.display()),
+            &format!("job `{task}` has a non-directory cwd"),
+            &format!("job cwd `{}` is not a directory", task_cwd.display()),
             "use a project-relative directory for `cwd`.",
         );
         return 2;
@@ -339,8 +339,8 @@ pub(super) fn run_project_task_with_mode(
         if metadata.outputs.is_empty() {
             theme.error_coded(
                 "E1330",
-                &format!("task `{task}` enables caching without outputs"),
-                "a cached task needs at least one declared output so a later run can prove that the result still exists.",
+                &format!("job `{task}` enables caching without outputs"),
+                "a cached job needs at least one declared output so a later run can prove that the result still exists.",
                 "add `outputs: [\"path\"]`, or use `cache: .Uncached`.",
             );
             return 2;
@@ -348,7 +348,7 @@ pub(super) fn run_project_task_with_mode(
         if let Err(message) = validate_cached_task_metadata(project_dir, &metadata) {
             theme.error_coded(
                 "E1330",
-                &format!("task `{task}` has unsafe cache declarations"),
+                &format!("job `{task}` has unsafe cache declarations"),
                 &message,
                 "declare every project input and keep cached outputs separate from inputs, or use `cache: .Uncached`.",
             );
@@ -357,7 +357,7 @@ pub(super) fn run_project_task_with_mode(
         if let Err(message) = validate_cached_task_environment(&plan, &env) {
             theme.error_coded(
                 "E1330",
-                &format!("task `{task}` has an unsafe cached environment"),
+                &format!("job `{task}` has an unsafe cached environment"),
                 &message,
                 "remove secret-bearing environment inputs, or use `cache: .Uncached`.",
             );
@@ -368,9 +368,9 @@ pub(super) fn run_project_task_with_mode(
             Err(message) => {
                 theme.error_coded(
                     "E1330",
-                    &format!("task `{task}` cannot resolve its compiler"),
+                    &format!("job `{task}` cannot resolve its compiler"),
                     &message,
-                    "make the compiler named by the task environment available, or use `cache: .Uncached`.",
+                    "make the compiler named by the job environment available, or use `cache: .Uncached`.",
                 );
                 return 2;
             }
@@ -396,7 +396,7 @@ pub(super) fn run_project_task_with_mode(
             Err(message) => {
                 theme.error_coded(
                     "E1330",
-                    &format!("task `{task}` has invalid cache inputs or outputs"),
+                    &format!("job `{task}` has invalid cache inputs or outputs"),
                     &message,
                     "use existing project-relative input and output paths.",
                 );
@@ -404,14 +404,14 @@ pub(super) fn run_project_task_with_mode(
             }
         };
         if task_cache_hit(project_dir, roots, &metadata, &key) {
-            theme.status(&format!("task {} is up to date", theme.bold(task)));
+            theme.status(&format!("job {} is up to date", theme.bold(task)));
             return 0;
         }
         Some(key)
     };
 
     theme.status(&format!(
-        "running task {} ({})",
+        "running job {} ({})",
         theme.bold(task),
         theme.gray(&entry.display().to_string())
     ));
@@ -419,7 +419,7 @@ pub(super) fn run_project_task_with_mode(
     let mut argv = vec![
         jet_binary,
         "run".to_string(),
-        format!("--task={task}"),
+        format!("--job={task}"),
         entry.to_string_lossy().into_owned(),
     ];
     if !task_args.is_empty() {
@@ -430,10 +430,10 @@ pub(super) fn run_project_task_with_mode(
         .as_deref()
         .map(task_access_trace_path);
     let code = if let Some(trace_path) = access_trace.as_deref() {
-        // A strict cache key must describe the complete task environment. The
-        // ordinary direct-task path inherits host variables, so cached tasks
+        // A strict cache key must describe the complete job environment. The
+        // ordinary direct-job path inherits host variables, so cached jobs
         // use the clean composed environment whose values are in the key.
-        match run_task_with_access_trace(
+        match run_job_with_access_trace(
             &env,
             &argv,
             &task_cwd,
@@ -445,9 +445,9 @@ pub(super) fn run_project_task_with_mode(
             Err(message) => {
                 theme.error_coded(
                     "E1330",
-                    &format!("task `{task}` cannot prove strict cache access"),
+                    &format!("job `{task}` cannot prove strict cache access"),
                     &message,
-                    "run the cached task on a host with file-access tracing, or use `cache: .Uncached`.",
+                    "run the cached job on a host with file-access tracing, or use `cache: .Uncached`.",
                 );
                 return 2;
             }
@@ -482,9 +482,9 @@ pub(super) fn run_project_task_with_mode(
                 Err(message) => {
                     theme.error_coded(
                         "E1330",
-                        &format!("task `{task}` access proof failed"),
+                        &format!("job `{task}` access proof failed"),
                         &message,
-                        "fix the trace file or use `cache: .Uncached` for tasks that cannot be proven.",
+                        "fix the trace file or use `cache: .Uncached` for jobs that cannot be proven.",
                     );
                     return 1;
                 }
@@ -492,7 +492,7 @@ pub(super) fn run_project_task_with_mode(
             if !undeclared.is_empty() {
                 theme.error_coded(
                     "E1330",
-                    &format!("task `{task}` read undeclared project files"),
+                    &format!("job `{task}` read undeclared project files"),
                     &undeclared.join(", "),
                     "declare every read path in `inputs`, or use `cache: .Uncached`.",
                 );
@@ -501,17 +501,17 @@ pub(super) fn run_project_task_with_mode(
             if !task_outputs_exist(project_dir, &metadata) {
                 theme.error_coded(
                     "E1330",
-                    &format!("task `{task}` did not produce its declared outputs"),
-                    "a successful cached task must leave every declared output in place before its result can be recorded",
-                    "write each declared output, or remove it from `outputs` and keep the task uncached",
+                    &format!("job `{task}` did not produce its declared outputs"),
+                    "a successful cached job must leave every declared output in place before its result can be recorded",
+                    "write each declared output, or remove it from `outputs` and keep the job uncached",
                 );
                 return 1;
             }
             if let Err(error) = write_task_cache(project_dir, roots, &metadata, &cache_key) {
                 theme.error(
-                    "task completed but its cache record could not be written",
+                    "job completed but its cache record could not be written",
                     &error,
-                    "fix permissions for `.jet/tasks` or the Jet state directory, then rerun the task.",
+                    "fix permissions for `.jet/tasks` or the Jet state directory, then rerun the job.",
                 );
                 return 1;
             }
@@ -541,7 +541,7 @@ fn resolve_task_jet_binary(env: &Env) -> Result<String, String> {
     Ok(resolve_executable_path(&requested)?.to_string_lossy().into_owned())
 }
 
-fn run_task_with_access_trace(
+fn run_job_with_access_trace(
     env: &Env,
     argv: &[String],
     cwd: &Path,
@@ -550,7 +550,7 @@ fn run_task_with_access_trace(
     trace_path: &Path,
 ) -> Result<i32, String> {
     if !cfg!(target_os = "linux") {
-        return Err("strict cached task access tracing is currently supported only on Linux".to_string());
+        return Err("strict cached job access tracing is currently supported only on Linux".to_string());
     }
     let base_path = if clean {
         crate::Platform::clean_path().to_string()
@@ -1007,7 +1007,7 @@ fn task_environment_hash_with_vars(
     vars: &BTreeMap<String, String>,
 ) -> String {
     let mut identity = Trust::environment_definition_hash(refs, table, secrets, facts);
-    identity.push_str("\n--task-active-environment--\n");
+    identity.push_str("\n--job-active-environment--\n");
     identity.push_str(facts.active_environment.as_deref().unwrap_or("<none>"));
     identity.push('\n');
     for module in &facts.active_environment_provenance {
@@ -1015,12 +1015,12 @@ fn task_environment_hash_with_vars(
         identity.push_str(module);
         identity.push('\n');
     }
-    identity.push_str("--task-source-files--\n");
+    identity.push_str("--job-source-files--\n");
     for source in &facts.source_files {
         identity.push_str(source);
         identity.push('\n');
     }
-    identity.push_str("--task-environment-values--\n");
+    identity.push_str("--job-environment-values--\n");
     for (name, value) in vars {
         identity.push_str(name);
         identity.push('=');
@@ -1709,7 +1709,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .map(|reference| reference.raw.as_str())
         .collect::<Vec<_>>();
     let entry = find_project_entry(&plan.project_root);
-    let mut tasks = list_project_tasks(&entry);
+    let mut tasks = list_project_jobs(&entry);
     for hook in plan
         .environment
         .lifecycle
@@ -2799,7 +2799,7 @@ mod tests {
     fn strace_paths_use_file_arguments_and_decode_escapes() {
         assert_eq!(
             strace_paths(
-                r#"123 execve("/project/jet", ["jet", "run", "--task=build"], 0x0) = 0"#
+                r#"123 execve("/project/jet", ["jet", "run", "--job=build"], 0x0) = 0"#
             ),
             vec![PathBuf::from("/project/jet")]
         );

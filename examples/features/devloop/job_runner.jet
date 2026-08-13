@@ -1,0 +1,15 @@
+// D-JPK-TASKRUN1 (card #476) — project jobs are Jet `#Job fn`s.
+// Discover inside a project with `jet jobs`.
+// Invoke: `jet run --job greet <this-file>` / `jet run --job seed <this-file>`.
+// Cross-job dependency = a plain call (`seed` calls `greet` below).
+// I5 golden runs both --job paths (see tests/golden.rs).
+#[Job, Doc("Say hello from a project job")] fn greet() {
+    print("hello from job")
+}
+
+#[Job, Doc("Seed local data"), Every(5min)] fn seed() {
+    greet()
+    print("seeded")
+}
+
+fn run() { print("use jet run --job greet <this-file>") }
