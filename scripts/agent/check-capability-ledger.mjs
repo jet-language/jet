@@ -206,6 +206,16 @@ function rustTestBody(text, testName) {
   throw new Error(`exact Rust test function ${testName} has no complete body`);
 }
 
+/// Test binaries may assemble from `include!("...")` parts (suite time budget
+/// splits). Inline one level of includes so exact-function lookups still work.
+function testBinarySource(testPath) {
+  const raw = readFileSync(testPath, "utf8");
+  return raw.replace(/include!\("([^"]+)"\);/g, (whole, rel) => {
+    const part = join(dirname(testPath), rel);
+    return existsSync(part) ? readFileSync(part, "utf8") : whole;
+  });
+}
+
 function validateCommand(command, proven, claimId, laneId) {
   if (!Array.isArray(command) || command.length !== 7 || command.some((part) => typeof part !== "string" || !part)) {
     throw new Error("acceptance command must be a non-empty argv array");
@@ -217,7 +227,7 @@ function validateCommand(command, proven, claimId, laneId) {
     const testPath = join(ROOT, "tests", `${command[3]}.rs`);
     if (!existsSync(testPath)) throw new Error(`proven acceptance test does not exist: ${relative(ROOT, testPath)}`);
     const marker = `CAPABILITY_CLAIM: ${claimId} / ${laneId}`;
-    const body = rustTestBody(readFileSync(testPath, "utf8"), command[4]);
+    const body = rustTestBody(testBinarySource(testPath), command[4]);
     if (!body.includes(marker)) {
       throw new Error(`exact acceptance test body lacks lane marker ${marker}`);
     }
