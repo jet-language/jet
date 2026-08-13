@@ -647,7 +647,7 @@ fn outer_result() => Int {
     result
 }
 
-fn identity(value: Int) => Int = value
+fn identity(value: Int) => Int :: value
 
 fn nested_binary_exit() => Int {
     result :: loop {

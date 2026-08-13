@@ -38,7 +38,7 @@ fn parse_codes(source: &str) -> Vec<String> {
 
 #[test]
 fn core_lang_marker_enums_accept_dot_literals_without_imports() {
-    let diagnostics = codes("#Inline(.Always)\nfn helper() => Int = 1\nfn run() {}");
+    let diagnostics = codes("#Inline(.Always)\nfn helper() => Int :: 1\nfn run() {}");
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 

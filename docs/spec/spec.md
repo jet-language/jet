@@ -87,7 +87,7 @@ block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
 // S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
 // at each line end after a statement-ending token; the grammar stays
 // terminator-based. A leading `.` or binary/logical operator on the next line
-// suppresses insertion (continuation). A callable arrow, `=`, or `{` stays
+// suppresses insertion (continuation). A callable arrow, `::`, or `{` stays
 // attached to the declaration head. `NL` denotes that synthetic terminator.
 stmt     = binding | assign | if | loop | fenced-stmt
          | break | next | "return" [ expr ] NL
@@ -106,20 +106,20 @@ fence    = "@[" fence-entry { "," fence-entry } "]@"
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
-if       = "if" cond block
-           { "else" "if" cond block } [ "else" block ]
+if       = "if" cond effect-body
+           { "else" "if" cond effect-body } [ "else" effect-body ]
          | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // ordered arm table with named subject
          | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // ordered arm table
 arm      = arm-head "->" arm-body NL ;
 guard-arm = cond "->" guard-stmt-body NL ;
-effect-body = block ;
+effect-body = block | "->" non-if-stmt ;
 guard-stmt-body = block | non-if-stmt ;
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
-loop-body= "loop" block
-         | "loop" cond block
+loop-body= "loop" effect-body
+         | "loop" cond effect-body
          | "loop" source-clauses [ "if" cond ] loop-result-body
          | "loop" ident ":=" expr "," cond [ "," expr ] loop-result-body ;
 source-clauses = source-clause { "," source-clause } ;
@@ -195,7 +195,8 @@ keep code readable from top to bottom. See
   as written; unrelated expressions may appear in the same table. The first
   matching or true head wins. Chained `else if` remains legal, but there should
   rarely be a reason to prefer it and it is not a canonical teaching form.
-  Conventional effect-only branches have no arrow. Arm-table arrows select an
+  Conventional effect-only branches use `->` for one adjacent statement and
+  braces for multiple statements or scoped bodies. Arm-table arrows select an
   arm, including an arm yielding `()`. Value branches require `else` unless a closed
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
@@ -221,16 +222,20 @@ keep code readable from top to bottom. See
   Bare `next` is control only as a complete statement or `??` fallback;
   `next()`, `.next()`, and `fn next` are ordinary identifier uses, while a value
   named `next` after `??` needs parentheses: `value ?? (next)`.
-- A finite source or C-style loop may use `-> expression` or `-> { ... }`.
+- A finite source loop in value position may use `-> expression` or `-> { ... }`.
   Each accepted iteration yields one non-unit value. The result is an eager
   List in iteration order. A header guard or `next` omits items. Multiple
   source clauses yield one flat List; an explicitly nested collecting loop
   preserves nesting. Maps and Sets use explicit terminals. Lazy work uses the
   existing iterator adapters.
-- A bare or condition-only loop does not accept `->`. It returns one final
-  value only through `break value` or `break(name, value)`. All payload exits
-  unify. In a collecting loop, `break` returns the partial List and payload
-  breaks are rejected.
+- A statement-position finite source, bare infinite, condition-only, or
+  mutable-state loop may use `-> statement`; the statement runs for its effect
+  and its value is discarded. A non-unit discarded value gets the registered
+  lint; bind the loop with `::` to collect values or use a write handle for an
+  in-place update. A loop returns one final value only through `break value` or
+  `break(name, value)` when it is used as a value. All payload exits unify. In a
+  collecting loop, `break` returns the partial List and payload breaks are
+  rejected.
 - `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
   heads top to bottom. Bare values and ranges compare against the subject;
   predicate heads are `Bool`; `else` is mandatory unless enum/option

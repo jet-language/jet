@@ -2830,7 +2830,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) => View<Book> = lib.books[i..i]
+fn book_at(lib: Library, i: Int) => View<Book> :: lib.books[i..i]
 
 fn edit_at(lib: &Library, i: Int) => ViewMut<Book> {
     return &lib.books[i..i]
@@ -2885,7 +2885,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) => View<Book> = lib.books[i..i]
+fn book_at(lib: Library, i: Int) => View<Book> :: lib.books[i..i]
 
 fn run() {
     lib := Library.{
@@ -5701,7 +5701,7 @@ struct Packet {
 }
 
 impl Packet.Slice {
-    fn head(self) => View<Int> from self = self.data[0..1]
+    fn head(self) => View<Int> from self :: self.data[0..1]
 }
 
 fn first(s: Slice) => View<Int> from s {

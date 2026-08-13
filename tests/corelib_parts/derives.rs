@@ -240,7 +240,7 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) => DataTree = DataTree.Object(["address": DataTree.Text(~self.address)])
+    fn encode(self) => DataTree :: DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
     fn decode(tree: DataTree) => HandEmail ? [FieldError] {
@@ -294,8 +294,8 @@ use core.encoding.json as json
 #Codable
 struct Boxed<T> { value: T }
 
-fn generic_encode<T: Encode>(value: T) => String = json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) => T ? [FieldError] = json.decode<T>(wire)
+fn generic_encode<T: Encode>(value: T) => String :: json.to_string(value)
+fn generic_decode<T: Decode>(wire: String) => T ? [FieldError] :: json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>.{ value: 7 }
@@ -739,7 +739,7 @@ fn user_derive_orphan_rule_allows_either_local_side() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 derive T.RemoteLabel {
-    fn remote_label(self) => String = "remote:{T.@name}"
+    fn remote_label(self) => String :: "remote:{T.@name}"
 }
 
 #LocalLabel
@@ -754,7 +754,7 @@ pub fn remote_type_label() => String {
 use labels
 
 derive T.LocalLabel {
-    fn local_label(self) => String = "local:{T.@name}"
+    fn local_label(self) => String :: "local:{T.@name}"
 }
 
 #RemoteLabel
@@ -797,7 +797,7 @@ derive T.LayoutFacts {
     reflected_kind :: reflected.kind
     field_name :: selected.name
     name :: T.reflect().name
-    fn layout_facts(self) => String = "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}"
+    fn layout_facts(self) => String :: "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}"
 }
 
 #LayoutFacts
@@ -888,8 +888,8 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) => @param = ~self.value
-    fn type_name(self) => String = T.@name
+    fn get_value(self) => @param :: ~self.value
+    fn type_name(self) => String :: T.@name
 }
 
 #TypeName
@@ -928,7 +928,7 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) => fn(Int) => Int = ~self.callback
+    fn duplicate(self) => fn(Int) => Int :: ~self.callback
 }
 
 #CopyCallback

@@ -527,8 +527,8 @@ impl<'a> Fmt<'a> {
                 if let Some((_n, _)) = label {
                     self.write(&format!("{} :: ", _n));
                 }
-                self.write("loop {");
-                self.fmt_body(inner);
+                self.write("loop");
+                self.fmt_control_body_after_header(inner);
             }
             Stmt::Unsafe { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -744,8 +744,7 @@ impl<'a> Fmt<'a> {
 
     fn fmt_effect_loop_body(&mut self, body: &[Stmt], header_end: usize) {
         let _ = header_end;
-        self.write(" {");
-        self.fmt_control_body(body);
+        self.fmt_control_body_after_header(body);
     }
 
     /// D-IF1/D-FMT1: render one dispatch arm. A bare-value arm
@@ -825,8 +824,7 @@ impl<'a> Fmt<'a> {
         };
         self.emit_classic_if_condition_trivia(arm.cond.span().start);
         self.fmt_cond(&arm.cond);
-        self.write(" {");
-        self.fmt_control_body(&arm.body);
+        self.fmt_control_body_after_header(&arm.body);
         match else_body {
             Some([
                 Stmt::Switch {
@@ -842,8 +840,8 @@ impl<'a> Fmt<'a> {
                 self.fmt_classic_switch(arms, else_body.as_deref());
             }
             Some(body) => {
-                self.write(" else {");
-                self.fmt_control_body(body);
+                self.write(" else");
+                self.fmt_control_body_after_header(body);
             }
             None => {}
         }
@@ -930,6 +928,39 @@ impl<'a> Fmt<'a> {
         }
         self.write(" {");
         self.fmt_body(body);
+    }
+
+    /// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C: one simple effect-control
+    /// statement uses `->` when it fits. Braces remain the canonical shape for
+    /// multiple statements, scoped blocks, comments, and over-width output.
+    fn fmt_control_body_after_header(&mut self, body: &[Stmt]) {
+        if body.len() == 1 && is_simple_stmt(&body[0]) {
+            let comment_free = self
+                .single_stmt_braces(&body[0])
+                .map_or(true, |(open, close)| !self.span_has_comment(open, close));
+            if !comment_free {
+                self.write(" {");
+                self.fmt_control_body(body);
+                return;
+            }
+            let saved_out = self.out.len();
+            let saved_col = self.col;
+            let saved_line_start = self.at_line_start;
+            let saved_pending_blank = self.pending_blank;
+            let saved_comment_i = self.comment_i;
+            self.write(" -> ");
+            self.fmt_stmt_inline(&body[0]);
+            if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+                return;
+            }
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+        }
+        self.write(" {");
+        self.fmt_control_body(body);
     }
 
     fn arm_head_starts_with_dot(cond: &Expr) -> bool {

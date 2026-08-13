@@ -24,7 +24,7 @@ build: {
     let source = r#"
 module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
-    pub fn slots() => Int = capacity
+    pub fn slots() => Int :: capacity
 }
 module tuned :: cache<Int>(@build.settings.cache_slots)
 fn run() { print(tuned.slots()) }
@@ -196,13 +196,13 @@ fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
 module cache<K>(capacity: Int) {
     @computed_size :: @base + capacity
     pub struct Entry { items: [K#capacity] }
-    pub fn size() => Int = @computed_size
+    pub fn size() => Int :: @computed_size
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) => K = value
+    pub fn identity(value: K) => K :: value
 }
 module plain :: plain_template<Int>
 

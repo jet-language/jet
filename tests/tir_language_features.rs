@@ -254,7 +254,7 @@ fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => S
 fn identity<T>(value: T, *, note: String = \"unused\") => T {
     return value
 }
-fn force(*, force: Bool) => Int = 1
+fn force(*, force: Bool) => Int :: 1
 fn apply(action: fn(*, force: Bool) => Int) => Int {
     return action(force: true)
 }

@@ -112,6 +112,10 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
         span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        /// The body still uses the ordinary statement AST; sema owns the
+        /// discarded-value lint and codegen keeps the same lowering path.
+        arrow_body: bool,
         /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop cond { }`).
         label: Option<(String, Span)>,
     },
@@ -124,6 +128,8 @@ pub enum Stmt {
         kind: ForKind,
         body: Vec<Stmt>,
         span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
         /// D-LOOPLABEL3: optional compile-time loop name.
         label: Option<(String, Span)>,
     },
@@ -145,6 +151,8 @@ pub enum Stmt {
     Loop {
         body: Vec<Stmt>,
         span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
         /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop { }`).
         label: Option<(String, Span)>,
     },
@@ -155,6 +163,8 @@ pub enum Stmt {
         step: Option<Box<Stmt>>,
         body: Vec<Stmt>,
         span: Span,
+        /// D-LOOP-STMT-ARROW1=C: true when statement position used `->`.
+        arrow_body: bool,
         label: Option<(String, Span)>,
     },
     /// S58 (E2-M13): `#Unsafe("reason") { … }` audited region. `audit` carries

@@ -1,7 +1,7 @@
 Error [E0740]: `load` uses the effect `FS`, which its signature doesn't allow
   --> tests/ui/effect_out_of_set.jet:3:25
     |
-  3 | fn load(path: String) =[Net]=> String = fs.read(~path) ?? ""
+  3 | fn load(path: String) =[Net]=> String :: fs.read(~path) ?? ""
     |                         ^^^
  Why: the signature declares `=[Net]=>`, so the body may only use those; `FS` is outside that set
  Fix: add `FS` to the effect list, or stop using it in `load`

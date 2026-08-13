@@ -13,7 +13,7 @@ use core.files as fs
 use core.io as io
 use core.env as env
 
-fn count_lines(text: String) => Int = text.lines().len()
+fn count_lines(text: String) => Int :: text.lines().len()
 fn scan_one(path: String) => String {
     text :: fs.read(~path) ?? return "{path}: unreadable"
     lines :: count_lines(text)
@@ -29,7 +29,7 @@ fn default_paths() => [String] {
     ]
 }
 
-fn paths_from_args() => [String] = io.args().skip(1).to_list()
+fn paths_from_args() => [String] :: io.args().skip(1).to_list()
 fn paths_from_prompt() => [String] {
     print("Enter file paths (blank line when done):")
     out := [String].{}
@@ -73,7 +73,7 @@ fn scan_parallel(paths: [String]) => [String] {
     return results
 }
 
-fn copy_paths(paths: [String]) => [String] = paths.map(path => ~path)
+fn copy_paths(paths: [String]) => [String] :: paths.map(path => ~path)
 fn run() {
     paths :: gather_paths()
     if paths.len() == 0 {

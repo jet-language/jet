@@ -21,13 +21,13 @@ module cache<K>(capacity: Int) {
         return Entry.{ key: k }
     }
 
-    pub fn slot(k: K) => Slot = Slot.Value(k)
+    pub fn slot(k: K) => Slot :: Slot.Value(k)
     pub fn key_of(k: K) => String {
         return "key"
     }
 
-    pub fn describe() => String = "generic cache"
-    pub fn size() => Int = @computed_size
+    pub fn describe() => String :: "generic cache"
+    pub fn size() => Int :: @computed_size
 }
 
 // Forward alias chain: declaration order does not affect resolution.
@@ -69,7 +69,7 @@ impl GoodToken.Token {
 // The annotation decides the kind: `Item` is a type slot because `Token` is a
 // trait, while `count` is an `Int` value slot. Their spelling follows that kind.
 module annotation_kinds<Item: Token>(count: Int) {
-    pub fn count() => Int = count
+    pub fn count() => Int :: count
 }
 
 module kinds :: annotation_kinds<GoodToken>(8)
@@ -98,7 +98,7 @@ module local_laws<T> {
 
     impl Wrapped.Reveal {
         type Output = T
-        fn reveal(self) => T = self.value
+        fn reveal(self) => T :: self.value
     }
 
     pub enum SourceErr { Bad(T) }

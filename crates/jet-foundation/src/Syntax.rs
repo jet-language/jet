@@ -117,10 +117,13 @@
 // `fn bench(suite: BenchSuite)` extend the existing command-entry convention.
 // `--show-default` selects the stock harness; no keyword or sigil enters the grammar.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
-// (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
-// items. Effect-only `if` and `loop` bodies use no arrow. D-BRACE1=A
-// (ratified 2026-07-30, card #1335) requires braces around every effect
-// `if`/`else`/`loop` body and makes fmt collapse fitting simple bodies.
+// (`->`) selects dispatch/guard values, yields finite-loop items, and marks a
+// one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
+// 2026-08-13, card #1453) gives every statement-position loop header this
+// body form. D-ONELINE-BODY1=B (ratified 2026-08-13,
+// cards #1453/#1454) makes `::` the one-line function-body marker; callable
+// heads keep `=>`; braces remain the multi-statement/scoped form. `=` remains
+// for slot-filling declarations such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
 // clauses and `(key, value)` for a two-name source binding.
 // D-LOOPSTATE1 owns break/next target arguments, and

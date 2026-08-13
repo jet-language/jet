@@ -91,7 +91,7 @@ The generated enum types are `ABI`, `Capability`, `FfiLanguage`, `InlineMode`,
 use core.lang as lang
 
 #Inline(lang.InlineMode.Always)
-fn parse_fast(text: String) => Int = text.parse() ?? 0
+fn parse_fast(text: String) => Int :: text.parse() ?? 0
 ```
 
 An expected marker argument also accepts a dot literal without an import:

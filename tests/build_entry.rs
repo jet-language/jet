@@ -130,7 +130,7 @@ fn root_fn_build_executes_graph_materializes_and_frontend_checks_generated_sourc
         r#"
 fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
     b.generate("generated_message") {
-        fn generated_message() => String = "built";
+        fn generated_message() => String :: "built";
     }?
     #Impure("write declared build output") {
     stamp :: b.action(
@@ -230,7 +230,7 @@ name: "package-entry"
 version: "0.1.0"
 fn build(b: BuildContext) => BuildPlan ? {
     b.generate("package_message") {
-        fn package_message() => String = "package";
+        fn package_message() => String :: "package";
     }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
     return b.plan(app)
@@ -742,7 +742,7 @@ name: "a"
 version: "0.1.0"
     fn build(b: BuildContext) => BuildPlan ? {
     b.generate("a_generated") {
-        fn a_generated() => String = "a";
+        fn a_generated() => String :: "a";
     }?
     target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])?
     return b.plan(target)
@@ -755,7 +755,7 @@ version: "0.1.0"
     );
     write(
         &packages.join("b").join("run.jet"),
-        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\") {\n        fn b_generated() => String = \\\"b\\\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
+        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\") {\n        fn b_generated() => String :: \\\"b\\\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
     );
 
     let output = jet::compile_programmable_build_opts(
@@ -1546,7 +1546,7 @@ fn locked_generated_drift_fails_before_materialization() {
     let source = |value: &str| format!(r#"
 fn build(b: BuildContext) => BuildPlan ? {{
     b.generate("value") {{
-        fn generated_value() => String = "{value}";
+        fn generated_value() => String :: "{value}";
     }}?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])?
     return b.plan(app)
@@ -1574,10 +1574,10 @@ fn generated_sources_materialize_and_compile_as_one_program() {
         r#"
 fn build(b: BuildContext) => BuildPlan ? {
     b.generate("consumer") {
-        pub fn generated_value() => String = "round two";
+        pub fn generated_value() => String :: "round two";
     }?
     b.generate("provider") {
-        pub fn message() => String = "round two";
+        pub fn message() => String :: "round two";
     }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])?
     return b.plan(app)
@@ -1634,7 +1634,7 @@ fn emit_generated_exports_the_exact_materialized_source() {
             r#"
 fn build(b: BuildContext) => BuildPlan ? {{
     b.generate("exported") {{
-        fn exported_generated() => String = "exported";
+        fn exported_generated() => String :: "exported";
     }}?
     app :: b.add_executable("app", ["main.jet"], [])?
     return b.plan(app)
@@ -2081,7 +2081,7 @@ fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     files :: b.find("assets/*.txt")
     message :: b.embed(files[0])
     b.generate("asset") {
-        fn generated_asset() => String = "hello";
+        fn generated_asset() => String :: "hello";
     }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])?
     return b.plan(app)

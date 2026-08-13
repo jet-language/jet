@@ -1230,7 +1230,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) => String = "custom length"
+    fn display(self) => String :: "custom length"
 }
 
 fn run() {
@@ -1285,7 +1285,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) => String = "custom length"
+    fn display(self) => String :: "custom length"
 }
 
 fn show(distance: Meter) {
@@ -1386,7 +1386,7 @@ fn imported_public_units_keep_display_metadata_across_tiers() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) => String = "defined in units"
+    fn display(self) => String :: "defined in units"
 }
 
 pub fn distance() => Meter { return 12meter }
@@ -1458,7 +1458,7 @@ fn run() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) => String = "defined in units"
+    fn display(self) => String :: "defined in units"
 }
 "#;
     let web_main = r#"

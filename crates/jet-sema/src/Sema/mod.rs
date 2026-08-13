@@ -1346,6 +1346,10 @@ pub(crate) struct Checker<'a> {
     collect_item_types: Vec<Option<Type>>,
     loop_value_frames: Vec<LoopValueFrame>,
     pending_loop_value: Option<(LoopValueKind, Option<String>)>,
+    /// D-LOOP-STMT-ARROW1=C: the body currently being checked came from a
+    /// statement-position loop arrow. Its ordinary expression statement may
+    /// compute a value, but that value is intentionally discarded.
+    arrow_loop_body: bool,
     last_loop_result_type: Option<Type>,
     /// D-EFF1: effects this function body reaches directly (Core calls, impure
     /// builtins). Accumulated during the walk; rolled into the per-function

@@ -7,14 +7,14 @@ use core.http.server as server
 use core.net as net
 use core.tasks as tasks
 
-fn handle_root(req: HTTPRequest) => HTTPResponse ? HTTPError = Ok(server.response(200, "welcome"))
+fn handle_root(req: HTTPRequest) => HTTPResponse ? HTTPError :: Ok(server.response(200, "welcome"))
 
 fn handle_user(req: HTTPRequest) => HTTPResponse ? HTTPError {
     id :: req.param("id") ?? "unknown"
     return Ok(server.response(200, "user={id}"))
 }
 
-fn handle_create(req: HTTPRequest) => HTTPResponse ? HTTPError = Ok(server.response(201, "created"))
+fn handle_create(req: HTTPRequest) => HTTPResponse ? HTTPError :: Ok(server.response(201, "created"))
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")

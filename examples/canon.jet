@@ -25,15 +25,15 @@ fn show_values() {
 }
 
 // --- functions & generics ------------------------------------------------
-fn greet(who: String) => String = "hello, {who}"
+fn greet(who: String) => String :: "hello, {who}"
 
-fn id<T>(x: ^T) => T = x
+fn id<T>(x: ^T) => T :: x
 
 struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) => Float = self.x * self.x + self.y * self.y
+    fn dist_sq(self) => Float :: self.x * self.x + self.y * self.y
 
     fn origin() => Point {
         return Point.{x: 0.0, y: 0.0}
@@ -88,12 +88,12 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) => Float = self.side * self.side
+    fn area(self) => Float :: self.side * self.side
 }
 
 // --- inline module -------------------------------------------------------
 module math {
-    pub fn double(n: Int) => Int = n * 2
+    pub fn double(n: Int) => Int :: n * 2
 }
 
 // --- low-level: `Type.{ uninit }` sentinel --------------------------------
@@ -178,7 +178,7 @@ struct LinuxBackend {
 
 #Target(OS.Linux)
 impl LinuxBackend.Backend {
-    fn label(self) => String = "linux: {self.name}"
+    fn label(self) => String :: "linux: {self.name}"
 }
 
 // --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`

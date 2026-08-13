@@ -39,7 +39,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_retired_mixed_angle_value_slot_teaches_parentheses() {
-        let src = "module cache<K, capacity: Int> { fn size() => Int = capacity }";
+        let src = "module cache<K, capacity: Int> { fn size() => Int :: capacity }";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired mixed parameter spelling");

@@ -1,7 +1,7 @@
 Error [E0120]: `name` was not moved here, so it cannot be returned as-is
-  --> tests/ui/return_borrowed_param.jet:1:35
+  --> tests/ui/return_borrowed_param.jet:1:36
     |
-  1 | fn pick(name: String) => String = name
-    |                                   ^^^^
+  1 | fn pick(name: String) => String :: name
+    |                                    ^^^^
  Why: this function has read access only and does not own the value
  Fix: return a copy: `return ~name;` — or take ownership with the move-capability marker `^`: `name: ^String`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership

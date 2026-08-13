@@ -54,7 +54,7 @@ fn fmt_preserves_script_and_declaration_source_order() {
 #[test]
 fn fmt_returned_function_calls_use_call_and_are_stable() {
     let source = r#"
-fn make_adder() => fn(Int) => Int = (value: Int) => value + 1
+fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
 
 fn run() {
     result :: make_adder().call(2)
@@ -154,10 +154,10 @@ fn computed_declaration_values_format_stably() {
 
 #[test]
 fn multi_head_function_surface_round_trips() {
-    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float = r * r\nfn area(Rect(w: Float, h: Float)) => Float = w * h\n";
+    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float :: r * r\nfn area(Rect(w: Float, h: Float)) => Float :: w * h\n";
     let once = jet::format_source(src).expect("multi-head functions should format");
-    assert!(once.contains("fn area(Circle(r: Float)) => Float = r * r"));
-    assert!(once.contains("fn area(Rect(w: Float, h: Float)) => Float = w * h"));
+    assert!(once.contains("fn area(Circle(r: Float)) => Float :: r * r"));
+    assert!(once.contains("fn area(Rect(w: Float, h: Float)) => Float :: w * h"));
     let twice = jet::format_source(&once).expect("formatted multi-head functions should parse");
     assert_eq!(once, twice, "multi-head formatting must be stable");
 }
@@ -1145,10 +1145,10 @@ fn fmt_preserves_bin_take_pattern_literal() {
     assert_eq!(out, twice, "binary take_pattern formatting must be idempotent");
 }
 
-// --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
+// --- D-FMT1 (revises S44): fitting one-statement control bodies ---
 //
-// A braced control body with one simple statement and no inner comment
-// collapses when it fits width 100. Wider, nested, or commented bodies expand.
+// A control body with one simple statement and no inner comment uses `->` when
+// it fits width 100. Wider, nested, or commented bodies keep braces.
 
 /// Assert formatting is idempotent (D-FMTCOLLAPSE1 may rewrite fitting braces).
 fn assert_fmt_stable(src: &str, label: &str) {
@@ -1212,15 +1212,15 @@ fn fmt_shield_block_stability() {
 
 #[test]
 fn fmt_preserves_single_line_if() {
-    // A one-line `if` body the author placed inline survives unchanged.
-    let src = "fn run() {\n    ready :: true\n    if ready { launch() }\n}\n";
+    // D-ONELINE-BODY1=B: a fitting effect body uses the canonical arrow.
+    let src = "fn run() {\n    ready :: true\n    if ready -> launch()\n}\n";
     assert_fmt_stable(src, "single-line if");
 }
 
 #[test]
 fn fmt_preserves_multiline_if() {
     let src = "fn run() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
-    let expected = "fn run() {\n    ready :: true\n    if ready { launch() }\n}\n";
+    let expected = "fn run() {\n    ready :: true\n    if ready -> launch()\n}\n";
     let out = jet::format_source(src).expect("multiline if should format");
     assert_eq!(out, expected);
     assert_eq!(out, jet::format_source(&out).expect("collapsed if should reformat"));
@@ -1231,7 +1231,8 @@ fn fmt_classic_if_ignores_braces_inside_leading_trivia() {
     let src =
         "fn run() {\n    ready :: true\n    if /* { trivia */ ready { launch() }\n}\n";
     let out = jet::format_source(src).expect("commented classic if should format");
-    assert_eq!(out, src);
+    let expected = "fn run() {\n    ready :: true\n    if /* { trivia */ ready -> launch()\n}\n";
+    assert_eq!(out, expected);
     assert_eq!(
         out,
         jet::format_source(&out).expect("commented classic if should reformat")
@@ -1243,7 +1244,7 @@ fn fmt_if_else_chain_collapses_when_every_branch_fits() {
     let src = "fn run() {\n    if a { x() } else {\n        y()\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
     assert_eq!(
-        out, "fn run() {\n    if a { x() } else { y() }\n}\n",
+        out, "fn run() {\n    if a -> x() else -> y()\n}\n",
         "fitting if/else branches should collapse, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("collapsed chain should re-fmt");
@@ -1287,10 +1288,10 @@ fn fmt_single_line_nested_forces_expand() {
         out.contains("if a {\n"),
         "outer body should expand around a nested block, got:\n{out}"
     );
-    // The inner one-line `if b { x() }` is itself simple and stays inline.
+    // The inner one-line `if` uses the canonical arrow.
     assert!(
-        out.contains("if b { x() }"),
-        "inner single-line if should survive, got:\n{out}"
+        out.contains("if b -> x()"),
+        "inner single-line if should survive as an arrow, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("nested output should re-fmt");
     assert_eq!(out, twice, "nested expansion must be idempotent");
@@ -1299,18 +1300,18 @@ fn fmt_single_line_nested_forces_expand() {
 #[test]
 fn fmt_preserves_single_line_loops_and_fn() {
     // The rule applies uniformly to `while`/`for`/`fn` bodies.
-    let while_src = "fn run() {\n    n :: 0\n    loop n < 3 { n += 1 }\n}\n";
+    let while_src = "fn run() {\n    n :: 0\n    loop n < 3 -> n += 1\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
 
-    let for_src = "fn run() {\n    loop i, 0..3 { print(\"{i}\") }\n}\n";
+    let for_src = "fn run() {\n    loop i, 0..3 -> print(\"{i}\")\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
-    let excl_src = "fn run() {\n    loop i, 0..<3 { print(\"{i}\") }\n}\n";
+    let excl_src = "fn run() {\n    loop i, 0..<3 -> print(\"{i}\")\n}\n";
     assert_fmt_stable(excl_src, "exclusive range loop");
-    let two_bind = "fn run() {\n    loop (i, x), xs { print(\"{i}\") }\n}\n";
+    let two_bind = "fn run() {\n    loop (i, x), xs -> print(\"{i}\")\n}\n";
     assert_fmt_stable(two_bind, "list two-binding loop");
 
 
-    let fn_src = "fn one() => Int { return 1 }\n";
+    let fn_src = "fn one() => Int :: 1\n";
     assert_fmt_stable(fn_src, "single-line fn body");
 
     let empty_fn_src = "fn noop() {}\n";
@@ -1426,7 +1427,7 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
 
 #[test]
 fn fmt_preserves_memo_bound_marker() {
-    let src = "#Memo(bound: none) fn cube(value: Int) =[]=> Int = value * value * value\n\nfn run() {}\n";
+    let src = "#Memo(bound: none) fn cube(value: Int) =[]=> Int :: value * value * value\n\nfn run() {}\n";
     assert_fmt_stable(src, "#Memo(bound: none) marker");
 }
 
@@ -1860,7 +1861,7 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeName). The formatter must emit it as `@name` so that
     // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    fn tag(self) => String = \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let src = "derive T.Debug {\n    fn tag(self) => String :: \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept a typed derive body");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
@@ -1869,7 +1870,7 @@ fn fmt_comptime_splice_stability() {
     );
 
     // Standalone `@name` expression (outside emit string) round-trips as `@name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) => String = @tname\n}\n\nfn run() {}\n";
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) => String :: @tname\n}\n\nfn run() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept @name expression");
     assert!(
         splice_once.contains("@tname"),
@@ -2214,7 +2215,7 @@ fn fmt_unified_loop_headers_and_next_stability() {
             "?? (next)",
             "loop item, [1, 2, 3], 2",
             "?? next",
-            "{ next }",
+            "if value == 1 -> next",
         ],
         "unified loop header",
     );
@@ -2240,13 +2241,25 @@ fn fmt_unified_loop_headers_and_next_stability() {
 }
 
 #[test]
-fn control_bodies_gain_braces_and_collapse_when_they_fit() {
+fn control_bodies_use_arrows_when_they_fit() {
     let src = "fn run() {\n    if true {\n        print(\"yes\")\n    }\n    loop false print(\"no\")\n}\n";
     let once = jet::format_source(src).expect("fmt should recover the retired adjacent loop");
-    assert!(once.contains("if true { print(\"yes\") }"), "{once}");
-    assert!(once.contains("loop false { print(\"no\") }"), "{once}");
+    assert!(once.contains("if true -> print(\"yes\")"), "{once}");
+    assert!(once.contains("loop false -> print(\"no\")"), "{once}");
     let twice = jet::format_source(&once).expect("formatted controls must parse");
     assert_eq!(once, twice);
+}
+
+#[test]
+fn effect_control_arrows_format_as_one_statement_bodies() {
+    let src = "fn run() {\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item, [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}\n";
+    let once = jet::format_source(src).expect("effect control arrows should format");
+    assert!(once.contains("if true -> print(\"yes\") else -> print(\"no\")"), "{once}");
+    assert!(once.contains("loop false -> print(\"again\")"), "{once}");
+    assert!(once.contains("loop -> print(\"forever\")"), "{once}");
+    assert!(once.contains("loop item, [1, 2] -> print(item)"), "{once}");
+    assert!(once.contains("loop i := 0, i < 2 -> i += 1"), "{once}");
+    assert_eq!(once, jet::format_source(&once).expect("arrow controls should be stable"));
 }
 
 #[test]
@@ -2254,9 +2267,9 @@ fn loop_headers_use_comma_clauses_and_group_two_names() {
     let src = "fn run() {\n    loop item, [1, 2, 3], 2 { print(item) }\n    loop (key, value), counts { print(key) }\n    loop i, 0..<3 { print(i) }\n}\n";
     let once = jet::format_source(src).expect("fmt should accept comma loop headers");
     for expected in [
-        "loop item, [1, 2, 3], 2 { print(item) }",
-        "loop (key, value), counts { print(key) }",
-        "loop i, 0..<3 { print(i) }",
+        "loop item, [1, 2, 3], 2 -> print(item)",
+        "loop (key, value), counts -> print(key)",
+        "loop i, 0..<3 -> print(i)",
     ] {
         assert!(once.contains(expected), "missing `{expected}`:\n{once}");
     }
@@ -2956,7 +2969,7 @@ fn fmt_typed_derive_body_comment_not_duplicated() {
     // D-META-CODE1: a derive body is a typed item template. Its comments are
     // walked with the ordinary formatter and must remain attached exactly
     // once across repeated formatting.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) => String = @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) => String :: @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -3215,11 +3228,11 @@ fn run() {}
 
 #[test]
 fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
-    // D-IFGUARD1=A + D-ARROW-CONTROL1=A: effect-only `if` has no arrow and
-    // keeps its mandatory body braces. Guard-table and value arms keep arrows.
+    // D-IFGUARD1=A + D-ONELINE-BODY1=B: one-statement effect `if` uses an
+    // arrow; guard-table and value arms keep their arrows.
     let src = r#"fn run() {
     ready :: true
-    if ready { print("inline") }
+    if ready -> print("inline")
     if {
         ready -> print("ready")
         false -> print("never")
@@ -3234,7 +3247,7 @@ fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
     let once = jet::format_source(src).expect("subjectless guards should format");
     assert_eq!(once, src, "concise subjectless guards should stay byte-stable");
     for preserved in [
-        "if ready { print(\"inline\") }",
+        "if ready -> print(\"inline\")",
         "if {",
         "ready ->",
         "false ->",
@@ -3291,7 +3304,7 @@ fn fmt_preserves_parameter_zones_and_public_labels() {
     // from the local name. All three must round-trip byte-for-byte (fmt
     // STABILITY — idempotence alone would not notice a dropped separator,
     // because a dropped one stays dropped on the second pass).
-    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String = host\n";
+    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String :: host\n";
     let once = jet::format_source(src).expect("fmt should accept parameter zones");
     for token in ["host: String", ", /,", ", *,", "timeout seconds: Int = 30", "tls: Bool = true"] {
         assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");

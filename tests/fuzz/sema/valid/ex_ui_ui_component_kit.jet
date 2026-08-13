@@ -2,7 +2,7 @@ use core.ui as ui
 
 struct Label { text: String }
 fn label(text: String) => Label { return Label.{text: ~text} }
-fn label_view(value: Label) => UiNode = ui.text(value.text)
+fn label_view(value: Label) => UiNode :: ui.text(value.text)
 struct Input {
     value: String
     placeholder: String
@@ -16,8 +16,8 @@ fn input_view(value: Input) => UiNode {
 
 struct Button { label: String }
 fn button(label: String) => Button { return Button.{label: ~label} }
-fn button_view(value: Button) => UiNode = ui.button(value.label)
-fn container(children: [UiNode]) => UiNode = ui.box(children)
+fn button_view(value: Button) => UiNode :: ui.button(value.label)
+fn container(children: [UiNode]) => UiNode :: ui.box(children)
 fn run() {
     tree := container([label_view(label("Name")), input_view(input("type")), button_view(button("Save"))])
     backend := ui.null_backend()

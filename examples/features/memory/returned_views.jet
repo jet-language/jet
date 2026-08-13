@@ -14,7 +14,7 @@ struct BorrowedRecord {
     body: View<str>
 }
 
-fn first(values: [Int]) => View<Int> from values = values[0..1]
+fn first(values: [Int]) => View<Int> from values :: values[0..1]
 
 // The result safely borrows whichever input wins at runtime. Both possible
 // owners remain live at the call site. D-MEMPROVENANCE3=A: the `from` clause
@@ -41,7 +41,7 @@ fn scan(source: String) => Token {
     return Token.{text: text, rest: rest}
 }
 
-fn parse(source: String) => Token = scan(source)
+fn parse(source: String) => Token :: scan(source)
 
 // A parser can return a list of tokens borrowed from different input buffers.
 fn tokenize(left: String, right: String) => [View<str>] {

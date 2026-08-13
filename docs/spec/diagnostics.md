@@ -210,10 +210,11 @@ renumbered, and no new `W` code may be allocated.
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | parse | teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D) |
 | E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
+| E0065 | parse | retired function body marker `=`; use `::` (D-ONELINE-BODY1=B) |
 | E0066 | parse | retired function effect syntax; use exact `=[Effects]=>` or `=[]=>` (D-SHAPE8, D-ARROW-CONTROL1) |
 | E0067 | lex | source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A) |
 | E0070 | parse | a callable result uses retired `->`; use `=>` (D-ARROW-CONTROL1) |
-| E0071 | parse/sema | an effect-only `if` or loop uses a result arrow (D-ARROW-CONTROL1) |
+| E0071 | parse/sema | *retired by D-ONELINE-BODY1=B* (was: effect-only result-arrow teaching) |
 | E0072 | sema | a non-finite collecting loop uses a collection arrow (D-LOOPEVAL1) |
 | E0073 | sema | a collecting loop path produces no item or `()` (D-LOOPEVAL1) |
 | E0074 | sema | collecting loop item types do not agree (D-LOOPEVAL1, D-COMPREHENSION1) |
@@ -221,9 +222,10 @@ renumbered, and no new `W` code may be allocated.
 | E0076 | sema | ordinary-loop exits omit a result or use incompatible payload types (D-LOOPSTATE1) |
 | E0077 | parse | a scoped grant uses the retired body-binding arrow (D-ARROW-CONTROL1) |
 | E0078 | sema | a finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1) |
+| E0079 | sema | effect-only loop uses a result exit (D-LOOPSTATE1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
-| E0986 | parse | callable `=>`, `=[Effects]=>`, `=`, or `{` split incorrectly from the declaration head (S6-R, D-ARROW-CONTROL1) |
+| E0986 | parse | callable `=>`, `=[Effects]=>`, `::`, or `{` split incorrectly from the declaration head (S6-R, D-ONELINE-BODY1=B) |
 | E0998 | parse | teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{` (D-IF3 / D-IFDIST1) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
@@ -398,7 +400,7 @@ renumbered, and no new `W` code may be allocated.
 | E0369 | parse | one binding fence repeats a name (D-EACH1=C, D-VERDICT-1320-1) |
 | E0370 | parse | lock-step fences have different entry counts (D-EACH1=C, D-VERDICT-1320-1) |
 | E0371 | parse | fence appears outside a binding target or expression statement, or a binding fence carries a non-name entry (D-EACH1=C, D-VERDICT-1320-1) |
-| E0372 | parse | teaching: an effect `if`, `else`, or `loop` body needs braces (D-BRACE1=A) |
+| E0372 | parse | teaching: an adjacent effect `if`, `else`, or `loop` body needs braces (D-ONELINE-BODY1=B) |
 | E0373 | parse | teaching: loop header clauses use commas, not semicolons (D-LOOP-COMMA1=A) |
 | E0374 | parse | teaching: retired `comptime`; use implicit folding or `$` (D-VERDICT-1308-1) |
 | E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
@@ -454,6 +456,7 @@ renumbered, and no new `W` code may be allocated.
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
 | L0507 | parse | prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A) |
+| L0508 | sema | arrow loop body computes and drops a non-unit value (D-LOOP-STMT-ARROW1=C) |
 | L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
@@ -898,15 +901,17 @@ copy:
 
 ## Callable and control syntax diagnostics
 
-These diagnostics migrate the clean break ratified by D-ARROW-CONTROL1,
+These diagnostics cover the body rules ratified by D-ONELINE-BODY1=B and
+D-ARROW-CONTROL1,
 D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
+| E0065 | This function uses the retired `=` body marker. | `::` separates a one-line function body; `=` fills a slot inside a definition. | Replace `=` with `::`; `jet fmt` applies this fix. |
 | E0057 | This closure uses the retired `take(...)` capture prefix. | Escaping closures infer ownership. Copyable values copy at closure creation, and other owned values move. A capture prefix cannot create a second owner. | Remove `take(...)` and use the captured names directly. |
 | E0066 | This function uses the retired effect-arrow spelling. | Callable results use `=>`. An explicit effect ceiling belongs inside that callable arrow. | Replace it with `=[Effects]=>`, or write `=[]=>` for an empty effect ceiling. |
 | E0070 | This callable result uses `->`. | `=>` defines callable results. `->` is reserved for selected or yielded control values. | Replace `->` with `=>`. For an effect ceiling, write `=[Effects]=>`. |
-| E0071 | This effect-only body uses a result arrow. | An arrow says that control selects or yields a value. A () body only performs work. | Remove `->`. Keep the body adjacent on one line, or use braces for several lines. |
+| E0071 | This retired effect-only result-arrow teaching is no longer emitted. | Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope. | Follow the current one-line body rule. |
 | E0072 | This collecting loop cannot return a List because it has no finite exhaustion edge. | A collecting loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary. | Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`. |
 | E0073 | This collecting loop path produces no item. | Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
@@ -914,7 +919,8 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
 | E0077 | This scoped grant uses the retired body binding. | The capability handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
-| E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `=`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
+| E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
+| E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
 | E0335 | A bare `{ }` follows a call. | Code arguments are ordinary `() => { … }` lambdas inside the call's parentheses (D-TRAILBLOCK2). Trailing `{ }` sugar after a call is gone. | Write `callee(() => { … })`. Put each statement on its own line inside the block. |
@@ -1524,6 +1530,7 @@ already-freed arena), these track the views themselves.
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
+| L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source. | Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place. |
 | L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
@@ -1533,7 +1540,7 @@ already-freed arena), these track the views themselves.
 | E0369 | `{name}` appears twice in this fence. | One binding fence must name each generated copy once. | Remove the second name or give it a different name. |
 | E0370 | Fences on one statement have different entry counts. | Multiple fences expand in lock-step, so every fence needs one entry for each copy. | Give every fence the same number of entries. |
 | E0371 | This fence is not in an allowed statement position, or one of its entries has the wrong shape (empty entry, trailing comma, non-name in a binding fence, malformed numbered range). | D-EACH1 expands complete binding or expression statements; a binding fence takes plain names or one ascending numbered-name range, an expression fence takes comma-separated expressions. | Move the fence to a binding target or a complete expression statement, or fix the entry. |
-| E0372 | This `{body}` body needs braces. | Braces make the body's boundary visible to readers, editors, and the compiler. | Wrap the body in `{ ... }`; `jet fmt` applies this fix. |
+| E0372 | This `{body}` body needs braces. | Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler. | Write `-> statement` for one statement, or wrap the body in `{ ... }`; `jet fmt` applies this fix. |
 | E0373 | This loop header uses a semicolon. | Commas separate loop clauses; semicolons separate statements. | Replace `;` with `,`; `jet fmt` applies this fix. |
 | E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build. |
 | E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
@@ -1620,7 +1627,7 @@ An undeclared value tag with a close declared tag (E0733):
 Error [E0733]: there's no tag called `Sanitizd`
   --> tags.jet:3:17
     |
-  3 | fn clean(input: #Sanitizd String) => String = ~input
+  3 | fn clean(input: #Sanitizd String) => String :: ~input
     |                 ^^^^^^^^^^^^^^^^^
  Why: a value tag in type position must name a declared `tag`
  Fix: did you mean `Sanitized`?

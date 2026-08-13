@@ -1560,6 +1560,7 @@ fn check_func_body_bundle_scoped(
         collect_item_types: Vec::new(),
         loop_value_frames: Vec::new(),
         pending_loop_value: None,
+        arrow_loop_body: false,
         last_loop_result_type: None,
         fx_direct: std::collections::BTreeSet::new(),
         fx_direct_spans: HashMap::new(),

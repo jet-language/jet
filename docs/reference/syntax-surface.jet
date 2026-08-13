@@ -85,19 +85,19 @@ wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
 // ============================================================================
 // FUNCTIONS & GENERICS
 // ============================================================================
-// `fn name(params) => Ret = value` or `fn name(params) => Ret { … }` (S1/S12).
+// `fn name(params) => Ret :: value` or `fn name(params) => Ret { … }` (S1/S12).
 // Private by default; `pub` exports
 // to every consumer; `pub(package)` exports only inside the package boundary.
 
-fn greet(who: String) => String = "hello, {who}"
-fn id<T>(x: ^T) => T = x
+fn greet(who: String) => String :: "hello, {who}"
+fn id<T>(x: ^T) => T :: x
 fn largest<T: Comparable>(xs: [T]) => T {
     // ...
 }
 
 // Argument labels bind by name and may skip defaults; `/` and `*` mark the
 // positional-only and label-only zones (S61, D-APILABEL1=A).
-fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) => Bool = urgent
+fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) => Bool :: urgent
 fn call_with_labels() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
     schedule("ping")                               // trailing defaults fill
@@ -106,8 +106,8 @@ fn call_with_labels() {
 // S83 / D-CHOOSE-HEADS1=A: multi-head functions use one exhaustive enum table.
 // Same name, different parameter patterns, dispatched by argument shape; the
 // first matching declaration-order head wins.
-// fn area(Circle(r: Float)) => Float = 3.14 * r * r
-// fn area(Rect(w: Float, h: Float)) => Float = w * h
+// fn area(Circle(r: Float)) => Float :: 3.14 * r * r
+// fn area(Rect(w: Float, h: Float)) => Float :: w * h
 
 
 // ============================================================================
@@ -199,7 +199,7 @@ struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) => Float = (self.x * self.x) + (self.y * self.y)
+    fn dist_sq(self) => Float :: (self.x * self.x) + (self.y * self.y)
     fn origin() => Point {                // no `self` => static/constructor (D-CTOR1)
         return Point.{x: 0.0, y: 0.0}
     }
@@ -316,7 +316,7 @@ trait Shape2 {
 struct Square { side: Float }
 
 impl Square.Shape2 {                          // top-level impl (S28)
-    fn area(self) => Float = self.side * self.side
+    fn area(self) => Float :: self.side * self.side
 }
 
 // Trait name in type position => dynamic dispatch; `<T: Trait>` => monomorphize (S48).
@@ -377,7 +377,7 @@ fn collections() {
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
-fn fixed() => [Int#3] = [1, 2, 3]                            // `.len` is a compile-time const
+fn fixed() => [Int#3] :: [1, 2, 3]                            // `.len` is a compile-time const
 fn strings() {
     parts :: "a,b,c".split(",").to_list()
     trimmed :: "  hi  ".trim()
@@ -406,7 +406,7 @@ fn closures() {
 }
 
 // Function types: `fn(T1, T2) => R` (S47). Named fns coerce to function values.
-fn apply(f: fn(Int) => Int, x: Int) => Int = f(x)
+fn apply(f: fn(Int) => Int, x: Int) => Int :: f(x)
 fn fixed_size_list() {
     tripled :: [Int#3].{3, 6, 9}
     [t0, t1, t2] :: tripled
@@ -444,7 +444,7 @@ use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
 
 // Inline module; `pub` controls cross-file access (S18).
 module math {
-    pub fn double(n: Int) => Int = n * 2
+    pub fn double(n: Int) => Int :: n * 2
 }
 
 // Kebab-case allowed in name positions only (package/module/system/image/env) (S84).
@@ -458,7 +458,7 @@ module web-app { }
 // Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
 // D-SHAPE8 puts every explicit effect row inside the arrow.
 
-fn square(n: Int) =[]=> Int = n * n
+fn square(n: Int) =[]=> Int :: n * n
 fn announce(label: String, n: Int) =[IO]=> {    // upper bound: may use IO
     print("{label} {n}")
 }
@@ -595,7 +595,7 @@ struct Ticket { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(Currency) { usd, eur }
-fn price() => Usd = Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
+fn price() => Usd :: Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
 #Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
@@ -654,7 +654,7 @@ fn c_ffi() {
 /// ```jet
 /// double(21) // => 42
 /// ```
-fn double(n: Int) => Int = n * 2
+fn double(n: Int) => Int :: n * 2
 fn invariants(n: Int) {
     require(n > 0, "n must be positive")
     panic("unreachable")

@@ -647,16 +647,19 @@ impl<'a> Fmt<'a> {
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);
         }
-        // D-ARROW-CONTROL1: preserve the canonical concise callable body.
-        // The parser desugars `= expr` to `return expr`; its synthetic return
-        // span starts on the author-written `=`.
+        // D-ONELINE-BODY1=B: preserve the canonical concise callable body.
+        // The parser desugars the marker plus expression to `return expr`; its
+        // synthetic return span starts on the author-written marker. Retired
+        // `=` input is intentionally rewritten to `::` here.
         if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
-            if self
-                .src
-                .get(span.start..span.start.saturating_add(1))
-                .is_some_and(|source| source == "=")
-            {
-                self.write(" = ");
+            if self.src.get(span.start..span.start.saturating_add(2)).is_some_and(|source| {
+                source == "::"
+                    || self
+                        .src
+                        .get(span.start..span.start.saturating_add(1))
+                        .is_some_and(|source| source == "=")
+            }) {
+                self.write(" :: ");
                 self.fmt_expr(expr, Prec::OrFallback);
                 return;
             }

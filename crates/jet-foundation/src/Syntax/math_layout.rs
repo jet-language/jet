@@ -274,8 +274,9 @@ pub const FOREIGN_CONTINUE: &str = "continue";
 /// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
 pub const KW_SWITCH: &str = "if";
 
-/// D-ARROW-CONTROL1=A: selected-value arrow inside ordered arm tables,
-/// value if, and finite yielding loops.
+/// D-ARROW-CONTROL1=A / D-LOOP-STMT-ARROW1=C: selected-value arrow inside
+/// ordered arm tables, value if, finite yielding loops, and one-statement
+/// effect loops.
 pub const OP_ARM_ARROW: &str = "->";
 
 /// S46 (ratified) + D-ARROW-CONTROL1=A: callable-result arrow for named functions,

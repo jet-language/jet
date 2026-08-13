@@ -96,7 +96,7 @@ fn option_zip_and_lift2_combinators() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
-fn missing_float() => Float? = None
+fn missing_float() => Float? :: None
 fn multiply_options(x: Float, y: Float) => Float {
     return x * y
 }

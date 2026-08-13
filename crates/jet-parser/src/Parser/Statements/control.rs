@@ -19,6 +19,7 @@ impl<'a> Parser<'a> {
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body,
                     span: start,
+                    arrow_body: false,
                     label: None,
                 }]),
                 span: Span::new(start.start, end),
@@ -186,6 +187,7 @@ impl<'a> Parser<'a> {
                     step,
                     body,
                     span: start,
+                    arrow_body: false,
                     label: None,
                 }
             } else {
@@ -198,6 +200,7 @@ impl<'a> Parser<'a> {
                         kind,
                         body: nested,
                         span: start,
+                        arrow_body: false,
                         label: None,
                     }];
                 }
@@ -210,6 +213,7 @@ impl<'a> Parser<'a> {
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body: vec![loop_stmt],
                     span: start,
+                    arrow_body: false,
                     label: Some((result_label, start)),
                 }]),
                 span: Span::new(start.start, end),
@@ -293,6 +297,7 @@ impl<'a> Parser<'a> {
                 step,
                 body,
                 span: start,
+                arrow_body: false,
                 label: Some((collect_label.clone(), start)),
             }
         } else {
@@ -306,6 +311,7 @@ impl<'a> Parser<'a> {
                     kind,
                     body: nested,
                     span: start,
+                    arrow_body: false,
                     label: (index + 1 == clause_count)
                         .then(|| (collect_label.clone(), start)),
                 }];
@@ -1386,14 +1392,29 @@ impl<'a> Parser<'a> {
         let span = self.bump().span; // `loop`
                                      // S19-amend: `loop` handles all three loop forms by header.
                                      //   loop { }               → infinite
-                                     //   loop cond { }          → conditional (was `while`)
-                                     //   loop x, ... { }        → iteration (was `for`)
-                                     //   loop (k, v), ... { }   → key-value iteration
-        if matches!(self.peek().kind, TokKind::LBrace) {
+        //   loop cond { }          → conditional (was `while`)
+        //   loop x, ... { }        → iteration (was `for`)
+        //   loop (k, v), ... { }   → key-value iteration
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            // D-ONELINE-BODY1=B: an infinite effect loop may use the same
+            // one-statement arrow body as conditional and source loops.
+            let (body, arrow_body) = self.effect_loop_body()?;
+            Ok(Stmt::Loop {
+                body,
+                span,
+                arrow_body,
+                label,
+            })
+        } else if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop
             self.bump();
             let body = self.block_stmts();
-            Ok(Stmt::Loop { body, span, label })
+            Ok(Stmt::Loop {
+                body,
+                span,
+                arrow_body: false,
+                label,
+            })
         } else if matches!(self.peek().kind, TokKind::Ident(_))
             && matches!(self.peek2().kind, TokKind::ColonEq)
         {
@@ -1433,13 +1454,14 @@ impl<'a> Parser<'a> {
                     Some(step_span),
                 ));
             }
-            let body = self.effect_loop_body()?;
+            let (body, arrow_body) = self.effect_loop_body()?;
             Ok(Stmt::CountedLoop {
                 init,
                 cond,
                 step: None,
                 body,
                 span,
+                arrow_body,
                 label,
             })
         } else if (matches!(&self.peek().kind, TokKind::Ident(_))
@@ -1493,7 +1515,7 @@ impl<'a> Parser<'a> {
                 };
                 ForKind::In { collection: first, step }
             };
-            let body = self.effect_loop_body()?;
+            let (body, arrow_body) = self.effect_loop_body()?;
             Ok(Stmt::For {
                 var,
                 var_span,
@@ -1501,36 +1523,44 @@ impl<'a> Parser<'a> {
                 kind,
                 body,
                 span,
+                arrow_body,
                 label,
             })
         } else {
             // Conditional: loop cond { }
             let cond = self.expr_no_struct_lit()?;
-            let body = self.effect_loop_body()?;
+            let (body, arrow_body) = self.effect_loop_body()?;
             Ok(Stmt::While {
                 cond,
                 body,
                 span,
+                arrow_body,
                 label,
             })
         }
     }
 
-    fn effect_loop_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
+    fn effect_loop_body(&mut self) -> Result<(Vec<Stmt>, bool), Diagnostic> {
         if matches!(self.peek().kind, TokKind::Arrow) {
-            let arrow = self.bump();
-            self.diags.push(Diagnostic::error(
-                "E0071",
-                "this effect-only loop uses a result arrow".to_string(),
-                "an arrow says that the loop yields values; this statement discards a result"
-                    .to_string(),
-                "remove `->` and wrap the body in `{ ... }`".to_string(),
-                Some(arrow.span),
-            ));
+            self.bump();
+            let nested_control = matches!(self.peek().kind, TokKind::KwIf | TokKind::KwLoop)
+                || (matches!(self.peek().kind, TokKind::Ident(_))
+                    && matches!(self.peek2().kind, TokKind::ColonColon)
+                    && matches!(self.peek3().kind, TokKind::KwLoop));
+            if nested_control {
+                return Err(Diagnostic::error(
+                    "E0329",
+                    "a nested one-line control body needs braces".to_string(),
+                    "an adjacent loop body owns one simple statement".to_string(),
+                    "wrap the nested control statement in `{ ... }`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            return Ok((vec![self.arrow_loop_stmt()?], true));
         }
         if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
-            return Ok(self.block_stmts());
+            return Ok((self.block_stmts(), false));
         }
         if matches!(self.peek().kind, TokKind::Semi | TokKind::Eof) {
             return Err(Diagnostic::error(
@@ -1551,7 +1581,53 @@ impl<'a> Parser<'a> {
             ));
         }
         self.teach_control_braces("loop", self.peek().span);
-        Ok(vec![self.stmt()?])
+        Ok((vec![self.stmt()?], false))
+    }
+
+    /// D-LOOP-STMT-ARROW1=C: statement-position loop arrows accept one
+    /// ordinary statement. The general statement parser keeps its useful
+    /// value-discard rejection everywhere else; this path only opens the
+    /// expression-statement slot after an explicit loop `->`.
+    fn arrow_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        if matches!(
+            self.peek().kind,
+            TokKind::KwReturn
+                | TokKind::KwYield
+                | TokKind::KwBreak
+                | TokKind::KwComptime
+                | TokKind::Hash
+                | TokKind::At
+                | TokKind::Dollar
+        ) || matches!(
+            &self.peek().kind,
+            TokKind::Ident(name)
+                if name == Syntax::KW_DEFER
+                    || name == Syntax::KW_ASSERT
+                    || name == Syntax::KW_NEXT
+                    || name == Syntax::FOREIGN_CONTINUE
+        ) || self.looks_like_sigil_binding()
+        {
+            return self.stmt();
+        }
+
+        let expression = self.expr()?;
+        if matches!(self.peek().kind, TokKind::Eq)
+            || self.peek().kind.compound_op().is_some()
+        {
+            let op_tok = self.bump();
+            let op = op_tok.kind.compound_op();
+            let value = self.expr()?;
+            self.finish_stmt()?;
+            let target = self.expr_to_lvalue(expression)?;
+            return Ok(Stmt::Assign {
+                target,
+                op,
+                op_span: op_tok.span,
+                value,
+            });
+        }
+        self.finish_stmt()?;
+        Ok(Stmt::Expr(expression))
     }
 
     fn loop_source_binding(&mut self) -> Result<(String, Span, Option<(String, Span)>), Diagnostic> {

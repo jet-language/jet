@@ -1372,10 +1372,10 @@ enum Packet {
 }
 
 #Target(JS)
-fn make_packet(n: Int) => Packet = .Data(n)
+fn make_packet(n: Int) => Packet :: .Data(n)
 
 #Target(JS)
-fn make_opt(n: Int) => Int? = .Val(n)
+fn make_opt(n: Int) => Int? :: .Val(n)
 
 #Target(JS)
 fn bind_opt(n: Int) => Int {
@@ -1393,7 +1393,7 @@ fn classify_range(n: Int) => Int {
 }
 
 #Target(Wasm)
-fn wasm_packet(n: Int) => Packet = .Data(n)
+fn wasm_packet(n: Int) => Packet :: .Data(n)
 
 #WasmExport
 fn wasm_classify(n: Int) => Int {
@@ -1438,10 +1438,10 @@ fn web_js_matches_binds_subject_once() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_opt(n: Int) => Int? = .Val(n)
+fn make_opt(n: Int) => Int? :: .Val(n)
 
 #Target(JS)
-fn make_toggle() => Toggle = .On
+fn make_toggle() => Toggle :: .On
 
 #Target(JS)
 fn classify(n: Int) => Int {

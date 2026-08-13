@@ -157,9 +157,9 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0049"
             | "E0055"
             | "E0057"
+            | "E0065"
             | "E0066"
             | "E0070"
-            | "E0071"
             | "E0077"
             | "E0146"
             | "E0154"
@@ -1160,15 +1160,15 @@ fn run() {
     server: Ready()
 }
 
-fn classify(score: Int) => Grade = if {
+fn classify(score: Int) => Grade :: if {
     score >= 90 -> .A
     score >= 80 -> .B
     else -> .C
 }
 
 fn notify(ready: Bool) =[Net]=> () {
-    if ready send() else skip()
-    loop item; items audit(item)
+    if ready -> send() else -> skip()
+    loop item, items -> audit(item)
     outer :: loop {
         next(outer)
     }
@@ -1182,14 +1182,11 @@ fn notify(ready: Bool) =[Net]=> () {
 "#;
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
-        assert!(once.contains("fn classify(score: Int) => Grade = if {"), "{once}");
+        assert!(once.contains("fn classify(score: Int) => Grade :: if {"), "{once}");
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) =[Net]=> ()"), "{once}");
-        // D-BRACE1=A (card #808/c08mu840, done): braces are mandatory for
-        // if/else/loop bodies now; fmt auto-wraps and collapses a fitting
-        // one-liner instead of preserving the old braceless spelling.
-        assert!(once.contains("if ready { send() } else { skip() }"), "{once}");
-        assert!(once.contains("loop item, items { audit(item) }"), "{once}");
+        assert!(once.contains("if ready -> send() else -> skip()"), "{once}");
+        assert!(once.contains("loop item, items -> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
         assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");
@@ -1235,7 +1232,8 @@ fn notify(ready: Bool) =[Net]=> () {
         for (src, code) in [
             ("fn old() -> Int { return 1 }\n", "E0070"),
             ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
-            ("fn run() { if ready -> send() }\n", "E0071"),
+            ("fn old() => Int = 1\n", "E0065"),
+            ("fn run() { if ready send() }\n", "E0372"),
             ("fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n", "E0077"),
             (
                 "protocol Old { client -> server: Hello(id: Int) }\n",

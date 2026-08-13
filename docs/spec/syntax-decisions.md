@@ -117,15 +117,16 @@ card #1209)*:
 - `=[Effects]=>` adds an explicit effect ceiling to that callable result.
 - `=[]=>` states an empty effect ceiling. `=[..E]=>` keeps an open row.
 - `->` selects a control-flow arm or yields one finite-loop item.
-- effect-only `if` and `loop` bodies have no arrow.
+- effect-only `if` and `loop` bodies use `->` for one adjacent statement;
+  D-ONELINE-BODY1=B later makes this the canonical one-body form.
 - braces group multiline bodies. They do not imply a result.
 
 Named functions, methods, function types, lambdas, computed fields, conversion
 implementations, and migration converters use the callable arrow. A concise
-named callable uses `= expression` after its result type:
+named callable uses `:: expression` after its result type:
 
 ```jet
-fn double(value: Int) => Int = value * 2
+fn double(value: Int) => Int :: value * 2
 
 fn load(path: String) =[FS]=> String {
     text :: core.files.read(path)?
@@ -288,8 +289,8 @@ position and never reordered (E0125).
 head its own body; dispatch by argument shape; heads must be exhaustive.
 
 ```jet
-fn area(Circle(r: Float)) => Float = 3.14 * r * r
-fn area(Rect(w: Float, h: Float)) => Float = w * h
+fn area(Circle(r: Float)) => Float :: 3.14 * r * r
+fn area(Rect(w: Float, h: Float)) => Float :: w * h
 ```
 
 **D-VARIADIC1 — Variadics & spread**: `...` everywhere — param `name: ...T`
@@ -322,7 +323,7 @@ after a call is E0335 with a fix that shows `callee(() => { … })`.
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
 the earlier untyped expression-body `fn f() = expr` (D-FP2), superseded by
-D-ARROW-CONTROL1's typed `fn f() => T = expr`; the earlier general-pipe
+D-ONELINE-BODY1=B's typed `fn f() => T :: expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
@@ -334,11 +335,11 @@ separately ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 
-**S3 — Blocks** *(amended by D-ARROW-CONTROL1 and D-BRACE1=A, ratified
-2026-07-30, card #1335)*: curly braces `{ }` give every effect `if`, `else`,
-and `loop` body a visible parse boundary. Arrow arm bodies remain expressions
-and retain their existing braceless form. Braces do not determine whether a
-construct returns a value.
+**S3 — Blocks** *(amended by D-ARROW-CONTROL1, D-BRACE1=A, and
+D-ONELINE-BODY1=B)*: curly braces `{ }` give every multi-statement or scoped
+effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
+effect body uses `->` followed by one statement. Arrow arm bodies remain
+expressions. Braces do not determine whether a construct returns a value.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, ratified
@@ -361,14 +362,15 @@ Commas separate loop header clauses. Semicolons remain statement boundaries only
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
 is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range step rule.
 
-A finite source loop may use `-> expression` or `-> { ... }`.
+A finite source loop in value position may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items. Multiple source
 clauses nest left to right and yield one flat List. An inner collecting loop
 preserves nesting. `next` omits the current item. Maps, Sets, and lazy
 iteration use ordinary Map construction, `Set.from(...)`, and the existing
 iterator adapters.
-Bare infinite and condition-only loops cannot use a yield arrow.
+Every statement-position loop header may use `-> statement`; the statement's
+value is discarded. A finite loop in value position keeps the collection arrow.
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
 optional third clause (`loop i, 0..10, 2`); `step` has no loop role.
@@ -441,9 +443,9 @@ D-BRANCH-TEACH1=A** *(ratified 2026-07-28, card #1259)*: L0507 points
 multi-line braced branches and all `else if` chains at ordered arm tables.
 One-line effect and value forms stay quiet. Fmt does not change branch shape.
 
-- Effect form has no arrow: `if ready run() else wait()`. Braces group
-  multiline bodies. Parentheses around the condition are optional and fmt
-  strips them.
+- Effect form uses `->` for one statement: `if ready -> run() else -> wait()`.
+  Braces group multiline or scoped bodies. Parentheses around the condition
+  are optional and fmt strips them.
 - Value form marks each selected value: `m :: if a > b -> a else -> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
@@ -482,7 +484,7 @@ heads. Pattern heads remain `==`-only. Statement and expression position share
 one table spelling; expression tables unify arm values or yield `()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
-#680; amended by D-ARROW-CONTROL1)*: `if cond statement` is the one-line
+#680; amended by D-ARROW-CONTROL1 and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary
 would be ambiguous. The subjectless spelling is the same ordered arm-table
 model without a named subject, not a separate or lesser branching mechanism.
@@ -2259,7 +2261,7 @@ static calls use each implementation's inferred row, while a trait method
 used through dynamic dispatch keeps its declared upper-bound contract.
 
 ```jet
-fn twice(n: Int) => Int = n * 2
+fn twice(n: Int) => Int :: n * 2
 // inferred []: pure
 
 pub fn load(path: String) => String { core.files.read(path)? }
@@ -6994,6 +6996,24 @@ finite-source finding form above. This section records the other outcomes.
   named thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, parameter defaults, field defaults, and enum discriminants
   keep `=`.
+
+**D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
+#1454; reconciles D-CHOOSE-FNBODY1=A)*: ordinary and multi-head function
+one-liners put `::` after the return type. Callable heads keep `=>`. An
+effect-only `if` or `loop` may put `->` before one adjacent statement; braces
+are required for multiple statements and scoped marker blocks. Function-body
+`=` retires with a teaching fix to `::`; `=` remains for slot-filling forms
+such as extern bindings, defaults, reassignment, field defaults, and enum
+discriminants. Marker-scoped blocks retain their own braces.
+
+**D-LOOP-STMT-ARROW1=C — arrow loop bodies in statement position** *(ratified
+2026-08-13, card #1453)*: every statement-position loop header — finite source,
+condition-only, bare infinite, and mutable state — accepts `-> statement`. The
+statement runs for its effect and its value is discarded. A non-unit value gets
+a lint that names the value form `name :: loop … -> value` for collection, or
+the write-capability form `loop item, &values -> item *= 2` for in-place edits.
+Value-position finite loops keep their collection arrow semantics. The
+formatter chooses the arrow when one simple body fits and braces otherwise.
 
 **2026-08-13 — D-MARK-BLOCK1=A** *(card #1606)*. Dedicated block-construct
 nodes keep their typed fields. Tools recover the registered marker row and its

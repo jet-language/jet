@@ -162,7 +162,7 @@ fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
 #[test]
 fn safe_kernel_proof_reaches_tir_without_rederivation() {
     let compiled = jet::compile(
-        "#Kernel(.parallel) fn add(left: Int, right: Int) => Int = left + right;\nfn run() { print(add(1, 2)) }\n",
+        "#Kernel(.parallel) fn add(left: Int, right: Int) => Int :: left + right;\nfn run() { print(add(1, 2)) }\n",
     )
     .expect("the checked kernel should compile");
     assert!(

@@ -1006,7 +1006,7 @@ fn must_stay_deferred(ticket: Ticket) => Bool {
     return false
 }
 
-fn missing_minutes() => Float? = None
+fn missing_minutes() => Float? :: None
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
@@ -1397,4 +1397,3 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
 
     let _ = fs::remove_dir_all(&dir);
 }
-

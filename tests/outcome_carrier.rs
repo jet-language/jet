@@ -241,7 +241,7 @@ fn run() {
 fn the_web_tier_reads_the_same_carrier() {
     let src = r#"
 #WasmExport
-fn double(n: Int) => Int = n * 2
+fn double(n: Int) => Int :: n * 2
 
 #Target(JS)
 fn run() {

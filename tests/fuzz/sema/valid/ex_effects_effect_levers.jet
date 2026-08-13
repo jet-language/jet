@@ -10,7 +10,7 @@
 //      contract instead of the conservative flow-through.
 // Lever 1: `transform` insists on a pure callback. An impure one is rejected at
 // the call site before it ever runs.
-fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] = items.map(x => f(x))
+fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] :: items.map(x => f(x))
 
 fn run_each(items: [Int], act: fn(Int) =[IO]=>) =[via act]=> {
     loop x, items {
@@ -18,7 +18,7 @@ fn run_each(items: [Int], act: fn(Int) =[IO]=>) =[via act]=> {
     }
 }
 
-fn double(n: Int) =[]=> Int = n * 2
+fn double(n: Int) =[]=> Int :: n * 2
 
 fn show(n: Int) {
     print("{n}")

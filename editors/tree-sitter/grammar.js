@@ -295,7 +295,7 @@ module.exports = grammar({
           seq("=>", field("return_type", $._type)),
           seq("?", optional(field("error_type", $._type))),
         )),
-        choice($.block, seq("=", field("body", $._expr))),
+        choice($.block, seq("::", field("body", $._expr))),
       ),
 
     // ── Struct definition ──────────────────────────────────────────────────
@@ -755,7 +755,8 @@ module.exports = grammar({
         prec(3, "next"),
       ),
 
-    // Effect loops use no arrow. Finite yielding loops use `->`.
+    // Effect loops use `->` for one statement; braces hold a block. Finite
+    // yielding loops keep their expression arrow form.
     loop_stmt: ($) =>
       seq(
         optional($.loop_label),
@@ -763,7 +764,7 @@ module.exports = grammar({
         optional($._loop_head),
         choice(
           $.block,
-          seq("->", choice($.block, $._expr)),
+          seq("->", choice($.block, $.expr_stmt, $.return_stmt, $.break_stmt, $.next_stmt)),
           $._expr,
         ),
       ),
@@ -899,7 +900,8 @@ module.exports = grammar({
     generic_access: ($) =>
       prec.left(4, seq($._expr, token.immediate("<"), commaSep1($._type), ">")),
 
-    // D-ARROW-CONTROL1: effect branches use no arrow; value branches use `->`.
+    // D-ONELINE-BODY1=B: effect branches use `->` for one statement; value
+    // branches keep their expression arrow form.
     if_expr: ($) =>
       prec.right(
         choice(
@@ -909,11 +911,11 @@ module.exports = grammar({
             choice(
               seq(
                 "->",
-                field("then", choice($.block, $._expr)),
+                field("then", choice($.block, $.expr_stmt, $.return_stmt, $.break_stmt, $.next_stmt)),
                 optional(seq(
                   "else",
                   "->",
-                  field("else", choice($.if_expr, $.block, $._expr)),
+                  field("else", choice($.if_expr, $.block, $.expr_stmt, $.return_stmt, $.break_stmt, $.next_stmt)),
                 )),
               ),
               seq(

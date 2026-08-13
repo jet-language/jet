@@ -164,10 +164,20 @@ impl<'a> Parser<'a> {
             let declared_return_view_provenance =
                 self.parse_opt_declared_view_from(&params);
     
-            // Single-expression body: `fn name(...) => T = expr;`
-            // Desugars to `return expr;` so the "path must return" check is satisfied.
-            if matches!(self.peek().kind, TokKind::Eq) {
-                let start = self.bump().span.start;
+            // D-ONELINE-BODY1=B: one-line function bodies use `::`. Keep the
+            // retired `=` spelling recoverable long enough to emit its teaching
+            // diagnostic and let `jet fmt` apply the replacement.
+            let body_marker = match self.peek().kind {
+                TokKind::ColonColon => Some(self.bump()),
+                TokKind::Eq => {
+                    let marker = self.bump();
+                    self.diags.push(Self::retired_function_body(marker.span));
+                    Some(marker)
+                }
+                _ => None,
+            };
+            if let Some(marker) = body_marker {
+                let start = marker.span.start;
                 let expr = self.expr_no_struct_lit()?;
                 let expr_end = expr.span().end;
                 self.expect(TokKind::Semi, "after the single-expression function body")?;
@@ -460,6 +470,16 @@ impl<'a> Parser<'a> {
                 "this callable result uses `->`".to_string(),
                 "`=>` defines callable results; `->` is reserved for selected or yielded control values".to_string(),
                 "replace `->` with `=>`".to_string(),
+                Some(span),
+            )
+        }
+
+        pub(in crate::Parser) fn retired_function_body(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0065",
+                "this function uses the retired `=` body marker".to_string(),
+                "`::` separates a one-line function body; `=` fills a slot inside a definition".to_string(),
+                "replace `=` with `::`".to_string(),
                 Some(span),
             )
         }

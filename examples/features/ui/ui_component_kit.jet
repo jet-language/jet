@@ -6,18 +6,18 @@ struct Label {
     text: String
 }
 
-fn label(text: String) => Label = .{text: ~text}
+fn label(text: String) => Label :: .{text: ~text}
 
-fn label_view(value: Label) => UiNode = ui.text(value.text)
+fn label_view(value: Label) => UiNode :: ui.text(value.text)
 
 struct Input {
     value: String
     placeholder: String
 }
 
-fn input(placeholder: String) => Input = .{value: "", placeholder: ~placeholder}
+fn input(placeholder: String) => Input :: .{value: "", placeholder: ~placeholder}
 
-fn type_char(value: Input, ch: String) => Input = .{value: "{value.value}{ch}", placeholder: ~value.placeholder}
+fn type_char(value: Input, ch: String) => Input :: .{value: "{value.value}{ch}", placeholder: ~value.placeholder}
 
 fn input_view(value: Input) => UiNode {
     shown := ~value.value
@@ -30,13 +30,13 @@ struct Button {
     clicks: Int
 }
 
-fn button(label: String) => Button = .{label: ~label, clicks: 0}
+fn button(label: String) => Button :: .{label: ~label, clicks: 0}
 
-fn press(value: Button) => Button = .{label: ~value.label, clicks: value.clicks + 1}
+fn press(value: Button) => Button :: .{label: ~value.label, clicks: value.clicks + 1}
 
-fn button_view(value: Button) => UiNode = ui.button("[{value.label}] clicks={value.clicks}")
+fn button_view(value: Button) => UiNode :: ui.button("[{value.label}] clicks={value.clicks}")
 
-fn container(children: [UiNode]) => UiNode = ui.box(children)
+fn container(children: [UiNode]) => UiNode :: ui.box(children)
 
 fn paint_form(name: Label, input_value: Input, save: Button) {
     tree :: container([label_view(name), input_view(input_value), button_view(save)])

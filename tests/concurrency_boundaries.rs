@@ -639,7 +639,7 @@ fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
     // spawn, so the ordinary view rules end its borrow too early.
     let source = format!(
         r#"{PARTICLES}
-fn eat(ps: ^[Particle]) => Int = ps.len()
+fn eat(ps: ^[Particle]) => Int :: ps.len()
 fn run() {{
     particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
         task.group g {{

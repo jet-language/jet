@@ -92,19 +92,10 @@ impl<'a> Parser<'a> {
                 Some(eq_span),
             ));
         }
-        // D-ARROW-CONTROL1: accept the retired result arrow and adjacent body
-        // only to teach both removals while preserving a formatter-recoverable AST.
+        // D-ONELINE-BODY1=B: an effect-only one-line `if` uses an arrow before
+        // its one statement. Braces remain the multi-statement/scoped form.
         if matches!(self.peek().kind, TokKind::Arrow) {
-            let arrow = self.bump();
-            self.diags.push(Diagnostic::error(
-                "E0071",
-                "this effect-only `if` uses a result arrow".to_string(),
-                "an arrow says that control selects a value; this body only performs work"
-                    .to_string(),
-                "remove `->` and wrap the body in `{ ... }`".to_string(),
-                Some(arrow.span),
-            ));
-            self.teach_control_braces("if", self.peek().span);
+            self.bump();
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
@@ -236,6 +227,10 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok(Some(ElseBranch::Else(self.block_stmts())));
         }
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            return Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)));
+        }
         self.teach_control_braces("else", self.peek().span);
         Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)))
     }
@@ -246,7 +241,9 @@ impl<'a> Parser<'a> {
             format!("this `{body}` body needs braces"),
             "braces make the body's boundary visible to readers, editors, and the compiler"
                 .to_string(),
-            format!("wrap the body in `{{ ... }}`; `jet fmt` applies this fix"),
+            format!(
+                "write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix"
+            ),
             Some(span),
         ));
     }

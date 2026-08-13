@@ -124,10 +124,10 @@ impl<'a> Checker<'a> {
                     Some(span),
                 )),
                 LoopValueKind::Effect => self.diags.push(Diagnostic::error(
-                    "E0071",
+                    "E0079",
                     "this effect-only loop uses a result exit".to_string(),
-                    "a break payload makes the loop a value expression".to_string(),
-                    "bind the loop result, or remove the payload".to_string(),
+                    "a break payload makes an effect-only loop a value expression".to_string(),
+                    "bind the loop with `::`, or remove the payload".to_string(),
                     Some(span),
                 )),
                 LoopValueKind::Result => {
@@ -1306,6 +1306,15 @@ impl<'a> Checker<'a> {
                         } else if !self.suppress_must_use {
                             self.check_ignored_must_use(expr, &ty, expr.span());
                         }
+                        if self.arrow_loop_body && !self.is_unit_type(&ty) {
+                            self.diags.push(Diagnostic::lint(
+                                "L0508",
+                                "this arrow loop body computes a value and drops it".to_string(),
+                                "a statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source".to_string(),
+                                "bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place".to_string(),
+                                Some(expr.span()),
+                            ));
+                        }
                         if is_task_type(&ty) {
                             self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
                                 "this task",
@@ -1703,6 +1712,7 @@ impl<'a> Checker<'a> {
                     cond,
                     body,
                     span: _,
+                    arrow_body,
                     label,
                 } => {
                     let memory_multiplier = self.memory_control_multiplier;
@@ -1717,7 +1727,10 @@ impl<'a> Checker<'a> {
                     // times, so the facts after the loop join the zero-turn path with the
                     // path one walk of the body left behind.
                     let before_loop = self.flow.clone();
+                    let previous_arrow_loop_body = self.arrow_loop_body;
+                    self.arrow_loop_body = *arrow_body;
                     self.check_block(body, true);
+                    self.arrow_loop_body = previous_arrow_loop_body;
                     let after_body = self.flow.clone();
                     self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;
@@ -1734,6 +1747,7 @@ impl<'a> Checker<'a> {
                     kind,
                     body,
                     span: _,
+                    arrow_body,
                     label,
                 } => {
                     let memory_multiplier = self.memory_control_multiplier;
@@ -1829,9 +1843,12 @@ impl<'a> Checker<'a> {
                                 },
                             );
                             self.memory_control_multiplier = loop_multiplier;
+                            let previous_arrow_loop_body = self.arrow_loop_body;
+                            self.arrow_loop_body = *arrow_body;
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
                             }
+                            self.arrow_loop_body = previous_arrow_loop_body;
                             // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
                             // with this loop's index name (the provable 0..len trap).
                             if !*exclusive {
@@ -2100,9 +2117,12 @@ impl<'a> Checker<'a> {
                                 self.lending_view_loop_vars.insert(name.clone());
                             }
                             self.memory_control_multiplier = loop_multiplier;
+                            let previous_arrow_loop_body = self.arrow_loop_body;
+                            self.arrow_loop_body = *arrow_body;
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
                             }
+                            self.arrow_loop_body = previous_arrow_loop_body;
                             if let Some(name) = &lending_var {
                                 self.lending_view_loop_vars.remove(name);
                             }
@@ -2181,6 +2201,7 @@ impl<'a> Checker<'a> {
                     body,
                     step,
                     label,
+                    arrow_body,
                     ..
                 } => {
                     let memory_multiplier = self.memory_control_multiplier;
@@ -2194,7 +2215,10 @@ impl<'a> Checker<'a> {
                     self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
                     let before_loop = self.flow.clone();
+                    let previous_arrow_loop_body = self.arrow_loop_body;
+                    self.arrow_loop_body = *arrow_body;
                     self.check_block(body, true);
+                    self.arrow_loop_body = previous_arrow_loop_body;
                     if let Some(step) = step {
                         self.check_stmt(step.as_mut());
                     }
@@ -2209,7 +2233,10 @@ impl<'a> Checker<'a> {
                     self.memory_control_multiplier = memory_multiplier;
                 }
                 Stmt::Loop {
-                    body: inner, label, ..
+                    body: inner,
+                    label,
+                    arrow_body,
+                    ..
                 } => {
                     let memory_multiplier = self.memory_control_multiplier;
                     self.memory_control_multiplier = None;
@@ -2219,7 +2246,10 @@ impl<'a> Checker<'a> {
                     self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
                     let before_loop = self.flow.clone();
+                    let previous_arrow_loop_body = self.arrow_loop_body;
+                    self.arrow_loop_body = *arrow_body;
                     self.check_block(inner, true);
+                    self.arrow_loop_body = previous_arrow_loop_body;
                     let after_body = self.flow.clone();
                     self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;

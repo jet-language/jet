@@ -15,18 +15,18 @@ struct Doc {
 }
 
 impl Doc.Greeter {
-    fn greet(self) => String = "reviewing: {self.title}"
+    fn greet(self) => String :: "reviewing: {self.title}"
 }
 
 // Tag on a return: callers see this string is marked reviewed / internal.
-fn stamp_reviewed(title: String) => #Reviewed String = ~title
+fn stamp_reviewed(title: String) => #Reviewed String :: ~title
 
-fn stash_internal(note: String) => #Internal String = ~note
+fn stash_internal(note: String) => #Internal String :: ~note
 
 // Tag on a parameter: the API documents what kind of string it expects.
-fn announce(title: #Reviewed String) => String = "ship it: {title}"
+fn announce(title: #Reviewed String) => String :: "ship it: {title}"
 
-fn peek_internal(note: #Internal String) => String = "private: {note}"
+fn peek_internal(note: #Internal String) => String :: "private: {note}"
 
 fn run() {
     d :: Doc.{title: "spec"}

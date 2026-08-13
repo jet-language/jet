@@ -1,8 +1,8 @@
 Error [E0921]: string interpolation allocates a new `String` at tests/ui/no_alloc_policy_violation.jet violates the effective `no_alloc` declared at tests/ui/no_alloc_policy_violation.jet
-  --> tests/ui/no_alloc_policy_violation.jet:1:44
+  --> tests/ui/no_alloc_policy_violation.jet:1:45
     |
-  1 | fn frame_label(frame_num: Int) => String = "frame {frame_num}"
-    |                                            ^^^^^^^^^^^^^^^^^^^
+  1 | fn frame_label(frame_num: Int) => String :: "frame {frame_num}"
+    |                                             ^^^^^^^^^^^^^^^^^^^
  Why: tests/ui/no_alloc_policy_violation.jet is reachable through no_alloc_policy_violation::run -> no_alloc_policy_violation::frame_label from code governed by `no_alloc`; declaration provenance: no_alloc = true
   function true at tests/ui/no_alloc_policy_violation.jet:63..80; operation provenance: frame_label in tests/ui/no_alloc_policy_violation.jet
  Fix: remove or replace the incompatible operation, call an implementation whose transitive memory facts satisfy the contract, or move the call outside this policy scope

@@ -225,7 +225,7 @@ fn taskgroup_type_is_second_class() {
 #[test]
 fn taskgroup_cannot_escape_in_a_closure() {
     let source = r#"
-fn use_group(group: TaskGroup) => Int = 1
+fn use_group(group: TaskGroup) => Int :: 1
 
 fn escape(group: TaskGroup) => fn() => Int {
     return () => use_group(group)

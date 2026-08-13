@@ -2616,6 +2616,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Expr(Expr::MethodCall {
             receiver, method, ..
         }) if method == Syntax::METHOD_DROP => TStmt::ExprStmt(lower_expr(receiver, cx, env)),
+        // D-LOOP-STMT-ARROW1=C: statement-position loop arrows normalize to
+        // the ordinary expression statement. Sema owns the discard lint;
+        // every execution tier lowers the expression through this same path.
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
         // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
         // lower on a cloned env so bindings inside don't leak out.

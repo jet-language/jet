@@ -548,7 +548,7 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) => DataTree = DataTree.Text("wire")
+    fn encode(self) => DataTree :: DataTree.Text("wire")
 }
 
 impl Token.Decode {
