@@ -38,10 +38,30 @@ plus every cited decision verbatim"; meet EVERY criterion; the invariants that a
 number; greenfield migration deletes the replaced form; unratified user-facing spelling →
 STOP that slice and return `ballot-needed` with the exact question; the exact writable
 paths; the hard prohibitions (`plugins/tower`, `jet-adjacent`, `AGENTS.md`, other cards'
-in-flight files); **no board writes, no cargo/jet, no git**; skills ponytail + caveman +
-simple; the return shape (files+lines, per-criterion evidence, proof commands, blockers).
-Codex workers cannot run cargo/jet (the sandbox blocks the Nix daemon) and cannot write the
-board — the orchestrator owns every proof and every board write.
+in-flight files); **no board writes** (the orchestrator owns every board write); skills
+ponytail + caveman + simple; the return shape (files+lines, per-criterion evidence, proof
+commands, blockers).
+
+## Dispatching codex workers
+
+Launch from the assigned worktree:
+
+```sh
+codex exec -p luna --skip-git-repo-check - < /tmp/luna/<brief>.md
+```
+
+The `luna` profile (`~/.codex/luna.config.toml`) pins model, max reasoning, no approvals,
+and full access. Full access is required, not convenience: codex `workspace-write`
+unconditionally read-only-protects `.git` (worktree pointers resolve into the main
+clone's `.git`), so sandboxed workers cannot branch, stage, or commit, and the sandbox
+blocks the Nix daemon socket unless `network_access` is set (probed 2026-08-13 on codex
+0.144.5; no `allow_git_writes` opt-out exists). Every brief therefore carries the
+access-discipline note: work only inside the assigned worktree; never touch the main
+checkout, sibling worktrees, or `plugins/tower`.
+
+Workers run cargo/jet through `scripts/agent/jet-env` wrapped in `timeout 900` (cold
+builds 1800) and commit explicit paths to their assigned branch. The orchestrator
+pre-creates lanes, verifies claims, integrates, and writes the board.
 
 ## Milestone stream
 
