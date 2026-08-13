@@ -1092,19 +1092,6 @@ impl LowerCtx<'_, '_> {
         None
     }
 
-    fn datatree_variant_disc(variant: &str) -> Option<i64> {
-        match variant {
-            "Null" => Some(0),
-            "Bool" => Some(1),
-            "Int" => Some(2),
-            "Float" => Some(3),
-            "Text" => Some(4),
-            "Array" => Some(5),
-            "Object" => Some(6),
-            _ => None,
-        }
-    }
-
     fn unpack_enum_heap_payload_at(
         &mut self,
         packed: Value,
@@ -1177,6 +1164,12 @@ impl LowerCtx<'_, '_> {
         Ok(self.call_host(self.host.encoding.datatree_pack, &[disc_v, payload_bits]))
     }
 
+    fn datatree_disc(&self, variant: &str) -> Result<i64, String> {
+        self.meta
+            .enum_variant_index("DataTree", variant)
+            .ok_or_else(|| format!("jit DataTree variant `{variant}`"))
+    }
+
     /// `DataTree.Object([k: v, …])` — source/Codable field order, not Map sort.
     fn lower_datatree_object_maplit(
         &mut self,
@@ -1213,7 +1206,8 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(set_i64, &[rec, one, v]);
             self.b.ins().call(push, &[list, rec]);
         }
-        self.pack_datatree_enum(6, Some((list, &Type::List(Box::new(Type::Int)))))
+        let disc = self.datatree_disc("Object")?;
+        self.pack_datatree_enum(disc, Some((list, &Type::List(Box::new(Type::Int)))))
     }
 
     /// Object payload: ordered MapLit (including #779 IfExpr desugar), else Map.
@@ -1260,15 +1254,23 @@ impl LowerCtx<'_, '_> {
             return Ok(val);
         }
         match &ty {
-            Type::Int | Type::IntN { .. } => self.pack_datatree_enum(2, Some((val, &Type::Int))),
+            Type::Int | Type::IntN { .. } => {
+                let disc = self.datatree_disc("Int")?;
+                self.pack_datatree_enum(disc, Some((val, &Type::Int)))
+            }
             Type::Bool => {
                 let wide = self.b.ins().uextend(types::I64, val);
-                self.pack_datatree_enum(1, Some((wide, &Type::Int)))
+                let disc = self.datatree_disc("Bool")?;
+                self.pack_datatree_enum(disc, Some((wide, &Type::Int)))
             }
             Type::Float | Type::Float32 => {
-                self.pack_datatree_enum(3, Some((val, &Type::Float)))
+                let disc = self.datatree_disc("Float")?;
+                self.pack_datatree_enum(disc, Some((val, &Type::Float)))
             }
-            Type::String => self.pack_datatree_enum(4, Some((val, &Type::String))),
+            Type::String => {
+                let disc = self.datatree_disc("Text")?;
+                self.pack_datatree_enum(disc, Some((val, &Type::String)))
+            }
             Type::Char => {
                 return Err("jit SerdeEncode Char unsupported".to_string());
             }
@@ -1285,7 +1287,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(none_block);
                 self.b.seal_block(none_block);
-                let null_tree = self.pack_datatree_enum(0, None)?;
+                let null_tree = self.pack_datatree_enum(self.datatree_disc("Null")?, None)?;
                 self.b.ins().jump(merge, &[null_tree]);
 
                 self.b.switch_to_block(some_block);
@@ -1458,7 +1460,8 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         let out = self.b.use_var(out_var);
-        self.pack_datatree_enum(5, Some((out, &Type::List(Box::new(Type::Named("DataTree".into()))))))
+        let disc = self.datatree_disc("Array")?;
+        self.pack_datatree_enum(disc, Some((out, &Type::List(Box::new(Type::Named("DataTree".into()))))))
     }
 
     fn lower_serde_encode(&mut self, recv: &TExpr) -> Result<Value, String> {
@@ -1555,13 +1558,14 @@ impl LowerCtx<'_, '_> {
                 let merge = self.b.create_block();
                 self.b.append_block_param(merge, types::I64);
                 for (index, member) in members.iter().enumerate() {
-                    let member_disc = match member {
-                        Type::Bool => 1,
-                        Type::Int | Type::IntN { .. } => 2,
-                        Type::Float | Type::Float32 => 3,
-                        Type::String => 4,
+                    let member_variant = match member {
+                        Type::Bool => "Bool",
+                        Type::Int | Type::IntN { .. } => "Int",
+                        Type::Float | Type::Float32 => "Float",
+                        Type::String => "Text",
                         _ => unreachable!(),
                     };
+                    let member_disc = self.datatree_disc(member_variant)?;
                     let arm = self.b.create_block();
                     let next = self.b.create_block();
                     let expected = self.b.ins().iconst(types::I64, member_disc);
@@ -1629,7 +1633,9 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let zero = self.b.ins().iconst(types::I64, 0);
         let disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
-        let is_null = self.b.ins().icmp(IntCC::Equal, disc, zero);
+        let null_disc = self.datatree_disc("Null")?;
+        let null = self.b.ins().iconst(types::I64, null_disc);
+        let is_null = self.b.ins().icmp(IntCC::Equal, disc, null);
         let none_block = self.b.create_block();
         let some_block = self.b.create_block();
         let merge = self.b.create_block();
@@ -1678,7 +1684,8 @@ impl LowerCtx<'_, '_> {
         // Expect Array; reuse `.at` path via host disc check + payload list.
         let zero = self.b.ins().iconst(types::I64, 0);
         let disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
-        let want = self.b.ins().iconst(types::I64, 5); // Array
+        let array_disc = self.datatree_disc("Array")?;
+        let want = self.b.ins().iconst(types::I64, array_disc);
         let is_arr = self.b.ins().icmp(IntCC::Equal, disc, want);
         let byte_elements = matches!(
             elem_ty,
@@ -1699,7 +1706,8 @@ impl LowerCtx<'_, '_> {
                 .brif(is_arr, good_block, &[], check_bytes, &[]);
             self.b.switch_to_block(check_bytes);
             self.b.seal_block(check_bytes);
-            let bytes_disc = self.b.ins().iconst(types::I64, 7);
+            let bytes_disc_value = self.datatree_disc("Bytes")?;
+            let bytes_disc = self.b.ins().iconst(types::I64, bytes_disc_value);
             let is_bytes = self.b.ins().icmp(IntCC::Equal, disc, bytes_disc);
             self.b
                 .ins()
@@ -16103,43 +16111,6 @@ impl LowerCtx<'_, '_> {
                     let disc = self
                         .meta
                         .enum_variant_index(enum_type, variant)
-                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
-                            // Core enum — not always in program.enum_variants.
-                            ("ProcessStreamMode", "Stream") => Some(0),
-                            ("ProcessStreamMode", "Inherit") => Some(1),
-                            ("ProcessStreamMode", "Capture") => Some(2),
-                            ("TerminalMode", "Raw") => Some(0),
-                            ("TerminalMode", "Cooked") => Some(1),
-                            ("TextWidthAmbiguous", "Narrow") => Some(0),
-                            ("TextWidthAmbiguous", "Wide") => Some(1),
-                            ("TextWidthControls", "Zero") => Some(0),
-                            ("TextWidthControls", "Reject") => Some(1),
-                            ("Overflow", "Block") => Some(0),
-                            ("Overflow", "DropNewest") => Some(1),
-                            ("Overflow", "DropOldest") => Some(2),
-                            ("FailurePolicy", "StopFirst") => Some(0),
-                            ("FailurePolicy", "Collect") => Some(1),
-                            ("FailurePolicy", "Log") => Some(2),
-                            ("FailurePolicy", "Ignore") => Some(3),
-                            ("EventResult", "Handled") => Some(0),
-                            ("EventResult", "Ignored") => Some(1),
-                            ("HookOutcome", "Continue") => Some(0),
-                            ("HookOutcome", "Cancel") => Some(1),
-                            ("HookOutcome", "Fail") => Some(2),
-                            ("HookDecision", "Continue") => Some(0),
-                            ("HookDecision", "Transform") => Some(1),
-                            ("HookDecision", "Cancel") => Some(2),
-                            ("HookDecision", "Fail") => Some(3),
-                            ("DispatchState", "Delivered") => Some(0),
-                            ("DispatchState", "HandlerFailed") => Some(1),
-                            ("DispatchState", "DroppedNewest") => Some(2),
-                            ("DispatchState", "DroppedOldest") => Some(3),
-                            ("DispatchState", "Closed") => Some(4),
-                            ("DispatchState", "Cancelled") => Some(5),
-                            ("DispatchState", "DeadlineExceeded") => Some(6),
-                            ("HookPolicy", "FirstCancelElseTransform") => Some(0),
-                            _ => None,
-                        })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     if is_datatree {
                         self.pack_datatree_enum(disc, None)
@@ -24895,7 +24866,9 @@ impl LowerCtx<'_, '_> {
         else {
             return Err("jit DataTree if-let needs a variant pattern".to_string());
         };
-        let want_disc = Self::datatree_variant_disc(variant)
+        let want_disc = self
+            .meta
+            .enum_variant_index("DataTree", variant)
             .ok_or_else(|| format!("jit DataTree variant `{variant}`"))?;
         let payload_ty = self
             .meta
@@ -25450,7 +25423,9 @@ impl LowerCtx<'_, '_> {
         else {
             return Err("jit DataTree if-let needs a variant pattern".to_string());
         };
-        let want_disc = Self::datatree_variant_disc(variant)
+        let want_disc = self
+            .meta
+            .enum_variant_index("DataTree", variant)
             .ok_or_else(|| format!("jit DataTree variant `{variant}`"))?;
         let payload_ty = self
             .meta

@@ -218,9 +218,16 @@ fn compiled_binary_output_with_stdin(
     if stem == "ui/ui_native_linux" {
         run_cmd.env("JET_UI_HEADLESS", "1");
     }
+    // `os.sync` flushes the shared build filesystem and can exceed the normal
+    // short example timeout when the workspace is busy.
+    let runtime_timeout = if stem == "io/os_process_control" {
+        Duration::from_secs(120)
+    } else {
+        DEV_DIFF_TIMEOUT
+    };
     let run = command_output_with_timeout(
         run_cmd,
-        DEV_DIFF_TIMEOUT,
+        runtime_timeout,
         &format!("compiled binary run for `{stem}`"),
     );
     ProgramOutput::ran(
@@ -5905,6 +5912,26 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
         "io/cli/terminal/time parity failures:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn core_os_examples_match_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(core_os_examples_match_interpreter_jit_and_aot_inner)
+        .expect("spawn core.os parity worker")
+        .join()
+        .expect("core.os parity worker must not panic");
+}
+
+fn core_os_examples_match_interpreter_jit_and_aot_inner() {
+    let _guard = dev_diff_lock().lock().unwrap();
+    for stem in ["io/os_facts", "io/os_process_control"] {
+        assert_io_cli_terminal_time_three_way(&example_path(stem), stem);
+    }
 }
 
 #[cfg(unix)]

@@ -884,7 +884,7 @@ fn jet_sync_decode_string(
         jet_std::DataTree::Text(value) => Ok(value.clone()),
         other => Err(jet_sync_decode_error(format!(
             "{label} must be text, got {}",
-            jet_std::datatree_kind(other)
+            jet_std::datatree_kind_for(other)
         ))),
     }
 }
@@ -899,7 +899,7 @@ fn jet_sync_decode_u64(
         other => {
             return Err(jet_sync_decode_error(format!(
                 "{label} must be a non-negative integer, got {}",
-                jet_std::datatree_kind(other)
+                jet_std::datatree_kind_for(other)
             )))
         }
     };
@@ -919,7 +919,7 @@ fn jet_sync_decode_array<'a>(
         jet_std::DataTree::Array(values) => Ok(values),
         other => Err(jet_sync_decode_error(format!(
             "{label} must be an array, got {}",
-            jet_std::datatree_kind(other)
+            jet_std::datatree_kind_for(other)
         ))),
     }
 }

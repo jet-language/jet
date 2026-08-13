@@ -66,6 +66,7 @@ mod codec_rt {
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
     }
+    include!("../../../Prelude/CoreLib/JetStd/DataTreeKind.rs");
     include!("../../../Prelude/Core/Codec.rs");
 }
 
@@ -1312,18 +1313,9 @@ enum EvalExprWork<'a> {
     Leave(usize),
 }
 
-fn datatree_kind(value: &CtValue) -> &'static str {
-    match datatree_variant(value) {
-        Some(("Null", _)) => "null",
-        Some(("Bool", _)) => "Bool",
-        Some(("Int", _)) => "Int",
-        Some(("Float", _)) => "Float",
-        Some(("Text", _)) => "Text",
-        Some(("Array", _)) => "a list",
-        Some(("Object", _)) => "an object",
-        Some(("Bytes", _)) => "Bytes",
-        _ => "value",
-    }
+fn datatree_kind_for(value: &CtValue) -> &'static str {
+    let tag = datatree_variant(value).map(|(tag, _)| tag).unwrap_or("value");
+    codec_rt::datatree_kind(tag)
 }
 
 fn restore_ambient_err(scope: &mut HashMap<String, CtValue>, previous: Option<CtValue>) {
@@ -1446,7 +1438,7 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             }
             _ => CtValue::failed(Box::new(decode_error(
                 "",
-                format!("expected Date, found {}", datatree_kind(&tree)),
+                format!("expected Date, found {}", datatree_kind_for(&tree)),
             ))),
         },
         "LocalTime" => match datatree_variant(&tree) {
@@ -1468,7 +1460,7 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             }
             _ => CtValue::failed(Box::new(decode_error(
                 "",
-                format!("expected LocalTime, found {}", datatree_kind(&tree)),
+                format!("expected LocalTime, found {}", datatree_kind_for(&tree)),
             ))),
         },
         "DateTime" => match datatree_variant(&tree) {
@@ -1489,7 +1481,7 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             }
             _ => CtValue::failed(Box::new(decode_error(
                 "",
-                format!("expected DateTime, found {}", datatree_kind(&tree)),
+                format!("expected DateTime, found {}", datatree_kind_for(&tree)),
             ))),
         },
         "Duration" => match datatree_variant(&tree) {
@@ -1504,7 +1496,7 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             )),
             _ => CtValue::failed(Box::new(decode_error(
                 "",
-                format!("expected Duration, found {}", datatree_kind(&tree)),
+                format!("expected Duration, found {}", datatree_kind_for(&tree)),
             ))),
         },
         "Decimal" => match datatree_variant(&tree) {
@@ -1525,7 +1517,7 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             }
             _ => CtValue::failed(Box::new(decode_error(
                 "",
-                format!("expected Decimal, found {}", datatree_kind(&tree)),
+                format!("expected Decimal, found {}", datatree_kind_for(&tree)),
             ))),
         },
         _ => CtValue::failed(Box::new(decode_error(
@@ -2296,7 +2288,7 @@ impl<'a> EvalCtx<'a> {
                         }),
                     _ => Err(decode_error(
                         "",
-                        format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
+                        format!("expected {}, found {}", ty.name(), datatree_kind_for(&tree)),
                     )),
                 };
                 let decoded = match decoded {
@@ -2348,7 +2340,7 @@ impl<'a> EvalCtx<'a> {
                     }),
                 _ => Err(decode_error(
                     "",
-                    format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
+                    format!("expected {}, found {}", ty.name(), datatree_kind_for(&tree)),
                 )),
             },
             Type::Float32 => {
@@ -2358,7 +2350,7 @@ impl<'a> EvalCtx<'a> {
                     _ => {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
-                            format!("expected F32, found {}", datatree_kind(&tree)),
+                            format!("expected F32, found {}", datatree_kind_for(&tree)),
                         ))));
                     }
                 };
@@ -2386,7 +2378,7 @@ impl<'a> EvalCtx<'a> {
                 },
                 _ => Err(decode_error(
                     "",
-                    format!("expected Bool, found {}", datatree_kind(&tree)),
+                    format!("expected Bool, found {}", datatree_kind_for(&tree)),
                 )),
             },
             Type::String => match datatree_variant(&tree) {
@@ -2396,7 +2388,7 @@ impl<'a> EvalCtx<'a> {
                 Some(("Bool", Some(CtValue::Bool(value)))) => Ok(CtValue::Str(value.to_string())),
                 _ => Err(decode_error(
                     "",
-                    format!("expected Text, found {}", datatree_kind(&tree)),
+                    format!("expected Text, found {}", datatree_kind_for(&tree)),
                 )),
             },
             Type::Char => match self.eval_datatree_decode(tree, &Type::String)? {
@@ -2452,7 +2444,7 @@ impl<'a> EvalCtx<'a> {
                 let Some(("Array", Some(CtValue::List(values)))) = datatree_variant(&tree) else {
                     return Ok(CtValue::failed(Box::new(decode_error(
                         "",
-                        format!("expected a list, found {}", datatree_kind(&tree)),
+                        format!("expected a list, found {}", datatree_kind_for(&tree)),
                     ))));
                 };
                 if let Type::FixedList { len, .. } = ty {
@@ -2489,7 +2481,7 @@ impl<'a> EvalCtx<'a> {
                 let Some(("Object", Some(object))) = datatree_variant(&tree) else {
                     return Ok(CtValue::failed(Box::new(decode_error(
                         "",
-                        format!("expected an object, found {}", datatree_kind(&tree)),
+                        format!("expected an object, found {}", datatree_kind_for(&tree)),
                     ))));
                 };
                 let values: Vec<(String, CtValue)> = match object {
@@ -2506,7 +2498,7 @@ impl<'a> EvalCtx<'a> {
                     _ => {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
-                            format!("expected an object, found {}", datatree_kind(&tree)),
+                            format!("expected an object, found {}", datatree_kind_for(&tree)),
                         ))));
                     }
                 };

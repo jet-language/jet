@@ -25,6 +25,10 @@ use super::Interpreter::Interp;
 use super::JSONInterp::{json_payload, json_variant};
 use crate::AST::{CtReport, CtValue};
 
+mod datatree_kind_rt {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+}
+
 // ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
@@ -183,20 +187,13 @@ fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
         CtValue::Enum { type_name, variant, args } if type_name == "JSON" => {
             Some((variant.as_str(), args.first().map(|(_, v)| v)))
         }
+        CtValue::Bytes(_) => Some(("Bytes", Some(tree))),
         _ => None,
     }
 }
-fn datatree_kind(tree: &CtValue) -> &'static str {
-    match variant_of(tree) {
-        Some(("Null", _)) => "null",
-        Some(("Bool", _)) => "Bool",
-        Some(("Int", _)) => "Int",
-        Some(("Float", _)) => "Float",
-        Some(("Text", _)) => "Text",
-        Some(("Array", _)) => "a list",
-        Some(("Object", _)) => "an object",
-        _ => "value",
-    }
+fn datatree_kind_for(tree: &CtValue) -> &'static str {
+    let tag = variant_of(tree).map(|(tag, _)| tag).unwrap_or("value");
+    datatree_kind_rt::datatree_kind(tag)
 }
 fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(tree, "Object") {
@@ -291,7 +288,7 @@ fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
             .parse::<i64>()
             .map(CtValue::Int)
             .map_err(|_| decode_error(format!("expected Int, found text {:?}", s))),
-        _ => Err(decode_error(format!("expected Int, found {}", datatree_kind(tree)))),
+        _ => Err(decode_error(format!("expected Int, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -305,7 +302,7 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             .parse::<f64>()
             .map(|value| CtValue::Float(CtFloat::f64(value)))
             .map_err(|_| decode_error(format!("expected Float, found text {:?}", s))),
-        _ => Err(decode_error(format!("expected Float, found {}", datatree_kind(tree)))),
+        _ => Err(decode_error(format!("expected Float, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -316,7 +313,7 @@ fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
             "false" => Ok(CtValue::Bool(false)),
             _ => Err(decode_error(format!("expected Bool, found text {:?}", s))),
         },
-        _ => Err(decode_error(format!("expected Bool, found {}", datatree_kind(tree)))),
+        _ => Err(decode_error(format!("expected Bool, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -325,7 +322,7 @@ fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
         Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
-        _ => Err(decode_error(format!("expected Text, found {}", datatree_kind(tree)))),
+        _ => Err(decode_error(format!("expected Text, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -367,7 +364,7 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
         _ => {
             return Err(decode_error(format!(
                 "expected F32, found {}",
-                datatree_kind(tree)
+                datatree_kind_for(tree)
             )))
         }
     };
@@ -429,7 +426,7 @@ pub(super) fn typed_decode_builtin_value(
             let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                 return Some(Err(decode_error(format!(
                     "expected a list, found {}",
-                    datatree_kind(tree)
+                    datatree_kind_for(tree)
                 ))));
             };
             if let Type::FixedList { len, .. } = ty {
@@ -495,7 +492,7 @@ impl<'a> Interp<'a> {
                 let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                     return Err(decode_error(format!(
                         "expected a list, found {}",
-                        datatree_kind(tree)
+                        datatree_kind_for(tree)
                     )));
                 };
                 if let Type::FixedList { len, .. } = ty {
@@ -527,7 +524,7 @@ impl<'a> Interp<'a> {
                 let Some(pairs) = object_pairs(tree) else {
                     return Err(decode_error(format!(
                         "expected an object, found {}",
-                        datatree_kind(tree)
+                        datatree_kind_for(tree)
                     )));
                 };
                 let mut out = std::collections::BTreeMap::new();

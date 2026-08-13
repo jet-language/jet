@@ -749,44 +749,6 @@ fn jet_std_env_home_dir() -> Option<String> {
         .or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
 }
 
-fn jet_std_os_name() -> String {
-    std::env::consts::OS.to_string()
-}
-fn jet_std_os_family() -> String {
-    std::env::consts::FAMILY.to_string()
-}
-fn jet_std_os_arch() -> String {
-    std::env::consts::ARCH.to_string()
-}
-fn jet_std_os_cpu_count() -> i64 {
-    std::thread::available_parallelism()
-        .map(|n| n.get() as i64)
-        .unwrap_or(1)
-}
-fn jet_std_os_temp_dir() -> String {
-    std::env::temp_dir().to_string_lossy().to_string()
-}
-fn jet_std_os_executable() -> String {
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default()
-}
-fn jet_std_os_pid() -> i64 {
-    std::process::id() as i64
-}
-fn jet_std_os_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| "localhost".to_string())
-}
-fn jet_std_os_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .or_else(|| std::env::var("USERNAME").ok())
-        .unwrap_or_default()
-}
 fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
     std::env::set_current_dir(path).map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
 }

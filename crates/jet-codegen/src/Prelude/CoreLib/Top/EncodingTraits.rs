@@ -227,7 +227,7 @@ impl __jet_Decode for jet_std::Duration {
             }),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Duration, found {}",
-                jet_std::datatree_kind(other)
+                jet_std::datatree_kind_for(other)
             ))),
         }
     }
@@ -236,7 +236,7 @@ impl __jet_Decode for u8 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::DataTree::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-            other => Err(jet_std::FieldError::one(format!("expected U8, found {}", jet_std::datatree_kind(other)))),
+            other => Err(jet_std::FieldError::one(format!("expected U8, found {}", jet_std::datatree_kind_for(other)))),
         }
     }
 }
@@ -254,7 +254,7 @@ macro_rules! jet_impl_sized_int_decode {
                     other => Err(jet_std::FieldError::one(format!(
                         "expected {}, found {}",
                         $name,
-                        jet_std::datatree_kind(other)
+                        jet_std::datatree_kind_for(other)
                     ))),
                 }
             }
@@ -281,7 +281,7 @@ impl __jet_Decode for jet_std::JetDecimal {
             jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
-                "expected Decimal, found {}", jet_std::datatree_kind(other)
+                "expected Decimal, found {}", jet_std::datatree_kind_for(other)
             ))),
         }
     }
@@ -331,7 +331,7 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
             }
             other => Err(jet_std::FieldError::one(format!(
                 "expected a list, found {}",
-                jet_std::datatree_kind(other)
+                jet_std::datatree_kind_for(other)
             ))),
         }
     }
@@ -382,7 +382,7 @@ impl<V: __jet_Decode> __jet_Decode for std::collections::BTreeMap<String, V> {
             }
             other => Err(jet_std::FieldError::one(format!(
                 "expected an object, found {}",
-                jet_std::datatree_kind(other)
+                jet_std::datatree_kind_for(other)
             ))),
         }
     }

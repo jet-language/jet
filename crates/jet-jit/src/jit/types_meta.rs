@@ -11,6 +11,16 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+mod prelude_enum_meta {
+    include!(concat!(env!("OUT_DIR"), "/prelude_enum_meta.rs"));
+}
+
+pub(crate) use prelude_enum_meta::{
+    PRELUDE_DATATREE_ARRAY, PRELUDE_DATATREE_BOOL, PRELUDE_DATATREE_BYTES,
+    PRELUDE_DATATREE_FLOAT, PRELUDE_DATATREE_INT, PRELUDE_DATATREE_NULL,
+    PRELUDE_DATATREE_OBJECT, PRELUDE_DATATREE_TEXT,
+};
+
 static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
 static HOOK_STR_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::String]);
 static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
@@ -20,31 +30,45 @@ static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::String, Type::Int]);
 static IO_CONTEXT_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::Named("IOContext".into())]);
-static IO_OPERATION_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    [
-        "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect()
+static PRELUDE_ENUM_VARIANTS: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
+    prelude_enum_meta::all()
+        .iter()
+        .map(|(name, variants)| {
+            (
+                (*name).to_string(),
+                variants.iter().map(|variant| (*variant).to_string()).collect(),
+            )
+        })
+        .collect()
 });
-static IO_ERROR_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    [
-        "InvalidInput",
-        "NotFound",
-        "PermissionDenied",
-        "TimedOut",
-        "Cancelled",
-        "Closed",
-        "Protocol",
-        "Other",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect()
-});
-static IO_OPERATION_NAME: LazyLock<String> = LazyLock::new(|| "IOOperation".to_string());
-static IO_ERROR_NAME: LazyLock<String> = LazyLock::new(|| "IOError".to_string());
+
+fn enum_variant_position<'a>(
+    mut variants: impl Iterator<Item = &'a String>,
+    variant: &str,
+) -> Option<i64> {
+    let mangled = mangle_path(variant);
+    let flat = jet_foundation::Syntax::generated_suffix(&mangled);
+    variants
+        .position(|candidate| {
+            candidate == variant
+                || candidate == &mangled
+                || jet_foundation::Syntax::generated_suffix(candidate) == variant
+                || jet_foundation::Syntax::generated_suffix(candidate) == flat
+        })
+        .map(|index| index as i64)
+}
+
+pub(crate) fn prelude_enum_variant_index(enum_name: &str, variant: &str) -> Option<i64> {
+    let variants = PRELUDE_ENUM_VARIANTS.get(enum_name)?;
+    enum_variant_position(variants.iter(), variant)
+}
+
+pub(crate) fn prelude_enum_variant_at(enum_name: &str, index: i64) -> Option<&'static str> {
+    let (_, variants) = prelude_enum_meta::all()
+        .iter()
+        .find(|(name, _)| *name == enum_name)?;
+    variants.get(usize::try_from(index).ok()?).copied()
+}
 // D-AUTH-TOKENPOLICY1=A: every AuthError variant uses one tagged heap record
 // with typed fields in declaration order, matching the JIT auth bridge carrier.
 static AUTH_ERROR_WRONG_AUDIENCE_PAYLOAD: LazyLock<Vec<Type>> =
@@ -957,285 +981,13 @@ impl<'a> JitMeta<'a> {
             .or_else(|| core_struct_field_type(type_name, field))
     }
 
-    /// Discriminant index from structured enum + variant Jet names.
+    /// Discriminant index from the Prelude declaration order or a user enum table.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
-        // D-CONC-FAIL1=A: Prelude TaskFailure uses the same order on every
-        // packed enum ABI, even when no user enum table reaches this JIT.
-        if enum_name == jet_foundation::Syntax::TYPE_TASK_FAILURE {
-            return match variant {
-                "Cancelled" => Some(0),
-                "DeadlineBlown" => Some(1),
-                "Panicked" => Some(2),
-                _ => None,
-            };
-        }
-        // Core ProcessStreamMode is not registered on JitProgram; fixed order
-        // matches jet_std::ProcessStreamMode { Stream, Inherit, Capture }.
-        if enum_name == "ProcessStreamMode" {
-            return match variant {
-                "Stream" => Some(0),
-                "Inherit" => Some(1),
-                "Capture" => Some(2),
-                _ => None,
-            };
-        }
-        if enum_name == "IOOperation" {
-            return match variant {
-                "Read" => Some(0),
-                "Write" => Some(1),
-                "Flush" => Some(2),
-                "Connect" => Some(3),
-                "Accept" => Some(4),
-                "Close" => Some(5),
-                "Resolve" => Some(6),
-                "Codec" => Some(7),
-                _ => None,
-            };
-        }
-        if enum_name == jet_foundation::Syntax::TYPE_TERMINAL_MODE {
-            return match variant {
-                "Raw" => Some(0),
-                "Cooked" => Some(1),
-                _ => None,
-            };
-        }
-        // Prelude `IOError` order (Open.rs); enum_names supplies fallback
-        // metadata when the core enum is absent from JitProgram.
-        if enum_name == "IOError" {
-            return match variant {
-                "InvalidInput" => Some(0),
-                "NotFound" => Some(1),
-                "PermissionDenied" => Some(2),
-                "TimedOut" => Some(3),
-                "Cancelled" => Some(4),
-                "Closed" => Some(5),
-                "Protocol" => Some(6),
-                "Other" => Some(7),
-                _ => None,
-            };
-        }
-        // D-TERM1: prelude `Key` / `JetKey` variant order.
-        if enum_name == "Key" {
-            return match variant {
-                "Char" => Some(0),
-                "Enter" => Some(1),
-                "Escape" => Some(2),
-                "Backspace" => Some(3),
-                "Tab" => Some(4),
-                "Delete" => Some(5),
-                "Up" => Some(6),
-                "Down" => Some(7),
-                "Left" => Some(8),
-                "Right" => Some(9),
-                "F" => Some(10),
-                "Ctrl" => Some(11),
-                "Unknown" => Some(12),
-                _ => None,
-            };
-        }
-        // D-ENCSTREAM-SURFACE1 core enums (not always on JitProgram).
-        if enum_name == "EncodingFormat" {
-            return match variant {
-                "JSON" => Some(0),
-                "JSONL" => Some(1),
-                "CSV" => Some(2),
-                "XML" => Some(3),
-                "CBOR" => Some(4),
-                _ => None,
-            };
-        }
-        if enum_name == "EncodingErrorKind" {
-            return match variant {
-                "Syntax" => Some(0),
-                "Truncated" => Some(1),
-                "Unsupported" => Some(2),
-                "Limit" => Some(3),
-                "IO" => Some(4),
-                "State" => Some(5),
-                _ => None,
-            };
-        }
-        if enum_name == "DataEvent" {
-            // Unit variants first (sema registration order), then payload ones.
-            return match variant {
-                "Null" => Some(0),
-                "ArrayStart" => Some(1),
-                "ArrayEnd" => Some(2),
-                "ObjectStart" => Some(3),
-                "ObjectEnd" => Some(4),
-                "Bool" => Some(5),
-                "Int" => Some(6),
-                "Float" => Some(7),
-                "Text" => Some(8),
-                "Bytes" => Some(9),
-                "Key" => Some(10),
-                _ => None,
-            };
-        }
-        // D-AUTH-TOKENPOLICY1=A: order mirrors codegen's AuthError surface.
-        if enum_name == "AuthError" {
-            return match variant {
-                "InvalidSignature" => Some(0),
-                "WeakKey" => Some(1),
-                "TokenExpired" => Some(2),
-                "MalformedToken" => Some(3),
-                "UnsupportedToken" => Some(4),
-                "MissingClaim" => Some(5),
-                "DecodeError" => Some(6),
-                "WrongAudience" => Some(7),
-                "WrongIssuer" => Some(8),
-                "TokenNotYetValid" => Some(9),
-                _ => None,
-            };
-        }
-        // D-EVENT1 / D-PENDING1: compiler-builtin enums not always on JitProgram.
-        if enum_name == "HookOutcome" {
-            return match variant {
-                "Continue" => Some(0),
-                "Cancel" => Some(1),
-                "Fail" => Some(2),
-                _ => None,
-            };
-        }
-        if enum_name == "HookDecision" {
-            return match variant {
-                "Continue" => Some(0),
-                "Transform" => Some(1),
-                "Cancel" => Some(2),
-                "Fail" => Some(3),
-                _ => None,
-            };
-        }
-        if enum_name == "Loadable" {
-            return match variant {
-                "Idle" => Some(0),
-                "Loading" => Some(1),
-                "Loaded" => Some(2),
-                "Failed" => Some(3),
-                _ => None,
-            };
-        }
-        if enum_name == "Overflow" {
-            return match variant {
-                "Block" => Some(0),
-                "DropNewest" => Some(1),
-                "DropOldest" => Some(2),
-                _ => None,
-            };
-        }
-        if enum_name == "FailurePolicy" {
-            return match variant {
-                "StopFirst" => Some(0),
-                "Collect" => Some(1),
-                "Log" => Some(2),
-                "Ignore" => Some(3),
-                _ => None,
-            };
-        }
-        if enum_name == "EventResult" {
-            return match variant {
-                "Handled" => Some(0),
-                "Ignored" => Some(1),
-                _ => None,
-            };
-        }
-        if enum_name == "DispatchState" {
-            return match variant {
-                "Delivered" => Some(0),
-                "HandlerFailed" => Some(1),
-                "DroppedNewest" => Some(2),
-                "DroppedOldest" => Some(3),
-                "Closed" => Some(4),
-                "Cancelled" => Some(5),
-                "DeadlineExceeded" => Some(6),
-                _ => None,
-            };
-        }
-        // D-SERVICE-AUTHORITY1=A: order mirrors codegen's
-        // `register_core_import_surfaces` (Codegen/Context.rs) — the AOT/
-        // interpreter discriminant order this table must agree with (I9).
-        if enum_name == "ServiceReceipt" {
-            return match variant {
-                "Accepted" => Some(0),
-                "Duplicate" => Some(1),
-                "Retained" => Some(2),
-                "DeadLettered" => Some(3),
-                "Rejected" => Some(4),
-                "Unavailable" => Some(5),
-                _ => None,
-            };
-        }
-        if enum_name == "SMTPSecurity" {
-            return match variant {
-                "StartTls" => Some(0),
-                "TLS" => Some(1),
-                _ => None,
-            };
-        }
-        if enum_name == "RecipientPolicy" {
-            return match variant {
-                "RequireAll" => Some(0),
-                "DeliverAccepted" => Some(1),
-                _ => None,
-            };
-        }
-        if enum_name == "SMTPAuth" {
-            return match variant {
-                "None" => Some(0),
-                "Password" => Some(1),
-                _ => None,
-            };
-        }
-        if enum_name == "TLSTrust" {
-            return match variant {
-                "System" => Some(0),
-                "SystemPlusCa" => Some(1),
-                _ => None,
-            };
-        }
-        if enum_name == "EmailError" {
-            return [
-                "Configuration",
-                "DNS",
-                "Connect",
-                "TLS",
-                "Auth",
-                "Protocol",
-                "Rejected",
-                "Transient",
-                "TimedOut",
-                "Cancelled",
-                "DeliveryUnknown",
-            ]
-            .iter()
-            .position(|candidate| *candidate == variant)
-            .map(|index| index as i64);
-        }
-        // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
-        if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
-            return match variant {
-                "Null" => Some(0),
-                "Bool" => Some(1),
-                "Int" => Some(2),
-                "Float" => Some(3),
-                "Text" => Some(4),
-                "Array" => Some(5),
-                "Object" => Some(6),
-                _ => None,
-            };
+        if let Some(index) = prelude_enum_variant_index(enum_name, variant) {
+            return Some(index);
         }
         let variants = self.enum_variants.get(enum_name)?;
-        let mangled = mangle_path(variant);
-        let flat = jet_foundation::Syntax::generated_suffix(&mangled);
-        variants
-            .iter()
-            .position(|v| {
-                v == variant
-                    || v == &mangled
-                    || jet_foundation::Syntax::generated_suffix(v) == variant
-                    || jet_foundation::Syntax::generated_suffix(v) == flat
-            })
-            .map(|i| i as i64)
+        enum_variant_position(variants.iter(), variant)
     }
 
     pub(crate) fn enum_variant_indices(&self, enum_name: &str, variant: &str) -> Vec<i64> {
@@ -1320,22 +1072,45 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
-        self.enum_variants.get(name).map(|v| v.as_slice()).or_else(|| {
-            match name {
-                "IOOperation" => Some(IO_OPERATION_VARIANTS.as_slice()),
-                "IOError" => Some(IO_ERROR_VARIANTS.as_slice()),
-                _ => None,
-            }
-        })
+        PRELUDE_ENUM_VARIANTS
+            .get(name)
+            .map(|variants| variants.as_slice())
+            .or_else(|| self.enum_variants.get(name).map(|variants| variants.as_slice()))
     }
 
     pub(crate) fn enum_names(&self) -> impl Iterator<Item = &String> {
         self.enum_variants
             .keys()
-            .chain((!self.enum_variants.contains_key("IOOperation")).then_some(&*IO_OPERATION_NAME))
-            .chain((!self.enum_variants.contains_key("IOError")).then_some(&*IO_ERROR_NAME))
+            .chain(PRELUDE_ENUM_VARIANTS.keys().filter(|name| !self.enum_variants.contains_key(*name)))
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jit_discriminants_follow_every_prelude_enum() {
+        for (name, source_variants) in prelude_enum_meta::all() {
+            let jit_variants = PRELUDE_ENUM_VARIANTS
+                .get(*name)
+                .expect("generated Prelude enum metadata");
+            assert_eq!(jit_variants.len(), source_variants.len(), "{name}");
+            for (index, variant) in source_variants.iter().enumerate() {
+                assert_eq!(
+                    prelude_enum_variant_index(name, variant),
+                    Some(index as i64),
+                    "{name}.{variant}"
+                );
+                assert_eq!(
+                    prelude_enum_variant_at(name, index as i64),
+                    Some(*variant),
+                    "{name}[{index}]"
+                );
+            }
+        }
+    }
 }
 
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
@@ -1769,6 +1544,8 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
     static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
     static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
     static TEXT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
+    static BYTES: LazyLock<[Type; 1]> =
+        LazyLock::new(|| [Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]);
     static ARRAY: LazyLock<[Type; 1]> =
         LazyLock::new(|| [Type::List(Box::new(Type::Named("DataTree".into())))]);
     static OBJECT: LazyLock<[Type; 1]> = LazyLock::new(|| {
@@ -1782,6 +1559,7 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         "Int" => INT.as_slice(),
         "Float" => FLOAT.as_slice(),
         "Text" => TEXT.as_slice(),
+        "Bytes" => BYTES.as_slice(),
         "Array" => ARRAY.as_slice(),
         "Object" => OBJECT.as_slice(),
         _ => &[],

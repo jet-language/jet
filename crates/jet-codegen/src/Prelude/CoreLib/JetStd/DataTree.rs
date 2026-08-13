@@ -116,6 +116,22 @@
         }
     }
 
+    // Engine adapters reduce their resident value to this tag before calling
+    // the Prelude-owned diagnostic vocabulary.
+    pub fn datatree_kind_for(t: &DataTree) -> &'static str {
+        let tag = match t {
+            DataTree::Null => "Null",
+            DataTree::Bool(_) => "Bool",
+            DataTree::Int(_) => "Int",
+            DataTree::Float(_) => "Float",
+            DataTree::Text(_) => "Text",
+            DataTree::Bytes(_) => "Bytes",
+            DataTree::Array(_) => "Array",
+            DataTree::Object(_) => "Object",
+        };
+        datatree_kind(tag)
+    }
+
     // D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on DataTree. Each
     // read returns `Result<T, [FieldError]>` so a `?` chain composes cleanly
     // inside a hand `decode`. `.field`/`.at` auto-fill the path with the
@@ -213,7 +229,7 @@
             }),
             other => Err(FieldError::one(format!(
                 "expected Int, found {}",
-                datatree_kind(other)
+                datatree_kind_for(other)
             ))),
         }
     }
@@ -227,7 +243,7 @@
             }),
             other => Err(FieldError::one(format!(
                 "expected Float, found {}",
-                datatree_kind(other)
+                datatree_kind_for(other)
             ))),
         }
     }
@@ -245,7 +261,7 @@
             },
             other => Err(FieldError::one(format!(
                 "expected Bool, found {}",
-                datatree_kind(other)
+                datatree_kind_for(other)
             ))),
         }
     }
@@ -258,7 +274,7 @@
             DataTree::Bool(value) => Ok(value.to_string()),
             other => Err(FieldError::one(format!(
                 "expected Text, found {}",
-                datatree_kind(other)
+                datatree_kind_for(other)
             ))),
         }
     }
@@ -270,7 +286,7 @@
             other => {
                 return Err(FieldError::one(format!(
                     "expected F32, found {}",
-                    datatree_kind(other)
+                datatree_kind_for(other)
                 )))
             }
         };
