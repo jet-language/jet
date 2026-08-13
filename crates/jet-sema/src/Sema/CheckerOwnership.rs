@@ -4220,7 +4220,7 @@ impl<'a> Checker<'a> {
             }
             let cap = self
                 .lookup(name)
-                .map(|i| (i.ty.clone(), i.sendable))
+                .map(|i| (i.ty.clone(), self.sendability_for(name)))
                 .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
             let Some((cap_ty, cap_sendable)) = cap else {
                 continue;
@@ -4270,7 +4270,7 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            if !info.sendable
+            if !self.sendability_for(name)
                 || self
                     .sendability_problem(&info.ty, true)
                     .is_some()
@@ -4838,7 +4838,7 @@ impl<'a> Checker<'a> {
     ) -> Option<SendabilityProblem> {
         if let Expr::Ident(name, _) = expr {
             if let Some(info) = self.lookup(name) {
-                if !info.sendable {
+                if !self.sendability_for(name) {
                     return self
                         .sendability_problem(&info.ty, closure_taken)
                         .or_else(|| {

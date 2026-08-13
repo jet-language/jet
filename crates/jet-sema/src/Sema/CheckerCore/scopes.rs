@@ -37,6 +37,7 @@ impl<'a> Checker<'a> {
         pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
             let depth = self.flow.depth;
             self.flow.bindings.set_at(name, depth, info);
+            self.flow.sendability.set_at(name, depth, true);
         }
 
         /// Every name a binding is known by here, at any depth. Callers use it
@@ -151,6 +152,22 @@ impl<'a> Checker<'a> {
             }
         }
 
+        pub(crate) fn sendability_for(&self, name: &str) -> bool {
+            let declared = self.flow.bindings.depth_of(name);
+            let narrowed = self.flow.narrow.depth_of(name);
+            let depth = match (declared, narrowed) {
+                (Some(declared), Some(narrowed)) if narrowed >= declared => narrowed,
+                (Some(declared), _) => declared,
+                (None, Some(narrowed)) => narrowed,
+                (None, None) => return true,
+            };
+            self.flow
+                .sendability
+                .get_at(name, depth)
+                .copied()
+                .unwrap_or(true)
+        }
+
         /// Update the callback representation fact after a function-valued
         /// local is assigned. The fact is deliberately attached to the
         /// binding, not inferred again at the eventual host call: an unsafe
@@ -190,7 +207,21 @@ impl<'a> Checker<'a> {
             // A fresh declaration replaces any refinement recorded for the same
             // name in this scope: the new binding is what the name now means.
             self.flow.narrow.remove_at(name, depth);
+            self.flow.sendability.remove_at(name, depth);
             self.flow.bindings.set_at(name, depth, info);
+            self.flow.sendability.set_at(name, depth, true);
+        }
+
+        pub(crate) fn declare_with_sendability(
+            &mut self,
+            name: &str,
+            name_span: Span,
+            info: LocalInfo,
+            sendable: bool,
+        ) {
+            self.declare(name, name_span, info);
+            let depth = self.flow.depth;
+            self.flow.sendability.set_at(name, depth, sendable);
         }
     
         pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
@@ -213,7 +244,6 @@ impl<'a> Checker<'a> {
                         mutable: false,
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
-                        sendable: true,
                         interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
@@ -223,6 +253,7 @@ impl<'a> Checker<'a> {
                         invalid: false,
                     },
                 );
+                self.flow.sendability.set_at(&name, depth, true);
             }
         }
 

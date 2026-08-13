@@ -436,7 +436,7 @@ impl<'a> Checker<'a> {
                 }
                 let captured = self
                     .lookup(&name)
-                    .map(|info| (info.ty.clone(), info.sendable))
+                    .map(|info| (info.ty.clone(), self.sendability_for(&name)))
                     .or_else(|| self.consts.get(&name).cloned().map(|ty| (ty, true)));
                 let Some((ty, sendable)) = captured else { continue };
                 if let Some(info) = self.lookup(&name) {

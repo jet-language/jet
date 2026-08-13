@@ -963,6 +963,23 @@ pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
     fact_rows().filter(|row| row.name.starts_with("Type."))
 }
 
+/// The closed `FactKind` view is a projection of the registered plane rows.
+/// `Type.Interval` is the one source name whose reflection kind is `Range`;
+/// every other plane uses its registered leaf name. Adding a plane therefore
+/// adds its typed reflection kind through the same source row.
+pub fn reflection_kind(name: &str) -> Option<&'static str> {
+    let row = row(name)?;
+    if row.kind() != RowKind::Plane {
+        return None;
+    }
+    if row.name == "Type.Interval" {
+        return Some("Range");
+    }
+    row.name
+        .strip_prefix("Type.")
+        .or(Some(row.name))
+}
+
 /// The drift guard for the two law columns (D-FACT-LAW1=B), and for the one
 /// name space the table keeps. One implementation: the law-zero coverage guard
 /// calls this, and no kind gets a second one.

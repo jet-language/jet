@@ -10,6 +10,7 @@
 //! | plane | fact | where the walker lives |
 //! |---|---|---|
 //! | [`Binding`] | everything a declaration says about a name | `CheckerCore` |
+//! | [`Sendability`] | whether a value may cross a task boundary | ownership prover |
 //! | [`Narrow`] | a binding refined by a proven test (D-FLOWTYPE1) | `CheckerCore` |
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |
 //! | [`Uninit`] | a `Type.{ uninit }` place not yet written (D-UNINIT1) | `CheckerCore` |
@@ -401,6 +402,25 @@ impl Plane for Binding {
     }
 }
 
+/// D-FACT-OWN1 / D-FACT-HOME1: sendability is a prover-published fact. Keep
+/// the value in the shared flow store so path joins cannot leave a stale
+/// private bit on `LocalInfo`.
+pub(crate) enum Sendability {}
+
+impl Plane for Sendability {
+    type Fact = bool;
+
+    fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
+        match (left, right) {
+            (Some(left), Some(right)) => Some(*left && *right),
+            // A binding that exists on only one reaching path is not proved
+            // sendable at the merge.
+            (Some(_), None) | (None, Some(_)) => Some(false),
+            (None, None) => None,
+        }
+    }
+}
+
 /// D-FLOWTYPE1: a binding a proven test refined for the rest of a path
 /// (`x != None` refines `T?` to `T`). The refined row shadows the declaration
 /// at the same depth and leaves with it.
@@ -508,6 +528,7 @@ pub(crate) struct FlowFacts {
     /// paths before asking the individual fact planes to join.
     pub(crate) reachable: bool,
     pub(crate) bindings: Facts<Binding>,
+    pub(crate) sendability: Facts<Sendability>,
     pub(crate) narrow: Facts<Narrow>,
     pub(crate) moved: Facts<Moved>,
     pub(crate) uninit: Facts<Uninit>,
@@ -520,6 +541,7 @@ impl Default for FlowFacts {
             depth: 0,
             reachable: true,
             bindings: Facts::default(),
+            sendability: Facts::default(),
             narrow: Facts::default(),
             moved: Facts::default(),
             uninit: Facts::default(),
@@ -537,6 +559,7 @@ impl FlowFacts {
     pub(crate) fn leave_scope(&mut self) {
         let depth = self.depth;
         self.bindings.leave_depth(depth);
+        self.sendability.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
         self.depth = depth.saturating_sub(1);
@@ -567,6 +590,11 @@ impl FlowFacts {
                 &before.bindings,
                 &Self::plane(&paths, |facts| &facts.bindings),
                 &mut sink,
+            ),
+            sendability: Facts::merge_paths(
+                &before.sendability,
+                &Self::plane(&paths, |facts| &facts.sendability),
+                &mut Vec::new(),
             ),
             narrow: Facts::merge_paths(
                 &before.narrow,
@@ -600,6 +628,11 @@ impl FlowFacts {
             depth: before.depth,
             reachable: true,
             bindings: Facts::after_loop(&before.bindings, &after_body.bindings, &mut Vec::new()),
+            sendability: Facts::after_loop(
+                &before.sendability,
+                &after_body.sendability,
+                &mut Vec::new(),
+            ),
             narrow: Facts::after_loop(&before.narrow, &after_body.narrow, &mut Vec::new()),
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),
             uninit: Facts::after_loop(&before.uninit, &after_body.uninit, &mut Vec::new()),

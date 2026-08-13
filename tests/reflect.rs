@@ -2,7 +2,9 @@
 
 mod common;
 
-use jet::Comptime::{build_distinct_type_info, build_struct_type_info, CtReport, CtValue};
+use jet::Comptime::{
+    build_distinct_type_info, build_registered_fact_info, build_struct_type_info, CtReport, CtValue,
+};
 use jet::Diagnostics::Span;
 use jet::AST::{
     AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone,
@@ -525,4 +527,29 @@ fn range_and_dimension_facts_are_typed_records() {
         struct_field(struct_field(dimension, "value"), "range"),
         CtValue::Failed(CtReport::Clean(_))
     ));
+}
+
+#[test]
+fn orphan_fact_rows_are_typed_and_readable() {
+    for (name, kind) in [
+        ("Sendability", "Sendability"),
+        ("Attribution", "Attribution"),
+        ("TrackOrigin", "TrackOrigin"),
+        ("ViewProvenance", "ViewProvenance"),
+        ("UnitScaleProvenance", "UnitScaleProvenance"),
+        ("Maturity", "Maturity"),
+    ] {
+        let info = build_registered_fact_info(name).expect("registered orphan fact");
+        assert!(matches!(
+            struct_field(&info, "kind"),
+            CtValue::Enum { variant, .. } if variant == kind
+        ));
+        assert!(matches!(struct_field(&info, "value"), CtValue::Struct { .. }));
+        if name == "Attribution" {
+            assert!(matches!(
+                struct_field(&info, "path"),
+                CtValue::Str(path) if path == "report.$attribution"
+            ));
+        }
+    }
 }

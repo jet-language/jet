@@ -360,7 +360,6 @@ impl<'a> Checker<'a> {
                     mutable: true,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
-                    sendable: true,
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
@@ -958,7 +957,7 @@ impl<'a> Checker<'a> {
                 && !matches!(&final_ty, Type::Named(name) if name == "Fixed"))
                 .then(|| self.evaluate_constant(&b.init))
                 .flatten();
-            self.declare(
+            self.declare_with_sendability(
                 &b.name,
                 b.name_span,
                 LocalInfo {
@@ -967,7 +966,6 @@ impl<'a> Checker<'a> {
                     mutable: b.mutable && !b.is_comptime,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
-                    sendable: binding_sendable,
                     interrupt_sendable,
                     reactive_local: b.reactive_local(),
                     reactive_shared: b.reactive_shared(),
@@ -976,6 +974,7 @@ impl<'a> Checker<'a> {
                     constant_value,
                     invalid: init_has_error,
                 },
+                binding_sendable,
             );
             if b.reactive_shared() && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
                 self.note_reactive_upgrade(&b.name, &final_ty, "#Shared pin");

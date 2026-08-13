@@ -256,16 +256,28 @@ fn the_one_table_holds_every_kind() {
 #[test]
 fn every_registered_plane_is_reflectable() {
     use jet_foundation::Registry::{self, RowKind};
+    use jet::Comptime::CtValue;
 
-    for row in Registry::type_plane_rows() {
+    let planes: Vec<_> = Registry::fact_rows()
+        .filter(|row| row.kind() == RowKind::Plane)
+        .collect();
+    for row in &planes {
         assert_eq!(row.kind(), RowKind::Plane);
         assert!(Registry::row(row.name).is_some(), "plane `{}` has no home", row.name);
+        let info = jet::Comptime::build_registered_fact_info(row.name)
+            .unwrap_or_else(|| panic!("plane `{}` has no typed reflection row", row.name));
+        assert!(matches!(
+            info,
+            CtValue::Struct { fields, .. }
+                if fields.iter().any(|(name, value)| name == "kind"
+                    && matches!(value, CtValue::Enum { .. }))
+        ));
     }
     assert_eq!(
-        Registry::type_plane_rows().count(),
+        planes.len(),
         Registry::fact_declarations()
             .iter()
-            .filter(|declaration| declaration.name.starts_with("Type."))
+            .filter(|declaration| declaration.target == jet_foundation::Registry::RowTarget::Value)
             .count()
     );
 }
@@ -337,5 +349,40 @@ fn a_prover_publishes_read_only_rows() {
         assert!(row.is_prover_supplied(), "`{name}` names no prover");
         assert_eq!(row.safe_direction, SafeDirection::None);
         assert!(row.gates.is_empty(), "`{name}` is read-only, so it has no gate");
+    }
+}
+
+#[test]
+fn orphan_fact_rows_have_one_home() {
+    use jet_foundation::Registry::{self, RowKind, RowTarget};
+
+    for name in [
+        "Sendability",
+        "Attribution",
+        "TrackOrigin",
+        "ViewProvenance",
+        "UnitScaleProvenance",
+        "Maturity",
+    ] {
+        let declaration = Registry::fact_declarations()
+            .iter()
+            .find(|declaration| declaration.name == name)
+            .unwrap_or_else(|| panic!("`{name}` has no Prelude declaration"));
+        let matches: Vec<_> = Registry::rows()
+            .iter()
+            .filter(|row| row.name == name)
+            .collect();
+        assert_eq!(matches.len(), 1, "`{name}` must have one registry home");
+        let row = matches[0];
+        assert_eq!(row.target, RowTarget::Value);
+        assert_eq!(row.kind(), RowKind::Plane);
+        assert_eq!(row.decision, declaration.decision);
+    }
+
+    for engine_fact in ["Uninit", "Exhaustiveness"] {
+        assert!(
+            !Registry::fact_rows().any(|row| row.name == engine_fact),
+            "`{engine_fact}` is prover state, not a registered user fact plane"
+        );
     }
 }

@@ -7,7 +7,8 @@
 
 use crate::AST::{
     Dimension, DistinctDef, EnumDef, Field, Func, FunctionObligations, KnowledgeFact, Marker,
-    Measure, StructDef, StructLayout, Type, TypeParam, VariantPayload,
+    MaturityTag, Measure, StructDef, StructLayout, Type, TypeParam, UnitScaleProvenance,
+    VariantPayload, ViewProvenance,
 };
 
 use crate::AST::CtValue;
@@ -278,8 +279,105 @@ fn obligation_info(obligations: &FunctionObligations) -> CtValue {
     )
 }
 
+pub fn build_sendability_info(known: bool) -> CtValue {
+    ct_struct("SendabilityInfo", &[("known", ct_bool(known))])
+}
+
+pub fn build_movedness_info(moved: bool) -> CtValue {
+    ct_struct("MovednessInfo", &[("known", ct_bool(moved))])
+}
+
+pub fn build_attribution_info(source: &str, code: Option<&str>) -> CtValue {
+    ct_struct(
+        "AttributionInfo",
+        &[
+            ("source", ct_str(source)),
+            (
+                "code",
+                optional_value(code.map(|code| ct_str(code)), "String"),
+            ),
+        ],
+    )
+}
+
+pub fn build_track_origin_info(origin: Option<&str>) -> CtValue {
+    ct_struct(
+        "TrackOriginInfo",
+        &[
+            ("tracked", ct_bool(origin.is_some())),
+            (
+                "source",
+                optional_value(origin.map(ct_str), "String"),
+            ),
+        ],
+    )
+}
+
+pub fn build_view_provenance_info(provenance: &ViewProvenance) -> CtValue {
+    ct_struct(
+        "ViewProvenanceInfo",
+        &[
+            (
+                "sources",
+                ct_list(
+                    provenance
+                        .sources
+                        .iter()
+                        .map(|source| ct_str(source.canonical()))
+                        .collect(),
+                ),
+            ),
+            ("mutable", ct_bool(provenance.mutable)),
+        ],
+    )
+}
+
+pub fn build_unit_scale_provenance_info(provenance: &UnitScaleProvenance) -> CtValue {
+    let (kind, value, source, uncertainty) = match provenance {
+        UnitScaleProvenance::Rational => ("Rational", None, None, None),
+        UnitScaleProvenance::SymbolicPi {
+            numerator,
+            denominator,
+        } => (
+            "SymbolicPi",
+            Some(ct_str(format!("{numerator}/{denominator}"))),
+            None,
+            None,
+        ),
+        UnitScaleProvenance::Conventional { value, source } => {
+            ("Conventional", Some(ct_str(value)), Some(ct_str(source)), None)
+        }
+        UnitScaleProvenance::Measured {
+            central_value,
+            standard_uncertainty,
+            source,
+        } => (
+            "Measured",
+            Some(ct_str(central_value)),
+            Some(ct_str(source)),
+            Some(ct_str(standard_uncertainty)),
+        ),
+    };
+    ct_struct(
+        "UnitScaleProvenanceInfo",
+        &[
+            ("kind", typed_enum("UnitScaleProvenanceKind", kind)),
+            ("value", optional_value(value, "String")),
+            ("source", optional_value(source, "String")),
+            ("uncertainty", optional_value(uncertainty, "String")),
+        ],
+    )
+}
+
+pub fn build_maturity_info(maturity: MaturityTag) -> CtValue {
+    ct_struct(
+        "MaturityInfo",
+        &[("level", typed_enum("Maturity", maturity.as_str()))],
+    )
+}
+
 /// Names and paths remain strings because they are stable fact identities; the
-/// fact's meaning is carried by typed kind, members, range, and dimension.
+/// fact's meaning is carried by the closed kind and its typed detail record.
 fn fact_value(
     kind: &str,
     name: &str,
@@ -310,6 +408,19 @@ fn fact_value(
             ("nominal", optional_value(None, "NominalInfo")),
             ("obligation", optional_value(None, "ObligationInfo")),
             ("state", optional_value(None, "StateRef")),
+            ("sendability", optional_value(None, "SendabilityInfo")),
+            (
+                "view_provenance",
+                optional_value(None, "ViewProvenanceInfo"),
+            ),
+            ("movedness", optional_value(None, "MovednessInfo")),
+            ("attribution", optional_value(None, "AttributionInfo")),
+            ("track_origin", optional_value(None, "TrackOriginInfo")),
+            (
+                "unit_scale_provenance",
+                optional_value(None, "UnitScaleProvenanceInfo"),
+            ),
+            ("maturity", optional_value(None, "MaturityInfo")),
         ],
     )
 }
@@ -405,6 +516,37 @@ fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
     }
 }
 
+fn registered_fact_kind(name: &str) -> Option<&'static str> {
+    jet_foundation::Registry::reflection_kind(name)
+}
+
+/// Reflect one row from the shared registration table. A row with no current
+/// producer still has a typed, absent payload; it never falls back to a
+/// display string or a private menu.
+pub fn build_registered_fact_info(name: &str) -> Option<CtValue> {
+    let row = jet_foundation::Registry::row(name)?;
+    let kind = registered_fact_kind(row.name)?;
+    let value = fact_value(
+        kind,
+        row.name,
+        std::iter::empty::<String>(),
+        None,
+        None,
+    );
+    let path = if row.name == "Attribution" {
+        "report.$attribution".to_string()
+    } else {
+        row.name.to_string()
+    };
+    Some(fact_info(kind, row.name, path, value))
+}
+
+pub fn build_registered_fact_infos() -> Vec<CtValue> {
+    jet_foundation::Registry::fact_rows()
+        .filter_map(|row| build_registered_fact_info(row.name))
+        .collect()
+}
+
 fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
     ct_struct(
         "FactInfo",
@@ -415,6 +557,50 @@ fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
             ("value", value),
         ],
     )
+}
+
+fn declared_function_facts(
+    path: &str,
+    maturity: Option<MaturityTag>,
+    view_provenance: Option<&crate::AST::ViewProvenanceMap>,
+) -> Vec<CtValue> {
+    let mut facts = Vec::new();
+    if let Some(maturity) = maturity {
+        facts.push(fact_info(
+            "Maturity",
+            "maturity",
+            format!("{path}.$maturity"),
+            fact_value_with_detail(
+                "Maturity",
+                "maturity",
+                std::iter::empty::<String>(),
+                build_maturity_info(maturity),
+                "maturity",
+            ),
+        ));
+    }
+    if let Some(view_provenance) = view_provenance {
+        for (slot, provenance) in view_provenance {
+            let slot_name = if slot.is_empty() {
+                "return".to_string()
+            } else {
+                slot.join(".")
+            };
+            facts.push(fact_info(
+                "ViewProvenance",
+                "view_provenance",
+                format!("{path}.$view_provenance.{slot_name}"),
+                fact_value_with_detail(
+                    "ViewProvenance",
+                    "view_provenance",
+                    [slot_name],
+                    build_view_provenance_info(provenance),
+                    "view_provenance",
+                ),
+            ));
+        }
+    }
+    facts
 }
 
 fn type_dimensions(ty: &Type) -> Vec<CtValue> {
@@ -630,6 +816,11 @@ pub fn build_method_info(method: &Func) -> CtValue {
                 .flat_map(|ty| type_dimensions(ty)),
         )
         .collect();
+    let facts = declared_function_facts(
+        &method.name,
+        method.maturity,
+        method.return_view_provenance.as_ref(),
+    );
     ct_struct(
         "MethodInfo",
         &[
@@ -647,6 +838,7 @@ pub fn build_method_info(method: &Func) -> CtValue {
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
             ("dimensions", ct_list(dimensions)),
+            ("facts", ct_list(facts)),
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
@@ -1351,6 +1543,11 @@ fn build_function_info(
 ) -> CtValue {
     let qualified = ledger_identity(&facts.name_ledger, module_idx, module, &func.name);
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
+    let declared_facts = declared_function_facts(
+        &qualified,
+        func.maturity,
+        func.return_view_provenance.as_ref(),
+    );
     ct_struct(
         "FunctionInfo",
         &[
@@ -1382,6 +1579,7 @@ fn build_function_info(
                 "reaches_panic",
                 ct_bool(facts.reaches_panic.contains(&qualified)),
             ),
+            ("facts", ct_list(declared_facts)),
         ],
     )
 }
