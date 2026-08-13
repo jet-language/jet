@@ -170,6 +170,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
     include_str!("../Prelude/Core/Time.rs"),
     include_str!("../Prelude/Core/Sketch.rs"),
+    include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module

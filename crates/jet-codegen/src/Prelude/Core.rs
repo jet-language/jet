@@ -543,8 +543,7 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
             clause_kw, msg, file, line
         );
     }
-    eprintln!("#{} contract failed: {}", clause_kw, msg);
-    eprintln!("  --> {}:{}", file, line);
+    eprintln!("{}", jet_contract_report(clause_kw, msg, file, line));
     jet_runtime_exit();
 }
 

@@ -14,7 +14,7 @@ use jet_codegen::Codegen::TIR::{
     TFnValueKind, TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern,
     TPatternPosition, TPlace,
     TStaticOwner, TStmt, TStrPart, TirWorklist, TTypedTextForm, TTypedTextInterpKind,
-    TZipFillMode,
+    TZipFillMode, TContract, TContractDisposition, TContractKind,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -150,6 +150,12 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// dominance point. This avoids carrying a child block's raw SSA handle
     /// across a merge.
     pub(crate) compute_retrack_names: HashSet<String>,
+    /// Function-owned contract pool.  Active postcondition frames store IDs so
+    /// lowering a short-lived `&TStmt` never extends a statement borrow.
+    pub(crate) contract_pool: Vec<&'a TContract>,
+    /// Active postcondition lists. A return lowers its value first, binds the
+    /// generated `result` slot, and checks these lists before cleanup/exit.
+    pub(crate) contract_posts: Vec<Vec<usize>>,
 }
 
 fn mixed_switch_int_literal(cond: &TExpr) -> Option<i64> {
@@ -3488,11 +3494,135 @@ impl LowerCtx<'_, '_> {
     /// Named-unsupported variants (destructures other than tuple, `Unsafe`,
     /// `Reactive`, `Layout`, …) return `Err` rather than a wildcard so a new
     /// `TStmt` variant fails to compile here, not silently drops at runtime.
+    fn lower_contract_check(&mut self, contract: &TContract) -> Result<(), String> {
+        if !matches!(contract.disposition, TContractDisposition::Check) {
+            return Ok(());
+        }
+        let condition = self.lower_expr(&contract.condition)?;
+        let condition = if self.b.func.dfg.value_type(condition) == types::I8 {
+            condition
+        } else {
+            let condition_ty = self.b.func.dfg.value_type(condition);
+            let zero = self.b.ins().iconst(condition_ty, 0);
+            self.b.ins().icmp(IntCC::NotEqual, condition, zero)
+        };
+        let checked = self.call_host(self.host.contract_check, &[condition]);
+        let zero = self.b.ins().iconst(types::I8, 0);
+        let failed = self.b.ins().icmp(IntCC::Equal, checked, zero);
+        let fail_block = self.b.create_block();
+        let cont = self.b.create_block();
+        self.b.ins().brif(failed, fail_block, &[], cont, &[]);
+
+        self.b.switch_to_block(fail_block);
+        self.b.seal_block(fail_block);
+        let msg = self.lower_expr(&contract.message)?;
+        let file = self.runtime.heap.alloc_string(contract.file.clone());
+        let file = self.b.ins().iconst(types::I64, file);
+        let line = self.b.ins().iconst(types::I64, i64::from(contract.line));
+        let kind = self.b.ins().iconst(
+            types::I64,
+            if matches!(contract.kind, TContractKind::Pre) {
+                0
+            } else {
+                1
+            },
+        );
+        let fail = self
+            .module
+            .declare_func_in_func(self.host.contract_fail, self.b.func);
+        self.b.ins().call(fail, &[msg, file, line, kind]);
+        self.emit_trap_check()?;
+        self.b.ins().jump(cont, &[]);
+
+        self.b.switch_to_block(cont);
+        self.b.seal_block(cont);
+        Ok(())
+    }
+
+    fn lower_active_contracts(
+        &mut self,
+        result: Option<(Value, &Type)>,
+    ) -> Result<(), String> {
+        if self.contract_posts.is_empty() {
+            return Ok(());
+        }
+        let result_key = Self::local_key(&TLocal::generated("result"));
+        let prior = result.map(|(value, ty)| {
+            let var = self.fresh_var(self.b.func.dfg.value_type(value));
+            self.b.def_var(var, value);
+            let prior_var = self.vars.insert(result_key.clone(), var);
+            let prior_ty = self.var_tys.insert(result_key.clone(), ty.clone());
+            (prior_var, prior_ty)
+        });
+        let lists = self.contract_posts.clone();
+        for list in lists.iter().rev() {
+            for index in list {
+                let contract = self
+                    .contract_pool
+                    .get(*index)
+                    .copied()
+                    .ok_or("jit contract pool index out of bounds")?;
+                self.lower_contract_check(contract)?;
+            }
+        }
+        if let Some((prior_var, prior_ty)) = prior {
+            match prior_var {
+                Some(var) => {
+                    self.vars.insert(result_key.clone(), var);
+                }
+                None => {
+                    self.vars.remove(&result_key);
+                }
+            }
+            match prior_ty {
+                Some(ty) => {
+                    self.var_tys.insert(result_key, ty);
+                }
+                None => {
+                    self.var_tys.remove(&result_key);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn lower_stmt(&mut self, stmt: &TStmt) -> Result<(), String> {
         if self.dead {
             return Ok(());
         }
         match stmt {
+            TStmt::Contract { contract } => {
+                self.lower_contract_check(contract)?;
+            }
+            TStmt::ContractScope {
+                pre,
+                body,
+                post,
+                ..
+            } => {
+                for contract in pre {
+                    self.lower_contract_check(contract)?;
+                }
+                if post.is_empty() {
+                    self.lower_stmts(body)?;
+                } else {
+                    let mut frame = Vec::with_capacity(post.len());
+                    for contract in post {
+                        let index = self
+                            .contract_pool
+                            .iter()
+                            .position(|candidate| std::ptr::eq(*candidate, contract))
+                            .ok_or("jit contract missing from pool")?;
+                        frame.push(index);
+                    }
+                    self.contract_posts.push(frame);
+                    self.lower_stmts(body)?;
+                    if !self.dead {
+                        self.lower_active_contracts(None)?;
+                    }
+                    self.contract_posts.pop();
+                }
+            }
             TStmt::Let { name, init, .. } => {
                 let result_option_abi = self.uses_result_option_abi(init);
                 if Self::is_range_ty(&init.ty) {
@@ -4183,6 +4313,11 @@ impl LowerCtx<'_, '_> {
                 } else {
                     None
                 };
+                if let Some(value) = val {
+                    self.lower_active_contracts(Some((value, &expr.ty)))?;
+                } else {
+                    self.lower_active_contracts(None)?;
+                }
                 // Keep compile-time txn_stack: a `return` in one `if` branch must
                 // not pop frames needed by the fallthrough / sibling path.
                 self.emit_txn_rollbacks_keep()?;
@@ -4213,6 +4348,7 @@ impl LowerCtx<'_, '_> {
                 self.dead = true;
             }
             TStmt::Return(None) => {
+                self.lower_active_contracts(None)?;
                 self.emit_txn_rollbacks_keep()?;
                 self.emit_lexical_exit(None, false, self.shield_depth)?;
                 self.dead = true;

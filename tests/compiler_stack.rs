@@ -211,8 +211,6 @@ fn tir_func(
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
-        pre_contracts: Vec::new(),
-        post_contracts: Vec::new(),
         body,
         kind: jet::Codegen::TIR::TFuncKind::TopLevel,
     }

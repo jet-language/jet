@@ -23,6 +23,10 @@ mod measurement_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/Measurement.rs");
 }
 
+pub(crate) mod contract_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -1072,6 +1076,30 @@ extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
     })
 }
 
+/// D-FAIL-TIER1: the JIT only marshals contract values.  The predicate and
+/// rendered report are the same Prelude functions used by AOT and TIR-eval.
+extern "C" fn jet_jit_contract_check(condition: i8) -> i8 {
+    i8::from(contract_kernel::jet_contract_check(condition != 0))
+}
+
+extern "C" fn jet_jit_contract_fail(msg: i64, file: i64, line: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let msg = rt.heap.clone_string(msg).unwrap_or_default();
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let clause = if kind == 0 { "Pre" } else { "Post" };
+        rt.stderr.push_str(&contract_kernel::jet_contract_report(
+            clause,
+            &msg,
+            &file,
+            line as u32,
+        ));
+        rt.stderr.push('\n');
+        rt.exit_code = Some(70);
+        rt.set_trap("__jet_contract__");
+        0
+    })
+}
+
 extern "C" fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
@@ -2114,6 +2142,14 @@ host_fns! {
             sig_rich_panic.params.push(AbiParam::new(types::I64));
         }
         sig_rich_panic.returns.push(AbiParam::new(types::I64));
+        let mut sig_contract_check = Signature::new(cc);
+        sig_contract_check.params.push(AbiParam::new(types::I8));
+        sig_contract_check.returns.push(AbiParam::new(types::I8));
+        let mut sig_contract_fail = Signature::new(cc);
+        for _ in 0..4 {
+            sig_contract_fail.params.push(AbiParam::new(types::I64));
+        }
+        sig_contract_fail.returns.push(AbiParam::new(types::I64));
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::F64));
         let mut sig_i8 = Signature::new(cc);
@@ -2469,6 +2505,8 @@ host_fns! {
     result_get_i32: "jet_jit_result_get_i32" => jet_jit_result_get_i32: sig_result_query_i32;
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
     rich_panic: "jet_jit_rich_panic" => jet_jit_rich_panic: sig_rich_panic;
+    contract_check: "jet_jit_contract_check" => jet_jit_contract_check: sig_contract_check;
+    contract_fail: "jet_jit_contract_fail" => jet_jit_contract_fail: sig_contract_fail;
     trace_err: "jet_jit_trace_err" => jet_jit_trace_err: sig_trace_err;
     trace_err_note: "jet_jit_trace_err_note" => jet_jit_trace_err_note: sig_trace_err_note;
     trace_reset: "jet_jit_trace_reset" => jet_jit_trace_reset: sig_trace_reset;

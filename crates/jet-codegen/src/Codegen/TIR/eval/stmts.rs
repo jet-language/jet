@@ -451,6 +451,40 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<Flow, Diagnostic> {
         self.burn()?;
         match stmt {
+            TStmt::Contract { contract } => {
+                self.check_contracts(std::slice::from_ref(contract), scope)?;
+                Ok(Flow::Normal)
+            }
+            TStmt::ContractScope {
+                pre,
+                body,
+                post,
+                ..
+            } => {
+                self.check_contracts(pre, scope)?;
+                let flow = self.exec_stmts(body, scope)?;
+                if post.is_empty() {
+                    return Ok(flow);
+                }
+                let result = match &flow {
+                    Flow::Return(value) => value.clone(),
+                    Flow::Normal => CtValue::Unit,
+                    _ => return Ok(flow),
+                };
+                let result_name = crate::Codegen::mangle_generated("result");
+                let prior = scope.insert(result_name.clone(), result);
+                let checked = self.check_contracts(post, scope);
+                match prior {
+                    Some(value) => {
+                        scope.insert(result_name, value);
+                    }
+                    None => {
+                        scope.remove(&result_name);
+                    }
+                }
+                checked?;
+                Ok(flow)
+            }
             TStmt::Let { name, init, .. } => {
                 // D-MEM1 S9 / D-PIN1=A: a whole-place write window (`p :: &node`,
                 // `pinned :: mem.pin(&node)`) is an alias in AOT and Cranelift,

@@ -2246,11 +2246,7 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     // internal compiler error (I2-class), never an AST fallback.
     if TIR::tir_covers(f, cx) {
         let tir = TIR::lower_func(f, cx);
-        if tir.pre_contracts.is_empty() && tir.post_contracts.is_empty() {
-            TIR::emit_tir_func(&tir, cx, out);
-        } else {
-            emit_func_with_contracts(cx, &tir, out);
-        }
+        TIR::emit_tir_func(&tir, cx, out);
         cx.current_type_params.borrow_mut().clear();
         return;
     }
@@ -2260,71 +2256,6 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
-}
-
-/// D-PREPOST1: wrap a function's normally-emitted body with `#Pre`/`#Post`
-/// runtime guards (E3005). `#Pre` clauses are checked entry guards, emitted
-/// right after the opening brace. When `#Post` clauses are present, the
-/// original body is wrapped in an immediately-invoked closure so `result`
-/// binds the return value at every exit point — Rust's own closure `return`
-/// semantics do the "checked before each return" work, instead of a bespoke
-/// control-flow rewrite (R1: dumb codegen; the TIR-emitted body text is
-/// reused byte-for-byte, only re-indented around it). A violated clause
-/// panics via `jet_contract_fail` naming the clause's own message text.
-///
-/// Known v1 limitation: a `#Post` condition that reads a parameter the
-/// original body *moves* can hit a Rust "used after move" error, since the
-/// body now runs inside a closure that may capture that parameter by value.
-/// `#Post` conditions should read `result` (and any parameter the body only
-/// borrows), matching every shipped example.
-fn emit_func_with_contracts(cx: &Cx, tir: &TIR::TFunc, out: &mut String) {
-    let mut body_buf = String::new();
-    TIR::emit_tir_func(tir, cx, &mut body_buf);
-    // The signature line is `"{vis}{unsafe}fn name<gen>(params)[-> ret] {\n"` —
-    // no bare `{`/`}` appears before the opening brace in ordinary Rust type
-    // syntax, so the first `" {\n"` reliably ends the signature.
-    let split_at = body_buf.find(" {\n").map(|i| i + 3).unwrap_or(0);
-    let sig = &body_buf[..split_at];
-    let rest = &body_buf[split_at..];
-    let body_only = &rest[..rest.len().saturating_sub("}\n\n".len())];
-
-    out.push_str(sig);
-    for clause in &tir.pre_contracts {
-        let cond = TIR::emit_tir_expr(&clause.condition, cx);
-        let msg = TIR::emit_tir_expr(&clause.message, cx);
-        out.push_str(&jet_format!(
-            "    let {jet_prefix}contract_ok = {cond};\n    jet_proof_record(1, if {jet_prefix}contract_ok {{ 0 }} else {{ 1 }}, \"Pre\", &{msg}, {file}, {line});\n    if !{jet_prefix}contract_ok {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
-            cond = cond,
-            file = escape_rust_str(&clause.file),
-            line = clause.line,
-            msg = msg,
-        ));
-    }
-    if tir.post_contracts.is_empty() {
-        out.push_str(body_only);
-    } else {
-        let ret_ty = tir
-            .ret
-            .clone()
-            .unwrap_or(crate::AST::Type::Named("Unit".to_string()));
-        let ret_annot = TIR::rust_return_type(cx, &ret_ty);
-        out.push_str(&jet_format!("    let {jet_prefix}result = (|| -> {ret_annot} {{\n"));
-        out.push_str(body_only);
-        out.push_str("    })();\n");
-        for clause in &tir.post_contracts {
-            let cond = TIR::emit_tir_expr(&clause.condition, cx);
-            let msg = TIR::emit_tir_expr(&clause.message, cx);
-            out.push_str(&jet_format!(
-                "    let {jet_prefix}contract_ok = {cond};\n    jet_proof_record(1, if {jet_prefix}contract_ok {{ 0 }} else {{ 1 }}, \"Post\", &{msg}, {file}, {line});\n    if !{jet_prefix}contract_ok {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
-                cond = cond,
-                file = escape_rust_str(&clause.file),
-                line = clause.line,
-                msg = msg,
-            ));
-        }
-        out.push_str(&jet_format!("    {jet_prefix}result\n"));
-    }
-    out.push_str("}\n\n");
 }
 
 /// D-ERR-CONV: emit a standalone Rust function for `impl Source => Target { body }`.

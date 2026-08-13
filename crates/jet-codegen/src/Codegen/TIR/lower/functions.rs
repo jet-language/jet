@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, ContractClause, Expr, Func, Param, Stmt, Type};
+use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
@@ -14,9 +14,12 @@ use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::{TContract, TExpr, TExprKind, TStmt};
+use crate::Codegen::TIR::{
+    TContract, TContractDisposition, TContractKind, TExpr, TExprKind, TStmt,
+};
 use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Syntax;
+use std::collections::HashMap;
 
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
@@ -137,8 +140,6 @@ pub(crate) fn lower_error_conv(
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
-        pre_contracts: Vec::new(),
-        post_contracts: Vec::new(),
         body: lower_stmts(&conversion.body, cx, &mut env),
         kind: TFuncKind::TopLevel,
     }
@@ -233,7 +234,13 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         collect_signature_clone_types(return_type, cx, &mut clone_types);
     }
     let generics = render_generics(&f.type_params, &clone_types);
-    let (pre_contracts, post_contracts) = lower_contracts(f, cx);
+    let body = wrap_contract_scope(
+        f,
+        body,
+        None,
+        f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty)),
+        cx,
+    );
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -253,8 +260,6 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
-        pre_contracts,
-        post_contracts,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -264,19 +269,32 @@ fn lower_contract_cond(
     f: &Func,
     cond: &Expr,
     result_binding: Option<(&str, &Type)>,
+    owner_type: Option<&str>,
     cx: &Cx,
 ) -> TExpr {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     for p in &f.params {
-        let param_ty = cx.expand_type_aliases(&if p.variadic {
+        let mut param_ty = if p.variadic {
             Type::List(Box::new(p.ty.clone()))
         } else {
             p.ty.clone()
-        });
+        };
+        if let Some(owner) = owner_type {
+            param_ty = resolve_self_ty(&param_ty, owner);
+        }
+        let param_ty = cx.expand_type_aliases(&param_ty);
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
-        let place = param_place_generic(&p.name, &slot_param, &f.type_params);
+        let place = if owner_type.is_some() && p.name == Syntax::KW_SELF {
+            if matches!(p.convention, AccessConvention::Write) {
+                TLocal::generated(Syntax::KW_SELF).through_ref()
+            } else {
+                TLocal::generated(Syntax::KW_SELF)
+            }
+        } else {
+            param_place_generic(&p.name, &slot_param, &f.type_params)
+        };
         env.bind(&p.name, place, Some(param_ty));
     }
     if let Some((rust_name, ty)) = result_binding {
@@ -285,40 +303,193 @@ fn lower_contract_cond(
     lower_expr(cond, cx, &mut env)
 }
 
+fn contract_interval(
+    expr: &Expr,
+    bindings: &HashMap<String, Type>,
+    cx: &Cx,
+) -> Option<(i64, i64)> {
+    match expr {
+        Expr::Int(value, ..) => Some((*value, *value)),
+        Expr::Ident(name, _) => match bindings.get(name)? {
+            Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+            Type::Tagged { inner, .. } => match inner.as_ref() {
+                Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+                _ => None,
+            },
+            _ => None,
+        },
+        // D-RANGETYPE1: a distinct value's raw integer projection preserves
+        // the declaration interval. This fact only controls disposition;
+        // the condition itself still lowers as an ordinary TIR expression.
+        Expr::MethodCall {
+            receiver, method, ..
+        } if method == "raw" => contract_interval(receiver, bindings, cx),
+        _ => None,
+    }
+}
+
+fn interval_comparison(op: BinOp, left: (i64, i64), right: (i64, i64)) -> bool {
+    let (left_lo, left_hi) = left;
+    let (right_lo, right_hi) = right;
+    match op {
+        BinOp::Eq => left_lo == left_hi && left == right,
+        BinOp::Ne => left_hi < right_lo || right_hi < left_lo,
+        BinOp::Lt => left_hi < right_lo,
+        BinOp::Gt => left_lo > right_hi,
+        BinOp::Le => left_hi <= right_lo,
+        BinOp::Ge => left_lo >= right_hi,
+        _ => false,
+    }
+}
+
+/// D-FAIL-TIER1: a range fact is a proof disposition, not an engine-local
+/// optimization.  The resulting `Proven` node is retained in TIR so every
+/// backend honors the same erasure disposition.
+pub(crate) fn contract_expr_proven(
+    expr: &Expr,
+    bindings: &HashMap<String, Type>,
+    cx: &Cx,
+) -> bool {
+    match expr {
+        Expr::Bool(value, _) => *value,
+        Expr::Binary(BinOp::And, left, right, _) => {
+            contract_expr_proven(left, bindings, cx)
+                && contract_expr_proven(right, bindings, cx)
+        }
+        Expr::Binary(BinOp::Or, left, right, _) => {
+            contract_expr_proven(left, bindings, cx)
+                || contract_expr_proven(right, bindings, cx)
+        }
+        Expr::Binary(op, left, right, _) if op.is_comparison() => {
+            match (
+                contract_interval(left, bindings, cx),
+                contract_interval(right, bindings, cx),
+            ) {
+                (Some(left), Some(right)) => interval_comparison(*op, left, right),
+                _ => false,
+            }
+        }
+        Expr::CompareChain { operands, ops, .. } => operands
+            .windows(2)
+            .zip(ops)
+            .all(|(pair, op)| {
+                match (
+                    contract_interval(&pair[0], bindings, cx),
+                    contract_interval(&pair[1], bindings, cx),
+                ) {
+                    (Some(left), Some(right)) => interval_comparison(*op, left, right),
+                    _ => false,
+                }
+            }),
+        _ => false,
+    }
+}
+
+fn contract_fact_bindings(
+    f: &Func,
+    result_binding: Option<(&str, &Type)>,
+    owner_type: Option<&str>,
+    cx: &Cx,
+) -> HashMap<String, Type> {
+    let mut bindings = HashMap::new();
+    for param in &f.params {
+        let mut ty = if param.variadic {
+            Type::List(Box::new(param.ty.clone()))
+        } else {
+            param.ty.clone()
+        };
+        if let Some(owner) = owner_type {
+            ty = resolve_self_ty(&ty, owner);
+        }
+        let ty = cx.expand_type_aliases(&ty);
+        bindings.insert(param.name.clone(), ty);
+    }
+    if let Some((name, ty)) = result_binding {
+        bindings.insert(name.to_string(), ty.clone());
+        bindings.insert("result".to_string(), ty.clone());
+    }
+    bindings
+}
+
 fn lower_contract_clause(
     f: &Func,
     clause: &ContractClause,
     result_binding: Option<(&str, &Type)>,
+    kind: TContractKind,
+    owner_type: Option<&str>,
     cx: &Cx,
 ) -> TContract {
     let (_, line, _) = crate::Codegen::TIR::tir_src_line_at(&cx.src, clause.span.start);
+    let bindings = contract_fact_bindings(f, result_binding, owner_type, cx);
     TContract {
-        condition: lower_contract_cond(f, &clause.cond, result_binding, cx),
-        message: lower_contract_cond(f, &clause.message_expr, result_binding, cx),
+        kind,
+        condition: lower_contract_cond(f, &clause.cond, result_binding, owner_type, cx),
+        message: lower_contract_cond(f, &clause.message_expr, result_binding, owner_type, cx),
         file: cx.file.clone(),
         line,
         span: clause.span,
+        disposition: if contract_expr_proven(&clause.cond, &bindings, cx) {
+            TContractDisposition::Proven
+        } else {
+            TContractDisposition::Check
+        },
     }
 }
 
-pub(crate) fn lower_contracts(f: &Func, cx: &Cx) -> (Vec<TContract>, Vec<TContract>) {
+fn lower_post_contracts_for_owner(
+    f: &Func,
+    owner_type: Option<&str>,
+    cx: &Cx,
+) -> Vec<TContract> {
     let ret_ty = f
         .return_type
         .as_ref()
-        .map(|ty| cx.expand_type_aliases(ty))
+        .map(|ty| {
+            let ty = owner_type
+                .map(|owner| resolve_self_ty(ty, owner))
+                .unwrap_or_else(|| ty.clone());
+            cx.expand_type_aliases(&ty)
+        })
         .unwrap_or(Type::Named("Unit".to_string()));
-    let pre = f
-        .pre
-        .iter()
-        .map(|clause| lower_contract_clause(f, clause, None, cx))
-        .collect();
     let result_name = mangle_generated("result");
     let post = f
         .post
         .iter()
-        .map(|clause| lower_contract_clause(f, clause, Some((&result_name, &ret_ty)), cx))
+        .map(|clause| {
+            lower_contract_clause(
+                f,
+                clause,
+                Some((&result_name, &ret_ty)),
+                TContractKind::Post,
+                owner_type,
+                cx,
+            )
+        })
         .collect();
-    (pre, post)
+    post
+}
+
+fn wrap_contract_scope(
+    f: &Func,
+    body: Vec<TStmt>,
+    owner_type: Option<&str>,
+    ret: Option<Type>,
+    cx: &Cx,
+) -> Vec<TStmt> {
+    let post = lower_post_contracts_for_owner(f, owner_type, cx);
+    if post.is_empty() {
+        body
+    } else {
+        vec![TStmt::ContractScope {
+            // D-FAIL-TIER1: #Pre is a call-site node. Keeping it out of the
+            // callee scope prevents duplicate checks and keeps its source
+            // arrow on the caller that supplied the bad arguments.
+            pre: Vec::new(),
+            body,
+            post,
+            ret,
+        }]
+    }
 }
 
 /// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
@@ -535,6 +706,15 @@ pub(crate) fn lower_method_for_owner(
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
+    let body = wrap_contract_scope(
+        f,
+        body,
+        Some(type_name),
+        f.return_type
+            .as_ref()
+            .map(|ty| resolve_self_ty(&cx.expand_type_aliases(ty), type_name)),
+        cx,
+    );
     let mut clone_types = env.cloned_types.borrow().clone();
     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
     for param in &f.params {
@@ -575,8 +755,6 @@ pub(crate) fn lower_method_for_owner(
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
-        pre_contracts: Vec::new(),
-        post_contracts: Vec::new(),
         body,
         kind,
     }
@@ -666,6 +844,15 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
     body.extend(lower_stmts(&f.body, cx, &mut env));
+    let body = wrap_contract_scope(
+        f,
+        body,
+        Some(type_name),
+        f.return_type
+            .as_ref()
+            .map(|ty| resolve_self_ty(&cx.expand_type_aliases(ty), type_name)),
+        cx,
+    );
     let mut clone_types = env.cloned_types.borrow().clone();
     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
     for param in &f.params {
@@ -700,8 +887,6 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
-        pre_contracts: Vec::new(),
-        post_contracts: Vec::new(),
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -796,8 +981,6 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
-        pre_contracts: Vec::new(),
-        post_contracts: Vec::new(),
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,

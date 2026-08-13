@@ -2010,10 +2010,6 @@ pub struct TFunc {
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
-    /// D-PREPOST1: lowered runtime contract facts. Every execution tier reads
-    /// these same TIR expressions; a tier that cannot execute them must deopt.
-    pub pre_contracts: Vec<TContract>,
-    pub post_contracts: Vec<TContract>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn __jet_name(<self>, …)`
@@ -2025,12 +2021,32 @@ pub struct TFunc {
 /// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
 /// function's parameter bindings; postconditions additionally bind
 /// `__jet_result` to the returned value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TContractKind {
+    Pre,
+    Post,
+}
+
+/// Why a contract node remains or disappears from executable TIR.
+///
+/// `Stripped` is reserved for the ratified per-module build policy.  It is
+/// deliberately distinct from `Proven`: an explicit policy choice is not a
+/// proof fact and must remain auditable in TIR.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TContractDisposition {
+    Check,
+    Proven,
+    Stripped,
+}
+
 pub struct TContract {
+    pub kind: TContractKind,
     pub condition: TExpr,
     pub message: TExpr,
     pub file: String,
     pub line: u32,
     pub span: crate::Diagnostics::Span,
+    pub disposition: TContractDisposition,
 }
 
 /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
@@ -2475,6 +2491,20 @@ pub enum TRequireKind {
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub enum TStmt {
+    /// D-FAIL-TIER1: one executable contract check.  A precondition node is
+    /// placed immediately before the call that supplies its arguments;
+    /// postconditions live in `ContractScope` around the callee body.
+    Contract {
+        contract: TContract,
+    },
+    /// D-FAIL-TIER1: function-body contract scope.  The post list is checked
+    /// against the returned value on every return path by each backend.
+    ContractScope {
+        pre: Vec<TContract>,
+        body: Vec<TStmt>,
+        post: Vec<TContract>,
+        ret: Option<Type>,
+    },
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
