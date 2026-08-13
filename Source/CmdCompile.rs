@@ -2326,7 +2326,11 @@ pub(crate) fn run_fmt(
                 }
             }
         }
-        exit(ExitCodes::USAGE);
+        exit(if check_only {
+            ExitCodes::USER_ERROR
+        } else {
+            ExitCodes::USAGE
+        });
     }
 
     // Root for root-relative path display in --check output.
