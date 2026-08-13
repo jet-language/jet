@@ -1899,6 +1899,7 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
+        ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BIT_SET.to_string()))),
         _ => None,
     }
 }

@@ -135,6 +135,11 @@ impl JetBitSet {
         self.bits.iter().copied().collect()
     }
 }
+
+fn jet_bits_copy(bits: &JetBitSet) -> JetBitSet {
+    bits.clone()
+}
+
 impl JetShow for JetBitSet {
     fn jet_show(&self) -> String {
         self.to_list().jet_show()

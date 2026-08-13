@@ -389,6 +389,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::BitSetRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::BitSetCount => apply_method(recv, "count", args, span),
         TBuiltinOp::BitSetToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::BitSetCopy => apply_method(recv, "copy", args, span),
         TBuiltinOp::BitSetNew => CollectionEval::prelude_new("JetBitSet", vec![], span)
             .unwrap_or_else(|| Err(unsupported("BitSet.new", span))),
         TBuiltinOp::ByteBufferNew => CollectionEval::prelude_new("JetByteBuffer", vec![], span)

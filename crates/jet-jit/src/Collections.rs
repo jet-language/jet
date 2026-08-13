@@ -256,6 +256,12 @@ mod collection_semantics {
         jet_map_equal_kernel(&map_from_pairs(left), &map_from_pairs(right))
     }
 
+    pub(super) fn bit_set_copy(
+        values: &std::collections::BTreeSet<i64>,
+    ) -> std::collections::BTreeSet<i64> {
+        jet_bits_copy(&JetBitSet { bits: values.clone() }).bits
+    }
+
     pub(super) fn map_first_key_i64(entries: Vec<(String, i64)>) -> Option<String> {
         jet_map_first_key_kernel(&map_from_pairs(entries)).ok()
     }
@@ -3177,6 +3183,18 @@ extern "C" fn jet_jit_bit_set_to_list(handle: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_bit_set_copy(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .bit_sets
+            .get((handle as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        rt.bit_sets.push(collection_semantics::bit_set_copy(&values));
+        rt.bit_sets.len() as i64
+    })
+}
+
 extern "C" fn jet_jit_bit_set_len(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.bit_sets
@@ -4023,6 +4041,7 @@ host_fns! {
     bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
     bit_set_remove: "jet_jit_bit_set_remove" => jet_jit_bit_set_remove: sig_push;
     bit_set_to_list: "jet_jit_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
+    bit_set_copy: "jet_jit_bit_set_copy" => jet_jit_bit_set_copy: sig_len;
     bit_set_len: "jet_jit_bit_set_len" => jet_jit_bit_set_len: sig_len;
     bit_set_count: "jet_jit_bit_set_count" => jet_jit_bit_set_count: sig_len;
     byte_buffer_new: "jet_jit_byte_buffer_new" => jet_jit_byte_buffer_new: sig_new;

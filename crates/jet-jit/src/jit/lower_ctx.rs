@@ -18743,6 +18743,9 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::BitSetToList => {
                 Ok(self.call_host(self.host.coll.bit_set_to_list, &[recv_val]))
             }
+            TBuiltinOp::BitSetCopy => {
+                Ok(self.call_host(self.host.coll.bit_set_copy, &[recv_val]))
+            }
             TBuiltinOp::BitSetNew => {
                 Ok(self.call_host(self.host.coll.bit_set_new, &[]))
             }

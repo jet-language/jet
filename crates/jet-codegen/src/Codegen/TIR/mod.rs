@@ -4547,6 +4547,7 @@ pub enum TBuiltinOp {
     BitSetRemove,
     BitSetCount,
     BitSetToList,
+    BitSetCopy,
     BitSetNew,
     ByteBufferNew,
     ByteBufferFrom,

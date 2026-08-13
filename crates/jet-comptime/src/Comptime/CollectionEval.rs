@@ -860,6 +860,7 @@ fn bitset_method(
             let bit = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(CtValue::Bool(bits.contains(&CtValue::Int(bit))))
         }
+        "copy" => Ok(bitset_struct(bits.clone())),
         "to_list" => Ok(CtValue::List(bits)),
         _ => Err(unsupported(
             &format!("BitSet.{} at compile time", method),

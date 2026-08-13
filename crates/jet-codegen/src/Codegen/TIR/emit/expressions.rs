@@ -1634,6 +1634,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::BitSetRemove => format!("({}).remove(&{})", recv, a(0)),
                 TBuiltinOp::BitSetCount => format!("({}).count()", recv),
                 TBuiltinOp::BitSetToList => format!("({}).to_list()", recv),
+                TBuiltinOp::BitSetCopy => format!("jet_bits_copy(&({}))", recv),
                 TBuiltinOp::BitSetNew => "JetBitSet::new()".to_string(),
                 TBuiltinOp::ByteBufferNew => "JetByteBuffer::new()".to_string(),
                 TBuiltinOp::ByteBufferWithCapacity => {

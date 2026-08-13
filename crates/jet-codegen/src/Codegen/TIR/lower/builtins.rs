@@ -526,6 +526,7 @@ pub(crate) fn resolve_builtin_op(
         ("slice", 1) if is_map => TBuiltinOp::MapSliceKeys,
         ("copy", 0) if is_map => TBuiltinOp::MapCopy,
         ("copy", 0) if is_set => TBuiltinOp::SetCopy,
+        ("copy", 0) if is_bit_set => TBuiltinOp::BitSetCopy,
         ("copy", 0) => TBuiltinOp::ListCopy,
         ("equal", 1) if is_map => TBuiltinOp::MapEqual,
         ("equal", 1) if is_set => TBuiltinOp::SetEqual,

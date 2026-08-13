@@ -2974,6 +2974,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::LruKeys
         | TBuiltinOp::BitSetCount
         | TBuiltinOp::BitSetToList
+        | TBuiltinOp::BitSetCopy
         | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
         TBuiltinOp::First | TBuiltinOp::Last => {
             (matches!(recv_ty, Type::Apply { name, .. } if name == "SortedSet")

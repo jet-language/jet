@@ -1410,7 +1410,8 @@ impl<'a> Interp<'a> {
                         | "len"
                         | "is_empty"
                         | "clear"
-                        | "to_list"),
+                        | "to_list"
+                        | "copy"),
                 ) if type_name == crate::Syntax::TYPE_BIT_SET => {
                     let mut bits = fields
                         .iter()
@@ -1434,6 +1435,10 @@ impl<'a> Interp<'a> {
                         "has" => CtValue::Bool(
                             bits.contains(&CtValue::Int(as_int(&argv[0], span)?)),
                         ),
+                        "copy" => CtValue::Struct {
+                            type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                            fields: vec![("bits".to_string(), CtValue::List(bits.clone()))],
+                        },
                         "to_list" => CtValue::List(bits.clone()),
                         "add" => {
                             let bit = as_int(&argv[0], span)?;
