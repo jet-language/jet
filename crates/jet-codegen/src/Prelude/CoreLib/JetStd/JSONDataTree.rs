@@ -357,21 +357,6 @@
             }
         }
     }
-
-    // A short kind name for decode error messages.
-    pub fn datatree_kind(t: &DataTree) -> &'static str {
-        match t {
-            DataTree::Null => "null",
-            DataTree::Bool(_) => "Bool",
-            DataTree::Int(_) => "Int",
-            DataTree::Float(_) => "Float",
-            DataTree::Text(_) => "Text",
-            DataTree::Bytes(_) => "Bytes",
-            DataTree::Array(_) => "a list",
-            DataTree::Object(_) => "an object",
-        }
-    }
-
     // Look up a key in an ordered Object.
     pub fn datatree_get<'a>(t: &'a DataTree, key: &str) -> Option<&'a DataTree> {
         match t {

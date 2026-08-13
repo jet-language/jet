@@ -2263,6 +2263,15 @@ fn run() {{
 
 #[test]
 fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner)
+        .expect("spawn CBOR parity worker")
+        .join()
+        .expect("CBOR parity worker must not panic");
+}
+
+fn cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping cbor whole-value test (need rustc)");
         return;
@@ -2338,7 +2347,10 @@ fn run() {
             stderr: dev_stderr,
             exit_code,
         } => {
-            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+            assert_eq!(
+                (exit_code, dev_stdout, dev_stderr),
+                (0, stdout.clone(), String::new())
+            );
             assert!(
                 jet_jit::jit_executed_for_test(),
                 "CBOR whole-value fixture must execute resident JIT"
@@ -2353,6 +2365,18 @@ fn run() {
             );
         }
         other => panic!("CBOR whole-value default-dev failed: {other:?}"),
+    }
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: interpreter_stdout,
+            stderr: interpreter_stderr,
+            exit_code,
+        } => assert_eq!(
+            (exit_code, interpreter_stdout, interpreter_stderr),
+            (0, stdout, String::new()),
+            "CBOR whole-value interpreter drifted from AOT/JIT"
+        ),
+        other => panic!("CBOR whole-value forced interpreter failed: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);
 }

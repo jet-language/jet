@@ -272,7 +272,7 @@ mod runtime_host;
 #[path = "jit/safety.rs"]
 mod safety;
 #[path = "jit/types_meta.rs"]
-mod types_meta;
+pub(crate) mod types_meta;
 #[path = "jit/lower_ctx.rs"]
 mod lower_ctx;
 #[path = "jit/functions_compile.rs"]

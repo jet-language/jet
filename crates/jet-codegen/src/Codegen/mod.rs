@@ -558,6 +558,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),

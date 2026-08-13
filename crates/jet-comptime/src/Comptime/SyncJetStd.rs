@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
 
 fn quote_json(s: &str) -> String {
@@ -90,18 +91,5 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
                 .collect::<Vec<_>>();
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
         }
-    }
-}
-
-pub fn datatree_kind(tree: &DataTree) -> &'static str {
-    match tree {
-        DataTree::Null => "null",
-        DataTree::Bool(_) => "Bool",
-        DataTree::Int(_) => "Int",
-        DataTree::Float(_) => "Float",
-        DataTree::Text(_) => "Text",
-        DataTree::Bytes(_) => "Bytes",
-        DataTree::Array(_) => "a list",
-        DataTree::Object(_) => "an object",
     }
 }

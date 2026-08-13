@@ -1,6 +1,45 @@
 // core.os identity, facts, and POSIX control (ledger #1465 / D-OSFACTS1).
 // Included after FSIoEnvOsTesting.rs at crate root (same level as jet_std).
 
+pub(crate) fn jet_std_os_name() -> String {
+    std::env::consts::OS.to_string()
+}
+pub(crate) fn jet_std_os_family() -> String {
+    std::env::consts::FAMILY.to_string()
+}
+pub(crate) fn jet_std_os_arch() -> String {
+    std::env::consts::ARCH.to_string()
+}
+pub(crate) fn jet_std_os_cpu_count() -> i64 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as i64)
+        .unwrap_or(1)
+}
+pub(crate) fn jet_std_os_temp_dir() -> String {
+    std::env::temp_dir().to_string_lossy().to_string()
+}
+pub(crate) fn jet_std_os_executable() -> String {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+pub(crate) fn jet_std_os_pid() -> i64 {
+    std::process::id() as i64
+}
+pub(crate) fn jet_std_os_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| "localhost".to_string())
+}
+pub(crate) fn jet_std_os_username() -> String {
+    std::env::var("USER")
+        .ok()
+        .or_else(|| std::env::var("USERNAME").ok())
+        .unwrap_or_default()
+}
+
 fn jet_os_unsupported(op: &str) -> jet_std::IOError {
     jet_std::IOError::other(
         jet_std::IOOperation::Resolve,
@@ -9,7 +48,7 @@ fn jet_os_unsupported(op: &str) -> jet_std::IOError {
     )
 }
 
-fn jet_std_os_release() -> String {
+pub(crate) fn jet_std_os_release() -> String {
     #[cfg(target_os = "linux")]
     {
         if let Ok(text) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
@@ -48,7 +87,7 @@ fn jet_std_os_release() -> String {
     String::new()
 }
 
-fn jet_std_os_version() -> String {
+pub(crate) fn jet_std_os_version() -> String {
     #[cfg(target_os = "linux")]
     {
         if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
@@ -85,11 +124,11 @@ fn jet_std_os_version() -> String {
     }
 }
 
-fn jet_std_os_getpid() -> i64 {
+pub(crate) fn jet_std_os_getpid() -> i64 {
     jet_std_os_pid()
 }
 
-fn jet_std_os_expand(template: &String) -> String {
+pub(crate) fn jet_std_os_expand(template: &String) -> String {
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
     let mut i = 0;
@@ -203,7 +242,7 @@ fn jet_os_last_err(op: jet_std::IOOperation, path: Option<String>) -> jet_std::I
     jet_std::IOError::other(op, path, std::io::Error::from_raw_os_error(errno))
 }
 
-fn jet_std_os_getppid() -> i64 {
+pub(crate) fn jet_std_os_getppid() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::getppid() as i64 };
@@ -213,7 +252,7 @@ fn jet_std_os_getppid() -> i64 {
         0
     }
 }
-fn jet_std_os_getuid() -> i64 {
+pub(crate) fn jet_std_os_getuid() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::getuid() as i64 };
@@ -223,7 +262,7 @@ fn jet_std_os_getuid() -> i64 {
         0
     }
 }
-fn jet_std_os_geteuid() -> i64 {
+pub(crate) fn jet_std_os_geteuid() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::geteuid() as i64 };
@@ -233,7 +272,7 @@ fn jet_std_os_geteuid() -> i64 {
         0
     }
 }
-fn jet_std_os_getgid() -> i64 {
+pub(crate) fn jet_std_os_getgid() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::getgid() as i64 };
@@ -243,7 +282,7 @@ fn jet_std_os_getgid() -> i64 {
         0
     }
 }
-fn jet_std_os_getegid() -> i64 {
+pub(crate) fn jet_std_os_getegid() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::getegid() as i64 };
@@ -253,7 +292,7 @@ fn jet_std_os_getegid() -> i64 {
         0
     }
 }
-fn jet_std_os_getgroups() -> Vec<i64> {
+pub(crate) fn jet_std_os_getgroups() -> Vec<i64> {
     #[cfg(unix)]
     {
         unsafe {
@@ -274,7 +313,7 @@ fn jet_std_os_getgroups() -> Vec<i64> {
         Vec::new()
     }
 }
-fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let out = unsafe { jet_os_sys::getpgid(pid as i32) };
@@ -289,7 +328,7 @@ fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("getpgid"))
     }
 }
-fn jet_std_os_getpgrp() -> i64 {
+pub(crate) fn jet_std_os_getpgrp() -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::getpgrp() as i64 };
@@ -299,7 +338,7 @@ fn jet_std_os_getpgrp() -> i64 {
         0
     }
 }
-fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let out = unsafe { jet_os_sys::getsid(pid as i32) };
@@ -314,7 +353,7 @@ fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("getsid"))
     }
 }
-fn jet_std_os_fork() -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_fork() -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let pid = unsafe { jet_os_sys::fork() };
@@ -328,7 +367,7 @@ fn jet_std_os_fork() -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("fork"))
     }
 }
-fn jet_std_os_setuid(uid: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_setuid(uid: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::setuid(uid as u32) } == 0 {
@@ -342,7 +381,7 @@ fn jet_std_os_setuid(uid: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("setuid"))
     }
 }
-fn jet_std_os_setgid(gid: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_setgid(gid: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::setgid(gid as u32) } == 0 {
@@ -356,7 +395,7 @@ fn jet_std_os_setgid(gid: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("setgid"))
     }
 }
-fn jet_std_os_setpgid(pid: i64, pgid: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_setpgid(pid: i64, pgid: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::setpgid(pid as i32, pgid as i32) } == 0 {
@@ -370,7 +409,7 @@ fn jet_std_os_setpgid(pid: i64, pgid: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("setpgid"))
     }
 }
-fn jet_std_os_setpgrp() -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_setpgrp() -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::setpgrp() } == 0 {
@@ -383,7 +422,7 @@ fn jet_std_os_setpgrp() -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("setpgrp"))
     }
 }
-fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let out = unsafe { jet_os_sys::setsid() };
@@ -397,7 +436,7 @@ fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("setsid"))
     }
 }
-fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         let c_user = std::ffi::CString::new(user.as_str()).map_err(|_| {
@@ -418,7 +457,7 @@ fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOErr
         Err(jet_os_unsupported("initgroups"))
     }
 }
-fn jet_std_os_kill(pid: i64, sig: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_kill(pid: i64, sig: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::kill(pid as i32, sig as i32) } == 0 {
@@ -432,7 +471,7 @@ fn jet_std_os_kill(pid: i64, sig: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("kill"))
     }
 }
-fn jet_std_os_wait() -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_wait() -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let mut status = 0i32;
@@ -447,7 +486,7 @@ fn jet_std_os_wait() -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("wait"))
     }
 }
-fn jet_std_os_waitpid(pid: i64, options: i64) -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_waitpid(pid: i64, options: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         let mut status = 0i32;
@@ -463,7 +502,7 @@ fn jet_std_os_waitpid(pid: i64, options: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("waitpid"))
     }
 }
-fn jet_std_os_pipe() -> Result<Vec<i64>, jet_std::IOError> {
+pub(crate) fn jet_std_os_pipe() -> Result<Vec<i64>, jet_std::IOError> {
     #[cfg(unix)]
     {
         let mut fds = [0i32; 2];
@@ -477,7 +516,7 @@ fn jet_std_os_pipe() -> Result<Vec<i64>, jet_std::IOError> {
         Err(jet_os_unsupported("pipe"))
     }
 }
-fn jet_std_os_close_fd(fd: i64) {
+pub(crate) fn jet_std_os_close_fd(fd: i64) {
     #[cfg(unix)]
     unsafe {
         let _ = jet_os_sys::close(fd as i32);
@@ -487,7 +526,7 @@ fn jet_std_os_close_fd(fd: i64) {
         let _ = fd;
     }
 }
-fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
@@ -508,13 +547,13 @@ fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("mkfifo"))
     }
 }
-fn jet_std_os_sync() {
+pub(crate) fn jet_std_os_sync() {
     #[cfg(unix)]
     unsafe {
         jet_os_sys::sync();
     }
 }
-fn jet_std_os_umask(mask: i64) -> i64 {
+pub(crate) fn jet_std_os_umask(mask: i64) -> i64 {
     #[cfg(unix)]
     {
         return unsafe { jet_os_sys::umask(mask as u32) as i64 };
@@ -525,7 +564,7 @@ fn jet_std_os_umask(mask: i64) -> i64 {
         0
     }
 }
-fn jet_std_os_getpriority(who: i64) -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_std_os_getpriority(who: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]
     {
         unsafe {
@@ -543,7 +582,7 @@ fn jet_std_os_getpriority(who: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("getpriority"))
     }
 }
-fn jet_std_os_setpriority(who: i64, prio: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_setpriority(who: i64, prio: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         if unsafe { jet_os_sys::setpriority(0, who as u32, prio as i32) } == 0 {
@@ -557,7 +596,7 @@ fn jet_std_os_setpriority(who: i64, prio: i64) -> Result<(), jet_std::IOError> {
         Err(jet_os_unsupported("setpriority"))
     }
 }
-fn jet_std_os_loadavg() -> Vec<f64> {
+pub(crate) fn jet_std_os_loadavg() -> Vec<f64> {
     #[cfg(unix)]
     {
         let mut avg = [0.0f64; 3];
@@ -572,7 +611,7 @@ fn jet_std_os_loadavg() -> Vec<f64> {
         vec![0.0, 0.0, 0.0]
     }
 }
-fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
         let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
@@ -597,7 +636,7 @@ fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std
         Err(jet_os_unsupported("utime"))
     }
 }
-fn jet_std_os_success(status: i64) -> bool {
+pub(crate) fn jet_std_os_success(status: i64) -> bool {
     #[cfg(unix)]
     {
         let s = status as i32;
@@ -608,7 +647,7 @@ fn jet_std_os_success(status: i64) -> bool {
         status == 0
     }
 }
-fn jet_std_os_exitcode(status: i64) -> i64 {
+pub(crate) fn jet_std_os_exitcode(status: i64) -> i64 {
     #[cfg(unix)]
     {
         let s = status as i32;
@@ -622,7 +661,7 @@ fn jet_std_os_exitcode(status: i64) -> i64 {
         status
     }
 }
-fn jet_std_os_times() -> Vec<f64> {
+pub(crate) fn jet_std_os_times() -> Vec<f64> {
     #[cfg(unix)]
     {
         let mut t = unsafe { std::mem::zeroed::<JetOsTms>() };
@@ -645,7 +684,7 @@ fn jet_std_os_times() -> Vec<f64> {
         vec![0.0, 0.0, 0.0, 0.0, 0.0]
     }
 }
-fn jet_std_os_uptime() -> f64 {
+pub(crate) fn jet_std_os_uptime() -> f64 {
     #[cfg(target_os = "linux")]
     {
         if let Ok(text) = std::fs::read_to_string("/proc/uptime") {
@@ -658,7 +697,7 @@ fn jet_std_os_uptime() -> f64 {
     }
     0.0
 }
-fn jet_std_os_stop(code: i64) {
+pub(crate) fn jet_std_os_stop(code: i64) {
     jet_std_process_exit(code);
 }
 
@@ -693,7 +732,7 @@ mod jet_os_atexit {
     }
 }
 
-fn jet_std_os_atexit<F>(handler: F)
+pub(crate) fn jet_std_os_atexit<F>(handler: F)
 where
     F: Fn() + Send + 'static,
 {

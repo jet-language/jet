@@ -1948,30 +1948,42 @@ fn from_stream_tree(tree: &runtime::jet_std::DataTree) -> super::Encoding::json_
     }
 }
 
-/// JIT DataEvent ABI (types_meta order) → stream DataEvent.
+fn data_event_disc(variant: &str) -> Result<i64, String> {
+    crate::types_meta::prelude_enum_variant_index("DataEvent", variant)
+        .ok_or_else(|| format!("unknown DataEvent variant `{variant}`"))
+}
+
+fn data_event_variant(disc: i64) -> Result<&'static str, String> {
+    crate::types_meta::prelude_enum_variant_at("DataEvent", disc)
+        .ok_or_else(|| format!("bad DataEvent disc {disc}"))
+}
+
+/// JIT DataEvent ABI (the Prelude declaration order) → stream DataEvent.
 fn read_data_event(packed: i64) -> Result<runtime::jet_std::DataEvent, String> {
+    let float_disc = data_event_disc("Float")?;
+    let text_disc = data_event_disc("Text")?;
+    let bytes_disc = data_event_disc("Bytes")?;
+    let key_disc = data_event_disc("Key")?;
     // Float payloads are heap records [disc, f64].
     let (disc, payload_bits, text, bytes, float_val) = Concurrency::with_runtime_mut(|rt| {
         // Heuristic: if packed looks like a small disc (0..15) or packed scalar,
         // use packed form. Float always uses heap record (handle >= 1 with 2 fields).
         if packed >= 1 {
             if let Some(disc) = rt.heap.record_get_int(packed, 0) {
-                if (5..=10).contains(&disc) || disc == 7 {
-                    if disc == 7 {
-                        let f = rt.heap.record_get_float(packed, 1).unwrap_or(0.0);
-                        return (disc, 0i64, None, None, Some(f));
-                    }
+                if disc == float_disc {
+                    let f = rt.heap.record_get_float(packed, 1).unwrap_or(0.0);
+                    return (disc, 0i64, None, None, Some(f));
                 }
             }
         }
         let disc = packed & 0xff;
         let payload = packed >> 8;
         match disc {
-            8 | 10 => {
+            disc if disc == text_disc || disc == key_disc => {
                 let s = rt.heap.clone_string(payload).unwrap_or_default();
                 (disc, payload, Some(s), None, None)
             }
-            9 => {
+            disc if disc == bytes_disc => {
                 let len = rt.heap.list_len(payload).unwrap_or(0);
                 let mut out = Vec::with_capacity(len as usize);
                 for i in 0..len {
@@ -1982,41 +1994,43 @@ fn read_data_event(packed: i64) -> Result<runtime::jet_std::DataEvent, String> {
             _ => (disc, payload, None, None, None),
         }
     });
-    Ok(match disc {
-        0 => runtime::jet_std::DataEvent::Null,
-        1 => runtime::jet_std::DataEvent::ArrayStart,
-        2 => runtime::jet_std::DataEvent::ArrayEnd,
-        3 => runtime::jet_std::DataEvent::ObjectStart,
-        4 => runtime::jet_std::DataEvent::ObjectEnd,
-        5 => runtime::jet_std::DataEvent::Bool(payload_bits != 0),
-        6 => runtime::jet_std::DataEvent::Int(payload_bits),
-        7 => runtime::jet_std::DataEvent::Float(float_val.unwrap_or(0.0)),
-        8 => runtime::jet_std::DataEvent::Text(text.unwrap_or_default()),
-        9 => runtime::jet_std::DataEvent::Bytes(bytes.unwrap_or_default()),
-        10 => runtime::jet_std::DataEvent::Key(text.unwrap_or_default()),
-        _ => return Err(format!("bad DataEvent disc {disc}")),
+    let variant = data_event_variant(disc)?;
+    Ok(match variant {
+        "Null" => runtime::jet_std::DataEvent::Null,
+        "ArrayStart" => runtime::jet_std::DataEvent::ArrayStart,
+        "ArrayEnd" => runtime::jet_std::DataEvent::ArrayEnd,
+        "ObjectStart" => runtime::jet_std::DataEvent::ObjectStart,
+        "ObjectEnd" => runtime::jet_std::DataEvent::ObjectEnd,
+        "Bool" => runtime::jet_std::DataEvent::Bool(payload_bits != 0),
+        "Int" => runtime::jet_std::DataEvent::Int(payload_bits),
+        "Float" => runtime::jet_std::DataEvent::Float(float_val.unwrap_or(0.0)),
+        "Text" => runtime::jet_std::DataEvent::Text(text.unwrap_or_default()),
+        "Bytes" => runtime::jet_std::DataEvent::Bytes(bytes.unwrap_or_default()),
+        "Key" => runtime::jet_std::DataEvent::Key(text.unwrap_or_default()),
+        _ => return Err(format!("bad DataEvent variant {variant}")),
     })
 }
 
 fn pack_data_event(ev: runtime::jet_std::DataEvent) -> i64 {
     use runtime::jet_std::DataEvent::*;
+    let disc = |variant| data_event_disc(variant).expect("Prelude DataEvent metadata");
     match ev {
-        Null => 0,
-        ArrayStart => 1,
-        ArrayEnd => 2,
-        ObjectStart => 3,
-        ObjectEnd => 4,
-        Bool(b) => 5 | ((i64::from(b)) << 8),
-        Int(n) => 6 | (n << 8),
+        Null => disc("Null"),
+        ArrayStart => disc("ArrayStart"),
+        ArrayEnd => disc("ArrayEnd"),
+        ObjectStart => disc("ObjectStart"),
+        ObjectEnd => disc("ObjectEnd"),
+        Bool(b) => disc("Bool") | ((i64::from(b)) << 8),
+        Int(n) => disc("Int") | (n << 8),
         Float(f) => Concurrency::with_runtime_mut(|rt| {
             let h = rt.heap.alloc_record(2);
-            let _ = rt.heap.record_set_int(h, 0, 7);
+            let _ = rt.heap.record_set_int(h, 0, disc("Float"));
             let _ = rt.heap.record_set_float(h, 1, f);
             h
         }),
         Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-            8 | (sid << 8)
+            disc("Text") | (sid << 8)
         }
         Bytes(b) => {
             let list = Concurrency::with_runtime_mut(|rt| {
@@ -2026,11 +2040,11 @@ fn pack_data_event(ev: runtime::jet_std::DataEvent) -> i64 {
                 }
                 list
             });
-            9 | (list << 8)
+            disc("Bytes") | (list << 8)
         }
         Key(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-            10 | (sid << 8)
+            disc("Key") | (sid << 8)
         }
     }
 }

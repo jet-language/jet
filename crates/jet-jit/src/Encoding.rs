@@ -103,6 +103,7 @@ pub(crate) mod json_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -200,15 +201,15 @@ mod yaml_rt {
 }
 
 /// DataTree heap ABI: record `[disc:i64, payload:i64]` (Float payload = to_bits).
-/// Variant order matches sema core_literals: Null,Bool,Int,Float,Text,Array,Object.
-const DT_NULL: i64 = 0;
-const DT_BOOL: i64 = 1;
-const DT_INT: i64 = 2;
-const DT_FLOAT: i64 = 3;
-const DT_TEXT: i64 = 4;
-const DT_ARRAY: i64 = 5;
-const DT_OBJECT: i64 = 6;
-const DT_BYTES: i64 = 7;
+/// Discriminants come from the Prelude enum declaration at build time.
+const DT_NULL: i64 = crate::types_meta::PRELUDE_DATATREE_NULL;
+const DT_BOOL: i64 = crate::types_meta::PRELUDE_DATATREE_BOOL;
+const DT_INT: i64 = crate::types_meta::PRELUDE_DATATREE_INT;
+const DT_FLOAT: i64 = crate::types_meta::PRELUDE_DATATREE_FLOAT;
+const DT_TEXT: i64 = crate::types_meta::PRELUDE_DATATREE_TEXT;
+const DT_BYTES: i64 = crate::types_meta::PRELUDE_DATATREE_BYTES;
+const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DATATREE_ARRAY;
+const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DATATREE_OBJECT;
 
 fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -1653,7 +1654,7 @@ extern "C" fn jet_jit_decode_fixed_len(result: i64, expected: i64) -> i64 {
 
 extern "C" fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
     let reason = read_datatree(tree)
-        .map(|tree| format!("expected a list, found {}", json_rt::datatree_kind(&tree)))
+        .map(|tree| format!("expected a list, found {}", json_rt::datatree_kind_for(&tree)))
         .unwrap_or_else(|| "expected a list, found value".to_string());
     result_err_decode("", &reason)
 }
@@ -1937,23 +1938,23 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         }
         (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, other) => result_err_decode(
             "",
-            &format!("expected Date, found {}", json_rt::datatree_kind(&other)),
+            &format!("expected Date, found {}", json_rt::datatree_kind_for(&other)),
         ),
         (CODEC_KIND_LOCAL_TIME, other) => result_err_decode(
             "",
-            &format!("expected LocalTime, found {}", json_rt::datatree_kind(&other)),
+            &format!("expected LocalTime, found {}", json_rt::datatree_kind_for(&other)),
         ),
         (CODEC_KIND_DATETIME, other) => result_err_decode(
             "",
-            &format!("expected DateTime, found {}", json_rt::datatree_kind(&other)),
+            &format!("expected DateTime, found {}", json_rt::datatree_kind_for(&other)),
         ),
         (CODEC_KIND_DURATION, other) => result_err_decode(
             "",
-            &format!("expected Duration, found {}", json_rt::datatree_kind(&other)),
+            &format!("expected Duration, found {}", json_rt::datatree_kind_for(&other)),
         ),
         (CODEC_KIND_DECIMAL, other) => result_err_decode(
             "",
-            &format!("expected Decimal, found {}", json_rt::datatree_kind(&other)),
+            &format!("expected Decimal, found {}", json_rt::datatree_kind_for(&other)),
         ),
         (_, _) => result_err_decode("", "unknown codec kind"),
     }
