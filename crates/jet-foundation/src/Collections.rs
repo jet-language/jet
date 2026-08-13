@@ -96,7 +96,9 @@ pub fn is_closure_method(method: &str) -> bool {
     )
 }
 
-/// D-ITERTOOLS1=A: adapters that return a lazy `Iter<T>` view.
+/// D-ITERTOOLS1=A: adapter spellings that are lazy when the receiver is an
+/// `Iter<T>`. D-CORE-EAGER1=A makes `map` and `filter` eager on concrete
+/// collections; receiver-sensitive lowering keeps the same vocabulary.
 pub fn is_lazy_adapter(method: &str) -> bool {
     matches!(
         method,

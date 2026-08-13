@@ -819,8 +819,38 @@ where
     })))
 }
 
+// D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection map/filter are eager.
+// `.lazy()` enters the JetIter plane, where the same names remain deferred.
+fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+where
+    F: Fn(&T) -> U,
+{
+    xs.iter().map(f).collect()
+}
+fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
+where
+    F: FnMut(&T) -> U,
+{
+    xs.iter().map(|x| f(x)).collect()
+}
+fn jet_list_filter<T, F>(xs: Vec<T>, mut f: F) -> Vec<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    xs.into_iter().filter(|x| f(x)).collect()
+}
+/// Adjacent eager adapters may be fused when the intermediate list is not
+/// observable. The callbacks still run in source order, once per element.
+fn jet_list_map_filter<T, U, F, P>(xs: Vec<T>, mut map: F, mut keep: P) -> Vec<U>
+where
+    F: FnMut(&T) -> U,
+    P: FnMut(&U) -> bool,
+{
+    xs.iter().map(|x| map(x)).filter(|value| keep(value)).collect()
+}
+
 // List-shaped helpers kept for non-Iter call sites / terminals that still
-// materialize; adapters above are the lazy path.
+// materialize; non-map/filter adapters above remain the lazy path.
 fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     xs.into_iter().take(n.max(0) as usize).collect()
 }

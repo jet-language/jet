@@ -47,6 +47,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/FixedList.js"),
     "\n",
+    include_str!("../Prelude/Core/Collections.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
@@ -1093,6 +1095,15 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             TIR::TFnValueKind::Interrupt { value } => web_expr_supported(value),
         },
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
+        // D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection adapters are
+        // eager on the JS tier too. The receiver remains an ordinary JS array;
+        // `.lazy()` is an adapter boundary in native tiers, but has the same
+        // observable collection result when a web program materializes it.
+        E::ClosureMethod { recv, op, args } => {
+            matches!(op, TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::Filter)
+                && web_expr_supported(recv)
+                && args.iter().all(web_expr_supported)
+        }
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => {
             let arity_ok = if method == "mount" {
@@ -1102,6 +1113,15 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 web_core_arity(module, method) == Some(args.len())
             };
             arity_ok && args.iter().all(web_expr_supported)
+        }
+        E::BuiltinMethod { recv, op, args } => {
+            matches!(
+                op,
+                TIR::TBuiltinOp::ListLazy
+                    | TIR::TBuiltinOp::IterToList
+                    | TIR::TBuiltinOp::IterCollect
+            ) && web_expr_supported(recv)
+                && args.iter().all(web_expr_supported)
         }
         E::HandleMethod { recv, op, args } => {
             web_js_handle_method_supported(op, args.len())
@@ -5029,6 +5049,76 @@ fn tir_js_distinct_convert(
     }
 }
 
+/// Marshal a compile-time constant into the JS representation used by the
+/// ordinary TIR emitter. `CtValue::serialize` is deliberately Rust-shaped for
+/// AOT, so web must not reuse it for list/map constants.
+fn tir_js_ct_value(value: &crate::AST::CtValue) -> Result<String, ()> {
+    use crate::AST::{CtReport, CtValue};
+
+    Ok(match value {
+        CtValue::Int(n) => format!("{n}n"),
+        CtValue::Float(value) => value.clone().to_json(),
+        CtValue::Bool(value) => value.to_string(),
+        CtValue::Char(value) => json_quote(&value.to_string()),
+        CtValue::Str(value) => json_quote(value),
+        CtValue::BigInt(value) => format!("BigInt({:?})", value.to_string_rep()),
+        CtValue::Bytes(values) => format!(
+            "[{}]",
+            values.iter().map(|value| format!("{value}n")).collect::<Vec<_>>().join(", ")
+        ),
+        CtValue::List(values) => format!(
+            "[{}]",
+            values.iter().map(tir_js_ct_value).collect::<Result<Vec<_>, _>>()?.join(", ")
+        ),
+        CtValue::Map(values) => format!(
+            "new Map([{}])",
+            values
+                .iter()
+                .map(|(key, value)| {
+                    Ok(format!(
+                        "[{}, {}]",
+                        tir_js_ct_value(&key.to_value())?,
+                        tir_js_ct_value(value)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
+        ),
+        CtValue::Struct { fields, .. } => format!(
+            "({{ {} }})",
+            fields
+                .iter()
+                .map(|(name, value)| Ok(format!(
+                    "{}: {}",
+                    web_name(name),
+                    tir_js_ct_value(value)?
+                )))
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
+        ),
+        CtValue::Enum { variant, args, .. } => format!(
+            "{{ tag: {}, values: [{}] }}",
+            json_quote(variant),
+            args.iter()
+                .map(|(_, value)| tir_js_ct_value(value))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
+        ),
+        CtValue::Present(value) => format!(
+            "{{ tag: \"Some\", values: [{}] }}",
+            tir_js_ct_value(value)?
+        ),
+        CtValue::Failed(CtReport::Clean(_)) =>
+            "{ tag: \"None\", values: [] }".to_string(),
+        CtValue::Failed(CtReport::Told(value)) => format!(
+            "{{ tag: \"Err\", values: [{}] }}",
+            tir_js_ct_value(value)?
+        ),
+        CtValue::Unit => "void 0".to_string(),
+        CtValue::Closure(_) => return Err(()),
+    })
+}
+
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
@@ -5041,7 +5131,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
         E::Local(local) => web_local(local),
         E::Unit | E::DefaultLit => "void 0".to_string(),
-        E::CtLit(value) => value.serialize(),
+        E::CtLit(value) => tir_js_ct_value(value)?,
         E::Uninit => match &expr.ty {
             Type::FixedList { len, .. } => format!("Array({len})"),
             _ => "void 0".to_string(),
@@ -5255,7 +5345,34 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
         E::MethodCall { recv, method, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(&method.rust()), tir_call_args(args, funcs, file_prefix)?),
+        E::ClosureMethod { recv, op, args } => {
+            let kernel = match op {
+                TIR::TClosureOp::Map | TIR::TClosureOp::MapMut => "jet_list_map",
+                TIR::TClosureOp::Filter => "jet_list_filter",
+                _ => return Err(()),
+            };
+            let args = args
+                .iter()
+                .map(|arg| tir_js_expr(arg, funcs, file_prefix))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            format!("{}({}, {})", kernel, tir_js_expr(recv, funcs, file_prefix)?, args)
+        }
         E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
+        E::BuiltinMethod { recv, op, args } => {
+            if !args.is_empty() {
+                return Err(());
+            }
+            match op {
+                TIR::TBuiltinOp::ListLazy => {
+                    format!("jet_iter_from_vec({})", tir_js_expr(recv, funcs, file_prefix)?)
+                }
+                TIR::TBuiltinOp::IterToList | TIR::TBuiltinOp::IterCollect => {
+                    format!("jet_iter_to_list({})", tir_js_expr(recv, funcs, file_prefix)?)
+                }
+                _ => return Err(()),
+            }
+        }
         E::HandleMethod { recv, op, args } => {
             if !web_js_handle_method_supported(op, args.len()) {
                 return Err(());

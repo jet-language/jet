@@ -3083,6 +3083,40 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
         // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
         TExprKind::ClosureMethod { recv, op, args } => {
+            // D-CORE-EAGER1=A: adjacent eager List.map(...).filter(...) calls
+            // may share one traversal while the intermediate stays unobservable.
+            // `.lazy()` is typed as Iter and therefore never enters this branch.
+            if matches!(op, TClosureOp::Filter) {
+                if let TExprKind::ClosureMethod {
+                    recv: map_recv,
+                    op: map_op,
+                    args: map_args,
+                } = &recv.kind
+                {
+                    if matches!(map_op, TClosureOp::Map | TClosureOp::MapMut)
+                        && matches!(map_recv.ty, Type::List(_))
+                    {
+                        let list = emit_tir_expr(map_recv, cx);
+                        let mut map_f = map_args
+                            .first()
+                            .map(|e| emit_tir_expr(e, cx))
+                            .unwrap_or_default();
+                        let mut keep = args
+                            .first()
+                            .map(|e| emit_tir_expr(e, cx))
+                            .unwrap_or_default();
+                        if let Some(rest) = map_f.strip_prefix("move ") {
+                            map_f = rest.to_string();
+                        }
+                        if let Some(rest) = keep.strip_prefix("move ") {
+                            keep = rest.to_string();
+                        }
+                        return format!(
+                            "jet_list_map_filter(({list}).clone(), {map_f}, {keep})"
+                        );
+                    }
+                }
+            }
             let recv_is_fixed = matches!(recv.ty, Type::FixedList { .. });
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv = emit_tir_expr(recv, cx);

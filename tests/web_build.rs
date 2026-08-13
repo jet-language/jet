@@ -138,6 +138,35 @@ fn run_web_app(dir: &PathBuf) -> String {
     String::from_utf8_lossy(&node.stdout).into_owned()
 }
 
+/// D-CORE-EAGER1=A / D-LOOPMAP1=B: the web tier keeps concrete collection
+/// adapters eager and returns plain arrays, with the same observable result as
+/// native tiers.
+#[test]
+fn web_eager_collection_adapters_match_native_shape() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web eager collection test (need rustc + node)");
+        return;
+    }
+    let src = r#"
+#Target(JS)
+fn run() {
+    nums :: [1, 2, 3, 4]
+    doubled :: nums.map((n: Int) => n * 2)
+    evens :: nums.filter((n: Int) => n > 2)
+    lazy_evens :: nums.lazy().filter((n: Int) => n > 2).map((n: Int) => n * 10).to_list()
+    print(doubled[0])
+    print(doubled[3])
+    print(evens[0])
+    print(evens[1])
+    print(lazy_evens[0])
+    print(lazy_evens[1])
+}
+"#;
+    let dir = build_web_fixture("eager_collection_adapters", src, "tests/fixtures/web_eager_collection_adapters.jet");
+    assert_eq!(run_web_app(&dir), "2\n8\n3\n4\n30\n40\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
 /// A minimal, dependency-free `document` stub — just the API surface
 /// `DomRuntime.js`'s `paint()`/`createBackend()` actually touches (see that
 /// file's `jetDomContainer()`) — so the real-DOM code path can be exercised

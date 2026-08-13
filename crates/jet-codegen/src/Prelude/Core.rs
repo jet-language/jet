@@ -1286,24 +1286,6 @@ fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String
     }
     chars[a as usize..=b as usize].iter().collect()
 }
-fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
-where
-    F: Fn(&T) -> U,
-{
-    xs.iter().map(f).collect()
-}
-fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
-where
-    F: FnMut(&T) -> U,
-{
-    xs.iter().map(|x| f(x)).collect()
-}
-fn jet_list_filter<T, F>(xs: Vec<T>, mut f: F) -> Vec<T>
-where
-    F: FnMut(&T) -> bool,
-{
-    xs.into_iter().filter(|x| f(x)).collect()
-}
 fn jet_list_each<T, F, I>(xs: I, f: F)
 where
     I: IntoIterator<Item = T>,

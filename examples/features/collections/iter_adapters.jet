@@ -1,6 +1,15 @@
-// D-ITERTOOLS1=A: lazy iterator adapters; materialize with to_list / reducers.
+// D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection map/filter are eager
+// and return plain collections. Write `.lazy()` before the chain for Iter.
 fn run() {
     nums :: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    doubled :: nums.map((n: Int) => n * 2)
+    print(doubled)
+    print(doubled.len())
+    evens :: nums.filter((n: Int) => n % 2 == 0)
+    print(evens)
+    lazy_hot :: nums.lazy().filter((n: Int) => n > 7).map((n: Int) => n * 10).to_list()
+    print(lazy_hot)
+
     // take / skip
     first3 :: nums.take(3).to_list()
     print(first3)
@@ -66,4 +75,10 @@ fn run() {
     print(jagged.chunk_while((a: Int, b: Int) => (b == a + 1)).to_list())
     // to_set — length only; set element order is not print-stable
     print(nums.to_set().len())
+}
+
+#Bench("eager map/filter fusion") {
+    values :: [1, 2, 3, 4, 5, 6, 7, 8]
+    result :: values.map((n: Int) => n * 2).filter((n: Int) => n > 8)
+    require_eq(result.len(), 4)
 }

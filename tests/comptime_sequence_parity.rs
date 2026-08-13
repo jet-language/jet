@@ -154,6 +154,34 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
     assert!(!out.contains("E0956"), "sequence method fell through: {out}");
 }
 
+/// D-CORE-EAGER1=A / D-LOOPMAP1=B: the public REPL exposes eager concrete
+/// adapters and the same names on an explicit lazy view.
+#[test]
+fn repl_eager_collection_adapters_and_lazy_opt_in_are_exact() {
+    let out = run_transcript(
+        &[
+            "values := [1, 2, 3]",
+            "values.map((n: Int) => n * 2)",
+            "values.filter((n: Int) => n > 1)",
+            "values.lazy().map((n: Int) => n * 10).to_list()",
+        ],
+        None,
+    );
+    let actual = out
+        .lines()
+        .filter(|line| !line.starts_with("values:"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        [
+            "[2, 4, 6] : List",
+            "[2, 3] : List",
+            "[10, 20, 30] : List",
+        ],
+        "REPL eager/lazy output:\n{out}"
+    );
+}
+
 #[test]
 fn repl_view_and_view_mut_sequence_methods_are_exact() {
     let out = run_transcript(
