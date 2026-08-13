@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1938,
-    "rev": 35695,
+    "nextNum": 1939,
+    "rev": 35711,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1647,14 +1647,14 @@
         {
           "n": 1,
           "text": "Every linked card is done; no test red remains in the linked set.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T01:45:18.211Z"
+          "evidence": "All linked cards done (1663 re-homed to e3-m13-jit-parity, its owning scope). Linked-set suites green on master 9cf005e64: golden 6, diagnostic_snapshots 5 (full env), truthfulness 23, tir_language_features 33, cffi 55, lib_use 6, unit_family 54, tir_patterns_and_fields 28, tir_collections_and_methods 35, corelib_net 35, corelib 11, cli_surface 32, cli_expand 31 (+service_probe alone), bind 24, shared_guards 10, reflect 7, gen_errors 3, diagnostics_format 6, jet_test 30.",
+          "at": "2026-08-13T11:30:10.824Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-10T17:46:42.634Z"
     },
     {
@@ -104382,7 +104382,13 @@
       "blockedBy": [],
       "workOrder": 11,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-13",
+          "by": "orchestrator",
+          "text": "Standing red tests owned by this card (pre-date epoch-3 M01; verified red at 2930332e9): run_tier_diagnostics::jet_run_e0956_uses_shared_voice and ::comptime_watcher_files_keeps_comptime_voice. They are this card's acceptance."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -104432,8 +104438,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T16:29:08.556Z",
-      "updated": "2026-08-12T18:58:12.426Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T11:29:23.099Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c0fhc4j9",
@@ -107399,7 +107405,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": "e3-bucket-1",
+      "milestoneId": "e3-m13-jit-parity",
       "phase": "ready",
       "priority": "P1",
       "plan": "tests/jit_gaps.txt (483 lines today) tracks compile-coverage gaps (`gaps:` section) and run-tier holes (`run_gaps:` section) that AGENTS.md forbids parking work in, consumed by tests/dev.rs::jit_coverage_audit and jet-env's shrink-only ratchet (D-LENS-RUN2/#778). Card #1363 ('JIT gaps to zero', phase done) closed with all entries still on file — a false closure the proposal calls out by name. First enumerate every entry (each `gaps:`/`run_gaps:` stem) and mint one Tower card per real gap (or fix it directly if trivial), homed under the current epoch; do not create a single umbrella tracker again — that repeats #1363's failure mode. As each gap closes, remove its line from jit_gaps.txt so the ratchet shrinks; when the file's gap sections are empty, delete tests/jit_gaps.txt and the audit machinery that reads it (or repoint it to assert emptiness permanently and keep it as a zero-guard). Annotate #1363 (`node plugins/tower/tower.mjs card log '#1363' --by <id> --text ...`) recording the false-closure finding and linking every corrective card minted here — do not reopen #1363's phase, just log the correction. Proof per closed gap: the specific example/golden that now compiles+runs on JIT; final proof for this card: `scripts/agent/jet-env cargo test --test dev -- jit_coverage_audit` shows zero gaps, or the file's deletion compiles the same test suite red-to-green removed. I9 tier note: every gap closure must reach true byte-identical run-tier parity, not just compile coverage — do not let a card close on 'compiles' when the run_gaps sibling still lists it.",
@@ -107493,7 +107499,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-13T10:33:07.183Z",
+      "updated": "2026-08-13T11:29:43.056Z",
       "updatedBy": "orchestrator",
       "workOrder": 206
     },
@@ -117189,7 +117195,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-bucket-1",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Route emit sites, spec pages, error pages, and jet explain through the registry; cover every emitted and retired row. I4/I9: one report product across tiers.",
       "blockedBy": [],
@@ -117256,38 +117262,38 @@
         {
           "n": 1,
           "text": "Typed rows own code, severity, moment, What/Why/Fix templates with named holes, and optional structured fixes; emit sites reference rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:43.446Z"
+          "evidence": "Typed E1112 row with {method} templates in Prelude/Diagnostics.jet:784; sema row construction CheckerTaskGroup.rs:86; interpreter routed through sema seam TIR/eval/mod.rs:2115 (commit 1fd94f5ea, merged 9cf005e64). Orchestrator re-ran diagnostics_coverage every_emitted_code_has_typed_row green on master.",
+          "at": "2026-08-13T11:29:04.726Z"
         },
         {
           "n": 2,
           "text": "Spec, error pages, and jet explain generate from rows; every emitted code has one row and every row is emitted, retired, or reserved.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:43.446Z"
+          "evidence": "Spec projections generated from rows: docs/spec/diagnostic-rows.md:786, docs/spec/diagnostics.md:698; gen_errors 3/3 green and every_registered_code_has_explain_page green on master (orchestrator ran); jet explain E1112 shows row-backed What/Why/Fix.",
+          "at": "2026-08-13T11:29:05.386Z"
         },
         {
           "n": 3,
           "text": "Per-row UI snapshots and focused AOT, jet run, and interpreter proof show one diagnostic product with no second text copy.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T19:05:43.446Z"
+          "evidence": "Per-row UI snapshots + tier proof: diagnostic_snapshots 5/5 green under full env on master (orchestrator ran); run_tier_diagnostics::e1112_row_text_matches_aot_run_and_interpreter green — AOT, default jet run, interpreter byte-identical text from one row.",
+          "at": "2026-08-13T11:29:06.496Z"
         },
         {
           "n": 4,
           "text": "cargo test --test diagnostic_snapshots ui_snapshots passes: every emitted diagnostic (including E1112) has a typed registry row; no has-no-typed-row panic is reachable from the UI corpus",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:55:15.660Z"
+          "evidence": "diagnostic_snapshots ui_snapshots green on master 9cf005e64 (orchestrator ran, full env): every emitted diagnostic including E1112 has a typed registry row; no has-no-typed-row panic reachable from UI corpus.",
+          "at": "2026-08-13T11:29:06.918Z"
         }
       ],
       "refs": [
@@ -117301,8 +117307,9 @@
       "parentId": "c01wqquu",
       "needsAcceptance": false,
       "created": "2026-08-08T19:05:42.938Z",
-      "updated": "2026-08-12T18:58:13.713Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T11:29:07.539Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-13T11:29:07.539Z"
     },
     {
       "id": "c0qukvac",
@@ -122280,6 +122287,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-13",
+          "by": "orchestrator",
+          "text": "M01 fresh-context review finding: tests/golden.rs:271 gtk example early-returns without front-end check when gtk4 absent (I5 false green); same skip shape at :577-600 for polyglot examples. Fix = unconditional front-end compile, capability-gate only native build/run."
+        },
+        {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
           "text": "audit #1869: plan authored from the 2026-08-12 evidence packet (target-audit-e3/packets-infra.md); criteria hardened to the exit-criteria quality bar."
@@ -122319,9 +122331,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T18:21:33.083Z",
-      "updated": "2026-08-13T10:32:34.720Z",
+      "updated": "2026-08-13T11:29:09.546Z",
       "updatedBy": "orchestrator",
-      "completedAt": "2026-08-13T10:32:34.720Z"
+      "completedAt": "2026-08-13T11:29:09.546Z"
     },
     {
       "id": "c00zl0f2",
@@ -126777,6 +126789,30 @@
       "updated": "2026-08-12T21:50:06.600Z",
       "updatedBy": "orchestrator",
       "completedAt": "2026-08-12T21:50:06.600Z"
+    },
+    {
+      "id": "c09f2ym0",
+      "num": 1938,
+      "title": "E0043 and E1219 are emitted without UI snapshots",
+      "body": "diagnostics_coverage::every_emitted_code_has_snapshot is red: E0043 and E1219 are emitted in Source/ but have no tests/ui fixture + golden (invariant I4b). Pre-dates epoch-3 M01 (verified red at 2930332e9 where E1258/E1259 were also missing; M01 fixed those two). Acceptance: add .jet fixture + .stderr/.warn golden for each; every_emitted_code_has_snapshot green; diagnostic_snapshots stays green.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-13T11:28:37.374Z",
+      "updated": "2026-08-13T11:28:37.374Z",
+      "updatedBy": "orchestrator"
     }
   ],
   "decisions": [
@@ -170076,6 +170112,118 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T11:30:10.824Z",
+      "by": "orchestrator",
+      "action": "milestone.criteria-meet",
+      "ref": "e3-bucket-1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T11:29:43.057Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-13T11:29:23.099Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zztp1s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T11:29:09.546Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0890oah",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T11:29:08.534Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zztp1s",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-13T11:29:07.540Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0bxf5m7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T11:29:06.919Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bxf5m7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T11:29:06.496Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bxf5m7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T11:29:05.386Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bxf5m7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T11:29:04.726Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bxf5m7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T11:28:37.374Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c09f2ym0",
+      "note": "E0043 and E1219 are emitted without UI snapshots"
+    },
+    {
+      "at": "2026-08-13T11:28:33.125Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zztp1s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T11:28:23.364Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zztp1s",
+      "note": "milestoneId,phase"
+    },
+    {
+      "at": "2026-08-13T11:28:14.638Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zztp1s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-13T11:02:38.118Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0890oah",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-13T11:02:25.491Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0890oah",
+      "note": "phase"
+    },
+    {
       "at": "2026-08-13T10:37:47.833Z",
       "by": "owner",
       "action": "done.clear",
@@ -173461,118 +173609,6 @@
       "by": "fable-e3-audit",
       "action": "card.update",
       "ref": "c0coebnr",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:07.771Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0x9zm5o",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:07.206Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0hmpent",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:06.645Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0lm4urn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:06.049Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0qknw8t",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:05.437Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c064oc7c",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:04.876Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0dk0p73",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:04.309Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0nwijdh",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:03.574Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0w07otg",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:02.797Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0nnh6tu",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:02.219Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c04ku6ov",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:01.631Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0wo4jnm",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:01.060Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0onpxuj",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:11:00.497Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0apkoqo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:59.910Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0m0umdf",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:59.341Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0xenv6u",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-12T18:10:58.759Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08ogzrs",
       "note": "milestoneId"
     }
   ],
