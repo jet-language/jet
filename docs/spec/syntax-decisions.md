@@ -1231,8 +1231,8 @@ and E3001's entry text.
 **D-FAIL-UNIT1=A — unit-fallible signatures omit arrow and unit** *(ratified
 2026-08-06, card #1534)*: `fn save(path: String) ? IOError` has no arrow and no
 unit. Bare `fn sync() ?` means the default error. A value-returning signature
-keeps the arrow: `fn load() => Config ? E`. This amends S80's `fn run() => ()
-?` form and extends S34 so a `?` clause after the parameter list is a full
+keeps the arrow: `fn load() => Config ? E`. This retires S80's arrow-and-unit
+form and extends S34 so a `?` clause after the parameter list is a full
 return annotation.
 
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified

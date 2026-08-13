@@ -95,6 +95,9 @@
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
 // D-ARROW-CONTROL1=A (ratified 2026-07-26, card #1209) splits callable and
 // control syntax. OP_CALLABLE_ARROW (`=>`) defines callable results.
+// D-FAIL-UNIT1=A (ratified 2026-08-06, card #1534) adds no token: a
+// unit-fallible function writes `? E` or bare `?` directly after its parameters;
+// value-returning fallible functions keep OP_CALLABLE_ARROW.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
 // items. Effect-only `if` and `loop` bodies use no arrow. D-BRACE1=A

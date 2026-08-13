@@ -321,7 +321,7 @@ fn run() {
 #[test]
 fn the_interpreter_edge_renders_default_err_through_the_prelude() {
     let src = r#"
-fn run() => () ? Err {
+fn run() ? Err {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;

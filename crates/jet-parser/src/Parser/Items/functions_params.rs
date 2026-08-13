@@ -126,20 +126,40 @@ impl<'a> Parser<'a> {
     
             let mut return_type = None;
             let mut return_type_span = None;
-            if decorated_arrow
-                || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
-            {
-                if !decorated_arrow {
-                    let arrow = self.bump();
-                    if matches!(arrow.kind, TokKind::Arrow) {
-                        self.diags.push(Self::retired_callable_arrow(arrow.span));
-                    }
+            let mut arrow_return = false;
+            if decorated_arrow {
+                if self.type_starts_here() {
+                    arrow_return = true;
+                    let (ty, span) = self.return_type()?;
+                    return_type = Some(ty);
+                    return_type_span = Some(span);
+                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    return_type = Some(ty);
+                    return_type_span = Some(span);
+                }
+            } else if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+                arrow_return = true;
+                let arrow = self.bump();
+                if matches!(arrow.kind, TokKind::Arrow) {
+                    self.diags.push(Self::retired_callable_arrow(arrow.span));
                 }
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 }
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                return_type = Some(ty);
+                return_type_span = Some(span);
+            }
+            if arrow_return
+                && return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+            {
+                self.diags.push(Self::retired_unit_fallible_signature(
+                    return_type_span.unwrap_or(self.peek().span),
+                ));
             }
             let declared_return_view_provenance =
                 self.parse_opt_declared_view_from(&params);

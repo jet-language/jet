@@ -48,6 +48,8 @@ module.exports = grammar({
     // In a bindings module body, `fn name(…)` may be an extern fn (`= "path"`)
     // or a normal fn (with a block); fork until the `=`/`{` appears.
     [$.extern_fn, $._expr],
+    [$.extern_fn, $.function_def],
+    [$.extern_fn],
   ],
 
   // S6-R: source has no visible semicolons (the lexer inserts synthetic ones).
@@ -241,7 +243,12 @@ module.exports = grammar({
         "fn",
         field("name", choice($.identifier, $.type_identifier)),
         $.param_list,
-        optional(seq("=>", field("return_type", $._type))),
+        optional(
+          choice(
+            seq("=>", field("return_type", $._type)),
+            prec.right(seq("?", optional(field("error_type", $._type)))),
+          ),
+        ),
         optional(seq("=", field("rust_path", $.string_literal))),
       ),
 
@@ -256,8 +263,17 @@ module.exports = grammar({
         optional($.type_params),
         $.param_list,
         optional(choice(
-          seq($.effect_arrow, optional(field("return_type", $._type))),
+          seq(
+            $.effect_arrow,
+            optional(
+              choice(
+                field("return_type", $._type),
+                seq("?", optional(field("error_type", $._type))),
+              ),
+            ),
+          ),
           seq("=>", field("return_type", $._type)),
+          seq("?", optional(field("error_type", $._type))),
         )),
         choice($.block, seq("=", field("body", $._expr))),
       ),
@@ -419,8 +435,17 @@ module.exports = grammar({
         optional($.type_params),
         $.param_list,
         optional(choice(
-          seq($.effect_arrow, optional(field("return_type", $._type))),
+          seq(
+            $.effect_arrow,
+            optional(
+              choice(
+                field("return_type", $._type),
+                seq("?", optional(field("error_type", $._type))),
+              ),
+            ),
+          ),
           seq("=>", field("return_type", $._type)),
+          seq("?", optional(field("error_type", $._type))),
         )),
       )),
 
@@ -584,7 +609,16 @@ module.exports = grammar({
         "(",
         commaSep($._type),
         ")",
-        optional(choice(seq($.effect_arrow, optional($._type)), seq("=>", $._type))),
+        optional(
+          choice(
+            seq(
+              $.effect_arrow,
+              optional(choice($._type, seq("?", optional($._type)))),
+            ),
+            seq("=>", $._type),
+            seq("?", optional($._type)),
+          ),
+        ),
       )),
 
     paren_type: ($) => seq("(", $._type, ")"),

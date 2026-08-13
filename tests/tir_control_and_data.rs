@@ -16,11 +16,11 @@ fn make() => Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
-fn typed(value: Err) => () ? Err {
+fn typed(value: Err) ? Err {
     return Err(value)
 }
 
-fn run() => () ? Err {
+fn run() ? Err {
     return typed(make())
 }
 "#;
@@ -34,7 +34,7 @@ fn run() => () ? Err {
 #[test]
 fn default_err_value_runs_on_the_default_jit_edge() {
     let src = r#"
-fn run() => () ? Err {
+fn run() ? Err {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;

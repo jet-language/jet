@@ -39,7 +39,7 @@ A marked region. Inside it, writes to tracked state are journaled. On failure, J
 
 ```jet
 // SKETCH ONLY — syntax not decided, not balloted.
-fn transfer(from &Account, to &Account, amount Money) => () ? {
+fn transfer(from &Account, to &Account, amount Money) ? {
     transaction {
         from.withdraw(amount)?   // changes state
         to.deposit(amount)?      // if THIS fails, the withdraw above is undone

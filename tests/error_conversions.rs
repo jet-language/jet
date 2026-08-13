@@ -17,7 +17,7 @@ fn get_user() => Int ? {
     return Ok(read_store()?)
 }
 
-fn run() => () ? {
+fn run() ? {
     get_user()?
 }
 "#;
@@ -36,7 +36,7 @@ fn read_store() => Int ? String {
     return Err("missing")
 }
 
-fn run() => () ? {
+fn run() ? {
     value :: read_store()?
     print(value)
 }

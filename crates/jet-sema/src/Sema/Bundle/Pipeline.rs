@@ -1836,7 +1836,7 @@ fn check_bundle_opts_for_output_inner(
                         "`run` returns the wrong kind of value".to_string(),
                         "`run` is where running starts; it either returns nothing or reports top-level errors with `() ?`"
                             .to_string(),
-                        "write `fn run() { ... }`, or `fn run() => () ? { ... }` if the entry uses `?`"
+                        "write `fn run() { ... }`, or `fn run() ? { ... }` if the entry uses `?`"
                             .to_string(),
                         Some(run_fn.name_span),
                     ));

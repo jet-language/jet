@@ -521,7 +521,7 @@ fn uncaught_err_prints_propagation_chain() {
         return;
     }
 
-    // D-FAIL-CTX1=A: uncaught Err at `fn run() => () ?` prints the `?` journey
+    // D-FAIL-CTX1=A: uncaught Err at `fn run() ?` prints the `?` journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
 fn read_raw() => String ? {
@@ -535,7 +535,7 @@ fn load_config() => String ? {
     cfg :: parse_config()? "loading config"
     return Ok(cfg)
 }
-fn run() => () ? {
+fn run() ? {
     _ :: load_config()?
 }
 "#;

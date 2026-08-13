@@ -476,9 +476,9 @@ opt-out stays as ratified.
 Before — a beginner's first `?` forces ceremony, and the ceremony is ugly:
 
 ```text
-fn run() => () ?              → the beginner types "() ?" to read a file
-fn run() => () ? CryptoError  → full E3001 frame, exit 70 (or 101 on Internal)
-fn run() => () ? StoreErr     → E0122: not allowed at the entry point
+fn run() ?              → the beginner types "?" to read a file
+fn run() ? CryptoError  → full E3001 frame, exit 70 (or 101 on Internal)
+fn run() ? StoreErr     → E0122: not allowed at the entry point
 ```
 
 After — proposed: `fn run()` is fallible by nature, because programs are.
@@ -587,8 +587,8 @@ lines are marked.
 **Beginner — a tool that reads a file and reports failure well:**
 
 ```jet
-// today — the beginner must spell "() ?" before their first ? works
-fn run() => () ? {
+// today — the beginner must spell `?` before their first ? works
+fn run() ? {
     text :: fs.read("notes.txt")?        // works, but the error is a string
     print(text)
 }

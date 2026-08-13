@@ -159,15 +159,15 @@ Runnable outputs link to ordinary functions by checked reference. Renames, visib
 Commands accept typed parameters, which become checked CLI flags. Services and checks take no parameters; their settings live in checked graph values so laptops, CI, images, and JetOS cannot invoke different configurations. Every callable returns `()` or `() ?`. A service lives while its function call lives. A check passes on normal return and fails on error.
 
 ```jet
-fn export(path: Path, pretty: Bool = false) => () ? {
+fn export(path: Path, pretty: Bool = false) ? {
     write_export(path, pretty)?
 }
 
-fn serve() => () ? {
+fn serve() ? {
     api.serve()?
 }
 
-fn verify_release() => () ? {
+fn verify_release() ? {
     require(licenses_ok(), "unapproved license")
 }
 ```
@@ -458,15 +458,15 @@ defaults: .{ run: app, check: unit, enter: dev }
 `Source/main.jet`:
 
 ```jet
-fn run() => () ? {
+fn run() ? {
     print("pulse ready")
 }
 
-fn test_unit() => () ? {
+fn test_unit() ? {
     require(2 + 2 == 4, "arithmetic changed")
 }
 
-fn postgres_ready() => () ? {
+fn postgres_ready() ? {
     require(true, "postgres did not answer")
 }
 ```
@@ -608,7 +608,7 @@ use core.mem
     register.* = 1
 }
 
-fn run() => () ? {
+fn run() ? {
     print("edge agent ready")
 }
 ```
@@ -694,11 +694,11 @@ outputs: .{
 `packages/api/Source/main.jet`:
 
 ```jet
-fn run() => () ? {
+fn run() ? {
     print("api ready")
 }
 
-fn unit() => () ? {
+fn unit() ? {
     require(true, "api unit failed")
 }
 ```
@@ -719,7 +719,7 @@ outputs: .{
 `packages/billing/Source/main.jet`:
 
 ```jet
-fn unit() => () ? {
+fn unit() ? {
     require(true, "billing unit failed")
 }
 ```
@@ -737,7 +737,7 @@ outputs: .{ app: .Executable.{ name: "acme-web", entry: run } }
 `packages/web/Source/main.jet`:
 
 ```jet
-fn run() => () ? {
+fn run() ? {
     print("web ready")
 }
 ```
@@ -1049,7 +1049,7 @@ pub laptop :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-
 `system/vm.jet`:
 
 ```jet
-fn verify_halcyon_vm() => () ? {
+fn verify_halcyon_vm() ? {
     host :: vm.host(systems.halcyon)
     host.install(images.installer)?
     host.reboot()?
@@ -1193,16 +1193,16 @@ The fleet adds two web hosts. Shared Configs carry common packages and health ru
 use core.http as http
 use core.net as net
 
-fn run_api() => () ? {
+fn run_api() ? {
     print("api ready")
 }
 
-fn api_ready() => () ? {
+fn api_ready() ? {
     stream :: net.tcp_connect("127.0.0.1:8080")?
     stream.close()?
 }
 
-fn api_can_serve() => () ? {
+fn api_can_serve() ? {
     response :: http.get("http://127.0.0.1:8080/health")?
     require(response.status() == 200, "api could not serve a request")
 }
