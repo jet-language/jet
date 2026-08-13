@@ -139,18 +139,20 @@ fn run_example(rel: &str) -> String {
         .to_string()
 }
 
-/// claim.metaprogramming / source-reentry — D-METADERIVE1.
+/// claim.metaprogramming / source-reentry — D-META-CODE1.
 #[test]
 fn derive_source_reentry() {
     // CAPABILITY_CLAIM: claim.metaprogramming / source-reentry
     let serde_registration = read("crates/jet-sema/src/Sema/Registration/Serde.rs");
     let codegen_items = read("crates/jet-codegen/src/Codegen/Items.rs");
     assert!(
-        serde_registration.contains("source.push_str(&format!(\"impl {}.Encode")
-            && serde_registration.contains("source.push_str(&format!(\"impl {}.Decode")
-            && serde_registration.contains("parse_generated_fragment(\n            &source")
-            && serde_registration.contains("crate::Parser::parse(&tokens)"),
-        "built-in codecs must emit ordinary Jet impl fragments and parse them"
+        serde_registration.contains("fn struct_codec_items")
+            && serde_registration.contains("fn enum_codec_items")
+            && serde_registration.contains("is_generated_serde: true")
+            && !serde_registration.contains("Lexer::lex")
+            && !serde_registration.contains("Parser::parse")
+            && !serde_registration.contains("parse_generated_fragment"),
+        "built-in codecs must be ordinary typed AST items"
     );
     for retired in [
         "__JetSerdeCarrier",
@@ -186,7 +188,7 @@ fn run() {
     let path = dir.join("main.jet");
     fs::write(&path, source).expect("write derive acceptance source");
     let compiled = jet::compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(|diags| {
-        panic!("generated codec did not re-enter the front end: {diags:#?}")
+        panic!("generated typed codec items did not reach the front end: {diags:#?}")
     });
     assert!(
         compiled.rust.contains("impl __jet_Encode for __jet_Point")

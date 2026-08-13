@@ -3,10 +3,10 @@
 // populated; `fields` non-empty only when the reflected value was a known
 // user struct — built entirely at the call site, `Codegen/TIR/emit.rs`
 // `("core.reflect", "of")`). `JetReflectField` is one struct field's name
-// and its `.jet_show()`-rendered value. Both are plain data — no runtime
-// type registry, no raw-pointer/audited-region casting of any kind (I1):
-// everything here is a string captured at compile time from the call
-// site's already-known static type.
+// and a nested `Value` handle for its typed value. Both are plain data — no
+// runtime type registry, no raw-pointer/audited-region casting of any kind
+// (I1): the call site builds the same recursively typed shape from its
+// already-known static type.
 
 #[derive(Clone)]
 struct JetReflectValue {
@@ -19,7 +19,7 @@ struct JetReflectValue {
 #[derive(Clone)]
 struct JetReflectField {
     name: String,
-    value: String,
+    value: JetReflectValue,
 }
 
 impl JetReflectValue {
@@ -41,7 +41,7 @@ impl JetReflectField {
     fn name(&self) -> String {
         self.name.clone()
     }
-    fn value(&self) -> String {
+    fn value(&self) -> JetReflectValue {
         self.value.clone()
     }
 }
@@ -53,6 +53,6 @@ impl JetShow for JetReflectValue {
 }
 impl JetShow for JetReflectField {
     fn jet_show(&self) -> String {
-        format!("Field({}: {})", self.name, self.value)
+        format!("Field({}: {})", self.name, self.value.display)
     }
 }

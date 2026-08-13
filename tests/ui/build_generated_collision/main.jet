@@ -2,7 +2,9 @@
 use "./.jet/generated/main/collision" as handwritten
 
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("collision", "pub fn collision() => String {{ return \"generated\" }}")?
+    b.generate("collision") {
+        pub fn collision() => String = "generated";
+    }?
     app :: b.add_executable(
         "app",
         ["main.jet", ".jet/generated/main/collision.jet"],

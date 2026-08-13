@@ -245,7 +245,6 @@ pub fn evaluate_typed_head(
 pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
     Methods::data_status_rows()
 }
-pub use Methods::apply_at_splices;
 pub use Purity::{
     check_build_time_io, walk_calls, walk_identifiers, walk_purity_expr, walk_purity_stmts,
     walk_purity_stmts_from, walk_expr_nodes_for_validation,
@@ -418,7 +417,6 @@ pub fn run_build_entry_with_policy(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: &program.globals,
         methods: &program.methods,
@@ -766,7 +764,6 @@ pub fn evaluate_with_imports_opts(
         repl_mode: false,
         repl_grants: &[],
         repl_authorizer: None,
-        emitted_fragments: None,
         embed_inputs: None,
         mutated: None,
     })
@@ -837,7 +834,6 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         repl_mode: false,
         repl_grants: &[],
         repl_authorizer: None,
-        emitted_fragments: None,
         embed_inputs: Some(&mut embed_inputs),
         mutated,
     })?;
@@ -918,7 +914,6 @@ pub fn run_main(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -966,7 +961,6 @@ pub fn run_main_debug(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -1022,7 +1016,6 @@ pub fn run_main_value(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -1067,7 +1060,6 @@ pub fn run_main_with_fuel(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -1110,7 +1102,6 @@ pub fn run_repl_main_with_fuel(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -1246,7 +1237,6 @@ fn run_repl_step_inner(
         repl_authorizer: Some(authorizer),
         repl_interruptible: interruptible,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         // Fresh Interp per turn — seed prior binding types so empty
         // `data.table`/`data.schema` can still read `Table<T>` / `[T]`.
         binding_types: binding_types.clone(),
@@ -1329,7 +1319,6 @@ pub fn run_block_with_imports(
         repl_authorizer: None,
         gates: jet_foundation::Policy::GateSet::default(),
         impure_depth: 0,
-        emitted_fragments: None,
         embed_inputs: None,
     })? {
         TirBridge::StmtOutcome::Done(scope) => Ok(scope),
@@ -1436,17 +1425,33 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     )
 }
 
-/// D-METADERIVE1=A: evaluate the body of a user-authored `derive T.Trait { … }`
-/// block in a comptime scope where `type_param` is bound to `type_info`.
-/// Returns the source fragments emitted by `emit(…)` calls (D-CTCODEGEN1=A).
-pub fn evaluate_derive_body(
-    body: &[crate::AST::Stmt],
+/// D-META-CODE1=A / D-META-BODY1=A: expand a user-authored derive body in a
+/// comptime scope where `type_param` is bound to `type_info`. The returned
+/// items are the same AST nodes the parser produced for hand-written items;
+/// compile-time control flow only decides how many cloned templates enter the
+/// ordinary sema path.
+pub fn expand_derive_body(
+    body: &[crate::AST::DeriveBodyItem],
     type_param: &str,
     type_info: CtValue,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
-) -> Result<Vec<String>, Diagnostic> {
-    let mut interp = Interp {
+) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+    let mut scope = HashMap::new();
+    scope.insert(type_param.to_string(), type_info);
+    expand_template_body(body, &scope, funcs, base_dir)
+}
+
+/// D-META-BODY1=A: expand the same typed item-template block for a build
+/// generated module. The caller supplies the current compile-time scope, so
+/// `@` holes in `b.generate` see the same values as a derive body.
+pub fn expand_template_body(
+    body: &[crate::AST::DeriveBodyItem],
+    initial_scope: &HashMap<String, CtValue>,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+    let mut interp = Interpreter::Interp {
         funcs,
         base_dir,
         fuel: FUEL_BUDGET,
@@ -1462,7 +1467,6 @@ pub fn evaluate_derive_body(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
         methods: empty_methods(),
@@ -1473,10 +1477,379 @@ pub fn evaluate_derive_body(
         migrations: empty_migrations(),
         list_write_windows: HashMap::new(),
     };
-    let mut scope = HashMap::new();
-    scope.insert(type_param.to_string(), type_info);
-    interp.exec_block(body, &mut scope)?;
-    Ok(interp.emitted_fragments)
+    let mut scope = initial_scope.clone();
+    let mut expanded = Vec::new();
+    expand_derive_items(body, &mut interp, &mut scope, &mut expanded)?;
+    Ok(expanded)
+}
+
+/// Render expanded item templates through the ordinary Jet formatter before a
+/// build context stores the generated module. This is only the build module's
+/// materialization boundary; derive expansion itself never serializes and
+/// re-lexes a body.
+pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
+    let program = crate::AST::Program {
+        imports: Vec::new(),
+        items,
+        script_body: Vec::new(),
+        block_spans: Vec::new(),
+        fenced_statements: Vec::new(),
+        web_target_ceiling: None,
+        pub_file: false,
+        no_prelude: false,
+        default_target: None,
+        html_path: None,
+        no_alloc_policy: None,
+        policy_declarations: Vec::new(),
+        applied_rules: Vec::new(),
+        rule_facts: Vec::new(),
+    };
+    jet_parser::Formatter::format_synthetic_program(&program)
+}
+
+fn expand_derive_items(
+    body: &[crate::AST::DeriveBodyItem],
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+    out: &mut Vec<crate::AST::Item>,
+) -> Result<(), Diagnostic> {
+    for body_item in body {
+        match body_item {
+            crate::AST::DeriveBodyItem::Stmt(stmt) => {
+                let mut stmt = stmt.clone();
+                expand_template_stmt(&mut stmt, interp, scope)?;
+                let _ = interp.exec_block(std::slice::from_ref(&stmt), scope)?;
+            }
+            crate::AST::DeriveBodyItem::Item(item) => {
+                let mut item = (**item).clone();
+                expand_template_item(&mut item, interp, scope)?;
+                out.push(item);
+            }
+            crate::AST::DeriveBodyItem::Loop { var, source, body, .. } => {
+                let value = interp.eval(source, scope)?;
+                let CtValue::List(values) = value else {
+                    return Err(Diagnostic::error(
+                        "E0956",
+                        "a derive loop source is not a compile-time list".to_string(),
+                        "`@loop` expands one item template for each value in its source list".to_string(),
+                        "use a reflected list such as `T.@fields`".to_string(),
+                        Some(source.span()),
+                    ));
+                };
+                let previous = scope.get(var).cloned();
+                for value in values {
+                    scope.insert(var.clone(), value);
+                    expand_derive_items(body, interp, scope, out)?;
+                }
+                if let Some(previous) = previous {
+                    scope.insert(var.clone(), previous);
+                } else {
+                    scope.remove(var);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expand_template_item(
+    item: &mut crate::AST::Item,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    match item {
+        crate::AST::Item::Func(function) => expand_template_func(function, interp, scope),
+        crate::AST::Item::Impl(implementation) => {
+            implementation.type_name = expand_template_name(
+                &implementation.type_name,
+                implementation.type_span,
+                interp,
+                scope,
+            )?;
+            for method in &mut implementation.methods {
+                expand_template_func(method, interp, scope)?;
+            }
+            for (_, _, ty) in &mut implementation.assoc_type_impls {
+                expand_template_type(ty, interp, scope)?;
+            }
+            Ok(())
+        }
+        crate::AST::Item::Struct(definition) => {
+            definition.name = expand_template_name(
+                &definition.name,
+                definition.name_span,
+                interp,
+                scope,
+            )?;
+            for field in &mut definition.fields {
+                expand_template_type(&mut field.ty, interp, scope)?;
+                if let Some(value) = &mut field.default {
+                    expand_template_expr(value, interp, scope)?;
+                }
+            }
+            for method in &mut definition.methods {
+                expand_template_func(method, interp, scope)?;
+            }
+            Ok(())
+        }
+        crate::AST::Item::Enum(definition) => {
+            definition.name = expand_template_name(
+                &definition.name,
+                definition.name_span,
+                interp,
+                scope,
+            )?;
+            for variant in &mut definition.variants {
+                match &mut variant.payload {
+                    crate::AST::VariantPayload::Unit => {}
+                    crate::AST::VariantPayload::Single(ty, _) => {
+                        expand_template_type(ty, interp, scope)?;
+                    }
+                    crate::AST::VariantPayload::Named(fields) => {
+                        for field in fields {
+                            expand_template_type(&mut field.ty, interp, scope)?;
+                        }
+                    }
+                }
+            }
+            for method in &mut definition.methods {
+                expand_template_func(method, interp, scope)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn expand_template_func(
+    function: &mut crate::AST::Func,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    function.name = expand_template_name(&function.name, function.name_span, interp, scope)?;
+    for param in &mut function.params {
+        expand_template_type(&mut param.ty, interp, scope)?;
+        if let Some(default) = &mut param.default {
+            expand_template_expr(default, interp, scope)?;
+        }
+    }
+    if let Some(ty) = &mut function.return_type {
+        expand_template_type(ty, interp, scope)?;
+    }
+    for stmt in &mut function.body {
+        expand_template_stmt(stmt, interp, scope)?;
+    }
+    Ok(())
+}
+
+fn expand_template_stmt(
+    stmt: &mut crate::AST::Stmt,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    let mut error = None;
+    stmt.for_each_expr_mut(|expr| {
+        if error.is_none() {
+            if let Err(diagnostic) = expand_template_expr(expr, interp, scope) {
+                error = Some(diagnostic);
+            }
+        }
+    });
+    if let Some(error) = error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+fn expand_template_name(
+    name: &str,
+    span: crate::Diagnostics::Span,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<String, Diagnostic> {
+    let Some(binding) = name.strip_prefix('@') else {
+        return Ok(name.to_string());
+    };
+    match scope_value(scope, binding) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        Some(CtValue::Struct { fields, .. }) => fields
+            .iter()
+            .find(|(field, _)| field == "name")
+            .and_then(|(_, value)| match value {
+                CtValue::Str(value) => Some(value.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| Diagnostic::error(
+                "E0956",
+                format!("compile-time name `@{binding}` has no text name"),
+                "a generated item name needs the reflected value's `name` field".to_string(),
+                "bind the name to a String value".to_string(),
+                Some(span),
+            )),
+        Some(value) => Err(Diagnostic::error(
+            "E0956",
+            format!("compile-time name `@{binding}` is not text"),
+            format!("a generated item name needs text, but this value is {}", value.jet_type().name()),
+            "bind the name to a String value".to_string(),
+            Some(span),
+        )),
+        None => {
+            let _ = interp;
+            Ok(name.to_string())
+        }
+    }
+}
+
+fn expand_template_expr(
+    expr: &mut crate::AST::Expr,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    let mut error = None;
+    expr.for_each_expr_mut(|node| {
+        if error.is_none() {
+            if let Err(diagnostic) = expand_template_expr_node(node, interp, scope) {
+                error = Some(diagnostic);
+            }
+        }
+    });
+    error.map_or(Ok(()), Err)
+}
+
+fn expand_template_expr_node(
+    expr: &mut crate::AST::Expr,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    let span = expr.span();
+    let probe = expr.clone();
+    match expr {
+        crate::AST::Expr::Field(base, member, _) if member.starts_with('@') => {
+            if let Ok(value) = interp.eval(&probe, scope) {
+                if let Some(literal) = comptime_literal_expr(value, span) {
+                    *expr = literal;
+                    return Ok(());
+                }
+            }
+            let binding = match base.as_ref() {
+                crate::AST::Expr::Ident(name, _) => Some(name.as_str()),
+                crate::AST::Expr::ComptimeName { name, .. } => Some(name.as_str()),
+                _ => None,
+            };
+            if let Some(binding) = binding {
+                if let Some(CtValue::Struct { fields, .. }) = scope_value(scope, binding.trim_start_matches('@')) {
+                    if let Some((_, CtValue::Str(value))) = fields.iter().find(|(name, _)| name == member.trim_start_matches('@')) {
+                        *expr = crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.clone())], span);
+                    }
+                }
+            }
+        }
+        crate::AST::Expr::ComptimeName { name, .. } => {
+            if let Some(value) = scope_value(scope, name.trim_start_matches('@')).cloned() {
+                if let Some(literal) = comptime_literal_expr(value, span) {
+                    *expr = literal;
+                }
+            }
+        }
+        crate::AST::Expr::Ident(name, _) if name.starts_with('@') => {
+            if let Some(value) = scope_value(scope, name.trim_start_matches('@')).cloned() {
+                if let Some(literal) = comptime_literal_expr(value, span) {
+                    *expr = literal;
+                }
+            }
+        }
+        crate::AST::Expr::StructLit { type_name, type_args, .. } => {
+            *type_name = expand_template_name(
+                type_name,
+                span,
+                interp,
+                scope,
+            )?;
+            for ty in type_args {
+                expand_template_type(ty, interp, scope)?;
+            }
+        }
+        crate::AST::Expr::EnumLit { type_name, .. } => {
+            *type_name = expand_template_name(type_name, span, interp, scope)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'a CtValue> {
+    scope
+        .get(name)
+        .or_else(|| scope.get(&format!("@{name}")))
+}
+
+fn comptime_literal_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
+    Some(match value {
+        CtValue::Int(value) => crate::AST::Expr::Int(value, span, None, None),
+        CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false),
+        CtValue::Bool(value) => crate::AST::Expr::Bool(value, span),
+        CtValue::Char(value) => crate::AST::Expr::Char(value, span),
+        CtValue::Str(value) => crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value)], span),
+        _ => return None,
+    })
+}
+
+fn expand_template_type(
+    ty: &mut Type,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    match ty {
+        Type::Named(name) if name.starts_with('@') => {
+            *name = expand_template_name(name, crate::Diagnostics::Span::new(0, 0), interp, scope)?;
+        }
+        Type::Named(_) => {}
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. } => expand_template_type(inner, interp, scope)?,
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            expand_template_type(key, interp, scope)?;
+            expand_template_type(value, interp, scope)?;
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                expand_template_type(param, interp, scope)?;
+            }
+            if let Some(ret) = ret {
+                expand_template_type(ret, interp, scope)?;
+            }
+        }
+        Type::Apply { name, args } => {
+            *name = expand_template_name(name, crate::Diagnostics::Span::new(0, 0), interp, scope)?;
+            for arg in args {
+                expand_template_type(arg, interp, scope)?;
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                expand_template_type(field, interp, scope)?;
+            }
+        }
+        Type::Union(members) => {
+            for member in members {
+                expand_template_type(member, interp, scope)?;
+            }
+        }
+        Type::Quantity { base, .. } => expand_template_type(base, interp, scope)?,
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::TraitObject(_)
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::ComputeDim(_) => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]

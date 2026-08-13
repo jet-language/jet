@@ -186,6 +186,29 @@ fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
     })
 }
 
+fn reflect_child(value: &CtValue) -> CtValue {
+    let mut fields = vec![("value".to_string(), value.clone())];
+    if let CtValue::Struct {
+        fields: value_fields,
+        ..
+    } = value
+    {
+        fields.push((
+            "field_names".to_string(),
+            CtValue::List(
+                value_fields
+                    .iter()
+                    .map(|(name, _)| CtValue::Str(name.clone()))
+                    .collect(),
+            ),
+        ));
+    }
+    CtValue::Struct {
+        type_name: "__Reflect".to_string(),
+        fields,
+    }
+}
+
 fn reflect_type_name(value: &CtValue) -> String {
     value.jet_type().leaf_name()
 }
@@ -233,7 +256,7 @@ fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, D
                             type_name: "__ReflectField".to_string(),
                             fields: vec![
                                 ("name".to_string(), CtValue::Str(name)),
-                                ("value".to_string(), CtValue::Str(value.jet_show())),
+                                ("value".to_string(), reflect_child(value)),
                             ],
                         })
                     })

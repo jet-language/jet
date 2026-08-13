@@ -38,6 +38,11 @@ pub struct CallArgFlags {
     /// longer parses, so this stays false. Kept so older AST snapshots and
     /// defensive formatter paths remain stable.
     pub is_trailing_block: bool,
+    /// D-META-BODY1=A: the hidden second slot on `b.generate(name) { … }`.
+    /// The parser keeps the item template beside the ordinary call arguments so
+    /// sema, comptime, and TIR can carry one typed block without turning it into
+    /// a source string or a runtime value.
+    pub template_items: Option<Vec<super::DeriveBodyItem>>,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
     /// D-APILABEL1=A: where the caller wrote this argument, when labels put the
@@ -754,9 +759,8 @@ impl Expr {
     }
 
     /// Move diagnostics for a compiler-generated expression back to the source
-    /// construct that requested it. Generated Jet fragments are parsed through
-    /// the ordinary parser, so their byte offsets belong to the temporary
-    /// fragment rather than the user's file.
+    /// construct that requested it. Typed templates retain the requesting
+    /// source span, so generated expressions do not expose synthetic offsets.
     pub fn reanchor(&mut self, span: Span) {
         match self {
             Expr::Str(_, current)

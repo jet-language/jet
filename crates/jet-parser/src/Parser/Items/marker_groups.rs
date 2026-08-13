@@ -1468,6 +1468,10 @@ impl<'a> Parser<'a> {
                         crate::Generics::PRINTABLE
                             | crate::Generics::EQUATABLE
                             | crate::Generics::DEBUG
+                            | crate::Generics::COMPARABLE
+                            | Syntax::MARKER_CODABLE
+                            | Syntax::MARKER_ENCODE
+                            | Syntax::MARKER_DECODE
                     )
                 {
                     continue;

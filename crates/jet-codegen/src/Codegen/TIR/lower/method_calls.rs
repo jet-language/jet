@@ -945,6 +945,7 @@ fn lower_method_call_impl(
                 .as_ref()
                 .is_some_and(|(conv, _)| *conv == AccessConvention::Write),
             value: receiver,
+            template_items: None,
             clone: false,
             arc_clone: false,
             fn_coerce: None,
@@ -5455,6 +5456,7 @@ fn lower_method_call_impl(
                     type_args: Vec::new(),
                     args: vec![TCallArg {
                         value: cap_arg,
+                        template_items: None,
                         borrow: false,
                         mut_borrow: false,
                         clone: false,
@@ -5627,6 +5629,7 @@ fn lower_method_call_impl(
                     type_args: Vec::new(),
                     args: vec![TCallArg {
                         value: arg_t,
+                        template_items: None,
                         borrow: false,
                         mut_borrow: false,
                         clone: false,
@@ -5672,6 +5675,7 @@ fn lower_method_call_impl(
                     type_args: Vec::new(),
                     args: vec![TCallArg {
                         value,
+                        template_items: None,
                         borrow: false,
                         mut_borrow: false,
                         clone: false,

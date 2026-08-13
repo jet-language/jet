@@ -556,6 +556,7 @@ fn lower_method_pre_contracts(
                 borrow: self_conv == AccessConvention::Read && !self_ty.is_scalar(),
                 mut_borrow: self_conv == AccessConvention::Write,
                 value: *recv_value,
+                template_items: None,
                 clone: false,
                 arc_clone: false,
                 fn_coerce: None,
@@ -3565,9 +3566,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // A qualified type path lowers as a field chain. The final
                 // segment is still the type name (`module.Packet`), while a
                 // value path such as `info.layout` remains lowercase.
-                Expr::Ident(name, _) | Expr::Field(_, name, _) => {
+                Expr::Ident(name, _) => {
                     name.chars().next().is_some_and(char::is_uppercase)
+                        || matches!(
+                            env.ty_of(name),
+                            Some(Type::Named(type_name))
+                                if matches!(
+                                    type_name.as_str(),
+                                    "FieldInfo" | "MethodInfo" | "TypeParamInfo"
+                                )
+                        )
                 }
+                Expr::Field(_, name, _) => name.chars().next().is_some_and(char::is_uppercase),
                 _ => false,
             };
             if compiler_fact_receiver
@@ -4895,6 +4905,7 @@ pub(crate) fn wrap_foreign_undo(
                 // conversions, but do not clone a second time before the forward call.
                 forward_module_args.push(TCallArg {
                     value: local_for_forward,
+                    template_items: None,
                     borrow,
                     mut_borrow,
                     clone: false,
@@ -4923,6 +4934,7 @@ pub(crate) fn wrap_foreign_undo(
                 ty: ty.clone(),
                 kind: TExprKind::Local(TLocal::user(temp)),
             },
+            template_items: None,
             borrow: convention == AccessConvention::Read && !inverse_ty.is_scalar(),
             mut_borrow: convention == AccessConvention::Write,
             clone: false,

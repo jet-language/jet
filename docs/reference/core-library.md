@@ -1156,12 +1156,14 @@ fn run() {
     print(v.path())         // the canonical typeable path, e.g. "reflect_value.Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
     loop f; v.fields() {
-        print("{f.name()} = {f.value()}")
+        print("{f.name()} = {f.value().display()}")
     }
 }
 ```
 
-`reflect.of(x)` returns a `Value` handle:
+`reflect.of(x)` returns a `Value` handle. The compile-time `T.reflect()` view
+and this runtime view read the same registered declaration field rows; runtime
+reflection keeps each field as a nested `Value`, not a pre-rendered string:
 
 | Method | Signature | Returns |
 |--------|-----------|---------|
@@ -1170,12 +1172,12 @@ fn run() {
 | `.display()` | `() → String` | the same string `"{x}"` interpolation shows |
 | `.fields()` | `() → [Field]` | one entry per struct field; `[]` for anything else (primitives, enums, tuples, lists) |
 
-Each `Field` carries a name and its rendered value:
+Each `Field` carries a name and its typed value:
 
 | Method | Signature | Returns |
 |--------|-----------|---------|
 | `.name()` | `() → String` | the field's declared name |
-| `.value()` | `() → String` | the field's rendered value |
+| `.value()` | `() → Value` | the field's nested typed value; call `.display()` when text is needed |
 
 A value that isn't `Display`-able (a closure, a `Shared<T>`) is **E0112** at
 the `reflect.of(...)` call site — the fix is the same as for a failed `"{x}"`

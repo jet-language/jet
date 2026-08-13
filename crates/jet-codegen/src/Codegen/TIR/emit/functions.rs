@@ -19,7 +19,7 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
         .trim_end();
     let pad = "    ".repeat(indent);
     out.push_str(&format!(
-        "{pad}let __jet_stack_frame = jet_stack_enter({}, {}, {}, {});\n",
+        "{pad}let __jet_stack_frame = crate::jet_stack_enter({}, {}, {}, {});\n",
         crate::Codegen::escape_rust_str(&cx.file),
         tir.line,
         crate::Codegen::escape_rust_str(&tir.name),

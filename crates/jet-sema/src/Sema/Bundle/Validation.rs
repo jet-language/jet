@@ -948,7 +948,12 @@ pub(crate) fn check_module_bodies(
                     .or_else(|| st.trait_reg.enum_params.get(&i.type_name));
                 for m in &mut i.methods {
                     let own_params = std::mem::take(&mut m.type_params);
-                    if i.trait_name.is_none() && own_params.is_empty() {
+                    // An implementation method sees the owner's generic
+                    // parameters whether the impl names a trait or not. A
+                    // typed derive body can fill a method hole with `T`, and
+                    // the generated `impl Type.Trait` must have the same
+                    // scope as a hand-written trait impl.
+                    if own_params.is_empty() {
                         m.type_params = owner_params.cloned().unwrap_or_default();
                     } else {
                         m.type_params = own_params.clone();

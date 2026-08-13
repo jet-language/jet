@@ -648,6 +648,31 @@ impl<'a> Interp<'a> {
                     };
                     return self.eval_typed_decode(&module, method, &text, &type_args[0], span);
                 }
+                // D-SERDE-ENGINE1: a user or generated `Encode` method is the
+                // same engine used by the native codec. The interpreter only
+                // marshals its returned tree into JSON text; it does not
+                // reconstruct the wire policy here.
+                if module == "core.encoding.json"
+                    && matches!(method, "to_string" | "to_string_pretty")
+                {
+                    if let Some(value) = argv.first() {
+                        if let Some(type_name) = super::super::super::TypedDecode::value_type_name(value) {
+                            if self
+                                .methods
+                                .contains_key(&(type_name, "encode".to_string()))
+                            {
+                                let tree = self.encode_value(value, span)?;
+                                return Ok(CtValue::Str(
+                                    super::super::super::JSONInterp::render_ordered_datatree(
+                                        &tree,
+                                        method == "to_string_pretty",
+                                        0,
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
                 // D-ENC-CBOR-SURFACE1 / R12: generic whole-value CBOR decode
                 // uses the same typed tree walker as every other codec.  Keep
                 // this ahead of the compatibility `cbor.decode(DataTree)` arm
@@ -1920,6 +1945,12 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        // D-SERDE-ENGINE1: primitive and container fields in a generated or
+        // hand-written codec still use the same tree constructor. User types
+        // are handled by the instance-method branch above.
+        if method == "encode" && args.is_empty() {
+            return self.encode_value(&recv, span);
+        }
         if let (
             CtValue::Int(value),
             method @ ("count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
@@ -2083,9 +2114,26 @@ impl<'a> Interp<'a> {
                 _ => {}
             }
         }
+        let template_source = args
+            .iter()
+            .find_map(|arg| arg.flags.template_items.as_deref())
+            .map(|items| {
+                let expanded = crate::Comptime::expand_template_body(
+                    items,
+                    scope,
+                    self.funcs,
+                    self.base_dir,
+                )?;
+                Ok::<_, Diagnostic>(crate::Comptime::format_template_items(expanded))
+            })
+            .transpose()?;
         let mut argv = Vec::new();
         for a in args {
-            argv.push(self.eval(&a.expr, scope)?);
+            if a.flags.template_items.is_some() {
+                argv.push(CtValue::Str(template_source.clone().unwrap_or_default()));
+            } else {
+                argv.push(self.eval(&a.expr, scope)?);
+            }
         }
         let arg_labels = args
             .iter()

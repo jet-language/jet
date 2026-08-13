@@ -2423,7 +2423,9 @@ fn lsp_definition_uses_build_graph_generated_source() {
         return;
     }
     let source = r#"fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("made", "fn generated_value() => String {{ return \"hi\" }}")?
+    b.generate("made") {
+        fn generated_value() => String = "hi";
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])?
     return b.plan(app)
 }

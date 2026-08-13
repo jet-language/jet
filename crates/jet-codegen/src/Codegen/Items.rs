@@ -1996,13 +1996,16 @@ pub(crate) fn emit_external_trait_impl(
     out: &mut String,
 ) {
     let trait_name = i.trait_name.as_deref().unwrap_or("");
-    let codec_params = if matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE) {
+    let impl_params = if matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE) {
         i.methods.first().map(|m| m.type_params.as_slice()).unwrap_or(&[])
     } else {
-        &[]
+        // A top-level trait impl inherits its target's generic parameters.
+        // This is the same owner scope used by an in-type trait block and by
+        // a typed derive body expanded into this item.
+        struct_def.map(|definition| definition.type_params.as_slice()).unwrap_or(&[])
     };
-    let tp_use = Generics::type_param_rust_list(codec_params);
-    let tp_impl = if codec_params.is_empty() {
+    let tp_use = Generics::type_param_rust_list(impl_params);
+    let tp_impl = if impl_params.is_empty() {
         String::new()
     } else {
         let mut extra: std::collections::HashMap<String, Vec<String>> =
@@ -2023,11 +2026,11 @@ pub(crate) fn emit_external_trait_impl(
             })
             .unwrap_or_default();
         for (name, bounds) in
-            Generics::rust_extra_clone_bounds_for_types(codec_params, &clone_shape)
+            Generics::rust_extra_clone_bounds_for_types(impl_params, &clone_shape)
         {
             extra.entry(name).or_default().extend(bounds);
         }
-        Generics::rust_type_param_list(codec_params, &extra)
+        Generics::rust_type_param_list(impl_params, &extra)
     };
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",

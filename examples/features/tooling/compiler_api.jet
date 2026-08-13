@@ -17,7 +17,9 @@ fn build(b: BuildContext) => BuildPlan ? {
     if map.generated_lines().len() != 1 {
         panic("compiler API lost source mapping")
     }
-    b.generate("compiler_api", source)?
+    b.generate("compiler_api") {
+        fn generated_compiler_api() => String = "compiler API";
+    }?
     app :: b.add_executable("compiler_api", ["compiler_api.jet", ".jet/generated/compiler_api/compiler_api.jet"], [])?
     return b.plan(app)
 }

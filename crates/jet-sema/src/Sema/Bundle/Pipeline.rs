@@ -130,6 +130,33 @@ fn collect_item_declared_text_blocks(
     }
 }
 
+fn derive_member_collision(
+    derive_name: &str,
+    type_name: &str,
+    method: &crate::AST::Func,
+    existing_site: &str,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E0105",
+        format!(
+            "generated method `{}` from `derive T.{}` collides with {}",
+            method.name, derive_name, existing_site
+        ),
+        format!(
+            "`derive T.{}` and {} both define a member named `{}` on `{}`",
+            derive_name,
+            existing_site,
+            method.name,
+            type_name
+        ),
+        format!(
+            "rename the generated member in `derive T.{}`, or rename the colliding member",
+            derive_name
+        ),
+        Some(method.name_span),
+    )
+}
+
 fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::new();
@@ -356,7 +383,7 @@ fn check_bundle_opts_for_output_inner(
         usize,
         String,
         String,
-        Vec<crate::AST::Stmt>,
+        Vec<crate::AST::DeriveBodyItem>,
         HashMap<String, Func>,
     )> = bundle
         .modules
@@ -756,8 +783,8 @@ fn check_bundle_opts_for_output_inner(
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
-        // derive bodies can call helper functions and access TypeInfo. Re-entry (D-CTCODEGEN1=A):
-        // emitted fragments go through the full lexer→parser pipeline and are appended as items.
+        // derive bodies can call helper functions and access TypeInfo. The expanded typed
+        // items are appended to the ordinary sema stream; no source string is re-lexed.
         {
             if !derive_providers.is_empty() {
                 let struct_infos: Vec<&crate::AST::StructDef> = module
@@ -775,7 +802,36 @@ fn check_bundle_opts_for_output_inner(
                 let mut new_items: Vec<Item> = Vec::new();
 
                 for s in &struct_infos {
-                    for (derive_name, derive_span) in &s.derives {
+                    let mut existing_member_sites: HashMap<String, String> = HashMap::new();
+                    for item in &module.items {
+                        match item {
+                            Item::Struct(candidate) if candidate.name == s.name => {
+                                for field in &candidate.fields {
+                                    existing_member_sites.insert(
+                                        field.name.clone(),
+                                        format!("existing field `{}.{}`", s.name, field.name),
+                                    );
+                                }
+                                for method in &candidate.methods {
+                                    existing_member_sites.insert(
+                                        method.name.clone(),
+                                        format!("existing method `{}.{}`", s.name, method.name),
+                                    );
+                                }
+                            }
+                            Item::Impl(candidate) if candidate.type_name == s.name => {
+                                for method in &candidate.methods {
+                                    existing_member_sites.insert(
+                                        method.name.clone(),
+                                        format!("existing method `{}.{}`", s.name, method.name),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let mut generated_method_spans: HashMap<String, Span> = HashMap::new();
+                    for (derive_name, _derive_span) in &s.derives {
                         // Prefer an entry-local provider, then one beside the target.
                         // Remaining imported/imported pairs violate the orphan law:
                         // either provider or target must be entry-local.
@@ -840,58 +896,75 @@ fn check_bundle_opts_for_output_inner(
                             &type_path,
                         );
 
-                        match crate::Comptime::evaluate_derive_body(
+                        match crate::Comptime::expand_derive_body(
                             body,
                             type_param,
                             type_info,
                             &actual_funcs,
                             &bundle.project_root,
                         ) {
-                                Ok(fragments) => {
-                                    for fragment in fragments {
-                                        let what = format!(
-                                            "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
-                                            derive_name, derive_name, s.name
-                                        );
-                                        if let Some(mut parsed) =
-                                            super::super::Registration::parse_generated_fragment(
-                                                &fragment,
-                                                what,
-                                                "fix the `derive` body so every emitted fragment is valid Jet source".to_string(),
-                                                *derive_span,
-                                                &mut diags,
-                                            )
-                                        {
-                                            new_items.extend(parsed.drain(..));
+                                Ok(expanded) => {
+                                    let mut methods = Vec::new();
+                                    for item in expanded {
+                                        match item {
+                                            Item::Func(function) => {
+                                                if let Some(existing_site) =
+                                                    existing_member_sites.get(&function.name)
+                                                {
+                                                    diags.push(derive_member_collision(
+                                                        derive_name,
+                                                        &s.name,
+                                                        &function,
+                                                        existing_site,
+                                                    ));
+                                                    continue;
+                                                }
+                                                if let Some(_generated_span) = generated_method_spans
+                                                    .get(&function.name)
+                                                {
+                                                    diags.push(derive_member_collision(
+                                                        derive_name,
+                                                        &s.name,
+                                                        &function,
+                                                        &format!(
+                                                            "another generated method `{}`",
+                                                            function.name
+                                                        ),
+                                                    ));
+                                                    continue;
+                                                }
+                                                generated_method_spans.insert(
+                                                    function.name.clone(),
+                                                    function.name_span,
+                                                );
+                                                methods.push(function)
+                                            }
+                                            other => new_items.push(other),
                                         }
                                     }
+                                    if !methods.is_empty() {
+                                        new_items.push(Item::Impl(crate::AST::ImplDef {
+                                            span: s.span,
+                                            type_name: s.name.clone(),
+                                            type_span: s.name_span,
+                                            // A derive provider names the
+                                            // capability that selects it; its
+                                            // body supplies ordinary members
+                                            // on the target. The provider name
+                                            // is not a Rust/Jet trait
+                                            // conformance requirement.
+                                            trait_name: None,
+                                            trait_span: None,
+                                            methods,
+                                            delegation_field: None,
+                                            assoc_type_impls: Vec::new(),
+                                            is_generated_serde: false,
+                                            os_target: None,
+                                        }));
+                                    }
                                 }
-                                // E2710: derive body failed at comptime. Wrap with context
-                                // pointing at the #TraitName trigger on the struct.
                             Err(inner) => {
-                                let layout_refusal =
-                                    inner.code == "E0956" && inner.what.contains("D-LAYOUT-FACTS1=B");
-                                let why = if layout_refusal {
-                                    format!("{}; {}", inner.what, inner.why)
-                                } else {
-                                    inner.what.clone()
-                                };
-                                let fix = if layout_refusal {
-                                    inner.fix.clone()
-                                } else {
-                                    "fix the `derive` body so it generates valid Jet at compile time"
-                                        .to_string()
-                                };
-                                super::super::push_causal_report(&mut diags, Diagnostic::error(
-                                    "E2710",
-                                    format!(
-                                        "`derive T.{}` body failed while expanding `#{}` on `{}`",
-                                        derive_name, derive_name, s.name
-                                    ),
-                                    why,
-                                    fix,
-                                    Some(*derive_span),
-                                ), inner);
+                                diags.push(inner);
                             }
                         }
                     }

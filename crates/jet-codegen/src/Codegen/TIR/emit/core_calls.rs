@@ -17,6 +17,58 @@ use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::{TExpr, TExprKind};
 
+fn reflect_field_type(cx: &Cx, owner_ty: &Type, declared: &Type) -> Type {
+    let Type::Apply { name, args } = owner_ty else {
+        return declared.clone();
+    };
+    let Some(params) = cx.struct_type_param_order.get(name) else {
+        return declared.clone();
+    };
+    let subst = params
+        .iter()
+        .zip(args)
+        .map(|(param, arg)| (param.clone(), arg.clone()))
+        .collect();
+    crate::Generics::substitute_type(declared, &subst)
+}
+
+fn reflect_nested_value(cx: &Cx, ty: &Type, value: &str) -> String {
+    let type_name = ty.leaf_name();
+    let path = cx.reflect_path(ty);
+    let fields = match ty {
+        Type::Named(name) | Type::Apply { name, .. } => cx
+            .struct_fields
+            .get(name)
+            .map(|fields| {
+                fields
+                    .iter()
+                    .map(|(field_name, declared_ty)| {
+                        let field_ty = reflect_field_type(cx, ty, declared_ty);
+                        let field_value = format!("({value}).{}", mangle(field_name));
+                        format!(
+                            "{}JetReflectField {{ name: {}.to_string(), value: {} }}",
+                            cx.root_prefix,
+                            escape_rust_str(field_name),
+                            reflect_nested_value(cx, &field_ty, &field_value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .map(|fields| format!("vec![{fields}]"))
+            .unwrap_or_else(|| "Vec::new()".to_string()),
+        _ => "Vec::new()".to_string(),
+    };
+    format!(
+        "{}JetReflectValue {{ type_name: {}.to_string(), path: {}.to_string(), display: ({}).jet_display(), fields: {} }}",
+        cx.root_prefix,
+        escape_rust_str(&type_name),
+        escape_rust_str(&path),
+        value,
+        fields
+    )
+}
+
 fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     let Type::Tuple(fields) = ty else {
         return "()".to_string();
@@ -763,35 +815,35 @@ pub(crate) fn emit_tir_core_call(
         // evaluated twice. `.display()` calls `jet_display()` (JetDisplay) —
         // never `jet_show()`/`{:?}` — so it shows exactly what `"{x}"` would,
         // never codegen's mangled Rust field names. `.fields()`'s per-field
-        // values use `jet_show()` (universal — every type has it, primitives
-        // included, so this never needs its own displayability check) and are
-        // populated only when the arg's resolved sema type is a known user
-        // struct (`cx.struct_fields`); every other shape (primitives, enums,
-        // tuples, lists) gets an empty list, never a guess.
+        // values are nested `Value` handles, so the same statically registered
+        // field rows project recursively instead of discarding their types as
+        // strings.
         ("core.reflect", "of") => {
             let arg_ty = args.first().map(|a| &a.ty);
             let type_name = arg_ty.map(Type::leaf_name).unwrap_or_default();
             let path = arg_ty.map(|t| cx.reflect_path(t)).unwrap_or_default();
             let fields_code = match arg_ty {
-                Some(Type::Named(struct_name) | Type::Apply { name: struct_name, .. }) => {
-                    match cx.struct_fields.get(struct_name) {
-                        Some(fields) if !fields.is_empty() => {
-                            let items: Vec<String> = fields
-                                .iter()
-                                .map(|(fname, _)| {
-                                    format!(
-                                        "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
-                                        root = cx.root_prefix,
-                                        fname = fname,
-                                        mangled = mangle(fname)
-                                    )
-                                })
-                                .collect();
-                            format!("vec![{}]", items.join(", "))
-                        }
-                        _ => "Vec::new()".to_string(),
-                    }
-                }
+                Some(owner_ty @ (Type::Named(struct_name) | Type::Apply { name: struct_name, .. })) => cx
+                    .struct_fields
+                    .get(struct_name)
+                    .map(|fields| {
+                        fields
+                            .iter()
+                            .map(|(field_name, declared_ty)| {
+                                let field_ty = reflect_field_type(cx, owner_ty, declared_ty);
+                                let field_value = format!("(__reflect_v).{}", mangle(field_name));
+                                format!(
+                                    "{}JetReflectField {{ name: {}.to_string(), value: {} }}",
+                                    cx.root_prefix,
+                                    escape_rust_str(field_name),
+                                    reflect_nested_value(cx, &field_ty, &field_value)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .map(|fields| format!("vec![{fields}]"))
+                    .unwrap_or_else(|| "Vec::new()".to_string()),
                 _ => "Vec::new()".to_string(),
             };
             format!(

@@ -24,8 +24,8 @@ Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
   `derive T.Wire`). The boilerplate killer.
 - **reflection** — reading a type's shape at compile time (`T.reflect()` →
   `TypeInfo`). The read half of derives.
-- **splice** — `@name`, weaving a compile-time value into generated source
-  (D-CTMARKER1).
+- **splice** — `@name`, a typed hole filled in an item template during
+  expansion (D-CTMARKER1).
 - **build entry** — the compile-time `fn main` equivalent: one function per
   unit that orchestrates its build. Spelling open (D-BUILDENTRY1); this doc
   writes it `fn build(b: BuildContext)`.
@@ -34,8 +34,10 @@ Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
   (D-CTEFFECT1).
 - **capability** — an explicit handle to a slice of the world (a read root, a
   pinned URL, an env var), granted to build code instead of ambient authority.
-- **generated source** — Jet text emitted by metaprogramming that re-enters
-  lexer → parser → sema like hand-written code (D-CTCODEGEN1 / R11).
+- **generated item** — a typed Jet item template whose holes are filled during
+  expansion and whose result enters ordinary sema like hand-written code
+  (D-META-CODE1 / R11). A build boundary may materialize the checked item as
+  Jet source for an addressed generated module.
 
 ## 2. North star
 
@@ -72,15 +74,14 @@ jobs (I8). A beginner lives on rungs 0–1 and never learns the rest exist.
 | 0 | type-driven boilerplate | built-in derives (`#Codable`, …) | shipped (S55) |
 | 1 | compile-time values | `comptime x = f();`, `comptime if`, `comptime { }` | shipped (S26/S57, D-CTMARKER1) |
 | 2 | pure eval + data embedding | whitelist Core (D-CTCORE1), `embed_file`/`embed_bytes` (D-CTIO1), `find` (D-CTFIND1), `fetch(url, sha256:)` (D-NETDEP1) | shipped |
-| 3 | user derives | `T.reflect()` (D-METAREFLECT1) + `derive T.Trait` emitting source fragments with `@` splices (D-METADERIVE1) | shipped |
+| 3 | user derives | `T.reflect()` (D-METAREFLECT1) + typed `derive T.Trait { … }` item templates (D-METADERIVE1/D-META-CODE1) | shipped |
 | 4 | whole-program build metaprogramming | **`fn build`** — this document | ratified 2026-07-01, card c1nixrpd (§15) |
 
 Rejected forever (D-METADEPTH1, load-bearing): token/AST macros, custom
 syntax, attribute macros, comptime types. **One law spans every rung:
-comptime never creates types.** Rung 4 honors it by staging — build code
-computes *values*, one of which is source text handed back to the ordinary
-front end. Type creation happens where it always does: in sema, over real
-source.
+comptime never creates types.** Build code supplies typed item blocks that are
+checked by the ordinary front end. Type creation happens where it always does:
+in sema, over checked Jet items.
 
 ## 4. `fn build` — the auditable bottleneck
 
@@ -92,7 +93,9 @@ stays pure and value-level, so there is exactly one place to audit.
 ```jet
 fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     migrations :: b.find("schema/*.sql")
-    b.generate("db_client", gen_db(migrations))?
+    b.generate("db_client") {
+        module db_client { … }
+    }?
     return b.plan(sources: ["src/main.jet"], generated: ["db_client"])
 }
 ```
@@ -170,13 +173,15 @@ Tier-2 capabilities are exact handles, deny-by-default:
 - secrets: never visible to dependency build code; if supported, named
   capabilities, never ambient env reads
 
-## 6. Generated source — materialized, additive, addressed
+## 6. Generated items — materialized, additive, addressed
 
 The direct answer to Jai's `#insert`, and the cornerstone of auditability.
-D-CTCODEGEN1 (ratified) already fixes the pipeline law: generated code
-re-enters lexer → parser → sema exactly like hand-written source; no
-generation path may inject nodes past the sema gatekeeper; errors pin to the
-user's trigger site with the fragment as optional context.
+D-META-CODE1 and D-META-BODY1 fix the pipeline law: typed item templates are
+checked with the ordinary grammar, their holes are filled at expansion, and
+the resulting items enter sema like hand-written source. No generation path
+may inject unchecked nodes past the sema gatekeeper; errors pin to the user's
+trigger site. A build boundary may then materialize the checked items as an
+addressed `.jet` module.
 
 This vision adds three surface rules (home/addressing balloted as
 **D-BUILDGEN1**):
@@ -368,7 +373,9 @@ Build files must feel like Jet programs, not manifest data. Simple generation:
 ```jet
 fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     schema :: b.embed("schema/app.sql")?
-    b.generate("db_client", make_db_client(schema))?
+    b.generate("db_client") {
+        module db_client { … }
+    }?
 
     app :: b.add_executable("ledger",
         sources: ["src/run.jet"],
@@ -377,16 +384,7 @@ fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     return b.plan(default: app)
 }
 
-fn make_db_client(schema: String) => String {
-    tables :: parse_tables(schema)
-    out := "module db_client {\n"
-
-    loop table; tables {
-        out += make_table_api(table)
-    }
-
-    return out + "}\n"
-}
+// The block may contain ordinary items and compile-time loops over typed data.
 ```
 
 Asset pipeline plus tests:
@@ -399,7 +397,9 @@ fn build(b: BuildContext) =[FS, Exec]=> BuildPlan ? {
         run: ["atlas-pack", "assets/sprites", "build/sprites.atlas"],
         caps: #(FS, Exec))
 
-    b.generate("sprite_ids", make_sprite_enum(atlas.outputs[0]))?
+    b.generate("sprite_ids") {
+        module sprite_ids { … }
+    }?
 
     game :: b.add_executable("game",
         sources: ["src/game.jet"],
@@ -503,7 +503,7 @@ Jai's model structurally cannot deliver this list. It is Jet's moat.
 D-CTMARKER1 `@` splices + `comptime { }` · D-CTCORE1 pure whitelist ·
 D-CTIO1 embed · D-CTFIND1/2 find · D-CTEFFECT1 tiers + `#Impure` ·
 D-NETDEP1 fetch backend (shipped — `Comptime/Methods.rs::eval_net_fetch`,
-sha256-pinned, lock-recorded) · D-CTCODEGEN1 source re-entry ·
+sha256-pinned, lock-recorded) · D-META-CODE1 typed-template sema entry ·
 D-METAREFLECT1 reflection (shipped) · D-METADERIVE1 user derives (shipped) ·
 D-METADEPTH1 ceiling · D-BUILDPROFILE1 profiles (shipped) ·
 D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `package.jet`.
@@ -654,29 +654,29 @@ golden example runs; E3501 fixture blessed.
 
 ### 15.3 D-BUILDGEN1=A — generated source
 
-**Ratified semantics.** `b.generate(name, source)` emits a real `.jet` module
-materialized under `.jet/generated/<package>/<name>.jet` (never committed),
-re-entering lexer → parser → sema like hand-written code (D-CTCODEGEN1, the
-shipped derive path). **Additive-only:** generation may add modules, never
-mutate or shadow user-written source. Rounds run in bounded, deterministic
-order; a later round may read an earlier round's output; a cycle is a compile
-error naming the chain (no loop-until-quiescent). Output hashes + source-input
-hashes are recorded in `.jet/lock`; `--locked` verifies or rejects drift;
-`jet build --emit-generated` copies the files somewhere visible on demand.
+**Ratified semantics.** `b.generate(name) { … }` takes a typed item block and
+materializes a real `.jet` module under `.jet/generated/<package>/<name>.jet`
+(never committed). Filled items enter ordinary sema like hand-written code
+(D-META-CODE1). **Additive-only:** generation may add modules,
+never mutate or shadow user-written source. Rounds run in bounded,
+deterministic order; a later round may read an earlier round's output; a cycle
+is a compile error naming the chain (no loop-until-quiescent). Output hashes +
+source-input hashes are recorded in `.jet/lock`; `--locked` verifies or rejects
+drift; `jet build --emit-generated` copies the files somewhere visible on
+demand.
 
 **API surface (Jet).**
 ```jet
-b.generate(name: String, source: String) => Unit ?   // adds .jet/generated/<pkg>/<name>.jet
+b.generate(name: String) { … } => Unit ?   // adds .jet/generated/<pkg>/<name>.jet
 return b.plan(sources: ["src/main.jet"], generated: ["api_client"])
 ```
 
 **Lands in.**
 - Materialization + staging rounds + additive check: new
   `crates/jet-driver/src/Jetpack/Generated.rs`. `b.generate` in
-  `Comptime/Build.rs` collects `(name, source)` pairs into the `BuildPlan`;
-  the driver writes them, then feeds them through the **existing** front-end
-  re-entry path already used by user derives (D-CTCODEGEN1) — do not invent a
-  second injection path (R11/I3).
+  `Comptime/Build.rs` collects `(name, typed items)` into the `BuildPlan`; the
+  driver materializes the checked block through the ordinary front end — do
+  not invent a second injection path (R11/I3).
 - Lock records: extend `crates/jet-driver/src/Lock.rs` with a
   `generated: [{name, input_hash, output_hash}]` section; `--locked` compare in
   the same file.
@@ -968,8 +968,8 @@ blessed; the two golden variants pass.
 - **I3 — checking stays in sema.** The build entry is never a checking
   strategy. All language type/borrow/effect checking stays in `jet-sema`;
   METADEPTH2 *reads* sema's output and adds **policy** diagnostics only.
-  Codegen stays dumb (I3): generated source (§15.3) goes through the normal
-  sema gate (R11/D-CTCODEGEN1), never injected past it; a bad generated program
+  Codegen stays dumb (I3): generated items (§15.3) go through the normal
+  sema gate (R11/D-META-CODE1), never injected past it; a bad generated program
   is caught by sema and pinned to the trigger site, never handed to rustc
   (I2). No "run the build to see if it type-checks."
 - **I4 — structured diagnostics.** Every new compiler code

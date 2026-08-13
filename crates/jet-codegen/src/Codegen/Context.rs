@@ -3830,8 +3830,7 @@ pub(crate) fn build_cx_items(
                 }
                 cx.struct_fields.insert(
                     s.name.clone(),
-                    s.fields
-                        .iter()
+                    s.reflection_fields()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
                 );

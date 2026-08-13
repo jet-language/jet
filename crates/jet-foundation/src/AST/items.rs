@@ -742,13 +742,30 @@ pub struct StateDecl {
     pub span: Span,
 }
 
+/// D-META-CODE1=A / D-META-BODY1=A: one item or compile-time operation in a
+/// user-authored derive body. Items stay as AST nodes from the definition
+/// parse; expansion fills their typed compile-time holes before ordinary sema
+/// checks them.
+#[derive(Debug, Clone)]
+pub enum DeriveBodyItem {
+    Item(Box<Item>),
+    Stmt(Stmt),
+    Loop {
+        var: String,
+        var_span: Span,
+        source: Expr,
+        body: Vec<DeriveBodyItem>,
+        span: Span,
+    },
+}
+
 /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
 #[derive(Debug, Clone)]
 pub struct DeriveDef {
     pub trait_name: String,
     pub trait_span: Span,
     pub type_param: String,
-    pub body: Vec<Stmt>,
+    pub body: Vec<DeriveBodyItem>,
     pub span: Span,
 }
 
@@ -1574,6 +1591,15 @@ pub struct StructDef {
     /// `validate { }` block.
     pub validate_block: Vec<Stmt>,
     pub validate_span: Option<Span>,
+}
+
+impl StructDef {
+    /// One declaration-owned stored-field model feeds comptime TypeInfo,
+    /// runtime reflection, and every generated field projection. Computed
+    /// fields are methods, not storage rows, so they do not enter this model.
+    pub fn reflection_fields(&self) -> impl Iterator<Item = &Field> {
+        self.fields.iter().filter(|field| field.computed.is_none())
+    }
 }
 
 /// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ? E` — transparent generic type shortcut.

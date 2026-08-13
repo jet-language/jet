@@ -2936,6 +2936,86 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    /// Keep typed `DataTree.Object` literals in source order. Dynamic maps use
+    /// the canonical `BTreeMap` representation, but a generated codec's object
+    /// fields are wire data and must agree with the ordered AOT/JIT tree.
+    fn eval_ordered_json_object_payload(
+        &mut self,
+        payload: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Option<CtValue>, Diagnostic> {
+        let entries: Vec<(&'a TExpr, &'a TExpr)> = match &payload.kind {
+            TExprKind::MapLit(entries) => entries.iter().map(|(key, value)| (key, value)).collect(),
+            TExprKind::IfExpr {
+                cond,
+                then_body,
+                then_value,
+                ..
+            } => {
+                let TIfCond::Plain(condition) = cond.as_ref() else {
+                    return Ok(None);
+                };
+                if !matches!(&condition.kind, TExprKind::BoolLit(true)) {
+                    return Ok(None);
+                }
+                let TExprKind::Local(result) = &then_value.kind else {
+                    return Ok(None);
+                };
+                let Some((first, rest)) = then_body.split_first() else {
+                    return Ok(None);
+                };
+                let TStmt::Let { name, init, .. } = first else {
+                    return Ok(None);
+                };
+                if name != &result.name
+                    || !matches!(&init.kind, TExprKind::MapLit(entries) if entries.is_empty())
+                {
+                    return Ok(None);
+                }
+                let mut entries = Vec::with_capacity(rest.len());
+                for stmt in rest {
+                    let TStmt::IndexAssign {
+                        base,
+                        index,
+                        is_map: true,
+                        value,
+                        ..
+                    } = stmt
+                    else {
+                        return Ok(None);
+                    };
+                    let TExprKind::Local(base_local) = &base.kind else {
+                        return Ok(None);
+                    };
+                    if base_local.name != *name {
+                        return Ok(None);
+                    }
+                    entries.push((index, value));
+                }
+                entries
+            }
+            _ => return Ok(None),
+        };
+
+        let mut fields = Vec::with_capacity(entries.len());
+        for (key, value) in entries {
+            let key = self.eval_expr_child(key, scope)?;
+            let CtValue::Str(key) = key else {
+                return Err(unsupported("JSON object key", self.span()));
+            };
+            let value = self.eval_expr_child(value, scope)?;
+            if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
+                *current = value;
+            } else {
+                fields.push((key, value));
+            }
+        }
+        Ok(Some(CtValue::Struct {
+            type_name: "JSONObject".to_string(),
+            fields,
+        }))
+    }
+
     pub(crate) fn eval_expr(
         &mut self,
         expr: &'a TExpr,
@@ -5327,7 +5407,7 @@ impl<'a> EvalCtx<'a> {
                 // not a second stored TypeInfo member; ordinary `.layout`
                 // remains the full-reflection projection.
                 if let Some(projected) = crate::Syntax::compiler_fact_member(field) {
-                    let CtValue::Struct { type_name, fields } = r else {
+                    let CtValue::Struct { fields, .. } = r else {
                         return Err(crate::Sema::Diagnostics::render_registered(
                             "E0302",
                             format!("`{field}` needs a reflected type value"),
@@ -5337,16 +5417,6 @@ impl<'a> EvalCtx<'a> {
                             Some(self.span()),
                         ));
                     };
-                    if type_name != crate::Syntax::TYPE_TYPE_INFO {
-                        return Err(crate::Sema::Diagnostics::render_registered(
-                            "E0302",
-                            format!("`{field}` needs a reflected type value"),
-                            "compiler facts attach to the type parameter in a derive body"
-                                .to_string(),
-                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
-                            Some(self.span()),
-                        ));
-                    }
                     return fields
                         .into_iter()
                         .find(|(name, _)| name == projected)
@@ -5737,9 +5807,27 @@ impl<'a> EvalCtx<'a> {
                 ..
             } => {
                 let mut r = self.eval_expr_child(recv, scope)?;
+                let template_source = args
+                    .iter()
+                    .find_map(|arg| arg.template_items.as_deref())
+                    .map(|items| {
+                        let funcs = HashMap::new();
+                        let expanded = crate::Comptime::expand_template_body(
+                            items,
+                            scope,
+                            &funcs,
+                            &self.base_dir,
+                        )?;
+                        Ok::<_, Diagnostic>(crate::Comptime::format_template_items(expanded))
+                    })
+                    .transpose()?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
-                    argv.push(self.eval_expr_child(&a.value, scope)?);
+                    if a.template_items.is_some() {
+                        argv.push(CtValue::Str(template_source.clone().unwrap_or_default()));
+                    } else {
+                        argv.push(self.eval_expr_child(&a.value, scope)?);
+                    }
                 }
                 if method.name == "clone" {
                     return self.clone_structural_value(r, &recv.ty);
@@ -7009,6 +7097,12 @@ impl<'a> EvalCtx<'a> {
             }),
             TExprKind::JSONLit { variant, arg } => {
                 let payload = match arg {
+                    Some(inner) if variant == "Object" => {
+                        match self.eval_ordered_json_object_payload(&inner.0, scope)? {
+                            Some(value) => Some(value),
+                            None => Some(self.eval_expr_child(&inner.0, scope)?),
+                        }
+                    }
                     Some(inner) => Some(self.eval_expr_child(&inner.0, scope)?),
                     None => None,
                 };

@@ -41,6 +41,15 @@ in a value fn E0405, nested `T??`, a bare `Variant(n) ->` arm) — they never re
 (Type *definitions* — `emit_struct`/`emit_enum`/`emit_trait_def` — are structural, not bodies,
 and emit directly; only executable bodies go through the TIR.)
 
+### One reflection model
+
+`StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
+comptime `TypeInfo`, runtime `reflect.of`, TIR evaluation, and generated field
+projection. Comptime reads facts from those rows; runtime wraps each projected
+field in a typed `Value` and adds display text only as a view. AOT, resident JIT,
+and the interpreter therefore preserve the same names, types, and nested value
+shape instead of maintaining a second string-field model.
+
 ## Compiler crate map
 
 D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
@@ -566,21 +575,21 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   not maintain a copied fallback template. `core.archive` is the concrete
   model: `corelib/core.archive/pkgs/archive/src/lib.rs` is consumed directly by
   both CoreProvider and the hidden bridge fallback.
-- **R11 — Generated code re-enters the front end.** Every build-time
-  code-generation step — a derive body, a comptime splice, any future
-  metaprogram — emits a **typed source fragment** that re-enters
-  lexer→parser→sema exactly like hand-written code. **No generation path may
-  inject pre-parsed AST past the sema gatekeeper** (R2). The guarantee that
-  buys: generated code is trustworthy-by-construction (R1 codegen-dumb, R2
+- **R11 — Generated code enters the front end.** Every typed build-time
+  generation step — a derive body, a comptime splice, or a future metaprogram
+  — parses its item template with the ordinary grammar, fills typed holes at
+  expansion, and sends the filled items through sema exactly like hand-written
+  code. A build materialization boundary may format those checked items into a
+  `.jet` file, but no generation path may inject unchecked AST or source text
+  past the sema gatekeeper (R2). The guarantee that buys:
+  generated code is trustworthy-by-construction (R1 codegen-dumb, R2
   sema-gatekeeper, R5/I2 rustc-never-speaks all keep holding through
   generation), and any error in generated output surfaces as a **real sema
   diagnostic pinned to the user's trigger site** — the struct, field, or
-  derive marker that caused it — with the generated fragment shown only as
-  optional context, never as raw rustc output. The shipped `#Codable` derive
-  already works this way; it is the required shape for all future derives and
-  build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
-  2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a
-  source fragment for exactly this reason.)
+  derive marker that caused it — never as raw rustc output. The shipped
+  `#Codable` derive already works this way; it is the required shape for all
+  future derives and build-time steps (S56 user derives, comptime).
+  (D-META-CODE1/D-META-BODY1 supersede the old source-reparse route.)
 - **R12 — One semantic core, every engine a dumb exhaustive consumer.** TIR is
   the single structured IR after sema. Every executable variant carries semantic
   facts (places, types, patterns, method identities) — never pre-rendered Rust

@@ -38,6 +38,29 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
+fn reflect_child(value: &CtValue) -> CtValue {
+    let mut fields = vec![("value".to_string(), value.clone())];
+    if let CtValue::Struct {
+        fields: value_fields,
+        ..
+    } = value
+    {
+        fields.push((
+            "field_names".to_string(),
+            CtValue::List(
+                value_fields
+                    .iter()
+                    .map(|(name, _)| CtValue::Str(name.clone()))
+                    .collect(),
+            ),
+        ));
+    }
+    CtValue::Struct {
+        type_name: "__Reflect".to_string(),
+        fields,
+    }
+}
+
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -907,7 +930,7 @@ pub fn apply_method(
                         type_name: "__ReflectField".to_string(),
                         fields: vec![
                             ("name".to_string(), CtValue::Str(n.clone())),
-                            ("value".to_string(), v.clone()),
+                            ("value".to_string(), reflect_child(v)),
                         ],
                     })
                     .collect(),

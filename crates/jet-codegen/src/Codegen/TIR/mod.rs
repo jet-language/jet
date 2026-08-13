@@ -5150,6 +5150,9 @@ pub enum THandleOp {
 /// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`).
 pub struct TCallArg {
     pub value: TExpr,
+    /// D-META-BODY1=A: `b.generate(name) { … }` carries its typed item
+    /// template beside the lowered placeholder value.
+    pub template_items: Option<Vec<crate::AST::DeriveBodyItem>>,
     /// Emit `&(...)` around the value (a non-scalar passed by `Read` convention).
     pub borrow: bool,
     /// Emit `&mut (...)` around the value (a `Mutate`-convention argument). c109

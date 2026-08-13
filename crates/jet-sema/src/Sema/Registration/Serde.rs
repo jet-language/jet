@@ -1,529 +1,1382 @@
 use super::*;
+use crate::AST::{
+    AccessConvention, BinOp, Call, CallArg, CallArgFlags, CtReport, CtValue, EnumLitArg,
+    Expr, ForKind, Func, ImplDef, IndexKind, Item, LValue, Param, PatSlot, Pattern, Stmt,
+    SwitchArm, TryConvert, Type, TypeParam, VariantPayload,
+};
 
-pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
+/// D-SERDE2=A / I3: built-in codecs are ordinary Jet AST items. The builder
+/// below shares the same method/body representation as hand-written codecs;
+/// only the declaration data comes from the reflected struct or enum.
+pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, _diags: &mut Vec<Diagnostic>) {
+    let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     let mut generated_items = Vec::new();
-    for item in items.iter_mut() {
-        if let Item::Enum(e) = item {
-            expand_builtin_enum_serde(e, diags, &mut generated_items);
-            continue;
-        }
-        let Item::Struct(s) = item else { continue };
-        let enc = s.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
-        let dec = s.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
-        if !enc && !dec { continue; }
-
-        // The synthetic container exists only to make the generated codec pass
-        // through the ordinary parser/checker.  Its inherited parameters need
-        // the same wire bounds that the final Rust impl receives; otherwise a
-        // field of type `T` is (correctly) rejected as not encodable while the
-        // generated Encode body is checked.
-        let mut codec_params = s.type_params.clone();
-        let wire_types = s.fields.iter()
-            .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP))
-            .map(|f| &f.ty)
-            .collect::<Vec<_>>();
-        for param in &mut codec_params {
-            let reaches_wire = wire_types.iter()
-                .any(|ty| crate::Generics::free_type_params(ty).contains(&param.name));
-            if reaches_wire && enc && !param.bounds.iter().any(|b| b == crate::Generics::ENCODE) {
-                param.bounds.push(crate::Generics::ENCODE.to_string());
+    let snapshot = items.clone();
+    for item in &snapshot {
+        match item {
+            Item::Struct(s)
+                if has_codec(&s.derives)
+                    || auto.auto_encode.contains(&s.name)
+                    || auto.auto_decode.contains(&s.name) =>
+            {
+                let mut derived = s.clone();
+                add_auto_codec_marker(
+                    &mut derived.derives,
+                    crate::Generics::ENCODE,
+                    &auto.auto_encode,
+                    &derived.name,
+                    derived.name_span,
+                );
+                add_auto_codec_marker(
+                    &mut derived.derives,
+                    crate::Generics::DECODE,
+                    &auto.auto_decode,
+                    &derived.name,
+                    derived.name_span,
+                );
+                generated_items.extend(struct_codec_items(&derived));
             }
-            if reaches_wire && dec && !param.bounds.iter().any(|b| b == crate::Generics::DECODE) {
-                param.bounds.push(crate::Generics::DECODE.to_string());
+            Item::Enum(e)
+                if has_codec(&e.derives)
+                    || auto.auto_encode.contains(&e.name)
+                    || auto.auto_decode.contains(&e.name) =>
+            {
+                let mut derived = e.clone();
+                add_auto_codec_marker(
+                    &mut derived.derives,
+                    crate::Generics::ENCODE,
+                    &auto.auto_encode,
+                    &derived.name,
+                    derived.name_span,
+                );
+                add_auto_codec_marker(
+                    &mut derived.derives,
+                    crate::Generics::DECODE,
+                    &auto.auto_decode,
+                    &derived.name,
+                    derived.name_span,
+                );
+                generated_items.extend(enum_codec_items(&derived));
             }
-        }
-        let params = crate::Generics::format_type_params(&codec_params);
-        let target = format!("{}{}", s.name, serde_type_arg_names(&s.type_params));
-        let mut source = String::new();
-        if enc {
-            source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\n", s.name));
-            let active: Vec<_> = s.fields.iter().filter(|f|
-                !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
-            ).collect();
-            let needs_mutation = active.iter().any(|f|
-                f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN)
-            );
-            if !needs_mutation {
-                source.push_str(&serde_ordered_object_source(&s.serde_markers, &active));
-            } else {
-                source.push_str("out := [String: DataTree].{}\n");
-            for f in &s.fields {
-                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
-                { continue; }
-                let key = serde_source_field_key(&s.serde_markers, f);
-                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN) {
-                    source.push_str(&format!(
-                        "nested :: self.{}.encode()\nif nested == {{ .Object(entries) -> {{ loop (key, value), entries {{ out[key] = value }} }} else -> {{}} }}\n",
-                        f.name
-                    ));
-                } else if matches!(f.ty, Type::Option(_)) {
-                    source.push_str(&format!(
-                        "if (~self.{}) == {{ .Val(value) -> {{ out[{:?}] = (~value).encode() }} else -> {{}} }}\n",
-                        f.name, key
-                    ));
-                } else {
-                    source.push_str(&format!("out[{:?}] = self.{}.encode()\n", key, f.name));
-                }
-            }
-                source.push_str("return DataTree.Object(out)\n");
-            }
-            source.push_str("}\n}\n");
-        }
-        if dec {
-            source.push_str(&format!("impl {}.Decode {{\n", s.name));
-            source.push_str(&format!("fn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n"));
-            let deny_unknown = s.serde_markers.iter().any(|m|
-                m.name == crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS
-            );
-            let has_flatten = s.fields.iter().any(|f|
-                f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN)
-            );
-            source.push_str("jet_serde_errors := [FieldError].{}\n");
-            // A missing field is only a missing field on an object. Do not let
-            // optional/default fallbacks turn a scalar/array root into a
-            // successfully decoded record, or hide the root shape error.
-            source.push_str(
-                "jet_serde_is_object := false\nif (~tree) == { .Object(jet_serde_root_entries) -> { jet_serde_is_object = true } else -> {} }\nif { !jet_serde_is_object -> { return Err([FieldError.{ path: \"\", reason: \"expected an object\" }]) } else -> {} }\n",
-            );
-            if deny_unknown && !has_flatten {
-                let keys = s.fields.iter()
-                    .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP))
-                    .map(|f| format!("{:?}", serde_source_field_key(&s.serde_markers, f)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                source.push_str(&format!(
-                    "if (~tree) == {{ .Object(entries) -> {{ loop (key, value), entries {{ if {{ ![{keys}].contains(key) -> {{ jet_serde_errors.push(FieldError.{{ path: ~key, reason: \"E2412: unknown field `{{key}}`\" }}) }} else -> {{}} }} }} }} else -> {{}} }}\n"
-                ));
-            }
-            let mut field_values = Vec::new();
-            let mut decoded_results = Vec::new();
-            let mut required_presence = Vec::new();
-            for f in s.fields.iter().filter(|f| f.computed.is_none()) {
-                let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP) {
-                    serde_source_default(f).unwrap_or_else(|| serde_source_zero(&f.ty))
-                } else if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN) {
-                    let result = format!("jet_serde_decode_{}", f.name);
-                    let value = format!("jet_serde_decoded_value_{}", decoded_results.len());
-                    source.push_str(&format!(
-                        "{result} := tree.decode<{}>()\n",
-                        serde_type_source(&f.ty)
-                    ));
-                    decoded_results.push((result, value.clone(), None, None));
-                    value
-                } else {
-                    let key = serde_source_field_key(&s.serde_markers, f);
-                    let required = !matches!(f.ty, Type::Option(_)) && serde_source_default(f).is_none();
-                    let missing_var = if required {
-                        let var = format!("jet_serde_missing_required_{}", decoded_results.len());
-                        source.push_str(&format!("{var} := false\n"));
-                        required_presence.push((var.clone(), key.clone()));
-                        Some(var)
-                    } else {
-                        None
-                    };
-                    let subtree = if matches!(f.ty, Type::Option(_)) {
-                        format!("(tree.field({key:?}) ?? DataTree.Null)")
-                    } else if let Some(default) = serde_source_default(f) {
-                        format!("(tree.field({key:?}) ?? {default}.encode())")
-                    } else {
-                        // Keep a missing required field in the same accumulated
-                        // list as wrong-typed siblings. The null sentinel is
-                        // decoded below and framed at this field boundary.
-                        format!("(tree.field({key:?}) ?? DataTree.Null)")
-                    };
-                    let result = format!("jet_serde_decode_{}", f.name);
-                    let value_var = format!("jet_serde_decoded_value_{}", decoded_results.len());
-                    source.push_str(&format!(
-                        "{result} := FieldError.under({key:?}, {subtree}.decode<{}>())\n",
-                        serde_type_source(&f.ty)
-                    ));
-                    decoded_results.push((result, value_var.clone(), missing_var, Some(key)));
-                    value_var
-                };
-                field_values.push(format!("{}: {}", f.name, value));
-            }
-            if !required_presence.is_empty() {
-                source.push_str("if (~tree) == { .Object(jet_serde_presence_entries) -> {\n");
-                for (missing_var, _) in &required_presence {
-                    source.push_str(&format!("{missing_var} = true\n"));
-                }
-                source.push_str("loop (jet_serde_presence_key, jet_serde_presence_value), jet_serde_presence_entries {\n");
-                for (missing_var, key) in &required_presence {
-                    source.push_str(&format!(
-                        "if {{ jet_serde_presence_key == {key:?} -> {{ {missing_var} = false }} else -> {{}} }}\n"
-                    ));
-                }
-                source.push_str("}\n} else -> {} }\n");
-            }
-            for (index, (result, _, missing_var, key)) in decoded_results.iter().enumerate() {
-                source.push_str(&format!(
-                    "if (~{result}) == {{ .Err(jet_serde_field_errors_{index}) -> {{ {} }} else -> {{}} }}\n",
-                    if let (Some(missing_var), Some(key)) = (missing_var, key) {
-                        format!(
-                            "if {{ {missing_var} -> {{ jet_serde_errors.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else -> {{ loop jet_serde_field_error_{index}, jet_serde_field_errors_{index} {{ jet_serde_errors.push(jet_serde_field_error_{index}) }} }} }}"
-                        )
-                    } else {
-                        format!("loop jet_serde_field_error_{index}, jet_serde_field_errors_{index} {{ jet_serde_errors.push(jet_serde_field_error_{index}) }}")
-                    }
-                ));
-            }
-            source.push_str("if { jet_serde_errors.is_empty() -> {\n");
-            for (index, (result, _, _, _)) in decoded_results.iter().enumerate() {
-                source.push_str(&format!(
-                    "if (~{result}) == {{ .Ok(jet_serde_decoded_value_{index}) -> {{\n"
-                ));
-            }
-            source.push_str(&format!(
-                "decoded :: {target}.{{ {} }}\n",
-                field_values.join(", ")
-            ));
-            if s.validate_block.is_empty() {
-                source.push_str("return Ok(decoded)\n");
-            } else {
-                // D-VALIDATE1 / D-VALIDATE-DECODE1: a successfully shaped
-                // value enters the same synthesized validator. Its list is
-                // returned unchanged, so shape and rule failures share one
-                // typed error contract.
-                source.push_str(&format!("return {target}.validate(decoded)\n"));
-            }
-            for _ in &decoded_results {
-                source.push_str("} else -> {} }\n");
-            }
-            source.push_str("} else -> {} }\nreturn Err(jet_serde_errors)\n");
-            source.push_str("}\n}\n");
-        }
-        let trigger_span = s.derives.iter()
-            .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
-            .map(|(_, span)| *span)
-            .unwrap_or(s.name_span);
-        match parse_generated_fragment(
-            &source,
-            format!("built-in codec derive generated invalid Jet for `{}`", s.name),
-            "built-in derives must emit valid ordinary Jet".to_string(),
-            trigger_span,
-            diags,
-        ) {
-            Some(generated) => {
-                generated_items.extend(generated.into_iter().filter_map(|item| match item {
-                    Item::Impl(mut imp) => {
-                        imp.is_generated_serde = true;
-                        Some(Item::Impl(imp))
-                    }
-                    _ => None,
-                }));
-            }
-            None => {}
+            _ => {}
         }
     }
     items.extend(generated_items);
 }
 
-fn expand_builtin_enum_serde(
-    e: &mut crate::AST::EnumDef,
-    diags: &mut Vec<Diagnostic>,
-    generated_items: &mut Vec<Item>,
+fn add_auto_codec_marker(
+    derives: &mut Vec<(String, Span)>,
+    trait_name: &str,
+    automatic: &std::collections::HashSet<String>,
+    type_name: &str,
+    span: Span,
 ) {
-    let enc = e.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
-    let dec = e.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
-    if !enc && !dec { return; }
-    let mut codec_params = e.type_params.clone();
-    let wire_types = e.variants.iter().flat_map(|v| match &v.payload {
-        crate::AST::VariantPayload::Unit => Vec::new(),
-        crate::AST::VariantPayload::Single(t, _) => vec![t],
-        crate::AST::VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
-    }).collect::<Vec<_>>();
-    for param in &mut codec_params {
-        let reaches_wire = wire_types.iter().any(|ty|
-            crate::Generics::free_type_params(ty).contains(&param.name));
-        if reaches_wire && enc && !param.bounds.iter().any(|b| b == crate::Generics::ENCODE) {
+    if automatic.contains(type_name) && !has_derive(derives, trait_name) {
+        derives.push((trait_name.to_string(), span));
+    }
+}
+
+fn has_codec(derives: &[(String, Span)]) -> bool {
+    derives
+        .iter()
+        .any(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
+}
+
+fn has_derive(derives: &[(String, Span)], name: &str) -> bool {
+    derives.iter().any(|(derive, _)| derive == name)
+}
+
+fn codec_params(
+    params: &[TypeParam],
+    wire_types: impl IntoIterator<Item = Type>,
+    encode: bool,
+    decode: bool,
+) -> Vec<TypeParam> {
+    let wire_types = wire_types.into_iter().collect::<Vec<_>>();
+    let mut params = params.to_vec();
+    for param in &mut params {
+        let reaches_wire = wire_types.iter().any(|ty| {
+            crate::Generics::free_type_params(ty).contains(&param.name)
+        });
+        if reaches_wire && encode && !param.bounds.iter().any(|bound| bound == crate::Generics::ENCODE) {
             param.bounds.push(crate::Generics::ENCODE.to_string());
         }
-        if reaches_wire && dec && !param.bounds.iter().any(|b| b == crate::Generics::DECODE) {
+        if reaches_wire && decode && !param.bounds.iter().any(|bound| bound == crate::Generics::DECODE) {
             param.bounds.push(crate::Generics::DECODE.to_string());
         }
     }
-    let params = crate::Generics::format_type_params(&codec_params);
-    let target = format!("{}{}", e.name, serde_type_arg_names(&e.type_params));
-    let tag = e
-        .serde_markers
+    params
+}
+
+fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
+    let encode = has_derive(&s.derives, crate::Generics::ENCODE);
+    let decode = has_derive(&s.derives, crate::Generics::DECODE);
+    let wire_types = s
+        .reflection_fields()
+        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+        .map(|field| field.ty.clone());
+    let params = codec_params(&s.type_params, wire_types, encode, decode);
+    let span = s
+        .derives
         .iter()
-        .find(|m| m.name == crate::Syntax::MARKER_TAG)
-        .and_then(marker_static_string);
-    let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_UNTAGGED);
-    let mut source = String::new();
-    if enc {
-        source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\nif self == {{\n", e.name));
-        for v in &e.variants {
-            let wire = serde_enum_variant_key(v);
-            let (pattern, payload) = serde_enum_pattern_and_value(v);
-            let value = if untagged {
-                match &v.payload {
-                    crate::AST::VariantPayload::Unit => "DataTree.Null".to_string(),
-                    crate::AST::VariantPayload::Single(..) => "(~v0).encode()".to_string(),
-                    crate::AST::VariantPayload::Named(fs) => format!("DataTree.Object([{}])", serde_enum_named_pairs(fs)),
-                }
-            } else if let Some(tag_key) = &tag {
-                match &v.payload {
-                    crate::AST::VariantPayload::Unit => format!("DataTree.Object([{tag_key:?}: DataTree.Text({wire:?})])"),
-                    crate::AST::VariantPayload::Named(fs) => {
-                        let pairs = serde_enum_named_pairs(fs);
-                        format!("DataTree.Object([{tag_key:?}: DataTree.Text({wire:?}){}{}])", if pairs.is_empty(){""}else{" ,"}, pairs)
-                    }
-                    crate::AST::VariantPayload::Single(..) => format!(
-                        "DataTree.Object([{tag_key:?}: DataTree.Text({wire:?}), \"value\": {payload}])"
-                    ),
-                }
-            } else {
-                match &v.payload {
-                    crate::AST::VariantPayload::Unit => format!("DataTree.Text({wire:?})"),
-                    crate::AST::VariantPayload::Single(..) => format!("DataTree.Object([{wire:?}: {payload}])"),
-                    crate::AST::VariantPayload::Named(fs) => format!("DataTree.Object([{wire:?}: DataTree.Object([{}])])", serde_enum_named_pairs(fs)),
-                }
-            };
-            source.push_str(&format!("{pattern} -> {{ return {value} }}\n"));
-        }
-        // The enum patterns cover every variant. Omitting the final else lets
-        // the parser create its internal exhaustive-dispatch terminator,
-        // which lowers to a diverging unreachable arm and keeps the generated
-        // encoder's value-return proof honest.
-        source.push_str("}\n}\n}\n");
+        .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
+        .map(|(_, span)| *span)
+        .unwrap_or(s.name_span);
+    let mut out = Vec::new();
+    if encode {
+        out.push(Item::Impl(serde_impl(
+            &s.name,
+            crate::Generics::ENCODE,
+            serde_method(
+                "encode",
+                params.clone(),
+                vec![self_param(span)],
+                Some(data_tree_type()),
+                struct_encode_body(s, span),
+                span,
+            ),
+            span,
+        )));
     }
-    if dec {
-        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n", e.name));
-        if untagged {
-            for v in &e.variants {
-                source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
-            }
-        } else if let Some(tag_key) = &tag {
-            source.push_str(&format!(
-                "tag_value := FieldError.under({tag_key:?}, (tree.field({tag_key:?}) ?? DataTree.Null).decode<String>())?\n"
-            ));
-            for v in &e.variants {
-                let wire = serde_enum_variant_key(v);
-                let payload_source = if matches!(v.payload, crate::AST::VariantPayload::Single(..)) {
-                    "(tree.field(\"value\")?)"
-                } else {
-                    "tree"
-                };
-                let single_segment = if matches!(v.payload, crate::AST::VariantPayload::Single(..)) {
-                    Some("value")
-                } else {
-                    None
-                };
-                source.push_str(&format!(
-                "if {{ tag_value == {wire:?} -> {{ {} }} else -> {{}} }}\n",
-                    serde_enum_decode_return(&target, v, payload_source, single_segment)
-                ));
-            }
-        } else {
-            let mut object_arms = String::new();
-            for (variant_index, v) in e.variants.iter().enumerate() {
-                match &v.payload {
-                    crate::AST::VariantPayload::Unit => {
-                        let wire = serde_enum_variant_key(v);
-                        source.push_str(&format!("if (~tree) == {{ .Text(variant_name) -> {{ if {{ variant_name == {wire:?} -> {{ return Ok({target}.{}) }} else -> {{}} }} }} else -> {{}} }}\n", v.name));
-                    }
-                    _ => {
-                        let wire = serde_enum_variant_key(v);
-                        let candidate = format!("candidate_{variant_index}");
-                        object_arms.push_str(&format!(
-                            "{candidate} := (~tree).field({wire:?}) ?? DataTree.Null\n"
-                        ));
-                        match &v.payload {
-                            crate::AST::VariantPayload::Single(t, _) => {
-                                let decoded = format!("decoded_{variant_index}");
-                                object_arms.push_str(&format!("{decoded} := FieldError.under({wire:?}, {candidate}.decode<{}>())\nif {decoded} == {{ .Ok(decoded_value) -> {{ return Ok({target}.{}(decoded_value)) }} else -> {{}} }}\n", serde_type_source(t), v.name));
-                            }
-                            crate::AST::VariantPayload::Named(_) => {
-                                object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate, None)));
-                            }
-                            crate::AST::VariantPayload::Unit => {}
-                        }
-                    }
-                }
-            }
-            source.push_str(&object_arms);
-        }
-        source.push_str("return Err([FieldError.{ path: \"\", reason: \"no matching enum variant\" }])\n}\n}\n");
+    if decode {
+        out.push(Item::Impl(serde_impl(
+            &s.name,
+            crate::Generics::DECODE,
+            serde_method(
+                "decode",
+                params,
+                vec![named_param("tree", data_tree_type(), span)],
+                Some(result_type(target_type(&s.name, &s.type_params), span)),
+                struct_decode_body(s, span),
+                span,
+            ),
+            span,
+        )));
     }
-    let trigger_span = e.derives.iter()
+    out
+}
+
+fn enum_codec_items(e: &crate::AST::EnumDef) -> Vec<Item> {
+    let encode = has_derive(&e.derives, crate::Generics::ENCODE);
+    let decode = has_derive(&e.derives, crate::Generics::DECODE);
+    let wire_types = e.variants.iter().flat_map(|variant| match &variant.payload {
+        VariantPayload::Unit => Vec::new(),
+        VariantPayload::Single(ty, _) => vec![ty.clone()],
+        VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
+    });
+    let params = codec_params(&e.type_params, wire_types, encode, decode);
+    let span = e
+        .derives
+        .iter()
         .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
         .map(|(_, span)| *span)
         .unwrap_or(e.name_span);
-    match parse_generated_fragment(
-        &source,
-        format!("built-in codec derive generated invalid Jet for `{}`", e.name),
-        "built-in derives must emit valid ordinary Jet".to_string(),
-        trigger_span,
-        diags,
-    ) {
-        Some(generated) => {
-            generated_items.extend(generated.into_iter().filter_map(|item| match item {
-                Item::Impl(mut imp) => {
-                    imp.is_generated_serde = true;
-                    Some(Item::Impl(imp))
-                }
-                _ => None,
-            }));
-        }
-        None => {}
+    let mut out = Vec::new();
+    if encode {
+        out.push(Item::Impl(serde_impl(
+            &e.name,
+            crate::Generics::ENCODE,
+            serde_method(
+                "encode",
+                params.clone(),
+                vec![self_param(span)],
+                Some(data_tree_type()),
+                enum_encode_body(e, span),
+                span,
+            ),
+            span,
+        )));
+    }
+    if decode {
+        out.push(Item::Impl(serde_impl(
+            &e.name,
+            crate::Generics::DECODE,
+            serde_method(
+                "decode",
+                params,
+                vec![named_param("tree", data_tree_type(), span)],
+                Some(result_type(target_type(&e.name, &e.type_params), span)),
+                enum_decode_body(e, span),
+                span,
+            ),
+            span,
+        )));
+    }
+    out
+}
+
+fn serde_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> ImplDef {
+    ImplDef {
+        span,
+        type_name: type_name.to_string(),
+        type_span: span,
+        trait_name: Some(trait_name.to_string()),
+        trait_span: Some(span),
+        methods: vec![method],
+        delegation_field: None,
+        assoc_type_impls: Vec::new(),
+        is_generated_serde: true,
+        os_target: None,
     }
 }
 
-fn reanchor_generated_items(items: &mut [Item], trigger_span: crate::Diagnostics::Span) {
-    for item in items {
-        match item {
-            Item::Func(function) => {
-                for statement in &mut function.body {
-                    statement.reanchor(trigger_span);
-                }
-            }
-            Item::Impl(implementation) => {
-                for method in &mut implementation.methods {
-                    for statement in &mut method.body {
-                        statement.reanchor(trigger_span);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+fn serde_method(
+    name: &str,
+    type_params: Vec<TypeParam>,
+    params: Vec<Param>,
+    return_type: Option<Type>,
+    body: Vec<Stmt>,
+    span: Span,
+) -> Func {
+    let mut function = Func::implicit_run(body, span);
+    function.name = name.to_string();
+    function.name_span = span;
+    function.type_params = type_params;
+    function.params = params;
+    function.return_type = return_type;
+    function.return_type_span = function.return_type.as_ref().map(|_| span);
+    function
 }
 
-pub(crate) fn parse_generated_fragment(
-    source: &str,
-    what: String,
-    fix: String,
-    trigger_span: Span,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Vec<Item>> {
-    let (tokens, lex_diags) = crate::Lexer::lex(source);
-    let parsed = if lex_diags.is_empty() {
-        crate::Parser::parse(&tokens)
-    } else {
-        Err(lex_diags)
+fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
+    let fields = s
+        .reflection_fields()
+        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+        .collect::<Vec<_>>();
+    let has_flatten = fields
+        .iter()
+        .any(|field| has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN));
+    if !has_flatten {
+        return ordered_encode_fields(&s.serde_markers, &fields, 0, Vec::new(), span);
+    }
+
+    let mut body = vec![binding(
+        "out",
+        Some(map_type(data_tree_type(), span)),
+        map_literal(Vec::new(), span),
+        true,
+        span,
+    )];
+    for field in fields {
+        let key = serde_field_key(&s.serde_markers, field);
+        if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
+            let nested = format!("jet_serde_nested_{}", field.name);
+            body.push(binding(
+                &nested,
+                None,
+                method(field_read("self", &field.name, span), "encode", Vec::new(), span),
+                false,
+                span,
+            ));
+            body.push(pattern_switch(
+                copy(ident(&nested, span), span),
+                "Object",
+                vec!["entries".to_string()],
+                vec![for_each_map(
+                    "key",
+                    "value",
+                    ident("entries", span),
+                    vec![assign_index(
+                        "out",
+                        ident("key", span),
+                        ident("value", span),
+                        span,
+                    )],
+                    span,
+                )],
+                Some(Vec::new()),
+                span,
+            ));
+        } else if matches!(field.ty, Type::Option(_)) {
+            body.push(option_encode(
+                copy(field_read("self", &field.name, span), span),
+                &key,
+                vec![field.name.clone()],
+                span,
+            ));
+        } else {
+            body.push(assign_index(
+                "out",
+                string_expr(&key, span),
+                method(field_read("self", &field.name, span), "encode", Vec::new(), span),
+                span,
+            ));
+        }
+    }
+    body.push(ret(data_tree_object_expr(ident("out", span), span), span));
+    body
+}
+
+fn ordered_encode_fields(
+    container_markers: &[crate::AST::Marker],
+    fields: &[&crate::AST::Field],
+    index: usize,
+    pairs: Vec<(Expr, Expr)>,
+    span: Span,
+) -> Vec<Stmt> {
+    let Some(field) = fields.get(index) else {
+        return vec![ret(data_tree_object(pairs, span), span)];
     };
-    match parsed {
-        // The ordinary Rust arm is `Ok(generated)`.  Keep the Jet-shaped
-        // source contract token `.Ok(generated) => Some(generated.items)`
-        // spelling in the source contract: the test guards that expansion
-        // still returns parsed top-level items rather than transplanting an
-        // AST fragment into the user type.
-        Ok(mut generated) => {
-            reanchor_generated_items(&mut generated.items, trigger_span);
-            Some(generated.items)
-        }
-        Err(errors) => {
-            let detail = errors
-                .first()
-                .map(|d| format!("{} at {:?}", d.what, d.span))
-                .unwrap_or_else(|| "generated codec source was invalid".to_string());
-            let diagnostic = Diagnostic::error(
-                "E2710",
-                what,
-                format!(
-                    "generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"
-                ),
-                fix,
-                Some(trigger_span),
-            );
-            if let Some(cause) = errors.first() {
-                push_causal_report(diags, diagnostic, cause.clone());
+    let key = serde_field_key(container_markers, field);
+    let next_pairs = |value: Expr| {
+        let mut next = pairs.clone();
+        next.push((string_expr(&key, span), value));
+        ordered_encode_fields(container_markers, fields, index + 1, next, span)
+    };
+    if matches!(field.ty, Type::Option(_)) {
+        let present = next_pairs(method(ident("jet_serde_option_value", span), "encode", Vec::new(), span));
+        vec![option_switch(
+            copy(field_read("self", &field.name, span), span),
+            "jet_serde_option_value",
+            present,
+            ordered_encode_fields(container_markers, fields, index + 1, pairs, span),
+            span,
+        )]
+    } else {
+        next_pairs(method(field_read("self", &field.name, span), "encode", Vec::new(), span))
+    }
+}
+
+fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
+    let mut body = vec![binding(
+        "jet_serde_errors",
+        Some(field_error_list_type(span)),
+        list_literal(Vec::new(), span),
+        true,
+        span,
+    )];
+    body.push(binding("jet_serde_is_object", Some(Type::Bool), Expr::Bool(false, span), true, span));
+    body.push(pattern_switch(
+        copy(ident("tree", span), span),
+        "Object",
+        vec!["jet_serde_root_entries".to_string()],
+        vec![assign_local("jet_serde_is_object", Expr::Bool(true, span), span)],
+        Some(Vec::new()),
+        span,
+    ));
+    body.push(if_stmt(
+        unary_not(ident("jet_serde_is_object", span), span),
+        vec![ret(
+            err(list_literal(vec![field_error("", "expected an object", span)], span), span),
+            span,
+        )],
+        span,
+    ));
+
+    let deny_unknown = has_marker(&s.serde_markers, crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS);
+    let has_flatten = s.reflection_fields().any(|field| {
+        has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN)
+    });
+    if deny_unknown && !has_flatten {
+        let keys = s
+            .reflection_fields()
+            .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+            .map(|field| string_expr(&serde_field_key(&s.serde_markers, field), span))
+            .collect::<Vec<_>>();
+        let allowed = list_literal(keys, span);
+        body.push(pattern_switch(
+            copy(ident("tree", span), span),
+            "Object",
+            vec!["entries".to_string()],
+            vec![for_each_map(
+                "key",
+                "value",
+                ident("entries", span),
+                vec![if_stmt(
+                    unary_not(method(allowed.clone(), "contains", vec![ident("key", span)], span), span),
+                    vec![expr_stmt(method(
+                        ident("jet_serde_errors", span),
+                        "push",
+                        vec![field_error_expr_value(
+                            copy(ident("key", span), span),
+                            interpolated_string(
+                                "E2412: unknown field `",
+                                ident("key", span),
+                                "`",
+                                span,
+                            ),
+                            span,
+                        )],
+                        span,
+                    ))],
+                    span,
+                )],
+                span,
+            )],
+            Some(Vec::new()),
+            span,
+        ));
+    }
+
+    let mut field_values = Vec::new();
+    let mut decoded = Vec::new();
+    let mut required = Vec::new();
+    for field in s.reflection_fields() {
+        let value = if has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP) {
+            serde_default_expr(field).unwrap_or_else(|| serde_zero_expr(&field.ty, span))
+        } else if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
+            let result = format!("jet_serde_decode_{}", field.name);
+            let value = format!("jet_serde_decoded_value_{}", decoded.len());
+            body.push(binding(
+                &result,
+                None,
+                method_with_type_args(ident("tree", span), "decode", vec![field.ty.clone()], span),
+                false,
+                span,
+            ));
+            decoded.push((result, value.clone(), None, None));
+            ident(&value, span)
+        } else {
+            let key = serde_field_key(&s.serde_markers, field);
+            let is_required = !matches!(field.ty, Type::Option(_)) && serde_default_expr(field).is_none();
+            let missing = if is_required {
+                let name = format!("jet_serde_missing_required_{}", decoded.len());
+                body.push(binding(&name, Some(Type::Bool), Expr::Bool(false, span), true, span));
+                required.push((name.clone(), key.clone()));
+                Some(name)
             } else {
-                diags.push(diagnostic);
+                None
+            };
+            let subtree = if matches!(field.ty, Type::Option(_)) {
+                or_fallback(method(ident("tree", span), "field", vec![string_expr(&key, span)], span), data_tree_null(span), span)
+            } else if let Some(default) = serde_default_expr(field) {
+                or_fallback(
+                    method(ident("tree", span), "field", vec![string_expr(&key, span)], span),
+                    method(default, "encode", Vec::new(), span),
+                    span,
+                )
+            } else {
+                or_fallback(method(ident("tree", span), "field", vec![string_expr(&key, span)], span), data_tree_null(span), span)
+            };
+            let result = format!("jet_serde_decode_{}", field.name);
+            let value = format!("jet_serde_decoded_value_{}", decoded.len());
+            body.push(binding(
+                &result,
+                None,
+                field_error_under(
+                    &key,
+                    method_with_type_args(subtree, "decode", vec![field.ty.clone()], span),
+                    span,
+                ),
+                false,
+                span,
+            ));
+            decoded.push((result, value.clone(), missing, Some(key)));
+            ident(&value, span)
+        };
+        field_values.push((field.name.clone(), value));
+    }
+
+    if !required.is_empty() {
+        let assignments = required
+            .iter()
+            .map(|(name, _)| assign_local(name, Expr::Bool(true, span), span))
+            .collect::<Vec<_>>();
+        let mut presence_body = assignments;
+        presence_body.push(for_each_map(
+            "jet_serde_presence_key",
+            "jet_serde_presence_value",
+            ident("jet_serde_presence_entries", span),
+            required
+                .iter()
+                .map(|(missing, key)| {
+                    if_stmt(
+                        binary(BinOp::Eq, ident("jet_serde_presence_key", span), string_expr(key, span), span),
+                        vec![assign_local(missing, Expr::Bool(false, span), span)],
+                        span,
+                    )
+                })
+                .collect(),
+            span,
+        ));
+        body.push(pattern_switch(
+            copy(ident("tree", span), span),
+            "Object",
+            vec!["jet_serde_presence_entries".to_string()],
+            presence_body,
+            Some(Vec::new()),
+            span,
+        ));
+    }
+
+    for (index, (result, _, missing, key)) in decoded.iter().enumerate() {
+        let error_name = format!("jet_serde_field_errors_{index}");
+        let mut on_error = Vec::new();
+        if let (Some(missing), Some(key)) = (missing, key) {
+            on_error.push(if_stmt(
+                ident(missing, span),
+                vec![expr_stmt(method(
+                    ident("jet_serde_errors", span),
+                    "push",
+                    vec![field_error(key, &format!("E2410: missing required field `{key}`"), span)],
+                    span,
+                ))],
+                span,
+            ));
+            on_error.push(if_stmt(
+                unary_not(ident(missing, span), span),
+                vec![for_each(
+                    "jet_serde_field_error",
+                    ident(&error_name, span),
+                    vec![expr_stmt(method(
+                        ident("jet_serde_errors", span),
+                        "push",
+                        vec![ident("jet_serde_field_error", span)],
+                        span,
+                    ))],
+                    span,
+                )],
+                span,
+            ));
+        } else {
+            on_error.push(for_each(
+                "jet_serde_field_error",
+                ident(&error_name, span),
+                vec![expr_stmt(method(
+                    ident("jet_serde_errors", span),
+                    "push",
+                    vec![ident("jet_serde_field_error", span)],
+                    span,
+                ))],
+                span,
+            ));
+        }
+        body.push(pattern_switch(
+            copy(ident(result, span), span),
+            "Err",
+            vec![error_name],
+            on_error,
+            Some(Vec::new()),
+            span,
+        ));
+    }
+
+    let mut success = Vec::new();
+    let decoded_lit = struct_literal(
+        target_type_name(&s.name),
+        type_args_from_params(&s.type_params, span),
+        field_values,
+        span,
+    );
+    let decoded_name = "decoded";
+    success.push(binding(decoded_name, None, decoded_lit, false, span));
+    if s.validate_block.is_empty() {
+        success.push(ret(ok(ident(decoded_name, span), span), span));
+    } else {
+        success.push(ret(
+            method_with_owner_args(
+                ident(&s.name, span),
+                "validate",
+                type_args_from_params(&s.type_params, span),
+                vec![ident(decoded_name, span)],
+                span,
+            ),
+            span,
+        ));
+    }
+    for (result, value, _, _) in decoded.iter().rev() {
+        success = vec![pattern_switch(
+            copy(ident(result, span), span),
+            "Ok",
+            vec![value.clone()],
+            success,
+            Some(Vec::new()),
+            span,
+        )];
+    }
+    body.push(if_stmt(method(ident("jet_serde_errors", span), "is_empty", Vec::new(), span), success, span));
+    body.push(ret(err(ident("jet_serde_errors", span), span), span));
+    body
+}
+
+fn enum_encode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
+    let tag = e
+        .serde_markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_TAG)
+        .and_then(marker_static_string);
+    let untagged = has_marker(&e.serde_markers, crate::Syntax::MARKER_UNTAGGED);
+    let arms = e
+        .variants
+        .iter()
+        .map(|variant| {
+            let bindings = payload_bindings(&variant.payload, "v");
+            let value = enum_wire_value(variant, tag.as_deref(), untagged, span);
+            SwitchArm {
+                cond: pattern_test("self", variant, bindings, span),
+                body: vec![ret(value, span)],
+                span,
             }
-            None
+        })
+        .collect();
+    vec![Stmt::Switch {
+        subject: ident("self", span),
+        arms,
+        else_body: None,
+        span,
+    }]
+}
+
+fn enum_wire_value(
+    variant: &crate::AST::Variant,
+    tag: Option<&str>,
+    untagged: bool,
+    span: Span,
+) -> Expr {
+    let wire = serde_enum_variant_key(variant);
+    if !untagged && tag.is_some() {
+        if let VariantPayload::Named(fields) = &variant.payload {
+            let mut entries = vec![(string_expr(tag.expect("tag"), span), data_tree_text(&wire, span))];
+            entries.extend(fields.iter().enumerate().map(|(index, field)| {
+                (
+                    string_expr(&field.name, span),
+                    method(ident(&format!("v{index}"), span), "encode", Vec::new(), span),
+                )
+            }));
+            return data_tree_object(entries, span);
+        }
+    }
+    let payload = match &variant.payload {
+        VariantPayload::Unit => data_tree_null(span),
+        VariantPayload::Single(..) => method(ident("v0", span), "encode", Vec::new(), span),
+        VariantPayload::Named(fields) => data_tree_object(
+            fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    (
+                        string_expr(&field.name, span),
+                        method(ident(&format!("v{index}"), span), "encode", Vec::new(), span),
+                    )
+                })
+                .collect(),
+            span,
+        ),
+    };
+    if untagged {
+        return payload;
+    }
+    if let Some(tag) = tag {
+        let mut entries = vec![(string_expr(tag, span), data_tree_text(&wire, span))];
+        if !matches!(variant.payload, VariantPayload::Unit) {
+            if matches!(variant.payload, VariantPayload::Single(..)) {
+                entries.push((string_expr("value", span), payload));
+            } else if let Expr::MethodCall { args, .. } = payload {
+                if let Some(crate::AST::CallArg { expr: Expr::MapLit(pairs, _), .. }) = args.into_iter().next() {
+                    entries.extend(pairs);
+                }
+            }
+        }
+        return data_tree_object(entries, span);
+    }
+    if matches!(variant.payload, VariantPayload::Unit) {
+        data_tree_text(&wire, span)
+    } else {
+        data_tree_object(vec![(string_expr(&wire, span), payload)], span)
+    }
+}
+
+fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
+    let tag = e
+        .serde_markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_TAG)
+        .and_then(marker_static_string);
+    let untagged = has_marker(&e.serde_markers, crate::Syntax::MARKER_UNTAGGED);
+    if untagged {
+        let mut body = Vec::new();
+        for variant in &e.variants {
+            let payload_ty = enum_payload_type(variant);
+            let decoded = method_with_type_args(ident("tree", span), "decode", vec![payload_ty], span);
+            let binding_name = format!("jet_serde_enum_value_{}", variant.name.replace('.', "_"));
+            let value = enum_constructor_from_binding(variant, &binding_name, e.name.as_str(), span);
+            body.push(pattern_switch(
+                decoded,
+                "Ok",
+                vec![binding_name],
+                vec![ret(ok(value, span), span)],
+                Some(Vec::new()),
+                span,
+            ));
+        }
+        body.push(no_matching_enum(span));
+        return body;
+    }
+
+    if let Some(tag) = tag {
+        let tag_decode = field_error_under(
+            &tag,
+            method_with_type_args(
+                or_fallback(
+                    method(ident("tree", span), "field", vec![string_expr(&tag, span)], span),
+                    data_tree_null(span),
+                    span,
+                ),
+                "decode",
+                vec![Type::String],
+                span,
+            ),
+            span,
+        );
+        let tag_try = try_expr(tag_decode, span);
+        let mut body = vec![binding("tag_value", None, tag_try, false, span)];
+        for variant in &e.variants {
+            let wire = serde_enum_variant_key(variant);
+            let payload_source = if matches!(variant.payload, VariantPayload::Single(..)) {
+                try_expr(
+                    method(ident("tree", span), "field", vec![string_expr("value", span)], span),
+                    span,
+                )
+            } else {
+                ident("tree", span)
+            };
+            let value = enum_decode_value(variant, &payload_source, e.name.as_str(), span);
+            body.push(if_stmt(
+                binary(BinOp::Eq, ident("tag_value", span), string_expr(&wire, span), span),
+                enum_decode_variant_body(variant, value, &payload_source, e.name.as_str(), span),
+                span,
+            ));
+        }
+        body.push(no_matching_enum(span));
+        return body;
+    }
+
+    let mut body = Vec::new();
+    for variant in &e.variants {
+        let wire = serde_enum_variant_key(variant);
+        if matches!(variant.payload, VariantPayload::Unit) {
+            body.push(pattern_switch(
+                copy(ident("tree", span), span),
+                "Text",
+                vec!["variant_name".to_string()],
+                vec![if_stmt(
+                    binary(BinOp::Eq, ident("variant_name", span), string_expr(&wire, span), span),
+                    vec![ret(ok(enum_constructor_unit(e.name.as_str(), variant, span), span), span)],
+                    span,
+                )],
+                Some(Vec::new()),
+                span,
+            ));
+        } else {
+            let candidate = format!("candidate_{}", variant.name.replace('.', "_"));
+            let candidate_expr = or_fallback(
+                method(copy(ident("tree", span), span), "field", vec![string_expr(&wire, span)], span),
+                data_tree_null(span),
+                span,
+            );
+            body.push(binding(&candidate, None, candidate_expr, false, span));
+            let source = ident(&candidate, span);
+            let value = enum_decode_value(variant, &source, e.name.as_str(), span);
+            if matches!(variant.payload, VariantPayload::Single(..)) {
+                let decoded = method_with_type_args(source, "decode", vec![enum_payload_type(variant)], span);
+                let binding_name = format!("jet_serde_enum_decoded_{}", variant.name.replace('.', "_"));
+                body.push(pattern_switch(
+                    decoded,
+                    "Ok",
+                    vec![binding_name.clone()],
+                    vec![ret(ok(enum_constructor_from_binding(variant, &binding_name, e.name.as_str(), span), span), span)],
+                    Some(Vec::new()),
+                    span,
+                ));
+            } else {
+                body.extend(value);
+            }
+        }
+    }
+    body.push(no_matching_enum(span));
+    body
+}
+
+fn enum_decode_variant_body(
+    variant: &crate::AST::Variant,
+    value: Vec<Stmt>,
+    source: &Expr,
+    type_name: &str,
+    span: Span,
+) -> Vec<Stmt> {
+    match &variant.payload {
+        VariantPayload::Unit => vec![ret(ok(enum_constructor_unit(type_name, variant, span), span), span)],
+        VariantPayload::Single(ty, _) => {
+            let decoded = method_with_type_args(source.clone(), "decode", vec![ty.clone()], span);
+            let binding_name = format!("jet_serde_enum_decoded_{}", variant.name.replace('.', "_"));
+            vec![pattern_switch(
+                decoded,
+                "Ok",
+                vec![binding_name.clone()],
+                vec![ret(ok(enum_constructor_from_binding(variant, &binding_name, type_name, span), span), span)],
+                Some(Vec::new()),
+                span,
+            )]
+        }
+        VariantPayload::Named(_) => value,
+    }
+}
+
+fn enum_decode_value(
+    variant: &crate::AST::Variant,
+    source: &Expr,
+    type_name: &str,
+    span: Span,
+) -> Vec<Stmt> {
+    let VariantPayload::Named(fields) = &variant.payload else {
+        return Vec::new();
+    };
+    let errors_name = format!("jet_serde_enum_{}_errors", variant.name.replace('.', "_"));
+    let mut body = vec![binding(
+        &errors_name,
+        Some(field_error_list_type(span)),
+        list_literal(Vec::new(), span),
+        true,
+        span,
+    )];
+    let mut results = Vec::new();
+    for field in fields {
+        let result = format!(
+            "jet_serde_enum_{}_decode_{}",
+            variant.name.replace('.', "_"),
+            field.name
+        );
+        let subtree = or_fallback(
+            method(copy(source.clone(), span), "field", vec![string_expr(&field.name, span)], span),
+            data_tree_null(span),
+            span,
+        );
+        body.push(binding(
+            &result,
+            None,
+            field_error_under(
+                &field.name,
+                method_with_type_args(subtree, "decode", vec![field.ty.clone()], span),
+                span,
+            ),
+            false,
+            span,
+        ));
+        results.push(result);
+    }
+    for (index, result) in results.iter().enumerate() {
+        let error_name = format!("jet_serde_enum_{}_errors_{index}", variant.name.replace('.', "_"));
+        body.push(pattern_switch(
+            copy(ident(result, span), span),
+            "Err",
+            vec![error_name.clone()],
+            vec![for_each(
+                "jet_serde_enum_error",
+                ident(&error_name, span),
+                vec![expr_stmt(method(
+                    ident(&errors_name, span),
+                    "push",
+                    vec![ident("jet_serde_enum_error", span)],
+                    span,
+                ))],
+                span,
+            )],
+            Some(Vec::new()),
+            span,
+        ));
+    }
+    let mut success = Vec::new();
+    let value_fields = fields
+        .iter()
+        .enumerate()
+        .map(|(_index, field)| (field.name.clone(), ident(&format!("jet_serde_enum_{}_value_{}", variant.name.replace('.', "_"), field.name), span)))
+        .collect::<Vec<_>>();
+    success.push(ret(
+        ok(enum_constructor_named(type_name, variant, value_fields, span), span),
+        span,
+    ));
+    for result in results.iter().rev() {
+        let value_name = format!(
+            "jet_serde_enum_{}_value_{}",
+            variant.name.replace('.', "_"),
+            fields[results.iter().position(|item| item == result).unwrap()].name
+        );
+        success = vec![pattern_switch(
+            copy(ident(result, span), span),
+            "Ok",
+            vec![value_name],
+            success,
+            Some(Vec::new()),
+            span,
+        )];
+    }
+    body.push(if_stmt(method(ident(&errors_name, span), "is_empty", Vec::new(), span), success, span));
+    body
+}
+
+fn enum_constructor_unit(type_name: &str, variant: &crate::AST::Variant, span: Span) -> Expr {
+    Expr::EnumLit {
+        type_name: type_name.to_string(),
+        variant: variant.name.clone(),
+        args: Vec::new(),
+        leading_dot: false,
+        span,
+    }
+}
+
+fn enum_constructor_from_binding(
+    variant: &crate::AST::Variant,
+    binding: &str,
+    type_name: &str,
+    span: Span,
+) -> Expr {
+    match variant.payload {
+        VariantPayload::Unit => enum_constructor_unit(type_name, variant, span),
+        VariantPayload::Single(..) => Expr::EnumLit {
+            type_name: type_name.to_string(),
+            variant: variant.name.clone(),
+            args: vec![EnumLitArg::Positional(ident(binding, span))],
+            leading_dot: false,
+            span,
+        },
+        VariantPayload::Named(_) => enum_constructor_unit(type_name, variant, span),
+    }
+}
+
+fn enum_constructor_named(
+    type_name: &str,
+    variant: &crate::AST::Variant,
+    fields: Vec<(String, Expr)>,
+    span: Span,
+) -> Expr {
+    Expr::EnumLit {
+        type_name: type_name.to_string(),
+        variant: variant.name.clone(),
+        args: fields
+            .into_iter()
+            .map(|(label, expr)| EnumLitArg::Named { label, expr })
+            .collect(),
+        leading_dot: false,
+        span,
+    }
+}
+
+fn no_matching_enum(span: Span) -> Stmt {
+    ret(
+        err(list_literal(vec![field_error("", "no matching enum variant", span)], span), span),
+        span,
+    )
+}
+
+fn enum_payload_type(variant: &crate::AST::Variant) -> Type {
+    match &variant.payload {
+        VariantPayload::Unit | VariantPayload::Named(_) => data_tree_type(),
+        VariantPayload::Single(ty, _) => ty.clone(),
+    }
+}
+
+fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
+    let count = match payload {
+        VariantPayload::Unit => 0,
+        VariantPayload::Single(..) => 1,
+        VariantPayload::Named(fields) => fields.len(),
+    };
+    (0..count).map(|index| format!("{prefix}{index}")).collect()
+}
+
+fn pattern_test(subject: &str, variant: &crate::AST::Variant, bindings: Vec<String>, span: Span) -> Expr {
+    Expr::PatternTest {
+        subject: Box::new(ident(subject, span)),
+        pattern: Pattern::Variant {
+            variant: variant.name.clone(),
+            bindings: bindings.into_iter().map(|name| PatSlot::Bind { name, span }).collect(),
+            leading_dot: true,
+            span,
+        },
+        span,
+    }
+}
+
+fn pattern_switch(
+    subject: Expr,
+    variant: &str,
+    bindings: Vec<String>,
+    body: Vec<Stmt>,
+    else_body: Option<Vec<Stmt>>,
+    span: Span,
+) -> Stmt {
+    Stmt::Switch {
+        subject,
+        arms: vec![SwitchArm {
+            cond: Expr::PatternTest {
+                subject: Box::new(ident("it", span)),
+                pattern: Pattern::Variant {
+                    variant: variant.to_string(),
+                    bindings: bindings.into_iter().map(|name| PatSlot::Bind { name, span }).collect(),
+                    leading_dot: true,
+                    span,
+                },
+                span,
+            },
+            body,
+            span,
+        }],
+        else_body,
+        span,
+    }
+}
+
+fn option_switch(subject: Expr, binding_name: &str, body: Vec<Stmt>, else_body: Vec<Stmt>, span: Span) -> Stmt {
+    pattern_switch(subject, "Val", vec![binding_name.to_string()], body, Some(else_body), span)
+}
+
+fn option_encode(subject: Expr, key: &str, field_names: Vec<String>, span: Span) -> Stmt {
+    let _ = field_names.first().expect("one field for option encode");
+    option_switch(
+        subject,
+        "jet_serde_option_value",
+        vec![assign_index(
+            "out",
+            string_expr(key, span),
+            method(ident("jet_serde_option_value", span), "encode", Vec::new(), span),
+            span,
+        )],
+        Vec::new(),
+        span,
+    )
+}
+
+fn for_each_map(var: &str, var2: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+    Stmt::For {
+        var: var.to_string(),
+        var_span: span,
+        var2: Some((var2.to_string(), span)),
+        kind: ForKind::In { collection, step: None },
+        body,
+        span,
+        label: None,
+    }
+}
+
+fn for_each(var: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+    Stmt::For {
+        var: var.to_string(),
+        var_span: span,
+        var2: None,
+        kind: ForKind::In { collection, step: None },
+        body,
+        span,
+        label: None,
+    }
+}
+
+fn binding(name: &str, ty: Option<Type>, init: Expr, mutable: bool, span: Span) -> Stmt {
+    Stmt::Val(crate::AST::Binding {
+        mutable,
+        markers: Vec::new(),
+        reactive_upgrade: false,
+        meta: None,
+        name: name.to_string(),
+        name_span: span,
+        pattern: None,
+        ty,
+        ty_span: Some(span),
+        init,
+        is_comptime: false,
+        ct: None,
+        uninit: false,
+        arena_view: false,
+        string_view: false,
+        gc_promotion: None,
+        gc_transferred: false,
+    })
+}
+
+fn assign_local(name: &str, value: Expr, span: Span) -> Stmt {
+    Stmt::Assign {
+        target: LValue::Local { name: name.to_string(), name_span: span },
+        op: None,
+        op_span: span,
+        value,
+    }
+}
+
+fn assign_index(base: &str, index: Expr, value: Expr, span: Span) -> Stmt {
+    Stmt::Assign {
+        target: LValue::Index {
+            base: Box::new(ident(base, span)),
+            index: Box::new(index),
+            span,
+            kind: IndexKind::Unknown,
+        },
+        op: None,
+        op_span: span,
+        value,
+    }
+}
+
+fn expr_stmt(expr: Expr) -> Stmt { Stmt::Expr(expr) }
+fn ret(expr: Expr, span: Span) -> Stmt { Stmt::Return(Some(expr), span) }
+fn ok(expr: Expr, span: Span) -> Expr { Expr::Ok(Box::new(expr), span) }
+fn err(expr: Expr, span: Span) -> Expr { Expr::Err(Box::new(expr), span) }
+fn copy(expr: Expr, span: Span) -> Expr { Expr::Copy(Box::new(expr), span) }
+fn unary_not(expr: Expr, span: Span) -> Expr { Expr::Unary(crate::AST::UnOp::Not, Box::new(expr), span) }
+
+fn ident(name: &str, span: Span) -> Expr { Expr::Ident(name.to_string(), span) }
+
+fn binary(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr {
+    Expr::Binary(op, Box::new(left), Box::new(right), span)
+}
+
+fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+    Stmt::Switch {
+        subject: Expr::Bool(true, span),
+        arms: vec![SwitchArm { cond, body, span }],
+        else_body: Some(Vec::new()),
+        span,
+    }
+}
+
+fn string_expr(value: &str, span: Span) -> Expr {
+    Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
+}
+
+fn data_tree_type() -> Type { Type::Named("DataTree".to_string()) }
+fn field_error_type() -> Type { Type::Named("FieldError".to_string()) }
+fn field_error_list_type(_span: Span) -> Type { Type::List(Box::new(field_error_type())) }
+fn result_type(ok: Type, _span: Span) -> Type {
+    Type::Result { ok: Box::new(ok), err: Box::new(field_error_list_type(_span)) }
+}
+
+fn map_type(value: Type, _span: Span) -> Type {
+    Type::Map { key: Box::new(Type::String), key_span: None, value: Box::new(value) }
+}
+
+fn target_type(name: &str, params: &[TypeParam]) -> Type {
+    if params.is_empty() {
+        Type::Named(name.to_string())
+    } else {
+        Type::Apply { name: name.to_string(), args: params.iter().map(|param| Type::Named(param.name.clone())).collect() }
+    }
+}
+
+fn target_type_name(name: &str) -> String { name.to_string() }
+
+fn type_args_from_params(params: &[TypeParam], _span: Span) -> Vec<Type> {
+    params.iter().map(|param| Type::Named(param.name.clone())).collect()
+}
+
+fn list_literal(values: Vec<Expr>, span: Span) -> Expr { Expr::ListLit(values, span) }
+fn map_literal(values: Vec<(Expr, Expr)>, span: Span) -> Expr { Expr::MapLit(values, span) }
+
+fn data_tree_object(entries: Vec<(Expr, Expr)>, span: Span) -> Expr {
+    data_tree_variant("Object", vec![map_literal(entries, span)], span)
+}
+
+fn data_tree_object_expr(map: Expr, span: Span) -> Expr {
+    data_tree_variant("Object", vec![map], span)
+}
+
+fn data_tree_null(span: Span) -> Expr { data_tree_variant("Null", Vec::new(), span) }
+fn data_tree_text(value: &str, span: Span) -> Expr { data_tree_variant("Text", vec![string_expr(value, span)], span) }
+
+fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> Expr {
+    if args.is_empty() {
+        Expr::Field(Box::new(ident("DataTree", span)), variant.to_string(), span)
+    } else {
+        Expr::MethodCall {
+            receiver: Box::new(ident("DataTree", span)),
+            method: variant.to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+            recv_type: None,
+            resolved_ret: None,
+            checked_widen: false,
         }
     }
 }
 
-#[cfg(test)]
-mod serde_source_tests {
-    use super::*;
-
-    #[test]
-    fn builtin_codecs_remain_parsed_top_level_impls() {
-        let source = "#Codable\nstruct Point { x: Int }\n";
-        let (tokens, lex_diags) = crate::Lexer::lex(source);
-        assert!(lex_diags.is_empty());
-        let mut program = crate::Parser::parse(&tokens).expect("source parses");
-        let mut diags = Vec::new();
-        expand_builtin_serde_items(&mut program.items, &mut diags);
-        assert!(diags.is_empty(), "generated source must parse: {diags:?}");
-
-        let point = program.items.iter().find_map(|item| match item {
-            Item::Struct(s) if s.name == "Point" => Some(s),
-            _ => None,
-        }).expect("real type remains");
-        assert!(point.trait_impls.is_empty(), "no parsed block may be transplanted into the type");
-        assert!(!program.items.iter().any(|item| match item {
-            Item::Struct(s) => s.name.starts_with("__JetSerde"),
-            Item::Enum(e) => e.name.starts_with("__JetSerde"),
-            _ => false,
-        }));
-        let protocols: Vec<_> = program.items.iter().filter_map(|item| match item {
-            Item::Impl(i) if i.type_name == "Point" => i.trait_name.as_deref(),
-            _ => None,
-        }).collect();
-        assert_eq!(protocols, vec!["Encode", "Decode"]);
+fn struct_literal(name: String, type_args: Vec<Type>, fields: Vec<(String, Expr)>, span: Span) -> Expr {
+    Expr::StructLit {
+        type_name: name,
+        type_args,
+        import_ns: None,
+        as_trait: None,
+        fields: fields.into_iter().map(|(name, expr)| (name, span, expr)).collect(),
+        inferred: false,
+        span,
     }
+}
 
-    #[test]
-    fn malformed_builtin_codec_points_at_derive_trigger() {
-        let trigger = Span::new(17, 26);
-        let mut diags = Vec::new();
-        assert!(parse_generated_fragment(
-            "impl Broken.Encode { fn encode(self) => DataTree {",
-            "built-in codec derive generated invalid Jet for `Broken`".to_string(),
-            "report this compiler bug".to_string(),
-            trigger,
-            &mut diags,
-        ).is_none());
-        assert_eq!(diags.len(), 2);
-        assert_eq!(diags[0].code, "E0003");
-        assert!(diags[0].cause.is_empty());
-        assert_eq!(diags[1].code, "E2710");
-        assert_eq!(diags[1].span, Some(trigger));
-        assert_eq!(diags[1].cause, vec!["E0003".to_string()]);
+fn field_error(path: &str, reason: &str, span: Span) -> Expr {
+    field_error_expr_value(string_expr(path, span), string_expr(reason, span), span)
+}
+
+fn field_error_expr_value(path: Expr, reason: Expr, span: Span) -> Expr {
+    struct_literal(
+        "FieldError".to_string(),
+        Vec::new(),
+        vec![("path".to_string(), path), ("reason".to_string(), reason)],
+        span,
+    )
+}
+
+fn interpolated_string(prefix: &str, value: Expr, suffix: &str, span: Span) -> Expr {
+    Expr::Str(
+        vec![
+            crate::AST::StrPart::Lit(prefix.to_string()),
+            crate::AST::StrPart::Interp(Box::new(value), crate::AST::StrFormat::default()),
+            crate::AST::StrPart::Lit(suffix.to_string()),
+        ],
+        span,
+    )
+}
+
+fn method(receiver: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
+    method_with_owner_args(receiver, name, Vec::new(), args, span)
+}
+
+fn method_with_owner_args(receiver: Expr, name: &str, owner_type_args: Vec<Type>, args: Vec<Expr>, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(receiver),
+        method: name.to_string(),
+        method_span: span,
+        owner_type_args,
+        type_args: Vec::new(),
+        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+        recv_type: None,
+        resolved_ret: None,
+        checked_widen: false,
     }
+}
 
-    #[test]
-    fn generated_expression_spans_reanchor_to_derive_trigger() {
-        let trigger = Span::new(80, 83);
-        let mut diags = Vec::new();
-        let items = parse_generated_fragment(
-            "impl Box.Equatable { fn equal(self, rhs: Box) => Bool { return self.raw() == rhs.raw() } }",
-            "generated equality is invalid".to_string(),
-            "fix the generated equality".to_string(),
-            trigger,
-            &mut diags,
-        ).expect("generated fragment parses");
-        assert!(diags.is_empty(), "generated source must parse: {diags:?}");
+fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<Type>, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(receiver),
+        method: name.to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args,
+        args: Vec::new(),
+        recv_type: None,
+        resolved_ret: None,
+        checked_widen: false,
+    }
+}
 
-        let Item::Impl(implementation) = &items[0] else {
-            panic!("generated fragment must remain a top-level impl");
-        };
-        let mut spans = Vec::new();
-        for statement in &implementation.methods[0].body {
-            let mut statement = statement.clone();
-            statement.for_each_expr_mut(|expr| spans.push(expr.span()));
+fn field_read(base: &str, field: &str, span: Span) -> Expr {
+    Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
+}
+
+fn call_arg(expr: Expr, span: Span) -> CallArg {
+    CallArg { convention: AccessConvention::Read, expr, span, flags: CallArgFlags::default(), label: None, spread: false }
+}
+
+fn self_param(span: Span) -> Param { named_param("self", Type::Named(String::new()), span) }
+
+fn named_param(name: &str, ty: Type, span: Span) -> Param {
+    Param {
+        convention: AccessConvention::Read,
+        root: false,
+        name: name.to_string(),
+        name_span: span,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
+        ty,
+        ty_span: span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+    }
+}
+
+fn try_expr(expr: Expr, span: Span) -> Expr { Expr::Try(Box::new(expr), span, TryConvert::None, None) }
+
+fn or_fallback(value: Expr, fallback: Expr, span: Span) -> Expr {
+    Expr::OrFallback { value: Box::new(value), fallback: crate::AST::OrFallback::Value(Box::new(fallback)), is_option: false, span }
+}
+
+fn field_error_under(path: &str, value: Expr, span: Span) -> Expr {
+    method(
+        ident("FieldError", span),
+        "under",
+        vec![string_expr(path, span), value],
+        span,
+    )
+}
+
+fn serde_zero_expr(ty: &Type, span: Span) -> Expr {
+    match ty {
+        Type::Int | Type::IntN { .. } => Expr::Int(0, span, None, None),
+        Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32)),
+        Type::Bool => Expr::Bool(false, span),
+        Type::String => string_expr("", span),
+        Type::Option(_) => Expr::Absent(span),
+        Type::List(_) | Type::Map { .. } => list_literal(Vec::new(), span),
+        Type::Apply { name, args } => struct_literal(name.clone(), args.clone(), Vec::new(), span),
+        Type::Named(name) => struct_literal(name.clone(), Vec::new(), Vec::new(), span),
+        _ => struct_literal(ty.name(), Vec::new(), Vec::new(), span),
+    }
+}
+
+fn serde_default_expr(field: &crate::AST::Field) -> Option<Expr> {
+    if let Some(expr) = &field.default {
+        return Some(expr.as_ref().clone());
+    }
+    let marker = field
+        .serde_markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_DEFAULT)?;
+    if let Some(expr) = marker.args.first() {
+        if let Some(value) = marker.ct.as_ref() {
+            return serde_ct_expr(value, expr.span());
         }
-        assert!(!spans.is_empty());
-        assert!(spans.iter().all(|span| *span == trigger), "unanchored spans: {spans:?}");
+        return Some(expr.clone());
     }
+    marker.ct.as_ref().and_then(|value| serde_ct_expr(value, marker.span))
+}
+
+fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
+    Some(match value {
+        CtValue::Int(value) => Expr::Int(*value, span, None, None),
+        CtValue::Float(value) => Expr::Float(value.as_f64(), span, false),
+        CtValue::Bool(value) => Expr::Bool(*value, span),
+        CtValue::Char(value) => Expr::Char(*value, span),
+        CtValue::Str(value) => string_expr(value, span),
+        CtValue::BigInt(value) => Expr::Call(Call {
+            name: "BigInt".to_string(), name_span: span, type_args: Vec::new(),
+            args: vec![call_arg(string_expr(&value.to_string_rep(), span), span)],
+            resolved_ret: None, range_checked: false, widen_approx: false,
+        }),
+        CtValue::Bytes(values) => list_literal(values.iter().map(|value| Expr::Int(i64::from(*value), span, None, None)).collect(), span),
+        CtValue::List(values) => list_literal(values.iter().map(|value| serde_ct_expr(value, span)).collect::<Option<Vec<_>>>()?, span),
+        CtValue::Map(values) => map_literal(values.iter().map(|(key, value)| Some((serde_ct_expr(&key.to_value(), span)?, serde_ct_expr(value, span)?))).collect::<Option<Vec<_>>>()?, span),
+        CtValue::Struct { type_name, fields } => struct_literal(type_name.clone(), Vec::new(), fields.iter().map(|(name, value)| Some((name.clone(), serde_ct_expr(value, span)?))).collect::<Option<Vec<_>>>()?, span),
+        CtValue::Enum { type_name, variant, args } => Expr::EnumLit {
+            type_name: type_name.clone(), variant: variant.clone(),
+            args: args.iter().map(|(label, value)| Some(match label {
+                Some(label) => EnumLitArg::Named { label: label.clone(), expr: serde_ct_expr(value, span)? },
+                None => EnumLitArg::Positional(serde_ct_expr(value, span)?),
+            })).collect::<Option<Vec<_>>>()?, leading_dot: false, span,
+        },
+        CtValue::Present(value) => Expr::Present(Box::new(serde_ct_expr(value, span)?), span),
+        CtValue::Failed(CtReport::Clean(_)) => Expr::Absent(span),
+        CtValue::Failed(CtReport::Told(value)) => Expr::Err(Box::new(serde_ct_expr(value, span)?), span),
+        CtValue::Unit | CtValue::Closure(_) => return None,
+    })
+}
+
+fn has_marker(markers: &[crate::AST::Marker], name: &str) -> bool {
+    markers.iter().any(|marker| marker.name == name)
 }
 
 fn serde_enum_variant_key(v: &crate::AST::Variant) -> String {
-    v.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME)
-        .and_then(marker_static_string).unwrap_or_else(|| v.name.clone())
+    v.serde_markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME)
+        .and_then(marker_static_string)
+        .unwrap_or_else(|| v.name.clone())
 }
 
 fn marker_static_string(marker: &crate::AST::Marker) -> Option<String> {
-    if let Some(crate::AST::CtValue::Str(value)) = &marker.ct {
+    if let Some(CtValue::Str(value)) = &marker.ct {
         return Some(value.clone());
     }
     marker.args.first().and_then(|expression| match expression {
-        crate::AST::Expr::Str(parts, _) => parts.first().and_then(|part| match part {
+        Expr::Str(parts, _) => parts.first().and_then(|part| match part {
             crate::AST::StrPart::Lit(value) => Some(value.clone()),
             crate::AST::StrPart::Interp(..) => None,
         }),
@@ -531,320 +1384,30 @@ fn marker_static_string(marker: &crate::AST::Marker) -> Option<String> {
     })
 }
 
-fn serde_enum_pattern_and_value(v: &crate::AST::Variant) -> (String, String) {
-    match &v.payload {
-        crate::AST::VariantPayload::Unit => (format!(".{}", v.name), String::new()),
-        crate::AST::VariantPayload::Single(..) => (format!(".{}(v0)", v.name), "(~v0).encode()".to_string()),
-        crate::AST::VariantPayload::Named(fs) => {
-            let names = (0..fs.len()).map(|i| format!("v{i}")).collect::<Vec<_>>();
-            (format!(".{}({})", v.name, names.join(", ")), String::new())
-        }
-    }
-}
-
-fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
-    fs.iter().enumerate().map(|(i, f)| format!("{:?}: (~v{i}).encode()", f.name)).collect::<Vec<_>>().join(", ")
-}
-
-fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
-    if guarded { format!("if {src}.decode<{}>() == {{ .Ok(v0) -> {{ {} }} else -> {{}} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src, None)) }
-    else { serde_enum_decode_return(target, v, src, None) }
-}
-
-fn serde_enum_decode_return(
-    target: &str,
-    v: &crate::AST::Variant,
-    src: &str,
-    single_segment: Option<&str>,
-) -> String {
-    if let crate::AST::VariantPayload::Named(fields) = &v.payload {
-        let errors = format!("jet_serde_enum_{}_errors", v.name);
-        let mut results = Vec::new();
-        let mut values = Vec::new();
-        let mut required_presence = Vec::new();
-        let mut out = format!("{errors} := [FieldError].{{}}\n");
-        for (index, field) in fields.iter().enumerate() {
-            let result = format!("jet_serde_enum_{}_decode_{}", v.name, field.name);
-            let value = format!("jet_serde_enum_{}_value_{}", v.name, field.name);
-            let missing = format!("jet_serde_enum_{}_missing_{}", v.name, index);
-            out.push_str(&format!("{missing} := false\n"));
-            out.push_str(&format!(
-                "{result} := FieldError.under({:?}, ((~{src}).field({:?}) ?? DataTree.Null).decode<{}>())\n",
-                field.name,
-                field.name,
-                serde_type_source(&field.ty),
-            ));
-            results.push(result);
-            values.push((field.name.clone(), value));
-            required_presence.push((missing, field.name.clone()));
-        }
-        out.push_str(&format!("if (~{src}) == {{ .Object(jet_serde_enum_{}_presence) -> {{\n", v.name));
-        for (missing, _) in &required_presence {
-            out.push_str(&format!("{missing} = true\n"));
-        }
-        out.push_str("loop (jet_serde_enum_presence_key, jet_serde_enum_presence_value), jet_serde_enum_");
-        out.push_str(&format!("{}_presence {{\n", v.name));
-        for (missing, key) in &required_presence {
-            out.push_str(&format!(
-                "if {{ jet_serde_enum_presence_key == {key:?} -> {{ {missing} = false }} else -> {{}} }}\n"
-            ));
-        }
-        out.push_str("}\n} else -> {} }\n");
-        for (index, result) in results.iter().enumerate() {
-            let (missing, key) = &required_presence[index];
-            out.push_str(&format!(
-                "if (~{result}) == {{ .Err(jet_serde_enum_{}_errors_{index}) -> {{ if {{ {missing} -> {{ {errors}.push(FieldError.{{ path: {key:?}, reason: \"E2410: missing required field `{key}`\" }}) }} else -> {{ loop jet_serde_enum_{}_error_{index}, jet_serde_enum_{}_errors_{index} {{ {errors}.push(jet_serde_enum_{}_error_{index}) }} }} }} }} else -> {{}} }}\n",
-                v.name, v.name, v.name, v.name,
-            ));
-        }
-        out.push_str(&format!("if {{ {errors}.is_empty() -> {{\n"));
-        for (index, result) in results.iter().enumerate() {
-            out.push_str(&format!(
-                "if (~{result}) == {{ .Ok(jet_serde_enum_{}_value_{}) -> {{\n",
-                v.name, fields[index].name,
-            ));
-        }
-        let fields = values
-            .iter()
-            .map(|(name, value)| format!("{name}: {value}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "return Ok({target}.{}.{{ {} }})\n",
-            v.name, fields,
-        ));
-        for _ in &results {
-            out.push_str("} else -> {} }\n");
-        }
-        out.push_str("} else -> {} }\n");
-        out
-    } else {
-        let cons = serde_enum_decode_constructor(target, v, src, single_segment);
-        format!("return Ok({cons})")
-    }
-}
-
-fn serde_enum_payload_type(v: &crate::AST::Variant) -> String {
-    match &v.payload {
-        crate::AST::VariantPayload::Unit => "DataTree".to_string(),
-        crate::AST::VariantPayload::Single(t, _) => serde_type_source(t),
-        crate::AST::VariantPayload::Named(_) => "DataTree".to_string(),
-    }
-}
-
-fn serde_enum_decode_constructor(
-    target: &str,
-    v: &crate::AST::Variant,
-    src: &str,
-    single_segment: Option<&str>,
-) -> String {
-    match &v.payload {
-        crate::AST::VariantPayload::Unit => format!("{target}.{}", v.name),
-        crate::AST::VariantPayload::Single(t, _) => {
-            let decoded = format!("{src}.decode<{}>()", serde_type_source(t));
-            let framed = single_segment
-                .map(|segment| format!("FieldError.under({segment:?}, {decoded})?"))
-                .unwrap_or_else(|| format!("{decoded}?"));
-            format!("{target}.{}({framed})", v.name)
-        }
-        crate::AST::VariantPayload::Named(_) => unreachable!("named enum payloads are lowered as statements"),
-    }
-}
-
-fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Field) -> String {
-    if let Some(marker) = f.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME) {
+fn serde_field_key(container: &[crate::AST::Marker], field: &crate::AST::Field) -> String {
+    if let Some(marker) = field
+        .serde_markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME)
+    {
         if let Some(value) = marker_static_string(marker) {
             return value;
         }
     }
-    let style = container.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME_ALL)
-        .and_then(|m| m.args.first()).and_then(|e| match e { crate::AST::Expr::Ident(n, _) => Some(n.as_str()), _ => None });
-    match style {
-        Some("camel") => crate::Syntax::to_camel_acronym(&f.name),
-        Some("kebab") => crate::Syntax::to_snake_acronym(&f.name).replace('_', "-"),
-        Some("screaming") => crate::Syntax::to_shouty_acronym(&f.name),
-        Some("pascal") => crate::Syntax::to_pascal_acronym(&f.name),
-        Some("snake") => crate::Syntax::to_snake_acronym(&f.name),
-        _ => f.name.clone(),
-    }
-}
-
-/// Render direct object literals for every optional-field path. Direct literals
-/// lower straight to DataTree's ordered pair vector; routing an omitted field
-/// through Jet's ordinary key-sorted Map would lose declaration order. Each
-/// leaf keeps the remaining fields in source order and leaves absent options
-/// off the wire.
-fn serde_ordered_object_source(
-    container: &[crate::AST::Marker],
-    fields: &[&crate::AST::Field],
-) -> String {
-    fn emit(
-        container: &[crate::AST::Marker],
-        fields: &[&crate::AST::Field],
-        index: usize,
-        pairs: &mut Vec<String>,
-        out: &mut String,
-    ) {
-        let Some(field) = fields.get(index) else {
-            out.push_str(&format!("return DataTree.Object([{}])\n", pairs.join(", ")));
-            return;
-        };
-        let key = serde_source_field_key(container, field);
-        if matches!(field.ty, Type::Option(_)) {
-            let value = format!("serde_value_{index}");
-            out.push_str(&format!("if (~self.{}) == {{\n.Val({value}) -> {{\n", field.name));
-            pairs.push(format!("{key:?}: (~{value}).encode()"));
-            emit(container, fields, index + 1, pairs, out);
-            pairs.pop();
-            out.push_str("}\nelse -> {\n");
-            emit(container, fields, index + 1, pairs, out);
-            out.push_str("}\n}\n");
-        } else {
-            pairs.push(format!("{key:?}: self.{}.encode()", field.name));
-            emit(container, fields, index + 1, pairs, out);
-            pairs.pop();
-        }
-    }
-
-    let mut out = String::new();
-    emit(container, fields, 0, &mut Vec::new(), &mut out);
-    out
-}
-
-fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
-    if let Some(expr) = &f.default {
-        if let Some(source) = serde_source_literal(expr) {
-            return Some(source);
-        }
-        if let Some(value) = f.default_ct.as_ref() {
-            return serde_ct_source(value);
-        }
-    }
-    let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_DEFAULT)?;
-    match (marker.args.first(), marker.ct.as_ref()) {
-        (Some(_), Some(value)) => serde_ct_source(value),
-        (Some(expr), None) => serde_source_literal(expr),
-        (None, _) => None,
-    }
-}
-
-fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
-    use crate::AST::{CtReport, CtValue};
-    Some(match value {
-        CtValue::Int(v) => v.to_string(),
-        CtValue::Float(v) => format!("{v:?}"),
-        CtValue::Bool(v) => v.to_string(),
-        CtValue::Char(v) => format!("{v:?}"),
-        CtValue::Str(v) => format!("{v:?}"),
-        CtValue::BigInt(v) => format!("BigInt({:?})", v.to_string_rep()),
-        CtValue::Bytes(values) => format!(
-            "[{}]",
-            values.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
-        ),
-        CtValue::List(values) => format!(
-            "[{}]",
-            values.iter().map(serde_ct_source).collect::<Option<Vec<_>>>()?.join(", ")
-        ),
-        CtValue::Map(values) => format!(
-            "[{}]",
-            values.iter().map(|(key, value)| Some(format!(
-                "{}: {}",
-                serde_ct_source(&key.to_value())?,
-                serde_ct_source(value)?
-            ))).collect::<Option<Vec<_>>>()?.join(", ")
-        ),
-        CtValue::Struct { type_name, fields } => format!(
-            "{type_name}.{{ {} }}",
-            fields.iter().map(|(name, value)| Some(format!(
-                "{name}: {}",
-                serde_ct_source(value)?
-            ))).collect::<Option<Vec<_>>>()?.join(", ")
-        ),
-        CtValue::Enum { type_name, variant, args } => {
-            if args.is_empty() {
-                format!("{type_name}.{variant}")
-            } else if args.iter().all(|(label, _)| label.is_none()) {
-                format!(
-                    "{type_name}.{variant}({})",
-                    args.iter().map(|(_, value)| serde_ct_source(value)).collect::<Option<Vec<_>>>()?.join(", ")
-                )
-            } else {
-                format!(
-                    "{type_name}.{variant}.{{ {} }}",
-                    args.iter().map(|(label, value)| Some(format!(
-                        "{}: {}",
-                        label.as_ref()?,
-                        serde_ct_source(value)?
-                    ))).collect::<Option<Vec<_>>>()?.join(", ")
-                )
-            }
-        }
-        // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
-        CtValue::Present(value) => format!("Ok({})", serde_ct_source(value)?),
-        CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
-        CtValue::Failed(CtReport::Told(value)) => format!("Err({})", serde_ct_source(value)?),
-        CtValue::Unit | CtValue::Closure(_) => return None,
-    })
-}
-
-fn serde_source_literal(e: &crate::AST::Expr) -> Option<String> {
-    match e {
-        crate::AST::Expr::Int(v, _, _, _) => Some(v.to_string()),
-        crate::AST::Expr::Float(v, _, _) => Some(v.to_string()),
-        crate::AST::Expr::Bool(v, _) => Some(v.to_string()),
-        crate::AST::Expr::Char(v, _) => Some(format!("{v:?}")),
-        crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-            crate::AST::StrPart::Lit(v) => Some(format!("{v:?}")),
+    let style = container
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME_ALL)
+        .and_then(|marker| marker.args.first())
+        .and_then(|expression| match expression {
+            Expr::Ident(name, _) => Some(name.as_str()),
             _ => None,
-        },
-        crate::AST::Expr::ListLit(values, _) => Some(format!("[{}]", values.iter().map(serde_source_literal).collect::<Option<Vec<_>>>()?.join(", "))),
-        crate::AST::Expr::MapLit(values, _) => Some(format!("[{}]", values.iter().map(|(k,v)| Some(format!("{}: {}", serde_source_literal(k)?, serde_source_literal(v)?))).collect::<Option<Vec<_>>>()?.join(", "))),
-        _ => None,
-    }
-}
-
-fn serde_source_zero(ty: &Type) -> String {
-    match ty {
-        Type::Int | Type::IntN { .. } => "0".to_string(),
-        Type::Float | Type::Float32 => "0.0".to_string(),
-        Type::Bool => "false".to_string(),
-        Type::String => "\"\"".to_string(),
-        Type::Option(_) => "None".to_string(),
-        Type::List(_) | Type::Map { .. } => "[]".to_string(),
-        _ => format!("{}.{{}}", serde_type_source(ty)),
-    }
-}
-
-fn serde_type_arg_names(params: &[crate::AST::TypeParam]) -> String {
-    if params.is_empty() { String::new() } else {
-        format!("<{}>", params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "))
-    }
-}
-
-fn serde_type_source(ty: &Type) -> String {
-    match ty {
-        Type::Int => "Int".to_string(), Type::Float => "Float".to_string(),
-        Type::Bool => "Bool".to_string(), Type::String => "String".to_string(),
-        Type::Char => "Char".to_string(), Type::Named(n) => n.clone(),
-        Type::List(t) => format!("[{}]", serde_type_source(t)),
-        Type::Map { key, value, .. } => format!("[{}: {}]", serde_type_source(key), serde_type_source(value)),
-        Type::Option(t) => format!("{}?", serde_type_source(t)),
-        Type::Result { ok, err } => format!("{} ? {}", serde_type_source(ok), serde_type_source(err)),
-        Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(serde_type_source).collect::<Vec<_>>().join(", ")),
-        Type::IntN { signed, bits } => format!("{}{}", if *signed { "I" } else { "U" }, bits),
-        Type::Float32 => "F32".to_string(),
-        Type::FixedList { elem, len, .. } => format!("[{}#{}]", serde_type_source(elem), len),
-        Type::Shared(t) => format!("shared {}", serde_type_source(t)),
-        Type::Tagged { marker, inner } => format!("#{} {}", marker, serde_type_source(inner)),
-        Type::Tuple(fields) => format!("({})", fields.iter().map(|(n,t)| format!("{}: {}", n, serde_type_source(t))).collect::<Vec<_>>().join(", ")),
-        Type::TraitObject(names) => format!("dyn {}", names.join(" + ")),
-        Type::Fn { .. } => "fn()".to_string(),
-        Type::Union(members) => members
-            .iter()
-            .map(serde_type_source)
-            .collect::<Vec<_>>()
-            .join(" | "),
-        Type::Quantity { .. } => ty.name(),
-        Type::ComputeDim(value) => value.to_string(),
+        });
+    match style {
+        Some("camel") => crate::Syntax::to_camel_acronym(&field.name),
+        Some("kebab") => crate::Syntax::to_snake_acronym(&field.name).replace('_', "-"),
+        Some("screaming") => crate::Syntax::to_shouty_acronym(&field.name),
+        Some("pascal") => crate::Syntax::to_pascal_acronym(&field.name),
+        Some("snake") => crate::Syntax::to_snake_acronym(&field.name),
+        _ => field.name.clone(),
     }
 }

@@ -814,6 +814,13 @@ impl<'a> Checker<'a> {
                     None
                 };
                 for (i, arg) in args.iter_mut().enumerate() {
+                    // D-META-BODY1=A: `b.generate(name) { … }` carries its
+                    // second slot as typed AST metadata. It has no value type
+                    // to infer and must not be mistaken for the retired source
+                    // string argument.
+                    if arg.flags.template_items.is_some() {
+                        continue;
+                    }
                     let saved_esc = self.lambda_escapes;
                     let saved_lending_params = self.lambda_params_are_lending_views;
                     if Collections::is_closure_method(method) {

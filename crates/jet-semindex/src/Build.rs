@@ -1902,7 +1902,24 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::UserDerive(value) => {
             ctx.db.refs.push(scoped_ref(value.trait_name.clone(), value.trait_span, mp, ctx));
-            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&value.body, mp, module, ctx));
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                for body_item in &value.body {
+                    match body_item {
+                        AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
+                        AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
+                        AST::DeriveBodyItem::Loop { source, body, .. } => {
+                            collect_expr(source, mp, ctx);
+                            for nested in body {
+                                match nested {
+                                    AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
+                                    AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
+                                    AST::DeriveBodyItem::Loop { source, .. } => collect_expr(source, mp, ctx),
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
         Item::GenericModule(value) => {
             ctx.db.defs.push(SymDef {

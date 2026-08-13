@@ -1,141 +1,66 @@
 use super::*;
+use crate::AST::{
+    AccessConvention, BinOp, Call, CallArg, CallArgFlags, Expr, Func, ImplDef, Item, Param,
+    PatSlot, Pattern, Stmt, SwitchArm, TraitImplBlock, Type, VariantPayload,
+};
 
 /// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests lower to the
-/// same parsed implementation surface as user-authored code. The generated
-/// block is attached to a struct or enum so generic owners inherit their
-/// declaration parameters through the ordinary in-type implementation path.
+/// same checked item surface as user-authored code. The builder below creates
+/// AST items directly. No generated source is lexed again.
 pub(in super::super) fn expand_builtin_derive_items(
     items: &mut Vec<Item>,
-    diags: &mut Vec<Diagnostic>,
+    _diags: &mut Vec<Diagnostic>,
 ) {
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     let invalid_distinct_names: std::collections::HashSet<String> = items
         .iter()
         .filter_map(|item| {
             let Item::Distinct(d) = item else { return None };
-            let crate::AST::Type::Named(base) = &d.base else {
-                return None;
-            };
+            let Type::Named(base) = &d.base else { return None };
             items.iter().any(|item| {
                 matches!(item, Item::Distinct(other) if other.name == *base)
             }).then(|| d.name.clone())
         })
         .collect();
-    let mut requests = Vec::new();
 
-    for item in items.iter() {
+    let mut generated = Vec::new();
+    let snapshot = items.clone();
+    for item in &snapshot {
         match item {
             Item::Struct(s) => {
-                let comparable = has_derive(&s.derives, crate::Generics::COMPARABLE);
+                let comparable = has_derive(&s.derives, crate::Generics::COMPARABLE)
+                    || auto.auto_comparable.contains(&s.name);
                 let equatable = comparable
                     || has_derive(&s.derives, crate::Generics::EQUATABLE)
                     || auto.auto_equatable.contains(&s.name);
                 if equatable || comparable {
-                    requests.push((
-                        s.name.clone(),
-                        derive_source_for_fields(&s.name, &s.fields, equatable, comparable),
-                        true,
-                    ));
+                    generated.extend(struct_derive_items(s, equatable, comparable));
                 }
             }
             Item::Enum(e) => {
-                let comparable = has_derive(&e.derives, crate::Generics::COMPARABLE);
+                let comparable = has_derive(&e.derives, crate::Generics::COMPARABLE)
+                    || auto.auto_comparable.contains(&e.name);
                 let equatable = comparable
                     || has_derive(&e.derives, crate::Generics::EQUATABLE)
                     || auto.auto_equatable.contains(&e.name);
                 if equatable || comparable {
-                    requests.push((
-                        e.name.clone(),
-                        derive_source_for_enum(&e.name, &e.variants, equatable, comparable),
-                        true,
-                    ));
+                    generated.extend(enum_derive_items(e, equatable, comparable));
                 }
             }
-            Item::Distinct(d) => {
-                if invalid_distinct_names.contains(&d.name) {
-                    continue;
-                }
-                let comparable = has_derive(&d.derives, crate::Generics::COMPARABLE);
-                requests.push((
-                    d.name.clone(),
-                    derive_source_for_distinct(&d.name, &d.base, comparable),
-                    false,
-                ));
+            Item::Distinct(d) if !invalid_distinct_names.contains(&d.name) => {
+                generated.extend(distinct_derive_items(d));
             }
-            // Unit-family members are virtual distinct declarations. Put their
-            // capability implementations through this same parsed path before
-            // codegen sees the family, so the virtual declarations do not retain
-            // a private raw-Rust implementation route.
             Item::UnitFamily(family) => {
                 for d in family.distinct_defs() {
-                    let comparable = has_derive(&d.derives, crate::Generics::COMPARABLE);
-                    requests.push((
-                        d.name.clone(),
-                        derive_source_for_distinct(&d.name, &d.base, comparable),
-                        false,
-                    ));
+                    generated.extend(distinct_derive_items(&d));
                 }
             }
             _ => {}
         }
     }
 
-    for (type_name, source, attach_to_type) in requests {
-        if source.is_empty() {
-            continue;
-        }
-        let Some(mut generated) = parse_generated_fragment(
-            &source,
-            format!("built-in derive generated invalid Jet for `{type_name}`"),
-            "built-in derives must emit valid ordinary Jet".to_string(),
-            items
-                .iter()
-                .find_map(|item| derive_trigger_span(item, &type_name))
-                .unwrap_or_else(|| Span::new(0, 0)),
-            diags,
-        ) else {
-            continue;
-        };
-        for item in generated.drain(..) {
-            match item {
-                Item::Func(function) => {
-                    // Recursive enum equality uses a generated free helper so its
-                    // structural `==` calls do not recurse through `equal` itself.
-                    // Keep that helper in the ordinary item table; dropping it here
-                    // would leave the attached implementation calling an unknown name.
-                    if !items.iter().any(|item| {
-                        matches!(item, Item::Func(existing) if existing.name == function.name)
-                    }) {
-                        items.push(Item::Func(function));
-                    }
-                }
-                Item::Impl(implementation) => {
-                    if has_trait_impl(items, &type_name, implementation.trait_name.as_deref()) {
-                        continue;
-                    }
-                    if attach_to_type {
-                        if let Some(target) = items.iter_mut().find_map(|item| match item {
-                            Item::Struct(s) if s.name == type_name => Some(&mut s.trait_impls),
-                            Item::Enum(e) if e.name == type_name => Some(&mut e.trait_impls),
-                            _ => None,
-                        }) {
-                            let Some(trait_name) = implementation.trait_name else {
-                                continue;
-                            };
-                            target.push(crate::AST::TraitImplBlock {
-                                trait_name,
-                                trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
-                                methods: implementation.methods,
-                                assoc_type_impls: implementation.assoc_type_impls,
-                            });
-                        }
-                    } else {
-                        items.push(Item::Impl(implementation));
-                    }
-                }
-                _ => {}
-            }
-        }
+    for item in generated {
+        attach_generated_derive_item(items, item);
     }
 }
 
@@ -143,285 +68,501 @@ fn has_derive(derives: &[(String, Span)], name: &str) -> bool {
     derives.iter().any(|(derive, _)| derive == name)
 }
 
-fn derive_trigger_span(item: &Item, type_name: &str) -> Option<Span> {
-    match item {
-        Item::Struct(s) if s.name == type_name => s
-            .derives
-            .iter()
-            .find(|(name, _)| {
-                name == crate::Generics::COMPARABLE || name == crate::Generics::EQUATABLE
-            })
-            .map(|(_, span)| *span)
-            .or(Some(s.name_span)),
-        Item::Enum(e) if e.name == type_name => e
-            .derives
-            .iter()
-            .find(|(name, _)| {
-                name == crate::Generics::COMPARABLE || name == crate::Generics::EQUATABLE
-            })
-            .map(|(_, span)| *span)
-            .or(Some(e.name_span)),
-        Item::Distinct(d) if d.name == type_name => d
-            .derives
-            .first()
-            .map(|(_, span)| *span)
-            .or(Some(d.name_span)),
-        Item::UnitFamily(family) => family
-            .distinct_defs()
-            .into_iter()
-            .find(|d| d.name == type_name)
-            .and_then(|d| d.derives.first().map(|(_, span)| *span).or(Some(d.name_span))),
-        _ => None,
-    }
-}
-
-fn has_trait_impl(items: &[Item], type_name: &str, trait_name: Option<&str>) -> bool {
-    let Some(trait_name) = trait_name else {
-        return true;
-    };
-    items.iter().any(|item| match item {
-        Item::Impl(i) => i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name),
-        Item::Struct(s) => {
-            s.name == type_name && s.trait_impls.iter().any(|i| i.trait_name == trait_name)
-        }
-        Item::Enum(e) => {
-            e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name)
-        }
-        _ => false,
-    })
-}
-
-fn derive_source_for_fields(
-    type_name: &str,
-    fields: &[crate::AST::Field],
+fn struct_derive_items(
+    s: &crate::AST::StructDef,
     equatable: bool,
     comparable: bool,
-) -> String {
-    let fields = fields
-        .iter()
-        .filter(|field| field.computed.is_none())
-        .map(|field| field.name.as_str())
-        .collect::<Vec<_>>();
-    let mut source = String::new();
+) -> Vec<Item> {
+    let fields: Vec<_> = s.fields.iter().filter(|field| field.computed.is_none()).collect();
+    let mut out = Vec::new();
     if equatable {
-        let equality = if fields.is_empty() {
-            "true".to_string()
-        } else {
-            fields
-                .iter()
-                .map(|field| format!("self.{field} == rhs.{field}"))
-                .collect::<Vec<_>>()
-                .join(" && ")
-        };
-        source.push_str(&format!(
-            "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn {equality}\n}}\n}}\n"
-        ));
+        let equality = fields
+            .iter()
+            .map(|field| binary(
+                BinOp::Eq,
+                field_read("self", &field.name, s.name_span),
+                field_read("rhs", &field.name, s.name_span),
+                s.name_span,
+            ))
+            .reduce(|left, right| binary(BinOp::And, left, right, s.name_span))
+            .unwrap_or_else(|| Expr::Bool(true, s.name_span));
+        out.push(Item::Impl(derive_impl(
+            &s.name,
+            crate::Generics::EQUATABLE,
+            generated_func(
+                "equal",
+                vec![self_param(s.name_span), named_param("rhs", Type::Named(s.name.clone()), s.name_span)],
+                Some(Type::Bool),
+                vec![Stmt::Return(Some(equality), s.name_span)],
+                s.name_span,
+            ),
+            s.name_span,
+        )));
     }
     if comparable {
-        source.push_str(&format!(
-            "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\n"
-        ));
+        let mut body = Vec::new();
         for field in fields {
-            source.push_str(&format!(
-                "if self.{field} < rhs.{field} {{ return Ordering.Less }} else {{}}\nif self.{field} > rhs.{field} {{ return Ordering.Greater }} else {{}}\n"
+            let left = field_read("self", &field.name, s.name_span);
+            let right = field_read("rhs", &field.name, s.name_span);
+            body.push(if_stmt(
+                binary(BinOp::Lt, left.clone(), right.clone(), s.name_span),
+                vec![return_ordering("Less", s.name_span)],
+                s.name_span,
+            ));
+            body.push(if_stmt(
+                binary(BinOp::Gt, left, right, s.name_span),
+                vec![return_ordering("Greater", s.name_span)],
+                s.name_span,
             ));
         }
-        source.push_str("return Ordering.Equal\n}\n}\n");
+        body.push(Stmt::Return(Some(ordering("Equal", s.name_span)), s.name_span));
+        out.push(Item::Impl(derive_impl(
+            &s.name,
+            crate::Generics::COMPARABLE,
+            generated_func(
+                "compare",
+                vec![self_param(s.name_span), named_param("rhs", Type::Named(s.name.clone()), s.name_span)],
+                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+                body,
+                s.name_span,
+            ),
+            s.name_span,
+        )));
     }
-    source
+    out
 }
 
-fn derive_source_for_enum(
-    type_name: &str,
-    variants: &[crate::AST::Variant],
+fn enum_derive_items(
+    e: &crate::AST::EnumDef,
     equatable: bool,
     comparable: bool,
-) -> String {
-    let mut source = String::new();
+) -> Vec<Item> {
+    let mut out = Vec::new();
     if equatable {
-        let recursive = variants.iter().any(|variant| match &variant.payload {
-            crate::AST::VariantPayload::Unit => false,
-            crate::AST::VariantPayload::Single(ty, _) => {
-                matches!(ty, crate::AST::Type::Named(name) if name == type_name)
-            }
-            crate::AST::VariantPayload::Named(fields) => fields.iter().any(|field| {
-                matches!(&field.ty, crate::AST::Type::Named(name) if name == type_name)
+        let recursive = e.variants.iter().any(|variant| match &variant.payload {
+            VariantPayload::Unit => false,
+            VariantPayload::Single(ty, _) => matches!(ty, Type::Named(name) if name == &e.name),
+            VariantPayload::Named(fields) => fields.iter().any(|field| {
+                matches!(&field.ty, Type::Named(name) if name == &e.name)
             }),
         });
         if recursive {
-            // A recursive payload must be compared through a helper outside the
-            // Equatable hook.  The ordinary `==` spelling is deliberately rejected
-            // inside `equal` because it dispatches back to this same hook; the
-            // helper keeps the structural recursion while leaving the hook body a
-            // plain call.
-            let helper = format!("_jet_derive_equal_{type_name}");
-            source.push_str(&format!(
-                "fn {helper}(left: {type_name}, right: {type_name}) => Bool {{\n"
-            ));
-            append_enum_dispatch(
-                &mut source,
-                variants,
-                "left",
-                "right",
-                |source, left, right, _, _, same| {
-                    if same {
-                        source.push_str(&format!("return {}\n", equality_expression(left, right)));
-                    } else {
-                        source.push_str("return false\n");
-                    }
-                },
+            let helper_name = format!("_jet_derive_equal_{}", e.name);
+            let helper_body = enum_dispatch_body(e, "left", "right", DispatchKind::Equality);
+            out.push(Item::Func(generated_func(
+                &helper_name,
+                vec![
+                    named_param("left", Type::Named(e.name.clone()), e.name_span),
+                    named_param("right", Type::Named(e.name.clone()), e.name_span),
+                ],
+                Some(Type::Bool),
+                helper_body,
+                e.name_span,
+            )));
+            let call = free_call(
+                &helper_name,
+                vec![ident("self", e.name_span), ident("rhs", e.name_span)],
+                e.name_span,
             );
-            source.push_str(&format!(
-                "return false\n}}\nimpl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn {helper}(self, rhs)\n}}\n}}\n"
-            ));
+            out.push(Item::Impl(derive_impl(
+                &e.name,
+                crate::Generics::EQUATABLE,
+                generated_func(
+                    "equal",
+                    vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                    Some(Type::Bool),
+                    vec![Stmt::Return(Some(call), e.name_span)],
+                    e.name_span,
+                ),
+                e.name_span,
+            )));
         } else {
-            source.push_str(&format!(
-                "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\n"
-            ));
-            append_enum_dispatch(
-                &mut source,
-                variants,
-                "self",
-                "rhs",
-                |source, left, right, _, _, same| {
-                    if same {
-                        source.push_str(&format!("return {}\n", equality_expression(left, right)));
-                    } else {
-                        source.push_str("return false\n");
-                    }
-                },
-            );
-            source.push_str("return false\n}\n}\n");
+            out.push(Item::Impl(derive_impl(
+                &e.name,
+                crate::Generics::EQUATABLE,
+                generated_func(
+                    "equal",
+                    vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                    Some(Type::Bool),
+                    enum_dispatch_body(e, "self", "rhs", DispatchKind::Equality),
+                    e.name_span,
+                ),
+                e.name_span,
+            )));
         }
     }
     if comparable {
-        source.push_str(&format!(
-            "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\n"
-        ));
-        append_enum_dispatch(
-            &mut source,
-            variants,
-            "self",
-            "rhs",
-            |source, left, right, left_index, right_index, same| {
-                if same {
-                    append_comparison(source, left, right);
-                } else if left_index < right_index {
-                    source.push_str("return Ordering.Less\n");
-                } else {
-                    source.push_str("return Ordering.Greater\n");
+        out.push(Item::Impl(derive_impl(
+            &e.name,
+            crate::Generics::COMPARABLE,
+            generated_func(
+                "compare",
+                vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+                enum_dispatch_body(e, "self", "rhs", DispatchKind::Comparison),
+                e.name_span,
+            ),
+            e.name_span,
+        )));
+    }
+    out
+}
+
+fn distinct_derive_items(d: &crate::AST::DistinctDef) -> Vec<Item> {
+    let Some(derive_span) = d.derives.first().map(|(_, span)| *span) else {
+        return Vec::new();
+    };
+    let equality = if matches!(d.base, Type::Float | Type::Float32) {
+        binary(
+            BinOp::And,
+            binary(
+                BinOp::Le,
+                method(ident("self", derive_span), "raw", Vec::new(), derive_span),
+                method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
+                derive_span,
+            ),
+            binary(
+                BinOp::Ge,
+                method(ident("self", derive_span), "raw", Vec::new(), derive_span),
+                method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
+                derive_span,
+            ),
+            derive_span,
+        )
+    } else {
+        binary(
+            BinOp::Eq,
+            method(ident("self", derive_span), "raw", Vec::new(), derive_span),
+            method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
+            derive_span,
+        )
+    };
+    let mut out = vec![Item::Impl(derive_impl(
+        &d.name,
+        crate::Generics::EQUATABLE,
+        generated_func(
+            "equal",
+            vec![self_param(derive_span), named_param("rhs", Type::Named(d.name.clone()), derive_span)],
+            Some(Type::Bool),
+            vec![Stmt::Return(Some(equality), derive_span)],
+            derive_span,
+        ),
+        derive_span,
+    ))];
+    if has_derive(&d.derives, crate::Generics::COMPARABLE) {
+        let self_raw = method(ident("self", derive_span), "raw", Vec::new(), derive_span);
+        let rhs_raw = method(ident("rhs", derive_span), "raw", Vec::new(), derive_span);
+        out.push(Item::Impl(derive_impl(
+            &d.name,
+            crate::Generics::COMPARABLE,
+            generated_func(
+                "compare",
+                vec![self_param(derive_span), named_param("rhs", Type::Named(d.name.clone()), derive_span)],
+                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+                vec![
+                    if_stmt(binary(BinOp::Lt, self_raw.clone(), rhs_raw.clone(), derive_span), vec![return_ordering("Less", derive_span)], derive_span),
+                    if_stmt(binary(BinOp::Gt, self_raw, rhs_raw, derive_span), vec![return_ordering("Greater", derive_span)], derive_span),
+                    Stmt::Return(Some(ordering("Equal", derive_span)), derive_span),
+                ],
+                derive_span,
+            ),
+            derive_span,
+        )));
+    }
+    out
+}
+
+#[derive(Clone, Copy)]
+enum DispatchKind {
+    Equality,
+    Comparison,
+}
+
+fn enum_dispatch_body(
+    e: &crate::AST::EnumDef,
+    left_name: &str,
+    right_name: &str,
+    kind: DispatchKind,
+) -> Vec<Stmt> {
+    let mut outer = Vec::new();
+    let mut outer_arms = Vec::new();
+    for (left_index, left_variant) in e.variants.iter().enumerate() {
+        let left_bindings = payload_bindings(&left_variant.payload, "left");
+        let mut inner_arms = Vec::new();
+        for (right_index, right_variant) in e.variants.iter().enumerate() {
+            let right_bindings = payload_bindings(&right_variant.payload, "right");
+            let body = if left_index != right_index {
+                match kind {
+                    DispatchKind::Equality => vec![Stmt::Return(Some(Expr::Bool(false, e.name_span)), e.name_span)],
+                    DispatchKind::Comparison => vec![Stmt::Return(Some(ordering(
+                        if left_index < right_index { "Less" } else { "Greater" },
+                        e.name_span,
+                    )), e.name_span)],
                 }
-            },
-        );
-        source.push_str("return Ordering.Equal\n}\n}\n");
-    }
-    source
-}
-
-fn append_enum_dispatch(
-    source: &mut String,
-    variants: &[crate::AST::Variant],
-    left_subject: &str,
-    right_subject: &str,
-    mut body: impl FnMut(&mut String, &[String], &[String], usize, usize, bool),
-) {
-    source.push_str(&format!("if {left_subject} == {{\n"));
-    for (left_index, left_variant) in variants.iter().enumerate() {
-        let left = payload_bindings(&left_variant.payload, "left");
-        source.push_str(".");
-        source.push_str(&left_variant.name);
-        append_pattern_slots(source, &left);
-        source.push_str(&format!(" -> {{\nif {right_subject} == {{\n"));
-        for (right_index, right_variant) in variants.iter().enumerate() {
-            let right = payload_bindings(&right_variant.payload, "right");
-            source.push_str(".");
-            source.push_str(&right_variant.name);
-            append_pattern_slots(source, &right);
-            source.push_str(" -> {");
-            body(
-                source,
-                &left,
-                &right,
-                left_index,
-                right_index,
-                left_index == right_index,
-            );
-            source.push_str("}\n");
+            } else {
+                match kind {
+                    DispatchKind::Equality => vec![Stmt::Return(Some(
+                        equality_expression(&left_bindings, &right_bindings, e.name_span),
+                    ), e.name_span)],
+                    DispatchKind::Comparison => comparison_body(&left_bindings, &right_bindings, e.name_span),
+                }
+            };
+            inner_arms.push(SwitchArm {
+                cond: pattern_test(right_name, right_variant, right_bindings, e.name_span),
+                body,
+                span: e.name_span,
+            });
         }
-        source.push_str("}\n}\n");
+        outer_arms.push(SwitchArm {
+            cond: pattern_test(left_name, left_variant, left_bindings, e.name_span),
+            body: vec![Stmt::Switch {
+                subject: ident(right_name, e.name_span),
+                arms: inner_arms,
+                else_body: None,
+                span: e.name_span,
+            }],
+            span: e.name_span,
+        });
+        let _ = left_index;
     }
-    source.push_str("}\n");
+    outer.push(Stmt::Switch {
+        subject: ident(left_name, e.name_span),
+        arms: outer_arms,
+        else_body: None,
+        span: e.name_span,
+    });
+    outer.push(Stmt::Return(
+        Some(match kind {
+            DispatchKind::Equality => Expr::Bool(false, e.name_span),
+            DispatchKind::Comparison => ordering("Equal", e.name_span),
+        }),
+        e.name_span,
+    ));
+    outer
 }
 
-fn payload_bindings(payload: &crate::AST::VariantPayload, prefix: &str) -> Vec<String> {
+fn comparison_body(left: &[String], right: &[String], span: Span) -> Vec<Stmt> {
+    let mut body = Vec::new();
+    for (left, right) in left.iter().zip(right) {
+        body.push(if_stmt(
+            binary(BinOp::Lt, ident(left, span), ident(right, span), span),
+            vec![return_ordering("Less", span)],
+            span,
+        ));
+        body.push(if_stmt(
+            binary(BinOp::Gt, ident(left, span), ident(right, span), span),
+            vec![return_ordering("Greater", span)],
+            span,
+        ));
+    }
+    body.push(Stmt::Return(Some(ordering("Equal", span)), span));
+    body
+}
+
+fn equality_expression(left: &[String], right: &[String], span: Span) -> Expr {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| binary(BinOp::Eq, ident(left, span), ident(right, span), span))
+        .reduce(|left, right| binary(BinOp::And, left, right, span))
+        .unwrap_or(Expr::Bool(true, span))
+}
+
+fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
     let count = match payload {
-        crate::AST::VariantPayload::Unit => 0,
-        crate::AST::VariantPayload::Single(..) => 1,
-        crate::AST::VariantPayload::Named(fields) => fields.len(),
+        VariantPayload::Unit => 0,
+        VariantPayload::Single(..) => 1,
+        VariantPayload::Named(fields) => fields.len(),
     };
     (0..count).map(|index| format!("{prefix}_{index}")).collect()
 }
 
-fn append_pattern_slots(
-    source: &mut String,
-    bindings: &[String],
-) {
-    if bindings.is_empty() {
+fn pattern_test(
+    subject: &str,
+    variant: &crate::AST::Variant,
+    bindings: Vec<String>,
+    span: Span,
+) -> Expr {
+    Expr::PatternTest {
+        subject: Box::new(ident(subject, span)),
+        pattern: Pattern::Variant {
+            variant: variant.name.clone(),
+            bindings: bindings
+                .into_iter()
+                .map(|name| PatSlot::Bind { name, span })
+                .collect(),
+            leading_dot: true,
+            span,
+        },
+        span,
+    }
+}
+
+fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
+    let Item::Impl(implementation) = item else {
+        if let Item::Func(function) = item {
+            if !items.iter().any(|existing| {
+                matches!(existing, Item::Func(old) if old.name == function.name)
+            }) {
+                items.push(Item::Func(function));
+            }
+        }
+        return;
+    };
+    let Some(trait_name) = implementation.trait_name.clone() else { return };
+    if has_trait_impl(items, &implementation.type_name, &trait_name) {
         return;
     }
-    source.push('(');
-    for (index, binding) in bindings.iter().enumerate() {
-        if index > 0 {
-            source.push_str(", ");
-        }
-        source.push_str(binding);
-    }
-    source.push(')');
-}
-
-fn equality_expression(left: &[String], right: &[String]) -> String {
-    if left.is_empty() {
-        return "true".to_string();
-    }
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| format!("{left} == {right}"))
-        .collect::<Vec<_>>()
-        .join(" && ")
-}
-
-fn append_comparison(source: &mut String, left: &[String], right: &[String]) {
-    for (left, right) in left.iter().zip(right) {
-        source.push_str(&format!(
-            "if {left} < {right} {{ return Ordering.Less }} else {{}}\nif {left} > {right} {{ return Ordering.Greater }} else {{}}\n"
-        ));
-    }
-    source.push_str("return Ordering.Equal\n");
-}
-
-fn derive_source_for_distinct(
-    type_name: &str,
-    base: &crate::AST::Type,
-    comparable: bool,
-) -> String {
-    // Generated equality for a Float-backed distinct value is compiler
-    // machinery, not a user-authored float comparison. The ordered pair has
-    // the same IEEE result as `==` (including NaN and signed zero) while it
-    // keeps the generated fragment out of the user-facing float-equality lint.
-    let equality = if matches!(base, crate::AST::Type::Float | crate::AST::Type::Float32) {
-        "self.raw() <= rhs.raw() && self.raw() >= rhs.raw()"
+    if let Some(target) = items.iter_mut().find_map(|item| match item {
+        Item::Struct(s) if s.name == implementation.type_name => Some(&mut s.trait_impls),
+        Item::Enum(e) if e.name == implementation.type_name => Some(&mut e.trait_impls),
+        _ => None,
+    }) {
+        target.push(TraitImplBlock {
+            trait_name,
+            trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
+            methods: implementation.methods,
+            assoc_type_impls: implementation.assoc_type_impls,
+        });
     } else {
-        "self.raw() == rhs.raw()"
-    };
-    let mut source = format!(
-        "impl {type_name}.Equatable {{\nfn equal(self, rhs: {type_name}) => Bool {{\nreturn {equality}\n}}\n}}\n"
-    );
-    if comparable {
-        source.push_str(&format!(
-            "impl {type_name}.Comparable {{\nfn compare(self, rhs: {type_name}) => Ordering {{\nif self.raw() < rhs.raw() {{ return Ordering.Less }} else {{}}\nif self.raw() > rhs.raw() {{ return Ordering.Greater }} else {{}}\nreturn Ordering.Equal\n}}\n}}\n"
-        ));
+        items.push(Item::Impl(implementation));
     }
-    source
+}
+
+fn has_trait_impl(items: &[Item], type_name: &str, trait_name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Impl(i) => i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name),
+        Item::Struct(s) => s.name == type_name && s.trait_impls.iter().any(|i| i.trait_name == trait_name),
+        Item::Enum(e) => e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name),
+        _ => false,
+    })
+}
+
+fn derive_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> ImplDef {
+    ImplDef {
+        span,
+        type_name: type_name.to_string(),
+        type_span: span,
+        trait_name: Some(trait_name.to_string()),
+        trait_span: Some(span),
+        methods: vec![method],
+        delegation_field: None,
+        assoc_type_impls: Vec::new(),
+        is_generated_serde: false,
+        os_target: None,
+    }
+}
+
+fn generated_func(
+    name: &str,
+    params: Vec<Param>,
+    return_type: Option<Type>,
+    body: Vec<Stmt>,
+    span: Span,
+) -> Func {
+    let mut function = Func::implicit_run(body, span);
+    function.name = name.to_string();
+    function.name_span = span;
+    function.params = params;
+    function.return_type = return_type;
+    function.return_type_span = function.return_type.as_ref().map(|_| span);
+    function
+}
+
+fn self_param(span: Span) -> Param {
+    named_param_with_ty("self", Type::Named(String::new()), span, AccessConvention::Read)
+}
+
+fn named_param(name: &str, ty: Type, span: Span) -> Param {
+    named_param_with_ty(name, ty, span, AccessConvention::Read)
+}
+
+fn named_param_with_ty(name: &str, ty: Type, span: Span, convention: AccessConvention) -> Param {
+    Param {
+        convention,
+        root: false,
+        name: name.to_string(),
+        name_span: span,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
+        ty,
+        ty_span: span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+    }
+}
+
+fn ident(name: &str, span: Span) -> Expr {
+    Expr::Ident(name.to_string(), span)
+}
+
+fn field_read(base: &str, field: &str, span: Span) -> Expr {
+    Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
+}
+
+fn binary(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr {
+    Expr::Binary(op, Box::new(left), Box::new(right), span)
+}
+
+fn call_arg(expr: Expr, span: Span) -> CallArg {
+    CallArg {
+        convention: AccessConvention::Read,
+        expr,
+        span,
+        flags: CallArgFlags::default(),
+        label: None,
+        spread: false,
+    }
+}
+
+fn free_call(name: &str, args: Vec<Expr>, span: Span) -> Expr {
+    Expr::Call(Call {
+        name: name.to_string(),
+        name_span: span,
+        type_args: Vec::new(),
+        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    })
+}
+
+fn method(receiver: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(receiver),
+        method: name.to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+        recv_type: None,
+        resolved_ret: None,
+        checked_widen: false,
+    }
+}
+
+fn ordering(variant: &str, span: Span) -> Expr {
+    Expr::EnumLit {
+        type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+        leading_dot: false,
+        span,
+    }
+}
+
+fn return_ordering(variant: &str, span: Span) -> Stmt {
+    Stmt::Return(Some(ordering(variant, span)), span)
+}
+
+fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
+    Stmt::Switch {
+        subject: Expr::Bool(true, span),
+        arms: vec![SwitchArm { cond, body, span }],
+        else_body: Some(Vec::new()),
+        span,
+    }
 }
 
 #[cfg(test)]
@@ -429,30 +570,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn built_in_and_user_derive_fragments_share_the_parser() {
+    fn builtin_derive_is_an_ast_item_not_source() {
         let (tokens, lex_diags) = crate::Lexer::lex("#Comparable struct Point { value: Int }");
         assert!(lex_diags.is_empty());
-        let mut built_in_program =
-            crate::Parser::parse(&tokens).expect("built-in source parses");
-        let mut built_in_diags = Vec::new();
-        let mut user_diags = Vec::new();
-        expand_builtin_derive_items(&mut built_in_program.items, &mut built_in_diags);
-        let user = parse_generated_fragment(
-            "impl Point.Comparable { fn compare(self, rhs: Point) => Ordering { return Ordering.Equal } }",
-            "user derive generated invalid Jet".to_string(),
-            "fix the derive body".to_string(),
-            Span::new(0, 1),
-            &mut user_diags,
-        );
-        assert!(built_in_diags.is_empty());
-        assert!(user_diags.is_empty());
-        assert!(built_in_program.items.iter().any(|item| matches!(
+        let mut program = crate::Parser::parse(&tokens).expect("source parses");
+        let mut diags = Vec::new();
+        expand_builtin_derive_items(&mut program.items, &mut diags);
+        assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+        assert!(program.items.iter().any(|item| matches!(
             item,
             Item::Struct(s)
                 if s.trait_impls
                     .iter()
                     .any(|implementation| implementation.trait_name == Syntax::MARKER_COMPARABLE)
         )));
-        assert!(matches!(user.unwrap().as_slice(), [Item::Impl(_)]));
     }
 }

@@ -103,8 +103,7 @@ fn layout_info_for_struct(s: &StructDef) -> CtValue {
         kind,
         guarantee,
         "struct declaration",
-        s.fields
-            .iter()
+        s.reflection_fields()
             .map(|field| (field.name.clone(), field.ty.name())),
     )
 }
@@ -1268,13 +1267,11 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
 ) -> CtValue {
     let fields_info: Vec<CtValue> = s
-        .fields
-        .iter()
+        .reflection_fields()
         .map(|field| build_field_info_with_vocabulary(field, vocabulary))
         .collect();
     let dimensions = s
-        .fields
-        .iter()
+        .reflection_fields()
         .flat_map(|field| type_dimensions(&field.ty))
         .collect::<Vec<_>>();
     let layout = build_struct_layout_info(s);
@@ -1310,7 +1307,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
         .iter()
         .map(|state| reflected_state_fact(&s.name, state))
         .collect::<Vec<_>>();
-    for field in &s.fields {
+    for field in s.reflection_fields() {
         facts.extend(type_fact_rows(&format!("{}.{}", s.name, field.name), &field.ty));
     }
     let (markers, expanded_markers) = type_level_marker_views_with_vocabulary(

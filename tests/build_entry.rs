@@ -128,7 +128,9 @@ fn root_fn_build_executes_graph_materializes_and_frontend_checks_generated_sourc
         &entry,
         r#"
 fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
-    b.generate("generated_message", "fn generated_message() => String {{ return \"built\" }}")?
+    b.generate("generated_message") {
+        fn generated_message() => String = "built";
+    }?
     #Impure("write declared build output") {
     stamp :: b.action(
         "stamp",
@@ -226,7 +228,9 @@ fn package_manifest_build_entry_uses_the_same_pipeline_as_a_file_entry() {
 name: "package-entry"
 version: "0.1.0"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("package_message", "fn package_message() => String {{ return \"package\" }}")?
+    b.generate("package_message") {
+        fn package_message() => String = "package";
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
     return b.plan(app)
 }
@@ -736,7 +740,9 @@ fn build(b: BuildContext) => BuildPlan ? {
 name: "a"
 version: "0.1.0"
     fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("a_generated", "fn a_generated() => String {{ return \"a\" }}")?
+    b.generate("a_generated") {
+        fn a_generated() => String = "a";
+    }?
     target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])?
     return b.plan(target)
 }
@@ -748,7 +754,7 @@ version: "0.1.0"
     );
     write(
         &packages.join("b").join("run.jet"),
-        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\", \"fn b_generated() => String {{ return \\\"b\\\" }}\")?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
+        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\") {\n        fn b_generated() => String = \\\"b\\\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
     );
 
     let output = jet::compile_programmable_build_opts(
@@ -913,14 +919,16 @@ fn run() {}
 }
 
 #[test]
-fn malformed_generated_source_is_a_jet_diagnostic_before_codegen() {
+fn malformed_generated_body_is_a_jet_diagnostic_before_codegen() {
     let root = project("bad-generated");
     let entry = root.join("main.jet");
     write(
         &entry,
         r#"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("broken", "fn nope(")?
+    b.generate("broken") {
+        fn nope(
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])?
     return b.plan(app)
 }
@@ -931,7 +939,7 @@ fn run() {}
         .unwrap_err();
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|d| d.code != "ICE"));
-    assert!(errors.iter().any(|d| d.what.contains("generated")));
+    assert!(errors.iter().any(|d| d.code == "E0003"));
     assert!(!root.join(".jet/generated/main/broken.jet").exists());
     assert!(!root.join(".jet/lock").exists());
 }
@@ -944,7 +952,9 @@ fn imported_fn_build_never_runs_and_bad_root_signature_is_e3501() {
         &dep,
         r#"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("should_not_exist", "fn hidden() {{}}")?
+    b.generate("should_not_exist") {
+        fn hidden() {}
+    }?
     return b.plan()
 }
 pub fn helper() {}
@@ -1290,18 +1300,22 @@ fn run() {}
 }
 
 #[test]
-fn unselected_malformed_generate_is_never_materialized_or_checked() {
+fn malformed_generate_is_rejected_before_selection() {
     let root = project("unselected-generate");
     let entry = root.join("main.jet");
     write(&entry, r#"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("ignored", "fn broken(")?
+    b.generate("ignored") {
+        fn broken(
+    }?
     app :: b.add_executable("app", ["main.jet"], [])?
     return b.plan(app)
 }
 fn run() {}
 "#);
-    compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0003"));
     assert!(!root.join(".jet/generated/main/ignored.jet").exists());
 }
 
@@ -1530,7 +1544,9 @@ fn locked_generated_drift_fails_before_materialization() {
     let entry = root.join("main.jet");
     let source = |value: &str| format!(r#"
 fn build(b: BuildContext) => BuildPlan ? {{
-    b.generate("value", "fn generated_value() => String {{{{ return \"{value}\" }}}}")?
+    b.generate("value") {{
+        fn generated_value() => String = "{value}";
+    }}?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])?
     return b.plan(app)
 }}
@@ -1549,15 +1565,19 @@ fn run() {{ print(generated_value()) }}
 }
 
 #[test]
-fn generated_sources_stage_in_dependency_rounds_and_compile_as_one_program() {
+fn generated_sources_materialize_and_compile_as_one_program() {
     let root = project("generated-rounds");
     let entry = root.join("main.jet");
     write(
         &entry,
         r#"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("consumer", "use \"provider\"\npub fn generated_value() => String {{ return provider.message() }}")?
-    b.generate("provider", "pub fn message() => String {{ return \"round two\" }}")?
+    b.generate("consumer") {
+        pub fn generated_value() => String = "round two";
+    }?
+    b.generate("provider") {
+        pub fn message() => String = "round two";
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])?
     return b.plan(app)
 }
@@ -1573,15 +1593,19 @@ fn run() { print(generated_value()) }
 }
 
 #[test]
-fn generated_source_dependency_cycles_fail_before_any_file_is_written() {
+fn duplicate_generated_modules_fail_before_any_file_is_written() {
     let root = project("generated-cycle");
     let entry = root.join("main.jet");
     write(
         &entry,
         r#"
 fn build(b: BuildContext) => BuildPlan ? {
-    b.generate("alpha", "use \"beta\"\npub fn alpha() {{}}")?
-    b.generate("beta", "use \"alpha\"\npub fn beta() {{}}")?
+    b.generate("alpha") {
+        pub fn alpha() {}
+    }?
+    b.generate("alpha") {
+        pub fn beta() {}
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
     return b.plan(app)
 }
@@ -1591,8 +1615,8 @@ fn run() {}
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(errors.iter().any(|diagnostic| {
         diagnostic.code == "E3511"
-            && diagnostic.fix.contains("alpha")
-            && diagnostic.fix.contains("beta")
+            && diagnostic.what.contains("generated twice")
+            && diagnostic.what.contains("alpha")
     }));
     assert!(!root.join(".jet/generated/main/alpha.jet").exists());
     assert!(!root.join(".jet/generated/main/beta.jet").exists());
@@ -1603,16 +1627,14 @@ fn emit_generated_exports_the_exact_materialized_source() {
     let root = project("emit-generated");
     let entry = root.join("main.jet");
     let generated = "fn exported_generated() => String { return \"exported\" }";
-    let generated_literal = generated
-        .replace('"', "\\\"")
-        .replace('{', "{{")
-        .replace('}', "}}");
     write(
         &entry,
         &format!(
             r#"
 fn build(b: BuildContext) => BuildPlan ? {{
-    b.generate("exported", "{generated_literal}")?
+    b.generate("exported") {{
+        fn exported_generated() => String = "exported";
+    }}?
     app :: b.add_executable("app", ["main.jet"], [])?
     return b.plan(app)
 }}
@@ -2057,7 +2079,9 @@ fn build_context_find_and_embed_are_locked_tier_one_inputs() {
 fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     files :: b.find("assets/*.txt")
     message :: b.embed(files[0])
-    b.generate("asset", "fn generated_asset() => String {{ return \"hello\" }}")?
+    b.generate("asset") {
+        fn generated_asset() => String = "hello";
+    }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])?
     return b.plan(app)
 }

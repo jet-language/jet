@@ -122,10 +122,10 @@ Every row is one job done more than once. File and line proof.
 | # | Job | Mechanism A | Mechanism B | Defect |
 |---|---|---|---|---|
 | 1 | Register a compile-time rule | `Policy::APPLIED_RULES`, 99 rows in Rust (`crates/jet-foundation/src/Policy.rs:833`) | `known_derive_names` — user `derive T.X {}` names join the marker vocabulary (`crates/jet-sema/src/Sema/Bundle.rs:1234-1239`) | Two registries for one vocabulary. One is closed, one is open. |
-| 2 | Generate code from a type | User derive: emits a **string**, re-lexed and re-parsed (`Bundle.rs:1654-1697`, E2710 on failure) | Built-in derive: hand-written Rust codegen (`crates/jet-codegen/src/Codegen/Items.rs:1158-1199`) | Two derive engines. Only one is writable by users. |
-| 3 | Generate code from a type (again) | Serde via Jet-source template (`crates/jet-sema/src/Sema/Registration/Serde.rs:3-49`) | Serde via raw Rust strings for enums and unions (`Items.rs:1030-1090`) | The code admits a half-finished migration at `Items.rs:1811-1815`. |
-| 4 | Splice a compile-time value | `Expr::ComptimeSplice`, a real AST node (`crates/jet-foundation/src/AST/expressions.rs:624-633`) | `apply_at_splices` — `@name` inside an `emit()` string, handled as string interpolation | One sigil, two implementations. |
-| 5 | Instantiate code with parameters | Generic modules: real Jet, substituted (`crates/jet-sema/src/Sema/Bundle/GenericModules.rs:1-51`) | Derives: escaped string templates | Same job. Only the first is checkable before use. |
+| 2 | Generate code from a type | User and built-in derives: typed Jet item templates checked on the ordinary path (`AST/items.rs`, `Sema/Registration/Serde.rs`) | — | One derive engine; providers and built-in rules contribute the same checked items. |
+| 3 | Generate code from a type (again) | Struct, enum, and union codec contributions use the shared typed codec protocol | — | Serde no longer has a source-string or raw-Rust serde template path. |
+| 4 | Splice a compile-time value | `Expr::ComptimeSplice`, a typed hole filled during template expansion | — | One hole mechanism; filled items enter ordinary sema. |
+| 5 | Instantiate code with parameters | Generic modules and typed templates both substitute checked values before ordinary checking | — | The instantiated result is checkable before use. |
 | 6 | Instantiate code with parameters (again) | Generic functions, specialized in codegen (`crates/jet-codegen/src/Codegen/TIR/mod.rs:816-902`) | Variadic-bound synthesis, a third AST-synthesis pass (`crates/jet-codegen/src/Codegen/VariadicBound.rs:1-30`) | Three instantiation engines in two crates. |
 | 7 | Prove a whole-program property | Effect inference, a worklist fixpoint (`crates/jet-sema/src/Sema/Effects.rs:750-787`); one shared `PurityStage` walk raises E3401 for both stages (`crates/jet-comptime/src/Comptime/Purity.rs:24-190`) | The former separate comptime checker and E0951 family | The split is retired by D-META-EFFECT1; the effect set and one walker now carry the fact. |
 | 8 | Evaluate a compile-time field | Shared comptime evaluator (`crates/jet-env-model/src/ModuleEval/Eval.rs:897-907`) | `packages:` alone, by raw text slicing (`Eval.rs:1239-1300`) | One field carved out, with the carve-out documented inline. |
@@ -218,9 +218,8 @@ Spelled out, because each one deletes a mechanism:
    declaration… rows can become `core.lang` declarations without changing any
    spelling" (`:318-322`). This proposal walks through that door.
 3. **A generic module and a derive are the same thing.** Both are Jet code with
-   holes, instantiated from known values. One is written as code. The other is
-   written as an escaped string.
-4. **`b.generate(name, source)` is a third spelling of the same thing.**
+   typed holes, instantiated from known values and checked as ordinary items.
+4. **`b.generate(name) { … }` is the build-scope spelling of the same block.**
 5. **Marker law zero and the plane law are one law.** Both say: registered,
    nameable, reflectable. One covers markers, one covers type facts. Nothing
    makes them different.
@@ -284,29 +283,16 @@ This amends `D-VERDICT-1308-1` and `D-VERDICT-1308-2` and retires
 
 ### S2 — Derive bodies are the implementation (D-META-BODY1=A; D-META-CODE1=A)
 
-Today, from `examples/features/serde/user_derive.jet`:
-
-```jet
-derive T.DebugText {
-    info :: T.reflect()
-    tname :: info.name
-    emit("""
-impl @tname {{
-    fn debug_string(self) => String {{
-        return "@tname"
-    }}
-}}
-""")
-}
-```
-
-Settled:
+The old source-emission form is retired. The provider body is the member list:
 
 ```jet
 derive T.DebugText {
     fn debug_string(self) => String = T.@name
 }
 ```
+
+The header names the provider and target. No nested `impl` is written, and a
+`@loop` in the body contributes one checked member per reflected field.
 
 The header already says which trait, for which type. The body is simply the
 members. There is no nested `impl`, because there is nothing left to name. Seven
@@ -441,10 +427,13 @@ name the compiler minted.
 
 ### S6 — `b.generate` uses the derive body form (D-META-CODE1=A; amends D-CTCODEGEN1)
 
-Today, from `examples/features/tooling/programmable_build/main.jet`:
+The old source-string argument is retired. The build form takes the same typed
+block as a derive:
 
 ```jet
-b.generate("build_message", "fn generated_build_message() => String {{ ... }}")?
+b.generate("build_message") {
+    fn generated_build_message() => String = @stamp
+}?
 ```
 
 Settled:
@@ -632,18 +621,6 @@ fn charge(card: Card, amount: Money, timeout: Duration) => Receipt ? { … }
 ### A derive that reads a type's shape
 
 ```jet
-// today
-derive T.Wire {
-    info :: T.reflect()
-    tname :: info.name
-    emit("""
-impl @tname {{
-    fn tag(self) => String {{ return "@tname" }}
-}}
-""")
-}
-
-// settled
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
@@ -725,11 +702,13 @@ Each item earns its place. None is kept because it shipped.
   restated as Law 1. Nine peer languages prove the cost of the alternative.
 - **`S26` — comptime never creates, parameterizes, or selects a type, and never
   affects dispatch.** Unchanged. Compile-time *values* stay values. Generated
-  *source* becomes types the same way hand-written source does, through sema,
-  exactly as `D-CTCODEGEN1` already rules.
-- **`D-CTCODEGEN1` — generated source re-enters lexer, parser, and sema.** This
-  is the one channel between stages. Racket, MetaOCaml, and Scala 3 each
-  arrived at the same discipline.
+  *typed items* become checked members the same way hand-written code does,
+  through sema.
+- **`D-META-CODE1/D-META-BODY1` — generated typed items enter sema.** A
+  template body uses the ordinary item grammar, typed holes are filled during
+  expansion, and the resulting items take the same sema path as hand-written
+  code. A build materialization boundary may format those checked items into
+  a generated module; no unchecked AST or source string bypasses sema.
 - **`D-BUILDGEN1=A` — materialized, additive, addressed.** Generated code is a
   real file you can open. Swift shipped the same conclusion in 2023.
 - **The marker sigil map.** `#` keeps exactly two readings, and gets cleaner:

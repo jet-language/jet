@@ -684,40 +684,6 @@ fn class_matches(class: &[char], needle: char) -> bool {
     matched
 }
 
-/// D-META-STAGE1=B (formerly D-CTMARKER1=C's splice spelling): substitute
-/// `@name` mentions in a string with their compile-time value from the
-/// comptime scope. Unknown names are left as-is (`@unknown`). Used by `emit(…)`.
-pub fn apply_at_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '@' {
-            let mut name = String::new();
-            while let Some(&nc) = chars.peek() {
-                if nc.is_alphanumeric() || nc == '_' {
-                    name.push(nc);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if !name.is_empty() {
-                if let Some(val) = scope.get(&name) {
-                    result.push_str(&val.jet_show());
-                } else {
-                    result.push('@');
-                    result.push_str(&name);
-                }
-            } else {
-                result.push('@');
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
 /// c139: the integer value of `e` when it is (possibly parenthesized/negated)
 /// an `Int` literal — used to mirror sema's compile-time-proof shortcut for a
 /// ranged distinct-type constructor (`eval_distinct_ctor`).

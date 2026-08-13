@@ -951,7 +951,6 @@ pub(super) struct EvalCtx<'a> {
     pub(super) source_nesting: usize,
     pub(super) current_span: Span,
     pub(super) current_fn: String,
-    pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
@@ -1536,7 +1535,6 @@ impl<'a> EvalCtx<'a> {
             source_nesting: 0,
             current_span: Span::new(0, 0),
             current_fn: String::new(),
-            emitted_fragments: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
             reflect_paths: config.reflect_paths,
@@ -3091,8 +3089,7 @@ fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String,
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
                 let fields = s
-                    .fields
-                    .iter()
+                    .reflection_fields()
                     .map(|f| (f.name.clone(), f.redact))
                     .collect::<Vec<(String, bool)>>();
                 for key in struct_metadata_keys(bundle, module_idx, &s.name) {
@@ -3112,8 +3109,7 @@ fn collect_struct_field_types(
         for item in &module.items {
             if let crate::AST::Item::Struct(s) = item {
                 let fields = s
-                    .fields
-                    .iter()
+                    .reflection_fields()
                     .map(|f| (f.name.clone(), f.ty.clone()))
                     .collect::<Vec<(String, crate::AST::Type)>>();
                 for key in struct_metadata_keys(bundle, module_idx, &s.name) {
@@ -3360,7 +3356,6 @@ fn run_program_with_structs_on_stack(
         source_nesting: 0,
         current_span: entry.source_span,
         current_fn: entry.name.clone(),
-        emitted_fragments: None,
         embed_inputs: None,
         struct_fields,
         reflect_paths: program.reflect_paths.clone(),
@@ -3447,7 +3442,6 @@ pub fn run_named_func(
         source_nesting: 0,
         current_span: func.source_span,
         current_fn: func.name.clone(),
-        emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
         reflect_paths: program.reflect_paths.clone(),
@@ -3648,7 +3642,6 @@ fn eval_expr_hook(
     let sink = sink_target
         .as_deref_mut()
         .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
-    let emitted_fragments = req.emitted_fragments.take();
     let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
         funcs,
@@ -3674,7 +3667,6 @@ fn eval_expr_hook(
         source_nesting: 0,
         current_span: source_span,
         current_fn: String::new(),
-        emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
         reflect_paths: HashMap::new(),
@@ -3773,7 +3765,6 @@ fn eval_block_hook(
     let sink = sink_target
         .as_deref_mut()
         .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
-    let emitted_fragments = req.emitted_fragments.take();
     let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
         funcs,
@@ -3799,7 +3790,6 @@ fn eval_block_hook(
         source_nesting: 0,
         current_span: source_span,
         current_fn: String::new(),
-        emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
         reflect_paths: HashMap::new(),

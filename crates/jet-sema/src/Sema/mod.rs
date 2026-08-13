@@ -15,34 +15,6 @@ use crate::AST::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-/// Keep a registered underlying report visible when sema adds a contextual
-/// report around it. The root is emitted once; every contextual report carries
-/// the same machine-readable chain.
-pub(crate) fn push_causal_report(
-    diagnostics: &mut Vec<Diagnostic>,
-    dependent: Diagnostic,
-    cause: Diagnostic,
-) {
-    if jet_foundation::Registry::diagnostic(&cause.code).is_none() {
-        diagnostics.push(dependent);
-        return;
-    }
-    let already_reported = diagnostics.iter().any(|existing| {
-        existing.moment == cause.moment
-            && existing.severity == cause.severity
-            && existing.code == cause.code
-            && existing.what == cause.what
-            && existing.why == cause.why
-            && existing.fix == cause.fix
-            && existing.span == cause.span
-            && existing.cause == cause.cause
-    });
-    if !already_reported {
-        diagnostics.push(cause.clone());
-    }
-    diagnostics.push(dependent.caused_by(&cause));
-}
-
 mod Casing;
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.

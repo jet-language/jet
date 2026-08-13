@@ -1231,7 +1231,7 @@ mod crypto_diagnostic_contract_tests {
         )
         .caused_by(&root);
         let leaf = Diagnostic::error(
-            "E2710",
+            "E0107",
             "leaf".into(),
             "test".into(),
             "fix leaf".into(),

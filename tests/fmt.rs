@@ -1835,16 +1835,16 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeName). The formatter must emit it as `@name` so that
     // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    info :: T.reflect()\n    tname :: info.name\n    emit(\"impl @tname {{ fn tag(self) => String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
-    let once = jet::format_source(src).expect("fmt should accept derive with @name in string");
+    let src = "derive T.Debug {\n    fn tag(self) => String = \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept a typed derive body");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
         once, twice,
-        "derive body with @name in emit string must be fmt-idempotent"
+        "typed derive body must be fmt-idempotent"
     );
 
     // Standalone `@name` expression (outside emit string) round-trips as `@name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    emit(\"impl @tname {{ }}\")\n}\n\nfn run() {}\n";
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) => String = @tname\n}\n\nfn run() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept @name expression");
     assert!(
         splice_once.contains("@tname"),
@@ -2926,14 +2926,11 @@ fn fmt_pub_file_precedes_imports() {
 }
 
 #[test]
-fn fmt_verbatim_derive_body_comment_not_duplicated() {
-    // D-METADERIVE1: `derive T.Trait { … }` bodies are emitted verbatim
-    // (copied straight from source) rather than walked comment-by-comment,
-    // so `comment_i` never advanced past a comment living inside the derive
-    // body. The next item's `emit_leading` then found that comment
-    // "unconsumed" and re-emitted it a second time before `#Label struct
-    // Cube` — the comment kept duplicating on every subsequent fmt pass.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    emit(\"impl @lbl {{ fn label(self) => String {{ return \\\"@lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+fn fmt_typed_derive_body_comment_not_duplicated() {
+    // D-META-CODE1: a derive body is a typed item template. Its comments are
+    // walked with the ordinary formatter and must remain attached exactly
+    // once across repeated formatting.
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) => String = @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),

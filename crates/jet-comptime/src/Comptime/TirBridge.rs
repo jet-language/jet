@@ -99,10 +99,7 @@ fn reflected_value<'a>(
                 }
             }
             let field = if crate::Syntax::compiler_fact_member(field).is_some() {
-                let CtValue::Struct { type_name, .. } = value else {
-                    return None;
-                };
-                if type_name != crate::Syntax::TYPE_TYPE_INFO {
+                if !matches!(value, CtValue::Struct { .. }) {
                     return None;
                 }
                 crate::Syntax::compiler_fact_member(field)?
@@ -415,8 +412,6 @@ pub struct ExprEvalRequest<'a> {
     pub repl_mode: bool,
     pub repl_grants: &'a [String],
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
-    /// D-METADERIVE1: `emit(…)` fragments (usually unused for single exprs).
-    pub emitted_fragments: Option<&'a mut Vec<String>>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
     /// Bindings as the fragment left them. An expression can mutate a binding
@@ -445,8 +440,6 @@ pub struct BlockEvalRequest<'a> {
     pub gates: jet_foundation::Policy::GateSet,
     pub impure_depth: usize,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
-    /// D-METADERIVE1: `emit(…)` fragments from a derive body.
-    pub emitted_fragments: Option<&'a mut Vec<String>>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
 }

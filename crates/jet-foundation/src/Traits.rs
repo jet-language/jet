@@ -1,4 +1,9 @@
 //! Trait registration & metadata, auto-derive checking, and trait codegen.
+//!
+//! D-SERDE2/D-SERDE16: `Encode` and `Decode` are ordinary trait contracts.
+//! Built-in `#Codable` registration and hand-written impls both enter this
+//! registry and reach the same typed DataTree dispatch surface; neither path
+//! owns a private wire engine.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
@@ -41,6 +46,9 @@ pub struct TraitRegistry {
     pub auto_printable: HashSet<String>,
     pub auto_debug: HashSet<String>,
     pub auto_equatable: HashSet<String>,
+    pub auto_comparable: HashSet<String>,
+    pub auto_encode: HashSet<String>,
+    pub auto_decode: HashSet<String>,
     /// D-ITER-HOOK: collection type → element type for `for x in coll`.
     pub iterable_items: HashMap<String, Type>,
     /// D-INDEX-HOOK: type → (key, value) for expert `[]` indexing.
@@ -72,7 +80,7 @@ impl TraitRegistry {
         registry
     }
 
-    /// Compute the three automatic structural traits for each bundle module.
+    /// Compute the automatic structural traits for each bundle module.
     /// Imported nominals are resolved through the shared name ledger and stored
     /// under their canonical package/module identity. Import aliases are only
     /// source lookup projections. A selective import may use a bare source name,
@@ -183,6 +191,24 @@ impl TraitRegistry {
                         .iter()
                         .filter_map(identity),
                 );
+                registries[module_idx].auto_comparable.extend(
+                    snapshot[target]
+                        .auto_comparable
+                        .iter()
+                        .filter_map(identity),
+                );
+                registries[module_idx].auto_encode.extend(
+                    snapshot[target]
+                        .auto_encode
+                        .iter()
+                        .filter_map(identity),
+                );
+                registries[module_idx].auto_decode.extend(
+                    snapshot[target]
+                        .auto_decode
+                        .iter()
+                        .filter_map(identity),
+                );
             }
             for selected in selective_imports[module_idx].values().flatten() {
                 let (target, leaf) = selected;
@@ -196,7 +222,16 @@ impl TraitRegistry {
                     registries[module_idx].auto_debug.insert(identity.clone());
                 }
                 if snapshot[*target].auto_equatable.contains(leaf) {
-                    registries[module_idx].auto_equatable.insert(identity);
+                    registries[module_idx].auto_equatable.insert(identity.clone());
+                }
+                if snapshot[*target].auto_comparable.contains(leaf) {
+                    registries[module_idx].auto_comparable.insert(identity.clone());
+                }
+                if snapshot[*target].auto_encode.contains(leaf) {
+                    registries[module_idx].auto_encode.insert(identity.clone());
+                }
+                if snapshot[*target].auto_decode.contains(leaf) {
+                    registries[module_idx].auto_decode.insert(identity);
                 }
             }
         }
@@ -209,6 +244,10 @@ impl TraitRegistry {
         self.auto_debug.extend(source.auto_debug.iter().cloned());
         self.auto_equatable
             .extend(source.auto_equatable.iter().cloned());
+        self.auto_comparable
+            .extend(source.auto_comparable.iter().cloned());
+        self.auto_encode.extend(source.auto_encode.iter().cloned());
+        self.auto_decode.extend(source.auto_decode.iter().cloned());
     }
 
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
@@ -927,7 +966,7 @@ impl TraitRegistry {
         foreign_supports: impl Fn(&str, &str) -> Option<bool>,
     ) -> bool {
         let mut any_changed = false;
-        for trait_name in [PRINTABLE, EQUATABLE, DEBUG] {
+        for trait_name in [PRINTABLE, EQUATABLE, DEBUG, COMPARABLE, ENCODE, DECODE] {
             loop {
                 let mut changed = false;
                 for item in items {
@@ -963,6 +1002,9 @@ impl TraitRegistry {
                         PRINTABLE => self.auto_printable.insert(name.clone()),
                         EQUATABLE => self.auto_equatable.insert(name.clone()),
                         DEBUG => self.auto_debug.insert(name.clone()),
+                        COMPARABLE => self.auto_comparable.insert(name.clone()),
+                        ENCODE => self.auto_encode.insert(name.clone()),
+                        DECODE => self.auto_decode.insert(name.clone()),
                         _ => false,
                     };
                 }
@@ -1085,13 +1127,12 @@ impl TraitRegistry {
             }
             Type::Named(name) => foreign_supports(name, trait_name)
                 .unwrap_or_else(|| self.implements_trait(name, trait_name)),
+            Type::Float | Type::Float32 => trait_name != COMPARABLE,
             Type::Int
-            | Type::Float
             | Type::Bool
             | Type::String
             | Type::Char
-            | Type::IntN { .. }
-            | Type::Float32 => true,
+            | Type::IntN { .. } => true,
             Type::Quantity { base, .. } => {
                 self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
             }
@@ -1164,6 +1205,9 @@ impl TraitRegistry {
             {
                 true
             }
+            COMPARABLE if self.auto_comparable.contains(type_name) => true,
+            ENCODE if self.auto_encode.contains(type_name) => true,
+            DECODE if self.auto_decode.contains(type_name) => true,
             COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
                 .get(type_name)
@@ -2241,12 +2285,17 @@ pub fn auto_derive_requested(
     markers
         .iter()
         .rev()
-        .find(|marker| marker.name == trait_name)
+        .find(|marker| {
+            marker.name == trait_name
+                || (matches!(trait_name, ENCODE | DECODE)
+                    && marker.name == Syntax::MARKER_CODABLE)
+        })
         .map_or(package_default, |marker| !marker.negated)
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
-    !s.fields.is_empty() && s.fields.iter().all(|f| field_auto_ok(&f.ty, &s.name))
+    let mut fields = s.reflection_fields();
+    fields.next().is_some() && fields.all(|f| field_auto_ok(&f.ty, &s.name))
 }
 
 pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {

@@ -1,8 +1,8 @@
 //! Card #392 pass 5: typed `Decode` dispatch at comptime — the machinery
 //! behind `json.decode<T>` / `json.decode_traced<T>` (and the csv/toml/yaml
 //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
-//! `__jet_Decode::jet_decode` / `jet_decode_traced` field-by-field walk
-//! (`Codegen/Items.rs::emit_struct_serde` / `emit_migration_chain_walker`)
+//! `__jet_Decode::jet_decode` / `jet_decode_traced` field-by-field walk from
+//! the shared typed codec item bodies and migration-chain walker
 //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
 //! and the `[FieldError]` / `MigrationStatus{migrated,from,steps}` shapes
@@ -239,6 +239,22 @@ fn object_key_set(tree: &CtValue) -> BTreeSet<String> {
 }
 fn text_cell(cell: String) -> CtValue {
     json_variant("Text", Some(CtValue::Str(cell)))
+}
+
+pub(super) fn value_type_name(value: &CtValue) -> Option<String> {
+    match value {
+        CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+            Some(type_name.clone())
+        }
+        _ => None,
+    }
+}
+
+fn key_to_string(key: &CtKey) -> String {
+    match key {
+        CtKey::Str(value) => value.clone(),
+        other => other.to_value().jet_show(),
+    }
 }
 
 /// Generic encode of a `CtValue` back into the `JSON`-tagged tree shape —
@@ -484,6 +500,111 @@ fn zero_value(ty: &Type) -> CtValue {
 }
 
 impl<'a> Interp<'a> {
+    /// Run the ordinary `Encode` method for a value when one is registered,
+    /// then fall back to the scalar/container representation used by the
+    /// typed tree walker. This is the interpreter-side marshalling adapter:
+    /// codec policy remains in the Jet method body, just as it does for AOT.
+    pub(super) fn encode_value(&mut self, value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+        if let Some(type_name) = value_type_name(value) {
+            if let Some(func) = self
+                .methods
+                .get(&(type_name.clone(), "encode".to_string()))
+                .copied()
+            {
+                if func.params.len() == 1 {
+                    let mut frame = std::collections::HashMap::new();
+                    frame.insert(func.params[0].name.clone(), value.clone());
+                    return self.call_func(&format!("{type_name}.encode"), func, frame);
+                }
+            }
+        }
+        Ok(match value {
+            CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
+            CtValue::Float(n) => json_variant("Float", Some(CtValue::Float(*n))),
+            CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
+            CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
+            CtValue::Char(c) => json_variant("Text", Some(CtValue::Str(c.to_string()))),
+            CtValue::Bytes(bytes) => json_variant("Bytes", Some(CtValue::Bytes(bytes.clone()))),
+            CtValue::List(values) => json_variant(
+                "Array",
+                Some(CtValue::List(
+                    values
+                        .iter()
+                        .map(|item| self.encode_value(item, span))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+            ),
+            CtValue::Map(values) => json_variant(
+                "Object",
+                Some(CtValue::Struct {
+                    type_name: "JSONObject".to_string(),
+                    fields: values
+                        .iter()
+                        .map(|(key, value)| {
+                            Ok((key_to_string(key), self.encode_value(value, span)?))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                }),
+            ),
+            CtValue::Present(value) => self.encode_value(value, span)?,
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit => json_variant("Null", None),
+            CtValue::Struct { fields, .. } => json_variant(
+                "Object",
+                Some(CtValue::Struct {
+                    type_name: "JSONObject".to_string(),
+                    fields: fields
+                        .iter()
+                        .map(|(name, value)| {
+                            Ok((name.clone(), self.encode_value(value, span)?))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                }),
+            ),
+            CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) | CtValue::BigInt(_) => {
+                return Err(unsupported(
+                    "this value has no comptime Encode implementation",
+                    span,
+                ));
+            }
+            CtValue::Closure(_) => {
+                return Err(unsupported(
+                    "closures cannot be encoded at comptime",
+                    span,
+                ));
+            }
+        })
+    }
+
+    fn decode_user_value(
+        &mut self,
+        name: &str,
+        tree: &CtValue,
+    ) -> Option<Result<CtValue, CtValue>> {
+        let func = self
+            .methods
+            .get(&(name.to_string(), "decode".to_string()))
+            .copied()?;
+        if func.params.len() != 1 {
+            return Some(Err(decode_error(format!(
+                "`{name}.decode` has the wrong number of parameters"
+            ))));
+        }
+        let mut frame = std::collections::HashMap::new();
+        frame.insert(func.params[0].name.clone(), tree.clone());
+        Some(match self.call_func(&format!("{name}.decode"), func, frame) {
+            Ok(CtValue::Present(value)) => Ok(*value),
+            Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
+            Ok(CtValue::Failed(CtReport::Clean(_))) => {
+                Err(decode_error(format!("`{name}.decode` returned no value")))
+            }
+            Ok(other) => Err(decode_error(format!(
+                "`{name}.decode` returned {}",
+                other.jet_show()
+            ))),
+            Err(diagnostic) => Err(decode_error(diagnostic.what)),
+        })
+    }
+
     /// The non-migrating decode: mirrors a type's plain `jet_decode` walk.
     /// Recurses through Option/List and nested user structs; the top-level
     /// `decode_traced<T>`/`decode<T>` entry point (`typed_decode_top`) is what
@@ -556,7 +677,9 @@ impl<'a> Interp<'a> {
                 }
             }
             Type::Map { .. } => Err(decode_error("comptime maps require String keys")),
-            Type::Named(name) => self.typed_decode_struct(name, tree, span),
+            Type::Named(name) => self
+                .decode_user_value(name, tree)
+                .unwrap_or_else(|| self.typed_decode_struct(name, tree, span)),
             other => Err(decode_error(format!(
                 "comptime can't decode `{}` yet — this type isn't a struct, primitive, `[T]`, or `T?`",
                 other.name()

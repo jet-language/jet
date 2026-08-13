@@ -4,8 +4,8 @@
 //! rest of Bundle beyond the AST types every checker function reads.
 
 use crate::AST::{
-    EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Pattern, ProgramBundle, Stmt,
-    StrPart, StructPatField,
+    DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Pattern,
+    ProgramBundle, Stmt, StrPart, StructPatField,
 };
 
 pub fn bundle_has_comptime_evaluation(bundle: &ProgramBundle) -> bool {
@@ -50,10 +50,20 @@ fn item_has_comptime_evaluation(item: &Item) -> bool {
             .as_deref()
             .is_some_and(|body| body.iter().any(item_has_comptime_evaluation)),
         Item::ErrorConv(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::UserDerive(value) => stmts_have_comptime_evaluation(&value.body),
+        Item::UserDerive(value) => derive_body_has_comptime_evaluation(&value.body),
         Item::GenericModule(value) => value.body.iter().any(item_has_comptime_evaluation),
         _ => false,
     }
+}
+
+fn derive_body_has_comptime_evaluation(body: &[DeriveBodyItem]) -> bool {
+    body.iter().any(|item| match item {
+        DeriveBodyItem::Item(item) => item_has_comptime_evaluation(item),
+        DeriveBodyItem::Stmt(stmt) => stmts_have_comptime_evaluation(std::slice::from_ref(stmt)),
+        DeriveBodyItem::Loop { source, body, .. } => {
+            expr_has_comptime_evaluation(source) || derive_body_has_comptime_evaluation(body)
+        }
+    })
 }
 
 pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {

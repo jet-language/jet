@@ -775,6 +775,13 @@ pub(crate) fn check_marker_vocabulary(
             diagnostics.push(vocabulary.unknown(&marker.name, marker.name_span));
             continue;
         }
+        // D-MARK-VOCAB1: a user derive provider contributes a dynamic marker
+        // name, not a closed Prelude rule row. Its request is checked by the
+        // ordinary derive/trait path; there is no registry attachment-site
+        // row to apply here.
+        if crate::Policy::applied_rule(&marker.name).is_none() {
+            continue;
+        }
         if let Some(site) = rule_facts
             .iter()
             .find(|fact| fact.marker.name_span == marker.name_span)

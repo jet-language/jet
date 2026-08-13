@@ -82,7 +82,8 @@ pub(crate) struct ReflectSlot {
     pub type_name: String,
     pub path: String,
     pub display: String,
-    pub fields: Vec<(String, String)>,
+    pub fields: Vec<(String, i64)>,
+    pub value: Option<i64>,
 }
 
 /// Canonical resident representation for a runtime function value.
@@ -2128,9 +2129,7 @@ extern "C" fn jet_jit_reflect_of_finish(
             let fh = rt.heap.list_get_int(fields, i).unwrap_or(0);
             let idx = (fh as usize).wrapping_sub(1);
             if let Some(slot) = rt.reflect_values.get(idx) {
-                // field slots store single field in type_name/display misuse:
-                // we store Field as ReflectSlot { type_name=name, display=value, fields=[] }
-                out.push((slot.type_name.clone(), slot.display.clone()));
+                out.push((slot.type_name.clone(), slot.value.unwrap_or(0)));
             }
         }
         rt.reflect_values.push(ReflectSlot {
@@ -2138,6 +2137,7 @@ extern "C" fn jet_jit_reflect_of_finish(
             path,
             display,
             fields: out,
+            value: None,
         });
         rt.reflect_values.len() as i64
     })
@@ -2146,12 +2146,12 @@ extern "C" fn jet_jit_reflect_of_finish(
 extern "C" fn jet_jit_reflect_field_new(name: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let name = rt.heap.clone_string(name).unwrap_or_default();
-        let value = rt.heap.clone_string(value).unwrap_or_default();
         rt.reflect_values.push(ReflectSlot {
             type_name: name,
             path: String::new(),
-            display: value,
+            display: String::new(),
             fields: Vec::new(),
+            value: Some(value),
         });
         rt.reflect_values.len() as i64
     })
@@ -2206,8 +2206,9 @@ extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
             rt.reflect_values.push(ReflectSlot {
                 type_name: name,
                 path: String::new(),
-                display: value,
+                display: String::new(),
                 fields: Vec::new(),
+                value: Some(value),
             });
             ids.push(rt.reflect_values.len() as i64);
         }
@@ -2220,7 +2221,13 @@ extern "C" fn jet_jit_reflect_field_name(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_reflect_field_value(handle: i64) -> i64 {
-    jet_jit_reflect_display(handle)
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        rt.reflect_values
+            .get(idx)
+            .and_then(|slot| slot.value)
+            .unwrap_or(0)
+    })
 }
 
 extern "C" fn jet_jit_testing_temp_dir(prefix: i64) -> i64 {

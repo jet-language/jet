@@ -246,12 +246,19 @@ pub(crate) fn lower_one_call_arg(
     // Default expressions carry private references to earlier declaration
     // slots. A plain worklist pass cannot install that mapping, so never reuse
     // its cached value here; lower the argument through the binder-aware path.
-    let value = if a.flags.binder_refs.is_empty() && !a.flags.c_callback_symbol {
-        super::take_scheduled_expr(&a.expr, cx)
+    let value = if a.flags.template_items.is_some() {
+        TExpr {
+            ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+            kind: TExprKind::Unit,
+        }
     } else {
-        None
-    }
-    .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx));
+        (if a.flags.binder_refs.is_empty() && !a.flags.c_callback_symbol {
+            super::take_scheduled_expr(&a.expr, cx)
+        } else {
+            None
+        })
+        .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx))
+    };
     // A worklist cache may have lowered a local identifier before an earlier
     // binding's refined type was installed in the sequential environment.
     // Refresh local reads from that environment before resolving boundary
@@ -340,6 +347,7 @@ pub(crate) fn lower_one_call_arg(
     };
     TCallArg {
         value,
+        template_items: a.flags.template_items.clone(),
         borrow,
         mut_borrow,
         clone,

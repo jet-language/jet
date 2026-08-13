@@ -551,6 +551,27 @@ impl<'a> Parser<'a> {
                                 }
                             }
                             self.expect(TokKind::RParen, "to finish the call")?;
+                            // D-META-CODE1=A / D-META-BODY1=A: `b.generate`
+                            // uses the typed item-template block shared with
+                            // derive definitions. Carry it as an internal
+                            // argument slot; it is not a source string.
+                            if member == "generate" && matches!(self.peek().kind, TokKind::LBrace) {
+                                let open = self.bump().span;
+                                let items = self.derive_body_items()?;
+                                let end = self.toks[self.pos - 1].span.end;
+                                let block_span = Span::new(open.start, end);
+                                args.push(CallArg {
+                                    convention: AccessConvention::Read,
+                                    expr: Expr::Str(Vec::new(), block_span),
+                                    span: block_span,
+                                    flags: crate::AST::CallArgFlags {
+                                        template_items: Some(items),
+                                        ..Default::default()
+                                    },
+                                    label: None,
+                                    spread: false,
+                                });
+                            }
                             let result = Expr::MethodCall {
                                 receiver: Box::new(Expr::Ident(type_name, span)),
                                 method: member,

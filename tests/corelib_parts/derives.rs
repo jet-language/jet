@@ -216,6 +216,109 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-SERDE2/D-SERDE16: the beginner `#Codable` request and the expert hand
+/// codec both feed the same DataTree protocol, so their wire bytes and decoded
+/// values agree for the same shape.
+#[test]
+fn derive_and_hand_written_codecs_share_one_engine() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping derive_and_hand_written_codecs_share_one_engine (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_codec_engine_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "codec_engine",
+        r#"
+use core.encoding.json as json
+
+#Codable
+struct DerivedEmail { address: String }
+
+struct HandEmail { address: String }
+impl HandEmail.Encode {
+    fn encode(self) => DataTree = DataTree.Object(["address": DataTree.Text(~self.address)])
+}
+impl HandEmail.Decode {
+    fn decode(tree: DataTree) => HandEmail ? [FieldError] {
+        field :: tree.field("address") ?? DataTree.Text("")
+        address :: field.text() ?? ""
+        return Ok(HandEmail.{ address: address })
+    }
+}
+
+fn run() {
+    derived :: DerivedEmail.{ address: "ada@jet" }
+    hand :: HandEmail.{ address: "ada@jet" }
+    derived_wire :: json.to_string(derived)
+    hand_wire :: json.to_string(hand)
+    derived_bytes :: derived_wire.bytes()
+    hand_bytes :: hand_wire.bytes()
+    assert(derived_bytes == hand_bytes)
+    derived_back :: json.decode<DerivedEmail>(hand_wire) ?? panic("derived decode")
+    hand_back :: json.decode<HandEmail>(derived_wire) ?? panic("hand decode")
+    assert(derived_back.address == hand_back.address)
+    print(derived_bytes == hand_bytes)
+    print(derived_back.address == hand_back.address)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "derive/hand codec parity failed: {stderr}");
+    assert_eq!(stdout, "true\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-SERDE9/D-SERDE16: a generic expert entry point calls the same Encode and
+/// Decode contracts emitted for a generic `#Codable` type.
+#[test]
+fn serde_derive_and_generic_share_one_engine() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping serde_derive_and_generic_share_one_engine (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_serde_engine_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "serde_engine",
+        r#"
+use core.encoding.json as json
+
+#Codable
+struct Boxed<T> { value: T }
+
+fn generic_encode<T: Encode>(value: T) => String = json.to_string(value)
+fn generic_decode<T: Decode>(wire: String) => T ? [FieldError] = json.decode<T>(wire)
+
+fn run() {
+    value :: Boxed<Int>.{ value: 7 }
+    derived_wire :: json.to_string(value)
+    generic_wire :: generic_encode(value)
+    derived_bytes :: derived_wire.bytes()
+    generic_bytes :: generic_wire.bytes()
+    assert(derived_bytes == generic_bytes)
+    derived_back :: json.decode<Boxed<Int>>(generic_wire) ?? panic("derived decode")
+    generic_back :: generic_decode<Boxed<Int>>(derived_wire) ?? panic("generic decode")
+    assert(derived_back.value == generic_back.value)
+    print(derived_bytes == generic_bytes)
+    print(derived_back.value == generic_back.value)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "derive/generic serde parity failed: {stderr}");
+    assert_eq!(stdout, "true\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// card #131: `DataTree.decode<T>()` dispatches primitive, container,
 /// generated, and hand-written Decode implementations through one spelling.
 #[test]
@@ -340,15 +443,12 @@ fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
     assert!(bundle_pipeline.contains(
         "super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);"
     ));
-    assert!(serde.contains("let (tokens, lex_diags) = crate::Lexer::lex(source);"));
-    assert!(serde.contains("crate::Parser::parse(&tokens)"));
-    assert!(serde.contains(".Ok(generated) => Some(generated.items)"));
-    assert!(serde.contains("Some(Item::Impl(imp))"));
-    assert!(serde.contains("imp.is_generated_serde = true"));
-    assert!(serde.contains("Some(trigger_span)"));
-    assert!(!serde.contains("__JetSerdeCarrier"));
-    assert!(!serde.contains("__JetSerdeGenerated"));
-    assert!(!serde.contains("trait_impls.extend"));
+    assert!(serde.contains("fn struct_codec_items"));
+    assert!(serde.contains("fn enum_codec_items"));
+    assert!(serde.contains("is_generated_serde: true"));
+    assert!(!serde.contains("Lexer::lex"));
+    assert!(!serde.contains("Parser::parse"));
+    assert!(!serde.contains("parse_generated_fragment"));
     assert!(!items.contains("emit_struct_serde"));
     assert!(!items.contains("emit_enum_serde"));
 }
@@ -639,9 +739,7 @@ fn user_derive_orphan_rule_allows_either_local_side() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 derive T.RemoteLabel {
-    info :: T.reflect()
-    name :: info.name
-    emit("impl @name {{ fn remote_label(self) => String {{ return \"remote:@name\" }} }}")
+    fn remote_label(self) => String = "remote:{T.@name}"
 }
 
 #LocalLabel
@@ -656,9 +754,7 @@ pub fn remote_type_label() => String {
 use labels
 
 derive T.LocalLabel {
-    info :: T.reflect()
-    name :: info.name
-    emit("impl @name {{ pub fn local_label(self) => String {{ return \"local:@name\" }} }}")
+    fn local_label(self) => String = "local:{T.@name}"
 }
 
 #RemoteLabel
@@ -701,7 +797,7 @@ derive T.LayoutFacts {
     reflected_kind :: reflected.kind
     field_name :: selected.name
     name :: T.reflect().name
-    emit("impl @name {{ fn layout_facts(self) => String {{ return \"@kind:@target:@guarantee:@source:@reflected_kind:@field_name\" }} }}")
+    fn layout_facts(self) => String = "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}"
 }
 
 #LayoutFacts
@@ -755,12 +851,10 @@ fn user_derive_generated_struct_reenters_registration_and_serde() {
 use core.encoding.json as json
 
 derive T.ConfigSchema {
-    emit("""
-#Codable
-struct GeneratedConfig {{
-    ports: [Int] = [80, 443]
-}}
-""")
+    #Codable
+    struct GeneratedConfig {
+        ports: [Int] = [80, 443]
+    }
 }
 
 #ConfigSchema
@@ -793,9 +887,9 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
     let src = r#"
 derive T.TypeName {
     info :: T.reflect()
-    name :: info.name
     param :: info.type_params[0].name
-    emit("impl @name {{ fn get_value(self) => @param {{ return ~self.value }} fn type_name(self) => String {{ return \"@name\" }} }}")
+    fn get_value(self) => @param = ~self.value
+    fn type_name(self) => String = T.@name
 }
 
 #TypeName
@@ -834,9 +928,7 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    info :: T.reflect()
-    name :: info.name
-    emit("impl @name {{ fn duplicate(self) => fn(Int) => Int {{ return ~self.callback }} }}")
+    fn duplicate(self) => fn(Int) => Int = ~self.callback
 }
 
 #CopyCallback

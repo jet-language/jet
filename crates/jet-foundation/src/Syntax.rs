@@ -23,6 +23,10 @@
 // D-BOUND-UNDO1=A: MARKER_UNDO owns the `#Undo(inverse)` binding contract.
 // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
 // call-site type-argument markers; they reuse the existing angle tokens.
+// D-META-CODE1=A / D-META-BODY1=A: `derive T.Trait { … }` and
+// `b.generate(name) { … }` are typed item-template bodies. Their user-visible
+// members and compile-time holes use the ordinary item/statement grammar;
+// neither spelling accepts a source string or re-lexes generated text.
 // D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type
 // and constructor name. core_surface::RETIRED_TYPE_ERROR exists only for the
 // E0432 teaching diagnostic; it never resolves as a type.

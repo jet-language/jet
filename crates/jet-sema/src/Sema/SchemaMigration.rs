@@ -63,6 +63,7 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 /// (zero cost).
 pub fn desugar_migrations(bundle: &mut ProgramBundle) {
     for module in &mut bundle.modules {
+        let auto_derives = TraitRegistry::auto_derives_for_items(&module.items);
         // Types that have a runtime decode path: `#PublishedSchema` + `Decode`,
         // concrete (a generic published schema has no single runtime shape).
         let mut decodable_published: HashSet<String> = HashSet::new();
@@ -77,7 +78,8 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
                         .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
                 if published
                     && s.type_params.is_empty()
-                    && s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+                    && (s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+                        || auto_derives.auto_decode.contains(&s.name))
                 {
                     decodable_published.insert(s.name.clone());
                 }
@@ -315,9 +317,12 @@ enum DeclaredOp {
 /// deserializes (reads published data back), never serializes. Guards the
 /// `add` op check: an added field on a Decode-only record must itself satisfy
 /// Decode (see the call site in `check_schema_migrations`).
-fn is_decode_only(s: &crate::AST::StructDef) -> bool {
-    s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-        && !s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+fn is_decode_only(s: &crate::AST::StructDef, reg: &TraitRegistry) -> bool {
+    let decode = s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+        || reg.auto_decode.contains(&s.name);
+    let encode = s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+        || reg.auto_encode.contains(&s.name);
+    decode && !encode
 }
 
 /// Run the schema migration diff pass over the items in a single module.
@@ -430,7 +435,7 @@ pub fn check_schema_migrations(
                         // The declared `add f: T` type must match the struct field's type.
                         if new_ty != ty {
                             diags.push(e0910_add_type_mismatch(&s.name, field, ty, new_ty, span));
-                        } else if is_decode_only(s) {
+                        } else if is_decode_only(s, reg) {
                             // Currently unreachable in any shape codegen/parsing can
                             // produce today (a Decode-only `#PublishedSchema` struct
                             // with an `add` op is not yet a shipped combination), but

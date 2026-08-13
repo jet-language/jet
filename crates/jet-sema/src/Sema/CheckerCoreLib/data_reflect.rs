@@ -81,7 +81,7 @@ pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Op
         ("Value", "display", 0) => Some(Type::String),
         ("Value", "fields", 0) => Some(Type::List(Box::new(Type::Named("Field".to_string())))),
         ("Field", "name", 0) => Some(Type::String),
-        ("Field", "value", 0) => Some(Type::String),
+        ("Field", "value", 0) => Some(Type::Named("Value".to_string())),
         _ => None,
     }
 }

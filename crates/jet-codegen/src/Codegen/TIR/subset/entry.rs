@@ -183,9 +183,6 @@ pub(crate) fn tir_covers_trait_method(
 ) -> bool {
     let serde_generic_owner = matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE)
         && struct_is_generic(type_name, cx);
-    // Signature shape: source-generated serde methods carry the owner's generic
-    // bounds on the parsed method so the whole fragment remains source-native.
-    // Other generic trait methods remain outside this subset.
     // c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
@@ -202,14 +199,9 @@ pub(crate) fn tir_covers_trait_method(
     {
         return false;
     }
-    // c109 Phase 19: a trait method on a GENERIC struct is the deferred generic-type
-    // method surface — exclude (conservative, as in `tir_covers_method`).
-    if struct_is_generic(type_name, cx)
-        && trait_name != crate::Generics::ENCODE
-        && trait_name != crate::Generics::DECODE
-    {
-        return false;
-    }
+    // Typed derive methods use the same generic-owner scope as hand-written
+    // trait impls. Keep the owner generic in the TIR lowering rather than
+    // falling back to a second code-generation path.
     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait
     // method (no `self`) — the codec bridge in `emit_tir_trait_method` renders it as
     // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no

@@ -3757,6 +3757,17 @@ impl<'a> Checker<'a> {
         let t = self.infer(inner);
         self.suppress_partial_move_root_read = suppress;
         let t = t?;
+        // D-ONCE-AT1=D / D-META-CODE1=A: compiler facts are typed
+        // projections on every reflected value, not only on the root
+        // `TypeInfo` value.  A derive loop commonly binds one `FieldInfo`
+        // and then reads `field.@name`.
+        if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+            if let Type::Named(type_name) = &t {
+                if let Some(fty) = core_struct_field(type_name, projected) {
+                    return Some(fty);
+                }
+            }
+        }
         self.field_type(&t, member, span)
     }
 

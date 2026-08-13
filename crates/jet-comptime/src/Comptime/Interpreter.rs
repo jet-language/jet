@@ -177,9 +177,6 @@ pub(super) struct Interp<'a> {
     /// of the bytes read, for recording in `.jet/lock`. Drained by the
     /// `evaluate_*_collecting` variants after evaluation.
     pub(super) embed_inputs: Vec<crate::AST::ComptimeInput>,
-    /// D-METADERIVE1=A: source fragments emitted by `emit(…)` calls inside
-    /// a user-authored `derive` body. Drained by `evaluate_derive_body`.
-    pub(super) emitted_fragments: Vec<String>,
     /// Static types for bindings in the active interpreter frame. An empty
     /// CtValue::List has no element to sample, so sequence identities use this
     /// declared fact instead of guessing Int.
@@ -356,7 +353,6 @@ impl<'a> Interp<'a> {
         let sink = self.sink.as_deref_mut();
         let repl_grants = &self.repl_grants;
         let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
-        let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut req = super::TirBridge::BlockEvalRequest {
             stmts,
@@ -377,7 +373,6 @@ impl<'a> Interp<'a> {
             repl_authorizer,
             gates,
             impure_depth,
-            emitted_fragments,
             embed_inputs,
         };
         match super::TirBridge::eval_block(&mut req)? {
@@ -521,7 +516,6 @@ impl<'a> Interp<'a> {
         let sink = self.sink.as_deref_mut();
         let repl_grants = &self.repl_grants;
         let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
-        let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut mutated = HashMap::new();
         let mut req = super::TirBridge::ExprEvalRequest {
@@ -543,7 +537,6 @@ impl<'a> Interp<'a> {
             repl_mode,
             repl_grants,
             repl_authorizer,
-            emitted_fragments,
             embed_inputs,
             mutated: Some(&mut mutated),
         };

@@ -1,5 +1,5 @@
 use crate::AST::{
-    EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item,
+    DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item,
     LambdaBody, LValue, OrFallback, Pattern, ProgramBundle, Stmt, StrPart, StructPatField,
     TraitMethodSig, VariantPayload,
 };
@@ -183,11 +183,25 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         }
         Item::UserDerive(d) => {
             pascal(&d.trait_name, d.trait_span, "trait", out);
-            stmt_names(&d.body, out);
+            derive_body_names(&d.body, out);
         }
         // D-SHAPE-CASE2=A: foreign declarations are exempt zones. Other
         // declaration families carry no user-defined identifier category.
         Item::CModule(_) | Item::ExternRust(_) | Item::ErrorConv(_) | Item::Migration(_) => {}
+    }
+}
+
+fn derive_body_names(body: &[DeriveBodyItem], out: &mut Vec<Diagnostic>) {
+    let traits = HashSet::new();
+    for item in body {
+        match item {
+            DeriveBodyItem::Item(item) => item_names(item, &traits, out),
+            DeriveBodyItem::Stmt(stmt) => stmt_names(std::slice::from_ref(stmt), out),
+            DeriveBodyItem::Loop { source, body, .. } => {
+                expr_names(source, out);
+                derive_body_names(body, out);
+            }
+        }
     }
 }
 

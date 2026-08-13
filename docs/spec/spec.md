@@ -784,18 +784,25 @@ impl Circle {
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55:
-  `Printable`/`Equatable`/`Debug` auto-derive whenever every field qualifies.
+  `Printable`/`Equatable`/`Debug`/`Comparable`/`Encode`/`Decode` auto-derive
+  whenever every field qualifies.
   The package default is on; `policy: .{ auto_derive: false }` disables silent
   generation. A signed type marker opts one trait in or out (`#Debug`,
   `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
-  D-AUTODERIVE-SYNTAX1=D). Other explicit derives are `#Comparable`, `#Codable`,
-  `#Encode`, `#Decode`.
+  D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;
+  `#Encode` and `#Decode` request one direction.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
   and `Decode.decode(tree: DataTree) => Self ? [FieldError]` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
-  Built-in derives generate Jet source fragments beside the marked type, then
-  run those fragments through the normal parser, sema, TIR, and codegen pipeline.
+  Built-in derives build typed Jet items beside the marked type and check them
+  through the same sema, TIR, and codegen path as hand-written members. The
+  #Codable and hand-written codec forms therefore share one engine: both call
+  `Encode`/`Decode` over `DataTree`, and JSON compares their encoded bytes and
+  decoded values in `derive_and_hand_written_codecs_share_one_engine`.
+  A serde derive and a generic codec helper are the same engine with different
+  entry points; `serde_derive_and_generic_share_one_engine` proves both the
+  encoded bytes and decoded values.
   A user-defined derive may expand only when its provider or target type is
   entry-local; otherwise E2711 points at the derive marker.
 - **Accumulated validation (D-VALIDATE1, card #506):** a `validate { … }`
@@ -3967,11 +3974,12 @@ CLI, graph, cache, and executor. Every effectful `b.action`/`b.probe` call must
 be inside its active `#Impure("reason")` region. Signature declaration and
 effective grant are checked before any probe or process runs.
 
-`b.generate(name, source)` materializes `.jet/generated/<package>/<name>.jet`.
-Action outputs ending in `.jet` follow the same path. Both re-enter lexer,
-parser, and sema before runtime codegen; malformed generated source is a Jet
-diagnostic with generator provenance. The build-only entry and imported build
-entries are removed before codegen, so rustc never sees build handles.
+`b.generate(name) { … }` takes the same typed item block as a derive and
+materializes `.jet/generated/<package>/<name>.jet`. Action outputs ending in
+`.jet` follow the same path. The filled block enters ordinary sema before
+runtime codegen; malformed members use ordinary Jet diagnostics. The build-only
+entry and imported build entries are removed before codegen, so rustc never sees
+build handles.
 
 Generation is additive and has one owner per managed path. Generated modules
 are ordered in deterministic dependency rounds using ordinary quoted-file

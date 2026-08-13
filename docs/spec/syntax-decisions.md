@@ -1505,16 +1505,18 @@ for one trait to one field; `impl App.Logger using logger` top-level form.
 All-or-nothing in v1.
 
 **S55 — Built-in derive policy** *(D-SERDE-CANON1 vocabulary; amended by
-D-AUTODERIVE1=E and D-AUTODERIVE-SYNTAX1=D, 2026-07-29, card #1267)*:
-`Printable`, `Equatable`, and `Debug` auto-derive whenever every field
-qualifies. The package default is on. `policy: .{ auto_derive: false }`
+D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D, and D-META-AUTO1=A, 2026-08-06,
+cards #1267/#1545)*: every structurally derivable built-in capability
+(`Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode`)
+auto-derives whenever every field qualifies. `Encode` + `Decode` is the
+`Codable` family. The package default is on. `policy: .{ auto_derive: false }`
 turns silent generation off for that package. At a type site, a bare trait
-marker opts in and `!` opts out: `#!Printable` or
-`#[!Debug, !Equatable, Printable]`. A missing trait follows the package
-default. Positive markers generate only when fields qualify. Negative markers
-reject only compiler generation. A hand-written implementation wins over the
-package default and either sign. This narrowly amends D-MARK-DEBUG1=A because
-package-off gives the explicit `Debug` marker a required job.
+marker opts in and `!` refuses compiler generation: `#!Printable` or
+`#[!Debug, !Equatable, Printable]`; `#!Codable` refuses both wire directions.
+A missing trait follows the package default. Positive markers generate only
+when fields qualify. Negative markers affect only compiler generation. A
+hand-written implementation wins over the package default and either sign.
+Traits that are not structurally derivable remain explicit-only.
 
 `Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
 Explicit opt-in markers for the other derive families remain
@@ -2441,9 +2443,11 @@ optional when physical layout is not guaranteed. Completion visibly groups
 `jet inspect expand --facts layout`, and JSON project the same model.
 
 **D-METADERIVE1 — User derives**: `derive T.Wire { … }` (old
-`derive Wire for T` is E2714); body uses `T.reflect()` + `@name` splices,
-emits Jet source text that re-enters lexer→parser→sema like hand-written code
-(**D-CTCODEGEN1** — never inject pre-parsed AST). Local-only orphan rule.
+`derive Wire for T` is E2714); the header names the provider and target, and
+the body contains typed Jet members. `@` holes are filled at expansion and the
+resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
+never inject unchecked AST or re-lex emitted text). `@loop` over
+`T.@fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
 **S56** stays open for Epoch 3 (typed-reflection hardening; see Open
@@ -3080,9 +3084,9 @@ surface is a first-class `Encode`/`Decode` protocol — a type implements
 `encode(self) => DataTree` and `decode(tree: DataTree) => Result<T,
 [FieldError]>` to own its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
-ordinary derives that *emit that same Jet source* and re-enter
-lexer/parser/sema (R11, D-CTCODEGEN1) — no compiler-synthesized Rust, no R11
-carve-out. Ratifying this also fixes cross-module `decode<T>` (derive output
+ordinary derives that contribute the same checked Jet items and enter sema
+(R11, D-META-CODE1) — no compiler-synthesized Rust, no R11 carve-out.
+Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
 
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
@@ -6557,7 +6561,7 @@ the compile-time ceiling, while mutation and grammar changes remain outside it.
 
 **D-META-CODE1=A — generated code is real Jet code** *(ratified 2026-08-06, card
 #1541)*: `derive` and `b.generate` bodies are Jet code with typed holes. A filled
-template re-enters ordinary semantic checking, while D-CTCODEGEN1 remains the
+template enters ordinary semantic checking; D-META-CODE1 is the typed
 code-generation boundary.
 
 **D-META-BODY1=A — derive bodies are implementations** *(ratified 2026-08-06,

@@ -16,7 +16,7 @@ are inventoried independently from their source registries by the same gate.
 | `claim.prelude-control` | Beginners get the prelude automatically and experts may opt out explicitly. |
 | `claim.maturity-tags` | Dependency maturity can be stated without changing runtime semantics. |
 | `claim.generic-modules` | Generic modules instantiate applicatively with type parameters and closed Bool, Int, Char, String, and fieldless-enum values, including Int `[T#capacity]`. |
-| `claim.metaprogramming` | Generated source re-enters Jet's lexer, parser, and semantic pipeline. |
+| `claim.metaprogramming` | Typed generated items use the ordinary Jet grammar and semantic pipeline; build materialization may write the checked items as `.jet` source. |
 | `claim.tooling-cli` | Jet ships one coherent beginner-first command-line toolset. |
 | `claim.ide-debug` | Editor analysis and debugging share incremental Jet semantic facts. |
 | `claim.format-test` | Project formatting and testing have complete deterministic workflows. |

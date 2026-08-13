@@ -223,7 +223,7 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(p.span.end);
             }
-            // D-METADERIVE1=A: derive blocks are emitted verbatim (non-destructive).
+            // D-META-CODE1=A: derive bodies are typed item templates.
             Item::UserDerive(d) => {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);

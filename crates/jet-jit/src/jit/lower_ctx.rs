@@ -6406,113 +6406,46 @@ impl LowerCtx<'_, '_> {
     /// named-unsupported (same gap string as before for CtLit/DefaultLit).
 
     fn lower_reflect_of(&mut self, arg: &TExpr) -> Result<Value, String> {
-        let type_name = arg.ty.leaf_name();
-        let path = self.meta.reflect_path(&arg.ty);
-        let named_type = match &arg.ty {
-            Type::Named(n) | Type::Apply { name: n, .. } => Some(n.as_str()),
-            _ => None,
-        };
-        if let Some(n) = named_type {
-            if let Some((_names, tys)) = self.meta.struct_layout(n) {
-                // Reject before emitting any resident instructions. The
-                // ambient path owns nested/collection reflection semantics;
-                // the resident path only has exact scalar field encoders.
-                if tys.iter().any(|ty| {
-                    !matches!(
-                        ty,
-                        Type::Int
-                            | Type::IntN { .. }
-                            | Type::Float
-                            | Type::Float32
-                            | Type::Bool
-                            | Type::Char
-                            | Type::String
-                    )
-                }) {
-                    return Err(format!(
-                        "resident reflection for `{n}` has non-scalar fields; use ambient parity path"
-                    ));
-                }
-            }
-        }
+        let value = self.lower_expr(arg)?;
+        self.lower_reflect_value(value, &arg.ty, true)
+    }
+
+    fn lower_reflect_value(
+        &mut self,
+        value: Value,
+        ty: &Type,
+        display: bool,
+    ) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        let type_name = ty.leaf_name();
+        let path = self.meta.reflect_path(&ty);
         let type_h = self.runtime.heap.alloc_string(type_name.clone());
         let type_v = self.b.ins().iconst(types::I64, type_h);
         let path_h = self.runtime.heap.alloc_string(path);
         let path_v = self.b.ins().iconst(types::I64, path_h);
+        let display_v = self.lower_reflect_text(value, &ty, display)?;
 
-        // display string — reuse Display path / scalar push
-        let buf = self.call_host(self.host.str_begin, &[]);
-        match &arg.ty {
-            Type::Named(n) | Type::Apply { name: n, .. } => {
-                self.lower_named_str_interp(buf, arg, n, jet_foundation::AST::StrFormat::Display)?;
-            }
-            Type::Int => {
-                let v = self.lower_expr(arg)?;
-                let push = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
-                self.b.ins().call(push, &[buf, v]);
-            }
-            Type::Float => {
-                let v = self.lower_expr(arg)?;
-                let push = self.module.declare_func_in_func(self.host.str_push_f64, self.b.func);
-                self.b.ins().call(push, &[buf, v]);
-            }
-            Type::Bool => {
-                let v = self.lower_expr(arg)?;
-                let push = self.module.declare_func_in_func(self.host.str_push_bool, self.b.func);
-                self.b.ins().call(push, &[buf, v]);
-            }
-            Type::String => {
-                let v = self.lower_expr(arg)?;
-                let push = self.module.declare_func_in_func(self.host.str_push_str, self.b.func);
-                self.b.ins().call(push, &[buf, v]);
-            }
-            _ => {
-                let v = self.lower_expr(arg)?;
-                let push = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
-                self.b.ins().call(push, &[buf, v]);
-            }
-        }
-        let display_v = buf; // str_begin buffer IS the string handle
-
-        // fields
         let fields = self.call_host(self.host.coll.list_new, &[]);
-        if let Some(n) = named_type {
+        if let Type::Named(n) | Type::Apply { name: n, .. } = &ty {
             if let Some((names, tys)) = self.meta.struct_layout(n) {
-                let recv = self.lower_expr(arg)?;
+                let names = names.to_vec();
+                let tys = tys.to_vec();
                 let push = self.module.declare_func_in_func(self.host.coll.list_push, self.b.func);
                 let field_new = self
                     .module
                     .declare_func_in_func(self.host.reflect_field_new, self.b.func);
-                for (i, (fname, fty)) in names.iter().zip(tys.iter()).enumerate() {
-                    let jet_name = fname.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(fname);
+                for (fname, fty) in names.iter().zip(tys.iter()) {
+                    let jet_name = fname
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(fname);
                     let name_h = self.runtime.heap.alloc_string(jet_name.to_string());
                     let name_v = self.b.ins().iconst(types::I64, name_h);
-                    let field_val = self.lower_record_field(recv, n, fname, fty)?;
-                    let fbuf = self.call_host(self.host.str_begin, &[]);
-                    match fty {
-                        Type::Int | Type::IntN { .. } => {
-                            let p = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
-                            self.b.ins().call(p, &[fbuf, field_val]);
-                        }
-                        Type::Float | Type::Float32 => {
-                            let p = self.module.declare_func_in_func(self.host.str_push_f64, self.b.func);
-                            self.b.ins().call(p, &[fbuf, field_val]);
-                        }
-                        Type::Bool => {
-                            let p = self.module.declare_func_in_func(self.host.str_push_bool, self.b.func);
-                            self.b.ins().call(p, &[fbuf, field_val]);
-                        }
-                        Type::String => {
-                            let p = self.module.declare_func_in_func(self.host.str_push_str, self.b.func);
-                            self.b.ins().call(p, &[fbuf, field_val]);
-                        }
-                        _ => {
-                            let p = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
-                            self.b.ins().call(p, &[fbuf, field_val]);
-                        }
-                    }
-                    let _ = i;
-                    let fnew = self.b.ins().call(field_new, &[name_v, fbuf]);
+                    let field_ty = self
+                        .concrete_struct_field_ty(&ty, fname)
+                        .unwrap_or_else(|| fty.clone());
+                    let field_val = self.lower_record_field(value, n, fname, &field_ty)?;
+                    let child = self.lower_reflect_value(field_val, &field_ty, true)?;
+                    let fnew = self.b.ins().call(field_new, &[name_v, child]);
                     let fh = self.b.inst_results(fnew)[0];
                     self.b.ins().call(push, &[fields, fh]);
                 }
@@ -6522,6 +6455,40 @@ impl LowerCtx<'_, '_> {
             self.host.reflect_of_finish,
             &[type_v, path_v, display_v, fields],
         ))
+    }
+
+    fn lower_reflect_text(
+        &mut self,
+        value: Value,
+        ty: &Type,
+        display: bool,
+    ) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        if matches!(&ty, Type::Named(name) if name == "Unit") {
+            return Ok(self.call_host(self.host.str_begin, &[]));
+        }
+        if display {
+            if let Type::Named(name) | Type::Apply { name, .. } = &ty {
+                let buf = self.call_host(self.host.str_begin, &[]);
+                let local = TLocal::generated(format!("reflect_{}", self.next_var));
+                let place = local.rust_name();
+                let expr = TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::Local(local),
+                };
+                self.with_bound_local(&place, ty.clone(), value, |this| {
+                    this.lower_named_str_interp(
+                        buf,
+                        &expr,
+                        name,
+                        jet_foundation::AST::StrFormat::Display,
+                    )
+                })?;
+                return Ok(buf);
+            }
+        }
+        let uses_result = matches!(&ty, Type::Option(inner) if matches!(inner.as_ref(), Type::IntN { .. }));
+        self.lower_jet_show_value(value, &ty, uses_result)
     }
 
     fn lower_testing_call(
@@ -10669,6 +10636,27 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// Resolve a field against the concrete receiver, including owner generic
+    /// arguments. TIR field facts can retain the declaration's `T` after a
+    /// monomorphic method body is demanded by the JIT, while the record slot
+    /// already carries the concrete `Wrap<String>` ABI.
+    fn concrete_struct_field_ty(&self, recv_ty: &Type, field: &str) -> Option<Type> {
+        match recv_ty {
+            Type::Apply { name, args } => {
+                let declared = self.meta.struct_field_ty(name, field)?;
+                let params = self.meta.struct_type_params(name)?;
+                let subst = params
+                    .iter()
+                    .zip(args)
+                    .map(|(param, arg)| (param.clone(), arg.clone()))
+                    .collect();
+                Some(jet_foundation::Generics::substitute_type(&declared, &subst))
+            }
+            Type::Named(name) => self.meta.struct_field_ty(name, field),
+            _ => None,
+        }
+    }
+
     fn lower_ct_result(
         &mut self,
         ok: bool,
@@ -10743,7 +10731,19 @@ impl LowerCtx<'_, '_> {
         let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, (field_ty, ct)) in ordered.iter().enumerate() {
             let raw = self.lower_ct_value(ct)?;
-            let abi_ty = self.erase_distinct_ty(field_ty);
+            // A generic owner stores its declaration field as `T`, but the
+            // folded CtValue already contains the concrete scalar. Select the
+            // record setter from that value or a String field is written as an
+            // integer slot and later read through the String getter.
+            let concrete_ty = match ct {
+                CtValue::Int(_) => Type::Int,
+                CtValue::Float(_) => Type::Float,
+                CtValue::Bool(_) => Type::Bool,
+                CtValue::Char(_) => Type::Char,
+                CtValue::Str(_) => Type::String,
+                _ => field_ty.clone(),
+            };
+            let abi_ty = self.erase_distinct_ty(&concrete_ty);
             let host_id = match &abi_ty {
                 ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
                 Type::Int => self.host.struct_set_i64,
@@ -15769,20 +15769,21 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[handle, field_v]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                // Prefer TIR field type for ABI. Metadata on generic owners still
-                // has binder params (`Wrap.value: T`); using that picks
-                // `struct_get_i64` for a String slot (stored via `struct_set_str`)
-                // and yields handle 0 — often a stale compile-time string lit.
-                // Fall back to meta only when TIR left Int (CORE structs missing
-                // from `cx.struct_fields`).
-                let field_ty = if matches!(&expr.ty, Type::Int) {
-                    self.meta
-                        .struct_field_ty(&type_name, field)
-                        .or_else(|| core_struct_field_type(&type_name, field))
-                        .unwrap_or_else(|| expr.ty.clone())
-                } else {
-                    expr.ty.clone()
-                };
+                // Prefer the concrete receiver's field substitution for ABI.
+                // TIR field facts can retain the declaration's `T` after a
+                // monomorphic method is demanded by the JIT; selecting the
+                // generic metadata type would read a String slot with the
+                // integer getter and return an unrelated handle.
+                let concrete_field_ty = self.concrete_struct_field_ty(&record_ty, field);
+                let field_ty = concrete_field_ty
+                    .or_else(|| {
+                        if matches!(&expr.ty, Type::Int) {
+                            core_struct_field_type(&type_name, field)
+                        } else {
+                            Some(expr.ty.clone())
+                        }
+                    })
+                    .unwrap_or_else(|| expr.ty.clone());
                 self.lower_record_field(handle, &type_name, field, &field_ty)
             }
             TExprKind::MethodCall {

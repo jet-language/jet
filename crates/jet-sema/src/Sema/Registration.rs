@@ -19,7 +19,7 @@ pub(crate) use Items::{
     register_type_alias, register_type_methods, resolve_comptime_declaration_values,
 };
 pub(super) use Derives::expand_builtin_derive_items;
-pub(crate) use Serde::{expand_builtin_serde_items, parse_generated_fragment};
+pub(crate) use Serde::expand_builtin_serde_items;
 
 fn is_void_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)

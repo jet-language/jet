@@ -50,6 +50,24 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
     format_program_with_tokens(prog, src, comment_toks, &source_toks)
 }
 
+/// Format compiler-owned template items without pretending that they came
+/// from a second source file. Their spans still point into the provider body,
+/// so give the formatter a comment-free blank source with the same addressable
+/// range. This keeps the normal formatter as the one rendering engine while
+/// avoiding a lexer/reparse round trip for generated code (D-META-CODE1=A).
+pub fn format_synthetic_program(prog: &Program) -> String {
+    let source_len = prog
+        .items
+        .iter()
+        .map(synthetic_item_end)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let src = " ".repeat(source_len);
+    let (source_toks, _) = crate::Lexer::lex(&src);
+    format_program_with_tokens(prog, &src, &[], &source_toks)
+}
+
 /// D-ONCE-RETIRE1=C: collect mechanical edits for the retired interpolation
 /// selector rail. The lexer already owns interpolation boundaries, so this
 /// never rewrites a `#` inside an ordinary string or a marker in an embedded
@@ -571,6 +589,17 @@ fn item_span_end(item: &Item) -> usize {
         // D-CONF-GENSPELL1=A: module alias span end.
         Item::ModuleAlias(ma) => ma.span.end,
     }
+}
+
+fn synthetic_item_end(item: &Item) -> usize {
+    let declared_end = match item {
+        Item::Func(f) => f.span.end,
+        Item::Struct(s) => s.span.end,
+        Item::Enum(e) => e.span.end,
+        Item::Impl(i) => i.span.end,
+        _ => 0,
+    };
+    declared_end.max(item_span_end(item))
 }
 
 fn stmt_end(stmt: &Stmt) -> usize {

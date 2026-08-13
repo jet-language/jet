@@ -72,15 +72,6 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                     feature: "calls into a C library".to_string(),
                     span: Some(module.span),
                 }),
-                Item::Impl(item)
-                    if !item.is_generated_serde
-                        && matches!(item.trait_name.as_deref(), Some("Encode" | "Decode")) =>
-                {
-                    return Some(Boundary {
-                        feature: "uses a typed encoding implementation".to_string(),
-                        span: item.trait_span.or(Some(item.type_span)),
-                    });
-                }
                 Item::Func(function) => {
                     if function.is_unsafe {
                         return Some(Boundary {

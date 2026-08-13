@@ -710,8 +710,8 @@ fn print_jit_op_report() {
 const BOUNDARY_CODES: &[&str] = &[
     "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E3412", "E1265",
     // Front-end / sema codes that surface when the interpreter can't load a
-    // construct the AOT path still accepts (derive/splice/generics gaps).
-    "E2710", "E0102", "E0857", "E0107", "E0501",
+    // construct the AOT path still accepts (splice/generics gaps).
+    "E0102", "E0857", "E0107", "E0501",
     // Frontend-rejected examples (corpus gate) may still appear in manifested lists.
     "E0308", "E0504", "E0302", "E0505", "E0915", "E0311", "E1004",
 ];
@@ -4168,25 +4168,24 @@ fn generic_user_derive_multi_instantiation_matches_resident_default_dev_and_aot(
     let src = r#"
 derive T.Access {
     info :: T.reflect()
-    name :: info.name
     param :: info.type_params[0].name
-    emit("impl @name {{ fn make(value: ^@param) => @name<@param> {{ return @name<@param>.{{ value: value }} }} fn marker() => Int {{ return 17 }} fn get_value(self) => @param {{ return ~self.value }} fn type_name(self) => String {{ return \"@name\" }} }}")
+    fn make(value: ^@param) => @name<@param> {
+        return @name<@param>.{ value: value }
+    }
+    fn marker() => Int = 17
+    fn get_value(self) => @param = ~self.value
+    fn type_name(self) => String = T.@name
 }
 
 derive T.NumericAccess {
     info :: T.reflect()
-    name :: info.name
     param :: info.type_params[0].name
-    emit("""
-impl @name {{
-    fn replace(&self, value: ^@param) => @param {{
+    fn replace(&self, value: ^@param) => @param {
         self.value = value
         return ~self.value
-    }}
-    fn plus(self, rhs: @param) => @param {{ return self.value + rhs }}
-    fn equal_to(self, rhs: @param) => Bool {{ return self.value == rhs }}
-}}
-""")
+    }
+    fn plus(self, rhs: @param) => @param = self.value + rhs
+    fn equal_to(self, rhs: @param) => Bool = self.value == rhs
 }
 
 #Access
@@ -4297,9 +4296,7 @@ fn run() {
         &generic_method_file,
         r#"
 derive T.GenericMethod {
-    info :: T.reflect()
-    name :: info.name
-    emit("impl @name {{ fn keep<T>(self, value: ^T) => T {{ return value }} }}")
+    fn keep<T>(self, value: ^T) => T = value
 }
 #GenericMethod
 struct Shadow<T: Printable> { value: T }
@@ -4351,9 +4348,8 @@ fn nested_generic_user_derive_reaches_resident_jit() {
     let src = r#"
 derive T.Access {
     info :: T.reflect()
-    name :: info.name
     param :: info.type_params[0].name
-    emit("impl @name {{ fn get_value(self) => @param {{ return ~self.value }} }}")
+    fn get_value(self) => @param = ~self.value
 }
 
 #Access

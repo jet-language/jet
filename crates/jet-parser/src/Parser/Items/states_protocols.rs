@@ -415,12 +415,90 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Dot, "after the type parameter in `derive T.Trait`")?;
             let (trait_name, trait_span) = self.expect_ident("after `.` in `derive T.Trait`")?;
             self.expect(TokKind::LBrace, "after the trait name in `derive T.Trait`")?;
-            let body = self.block_stmts(); // consumes `}`
+            let body = self.derive_body_items()?;
             let end = self.toks[self.pos - 1].span.end;
             Ok(crate::AST::DeriveDef {
                 trait_name,
                 trait_span,
                 type_param,
+                body,
+                span: Span::new(start, end),
+            })
+        }
+
+        /// D-META-CODE1=A / D-META-BODY1=A: parse a derive body as a mixed
+        /// sequence of ordinary item templates and compile-time operations.
+        /// The item parser is called directly, so the definition is checked
+        /// once here and never serialized to source for a second parse.
+        pub(crate) fn derive_body_items(&mut self) -> Result<Vec<crate::AST::DeriveBodyItem>, Diagnostic> {
+            let mut body = Vec::new();
+            while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    continue;
+                }
+                if matches!(self.peek().kind, TokKind::KwPub | TokKind::KwPriv) {
+                    let (is_pub, is_package_pub) = self.parse_item_visibility();
+                    body.push(crate::AST::DeriveBodyItem::Item(Box::new(
+                        self.item_after_visibility(is_pub, is_package_pub)?,
+                    )));
+                    continue;
+                }
+                let item = match self.peek().kind {
+                    TokKind::KwFn => Some(crate::AST::DeriveBodyItem::Item(Box::new(
+                        crate::AST::Item::Func(self.func()?),
+                    ))),
+                    TokKind::KwImpl => Some(crate::AST::DeriveBodyItem::Item(Box::new(
+                        self.impl_or_error_conv()?,
+                    ))),
+                    TokKind::KwStruct => Some(crate::AST::DeriveBodyItem::Item(Box::new(
+                        crate::AST::Item::Struct(self.struct_def(false)?),
+                    ))),
+                    TokKind::KwEnum => Some(crate::AST::DeriveBodyItem::Item(Box::new(
+                        crate::AST::Item::Enum(self.enum_def(false)?),
+                    ))),
+                    TokKind::Hash
+                        if self.at_marker_list()
+                            || self.at_single_type_marker() => Some(
+                        crate::AST::DeriveBodyItem::Item(Box::new(
+                            self.type_def_with_any_markers()?,
+                        )),
+                    ),
+                    TokKind::Hash if self.marker_sequence_leads_to_function() => Some(
+                        crate::AST::DeriveBodyItem::Item(Box::new(
+                            crate::AST::Item::Func(self.func_with_marker_list()?),
+                        )),
+                    ),
+                    TokKind::At if matches!(self.peek2().kind, TokKind::KwLoop) => {
+                        Some(self.derive_body_loop()?)
+                    }
+                    _ => Some(crate::AST::DeriveBodyItem::Stmt(self.stmt()?)),
+                };
+                if let Some(item) = item {
+                    body.push(item);
+                }
+            }
+            self.expect(TokKind::RBrace, "to close the derive body")?;
+            Ok(body)
+        }
+
+        /// D-META-BODY1=A: `@loop field, T.@fields { fn … }` expands item
+        /// templates, not runtime statements. This deliberately shares the
+        /// ordinary loop source expression grammar; sema evaluates the source
+        /// through the comptime interpreter during expansion.
+        fn derive_body_loop(&mut self) -> Result<crate::AST::DeriveBodyItem, Diagnostic> {
+            let start = self.bump().span.start; // `@`
+            self.expect(TokKind::KwLoop, "after `@` in a derive loop")?;
+            let (var, var_span) = self.expect_ident("for the derive loop binding")?;
+            self.expect(TokKind::Comma, "after the derive loop binding")?;
+            let source = self.expr_no_struct_lit()?;
+            self.expect(TokKind::LBrace, "to open the derive loop body")?;
+            let body = self.derive_body_items()?;
+            let end = self.toks[self.pos.saturating_sub(1)].span.end;
+            Ok(crate::AST::DeriveBodyItem::Loop {
+                var,
+                var_span,
+                source,
                 body,
                 span: Span::new(start, end),
             })

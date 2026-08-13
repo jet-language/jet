@@ -2279,8 +2279,7 @@ pub(super) fn cbor_struct_fields(
             (
                 name.clone(),
                 definition
-                    .fields
-                    .iter()
+                    .reflection_fields()
                     .map(|field| (field.name.clone(), field.ty.clone()))
                     .collect(),
             )

@@ -1,0 +1,19 @@
+// D-META-BODY1=A: one typed item template per reflected field.
+derive T.FieldNames {
+    @loop field, T.@fields {
+        method :: "field_{field.@name}"
+        fn @method(self) => String = field.@name;
+    }
+}
+
+#FieldNames
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn run() {
+    point := Point.{x: 1, y: 2}
+    print(point.field_x())
+    print(point.field_y())
+}
