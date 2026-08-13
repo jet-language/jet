@@ -595,7 +595,7 @@ fn e1210(_file: &str, detail: &str) -> Diagnostic {
             Syntax::TARGET_TEST,
             Syntax::TARGET_EXAMPLE,
             Syntax::TARGET_BENCHMARK,
-            Syntax::TARGET_PLUGIN,
+            Syntax::TARGET_SANDBOX,
         ),
         None,
     )
@@ -671,28 +671,28 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
 /// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
 /// `name` is not a blessed default (`release`/`debug`) or defined in `package.jet`'s
 /// `build { }` block. `defined` is the sorted list of profiles the user did define.
-/// E1258 (D-PLUGIN1=B, c81): a `target: plugin` package's own code uses an
-/// effect — plugins are deny-by-default (the wasmtime host registers zero
+/// E1258 (D-PLUGIN1=B, c81): a `target: sandbox` package's own code uses an
+/// effect — sandboxes are deny-by-default (the wasmtime host registers zero
 /// host imports), so any effect would fail to instantiate at load time.
 pub fn e1258(effects: &str) -> Diagnostic {
     Diagnostic::error(
         "E1258",
-        "a plugin can't use any effect".to_string(),
+        "a sandbox can't use any effect".to_string(),
         format!(
-            "this package builds as `target: plugin` (D-PLUGIN1=B) — it uses: {effects}. Plugins run fully sandboxed with zero host capabilities; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in)."
+            "this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: {effects}. Sandboxes run with zero host capabilities; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in)."
         ),
-        "remove the effectful call, or move it out of the plugin into the host program that loads it".to_string(),
+        "remove the effectful call, or move it out of the sandbox into the host program that loads it".to_string(),
         None,
     )
 }
 
-/// E1259 (D-DEP-WASM1=A, c81): the plugin's wasm32 Component Model build
+/// E1259 (D-DEP-WASM1=A, c81): the sandbox's wasm32 Component Model build
 /// failed — missing toolchain (`wasm-tools`) or a rejected module. Never a raw
 /// process crash reaching the user (I2): named tool, named failure.
 pub fn e1259(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1259",
-        "couldn't build the plugin's WASM Component".to_string(),
+        "couldn't build the sandbox's WASM Component".to_string(),
         detail.to_string(),
         "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)".to_string(),
         None,

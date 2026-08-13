@@ -2,6 +2,8 @@
 
 Research date: 2026-08-06. Question: what is available with zero imports in each major language, what each community praises or regrets, and what criteria and mitigations follow for Jet's zero-import prelude.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## 1. Comparison table
 
 | Language | Zero-import surface | Approx. size | Notes |

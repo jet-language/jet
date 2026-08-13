@@ -1238,12 +1238,12 @@ pub fn compile_web_with_gates(file: &str, gates: Policy::GateSet) -> Result<Comp
 
 pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_plugin_with_gates(file, Sema::CompileMode::Check, gates, Some(Syntax::TARGET_PLUGIN))
+        Driver::compile_bundle_path_opts_plugin_with_gates(file, Sema::CompileMode::Check, gates, Some(Syntax::TARGET_SANDBOX))
     })
 }
 
-/// Like `compile_with_path` but for `jet build --target=plugin` (D-PLUGIN1=B /
-/// D-DEP-WASM1=A, c81). `CompileMode::Check` — a plugin package has no single
+/// Like `compile_with_path` but for `jet build --target=sandbox` (D-PLUGIN1=B /
+/// D-DEP-WASM1=A, c81). `CompileMode::Check` — a sandbox package has no single
 /// `fn run` entry point (D-ILE1: it's a library-shaped export surface, not an
 /// executable), so the "no `run`" requirement (E0101, `Run`/`Eval`-only) never
 /// applies here; every other check still runs in full.
@@ -1252,7 +1252,7 @@ pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
         Driver::compile_bundle_path_opts_plugin(
             file,
             Sema::CompileMode::Check,
-            Some(Syntax::TARGET_PLUGIN),
+            Some(Syntax::TARGET_SANDBOX),
         )
     })
 }

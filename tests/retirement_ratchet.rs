@@ -45,6 +45,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("set-replace", 0),
     ("allow-impure", 0),
     ("core-path-free-functions", 0),
+    ("target-plugin", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -368,6 +369,32 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if text.contains("use core.path") || text.contains("core.path.") {
                     retired += 1;
                 } else if text.contains("Path.from") || text.contains("Path.home") {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "target-plugin" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let (_, retired_targets) = jet::Package::rewrite_retired_targets(&text);
+                if retired_targets > 0 || text.contains("target: plugin") {
+                    retired += 1;
+                } else if text.contains("target: sandbox")
+                    || jet::Package::PackageFacts::parse(&text, &path.display().to_string())
+                        .is_ok_and(|facts| {
+                            facts.packages.iter().any(|package| {
+                                package.targets.iter().any(|target| {
+                                    matches!(target, jet::Package::Target::Plugin { .. })
+                                })
+                            })
+                        })
+                {
                     canonical += 1;
                 }
             }

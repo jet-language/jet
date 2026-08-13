@@ -455,7 +455,7 @@ fn which_tool(name: &str) -> Result<std::path::PathBuf, ()> {
     Ok(std::path::PathBuf::from(path))
 }
 
-/// Like `compile_bundle_path_opts`, but for `jet build --target=plugin`
+/// Like `compile_bundle_path_opts`, but for `jet build --target=sandbox`
 /// (D-PLUGIN1=B / D-DEP-WASM1=A, c81): also emits the guest `.wit` + wasm32
 /// Rust artifacts (`Codegen::emit_plugin`).
 pub fn compile_bundle_path_opts_plugin(
@@ -3336,7 +3336,7 @@ fn compile_bundle_path_opts_full(
         None
     };
     // D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): the guest side of
-    // a `target: plugin` build — a `.wit` world + wasm32 guest Rust, generated
+    // a `target: sandbox` build — a `.wit` world + wasm32 guest Rust, generated
     // from the entry module's exportable (`Int`/`Float`-only) `pub fn`s.
     let plugin = if plugin_target {
         // E1260: every `pub fn` in the entry module must be exportable —
@@ -3359,7 +3359,7 @@ fn compile_bundle_path_opts_full(
                 "E1341",
                 "a Library output cannot also select a backend target".to_string(),
                 "Library artifacts are native static/shared projections (D-LIB-EXPORT1=C), not web or sandbox guest outputs".to_string(),
-                "remove `--target=web`/`--target=plugin` and select the Library output directly".to_string(),
+                "remove `--target=web`/`--target=sandbox` and select the Library output directly".to_string(),
                 None,
             )]);
         }

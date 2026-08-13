@@ -4,7 +4,7 @@
 //! `Prelude/CompilerExtension.rs`) in the isolated sibling `jetpack` process,
 //! with a **compiler-specific** WIT world
 //! that stays distinct from:
-//! - application `target: plugin` / `core.plugin` (world `jetplugin`, D-PLUGIN1)
+//! - application `target: sandbox` / `core.plugin` (world `jetplugin`, D-PLUGIN1)
 //! - PATH-discovered `jet-*` helpers (D-DX5)
 //!
 //! V1 contract (ratified): post-sema typed read-only snapshot in → validated
@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum PluginMechanism {
     /// D-DX5: `jet-<cmd>` executables discovered on PATH.
     PathHelper,
-    /// D-PLUGIN1 / D-DEP-WASM1: application `target: plugin` + `core.plugin`.
+    /// D-PLUGIN1 / D-DEP-WASM1: application `target: sandbox` + `core.plugin`.
     ApplicationPlugin,
     /// D-DX5-HOOK1=A: compiler-extension WASM component (this module).
     CompilerExtension,
@@ -63,7 +63,7 @@ pub const WORLD_NAME: &str = "compiler-extension-v1";
 /// WIT package identity for the compiler-extension world.
 pub const PACKAGE_NAME: &str = "jet:compiler-extension@0.1.0";
 
-/// Application `target: plugin` world name (D-PLUGIN1 / D-PLUGIN-EXPORT1).
+/// Application `target: sandbox` world name (D-PLUGIN1 / D-PLUGIN-EXPORT1).
 /// Kept here so callers can assert the two worlds never collide (I8).
 pub const APPLICATION_PLUGIN_WORLD: &str = "jetplugin";
 

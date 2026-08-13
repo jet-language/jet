@@ -4,6 +4,8 @@ Canvas is Jet's visual scripting surface (UE5 Blueprint equivalent). This spec
 defines the node visual system. It is the contract for the rendering overhaul.
 Bar: a screenshot of Canvas must read as polished as a UE5 Blueprint graph.
 
+Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+
 ## Node taxonomy — three primary archetypes (owner directive)
 
 There is NO user-visible distinction between "call", "method", and "function".

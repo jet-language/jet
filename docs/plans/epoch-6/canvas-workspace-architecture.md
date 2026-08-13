@@ -1,5 +1,7 @@
 # Canvas Workspace Architecture
 
+Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+
 Canvas v1 proves source-backed graph editing for one `.jet` file. The next
 architecture makes Canvas a package/workspace manager without changing the
 source-of-truth rule: Jet source files, `package.jet`, `workspace.jet`, env source,

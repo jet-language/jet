@@ -2,6 +2,8 @@
 
 Research for the Jet CoreLib redesign, 2026-08-06. Method: for each stdlib domain, find the implementation practitioners most consistently praise, extract the concrete design moves behind the praise, and collect notorious failures with root causes. Every claim carries a source URL.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Per owner directive, each verdict and rule carries a **segment lens**: how the design serves absolute beginners, intro-course students, hobbyists writing one-off scripts, migrants from other languages, medium-business teams, and enterprise maintenance. A rule makes the final list only if it serves the full spectrum or names its segment.
 
 ---

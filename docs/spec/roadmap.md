@@ -1,5 +1,7 @@
 # Roadmap
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 This file records verified history and durable program ownership. Tower owns
 the current epoch, work order, decisions, and blockers; start it using
 [`AGENTS.md`](../../AGENTS.md). Epoch 1 (v1.0) and Epoch 2 (GA) are

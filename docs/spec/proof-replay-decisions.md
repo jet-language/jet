@@ -10,6 +10,8 @@ complete ProofReport, execution, result, exit, report identity, or `.jetproof`.
 Capture writes the D-JREPLAY1 artifact through its ratified capture surface;
 replay consumption never captures or mutates it.
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 ## D-PROVE-REPLAY1=A — Proof and replay surface
 
 

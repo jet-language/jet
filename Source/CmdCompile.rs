@@ -285,9 +285,9 @@ pub(crate) fn run_compile_cmd(
     }
 
     let is_web = cross_target == Some(jet::Syntax::BUILD_TARGET_WEB);
-    // D-PLUGIN1=B / D-DEP-WASM1=A (c81): `--target=plugin` routes to the
+    // D-PLUGIN1=B / D-DEP-WASM1=A (c81): `--target=sandbox` routes to the
     // sandboxed WASM Component Model guest build instead of a native binary.
-    let is_plugin = cross_target == Some(jet::Syntax::TARGET_PLUGIN);
+    let is_plugin = cross_target == Some(jet::Syntax::TARGET_SANDBOX);
     if explain_partition && !is_web {
         let diag = jet::Diagnostics::Diagnostic::error(
             "E2102",
@@ -765,7 +765,7 @@ pub(crate) fn run_compile_cmd(
             // deterministic Fail budgets through CmdBudget's one canonical
             // evaluator/report path. Cross backends use their semantic target
             // class; native remains the default current target.
-            let budget_target=if is_web{"web"}else if is_plugin{"plugin"}else{"native"};
+            let budget_target=if is_web{"web"}else if is_plugin{"sandbox"}else{"native"};
             if crate::CmdBudget::run_build_gates(file,&artifact_path,budget_target,&budget_profile)!=0{
                 exit(ExitCodes::USER_ERROR);
             }
@@ -773,7 +773,7 @@ pub(crate) fn run_compile_cmd(
                 if is_web {
                     println!("built: build/app.wasm + build/app.js");
                 } else if is_plugin {
-                    println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
+                    println!("built: build/{}.wasm (sandbox)", stem(file));
                 } else {
                     println!("built: {}", bin_path(file).display());
                 }
@@ -1223,13 +1223,15 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let migrated = if edition == Some("2027") {
+    let edition_migrated = if edition == Some("2027") {
         apply_edition_2027_encoding_fixes(&src)
     } else {
         src.clone()
     };
+    let (migrated, retired_target_count) =
+        rewrite_retired_package_targets(&edition_migrated, file);
     if edition == Some("2027") {
-        for note in edition_2027_encoding_audit(&src, &migrated) {
+        for note in edition_2027_encoding_audit(&src, &edition_migrated) {
             println!("{file}: edition 2027 migration: {note}");
         }
     }
@@ -1248,17 +1250,25 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let n = fixes.len();
     if dry_run {
         print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
-        if n == 0 {
+        if n == 0 && retired_target_count == 0 {
             println!(
                 "{}: would apply edition migration (dry run; nothing written)",
                 file
             );
-        } else {
+        } else if n > 0 {
             println!(
                 "{}: would apply {} fix{} (dry run; nothing written)",
                 file,
                 n,
                 if n == 1 { "" } else { "es" }
+            );
+        }
+        if retired_target_count > 0 {
+            println!(
+                "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
+                file,
+                retired_target_count,
+                if retired_target_count == 1 { "" } else { "s" }
             );
         }
         if retired_selector_count > 0 {
@@ -1275,14 +1285,22 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
         crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
-    if n == 0 {
+    if n == 0 && retired_target_count == 0 {
         println!("{}: applied edition migration", file);
-    } else {
+    } else if n > 0 {
         println!(
             "{}: applied {} fix{}",
             file,
             n,
             if n == 1 { "" } else { "es" }
+        );
+    }
+    if retired_target_count > 0 {
+        println!(
+            "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
+            file,
+            retired_target_count,
+            if retired_target_count == 1 { "" } else { "s" }
         );
     }
     if retired_selector_count > 0 {
@@ -2146,11 +2164,20 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
         exit(ExitCodes::USAGE);
     }
     let label = stdin_path.unwrap_or("<stdin>");
+    let (_, retired_target_count) = rewrite_retired_package_targets(&src, label);
     let retired_selector_count =
         jet::Formatter::retired_interpolation_selector_edits(&src).len();
     match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>")) {
         Ok(formatted) => {
             print!("{}", formatted);
+            if retired_target_count > 0 {
+                eprintln!(
+                    "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
+                    label,
+                    retired_target_count,
+                    if retired_target_count == 1 { "" } else { "s" }
+                );
+            }
             if retired_selector_count > 0 {
                 eprintln!(
                     "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
@@ -2175,15 +2202,24 @@ fn format_source_for_fmt(
     src: &str,
     origin: &str,
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
-    match jet::format_source(src) {
+    let (migrated, _) = rewrite_retired_package_targets(src, origin);
+    match jet::format_source(&migrated) {
         Ok(formatted) => Ok(formatted),
-        Err(diagnostics) if is_typed_package_source(src, origin) => {
-            match jet::Package::format_source(src, origin) {
+        Err(diagnostics) if is_typed_package_source(&migrated, origin) => {
+            match jet::Package::format_source(&migrated, origin) {
                 Ok(formatted) => Ok(formatted),
                 Err(_) => Err(diagnostics),
             }
         }
         Err(diagnostics) => Err(diagnostics),
+    }
+}
+
+fn rewrite_retired_package_targets(src: &str, origin: &str) -> (String, usize) {
+    if is_typed_package_source(src, origin) {
+        jet::Package::rewrite_retired_targets(src)
+    } else {
+        (src.to_string(), 0)
     }
 }
 
@@ -2255,6 +2291,7 @@ pub(crate) fn run_fmt(
         formatted: String,
         changed: bool,
         retired_interpolation_selectors: usize,
+        retired_target_spellings: usize,
         io_error: Option<String>,
         parse_diags: Vec<jet::Diagnostics::Diagnostic>,
     }
@@ -2270,6 +2307,7 @@ pub(crate) fn run_fmt(
                     formatted: String::new(),
                     changed: false,
                     retired_interpolation_selectors: 0,
+                    retired_target_spellings: 0,
                     io_error: Some(format!("can't read `{}`: {}", path.display(), e)),
                     parse_diags: Vec::new(),
                 });
@@ -2281,12 +2319,15 @@ pub(crate) fn run_fmt(
                 let changed = formatted != src;
                 let retired_interpolation_selectors =
                     jet::Formatter::retired_interpolation_selector_edits(&src).len();
+                let (_, retired_target_spellings) =
+                    rewrite_retired_package_targets(&src, &path.display().to_string());
                 results.push(FileResult {
                     path: path.clone(),
                     original: src,
                     formatted,
                     changed,
                     retired_interpolation_selectors,
+                    retired_target_spellings,
                     io_error: None,
                     parse_diags: Vec::new(),
                 });
@@ -2298,6 +2339,7 @@ pub(crate) fn run_fmt(
                     formatted: String::new(),
                     changed: false,
                     retired_interpolation_selectors: 0,
+                    retired_target_spellings: 0,
                     io_error: None,
                     parse_diags: diags,
                 });
@@ -2416,6 +2458,14 @@ pub(crate) fn run_fmt(
                 } else {
                     "s"
                 }
+            );
+        }
+        if r.retired_target_spellings > 0 && !mode.json {
+            println!(
+                "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
+                r.path.display(),
+                r.retired_target_spellings,
+                if r.retired_target_spellings == 1 { "" } else { "s" }
             );
         }
     }
@@ -2795,7 +2845,7 @@ fn validate_target(triple: &str, mode: OutputMode) {
     }
     // D-PLUGIN1=B (c81): another Jet backend target, not a rustc triple — the
     // guest build resolves its own `wasm32-unknown-unknown` triple internally.
-    if triple == jet::Syntax::TARGET_PLUGIN {
+    if triple == jet::Syntax::TARGET_SANDBOX {
         return;
     }
     // rustc --print target-list gives the full list; if the output contains
@@ -3604,13 +3654,13 @@ pub(crate) fn build(
         return;
     }
 
-    // D-PLUGIN1=B (c81): `plugin` is another Jet backend target — build the
+    // D-PLUGIN1=B (c81): `sandbox` is another Jet backend target — build the
     // sandboxed wasm32 Component Model module instead of a native binary.
-    if cross_target == Some(jet::Syntax::TARGET_PLUGIN) {
+    if cross_target == Some(jet::Syntax::TARGET_SANDBOX) {
         let plugin = plugin.unwrap_or_else(|| {
             eprintln!(
                 "{}",
-                jet::Diagnostics::render_ice_report("missing plugin codegen output", "", false)
+                jet::Diagnostics::render_ice_report("missing sandbox codegen output", "", false)
             );
             exit(ExitCodes::ICE);
         });
@@ -3625,8 +3675,8 @@ pub(crate) fn build(
             }
             Err(PluginBuildError::ToolFailure(msg)) => {
                 let diag = jet::Manifest::e1259(&msg);
-                let src = format!("// plugin build for {}", file);
-                report_problems(mode, "<plugin>", &src, &[diag]);
+                let src = format!("// sandbox build for {}", file);
+                report_problems(mode, "<sandbox>", &src, &[diag]);
                 exit(ExitCodes::USER_ERROR);
             }
         };
@@ -3637,7 +3687,7 @@ pub(crate) fn build(
         let _ = clinks;
         if !mode.json {
             eprintln!(
-                "note: `--target=plugin` wrote `{}`, `{}`, `{}`, `{}`",
+                "note: `--target=sandbox` wrote `{}`, `{}`, `{}`, `{}`",
                 paths.wit.display(),
                 paths.guest_rust.display(),
                 paths.core_wasm.display(),

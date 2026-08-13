@@ -563,7 +563,7 @@ fn jetpack_toml_alone_is_not_e1226() {
     );
 }
 
-/// D-PLUGIN1=B (c81): a `target: plugin` package is deny-by-default — its own
+/// D-PLUGIN1=B (c81): a `target: sandbox` package is deny-by-default — its own
 /// code using any effect (here `core.env`) must fail cleanly at build time
 /// (E1258), not defer to a runtime instantiation failure. This check lives in
 /// the CLI's post-compile effect-budget pass (`Source/CmdCompile.rs`), so it
@@ -580,7 +580,7 @@ fn plugin_using_an_effect_is_e1258() {
     let out = Command::new(jet())
         .arg("build")
         .arg("main.jet")
-        .arg("--target=plugin")
+        .arg("--target=sandbox")
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -596,7 +596,7 @@ fn plugin_using_an_effect_is_e1258() {
     );
 }
 
-/// D-DEP-WASM1=A (c81): `jet build --target=plugin` shells out to
+/// D-DEP-WASM1=A (c81): `jet build --target=sandbox` shells out to
 /// `wasm-tools` to lift the rustc-built core wasm module into a Component. A
 /// PATH without `wasm-tools` on it (but with `rustc` still reachable, so the
 /// core-module half of the build succeeds) must fail as a clean E1259, never
@@ -638,7 +638,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let out = Command::new(jet())
         .arg("build")
         .arg("main.jet")
-        .arg("--target=plugin")
+        .arg("--target=sandbox")
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("PATH", &bin_dir)

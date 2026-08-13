@@ -1239,6 +1239,173 @@ fn stdlib_api_laws_doc_exists() {
 }
 
 // ---------------------------------------------------------------------------
+// Check 11: the vocabulary page is one definition home and its doc lint is live
+// ---------------------------------------------------------------------------
+#[test]
+fn vocabulary_page_has_one_definition_and_no_retired_senses() {
+    let root = root();
+    let vocabulary_path = root.join("docs/spec/vocabulary.md");
+    let vocabulary = fs::read_to_string(&vocabulary_path).expect("vocabulary page is readable");
+    for heading in ["Stream", "Reader", "Event", "Collecting loop"] {
+        assert_eq!(
+            vocabulary.matches(&format!("## {heading}\n\nDefinition:")).count(),
+            1,
+            "vocabulary page must define `{heading}` exactly once"
+        );
+    }
+    assert_eq!(
+        vocabulary.matches("Definition:").count(),
+        4,
+        "vocabulary page must have one definition for each vocabulary word"
+    );
+
+    let row = jet_foundation::Registry::row("JetVocabulary")
+        .expect("vocabulary truth must be registered in the corpus table");
+    assert_eq!(row.home, Some("docs/spec/vocabulary.md"));
+    assert_eq!(
+        row.guard.map(|guard| guard.test),
+        Some("vocabulary_page_has_one_definition_and_no_retired_senses")
+    );
+
+    let hostile = [
+        (
+            "codec mode called a stream",
+            "The codec mode is called a stream.",
+        ),
+        ("event called a stream", "The event is called a stream."),
+        (
+            "collecting loop called yielding",
+            "The collecting loop is called yielding.",
+        ),
+    ];
+    for (label, fixture) in hostile {
+        assert!(
+            retired_vocabulary_senses(fixture).contains(&label),
+            "hostile fixture must be rejected: {label}"
+        );
+    }
+
+    let docs_root = root.join("docs");
+    let mut markdown = Vec::new();
+    collect_markdown_paths(&docs_root, &mut markdown);
+    let vocabulary_path = fs::canonicalize(vocabulary_path).expect("vocabulary path canonical");
+    let docs_root = fs::canonicalize(docs_root).expect("docs path canonical");
+    let mut targets = HashSet::new();
+    for source in markdown {
+        let Ok(text) = fs::read_to_string(&source) else { continue };
+        for target in markdown_link_targets(&text) {
+            let target = target.trim_matches('<').trim_matches('>');
+            let target = target.split(['#', '?']).next().unwrap_or_default();
+            if target.is_empty() || target.starts_with("/") || target.contains("://") {
+                continue;
+            }
+            let candidate = source.parent().unwrap_or(Path::new(".")).join(target);
+            let Ok(candidate) = fs::canonicalize(candidate) else { continue };
+            if !candidate.starts_with(&docs_root)
+                || candidate.extension().and_then(|ext| ext.to_str()) != Some("md")
+            {
+                continue;
+            }
+            targets.insert(candidate);
+        }
+    }
+
+    let mut violations = Vec::new();
+    for target in targets {
+        let Ok(text) = fs::read_to_string(&target) else { continue };
+        if target != vocabulary_path {
+            let retired = retired_vocabulary_senses(&text);
+            if !retired.is_empty() {
+                violations.push(format!(
+                    "{}: retired senses: {}",
+                    target.strip_prefix(&root).unwrap_or(&target).display(),
+                    retired.join(", ")
+                ));
+            }
+        }
+        if target != vocabulary_path
+            && ["stream", "reader", "event", "collecting loop"]
+                .into_iter()
+                .any(|word| contains_word(&text, word))
+            && !text.contains("vocabulary.md")
+        {
+            violations.push(format!(
+                "{}: uses Jet vocabulary without linking docs/spec/vocabulary.md",
+                target.strip_prefix(&root).unwrap_or(&target).display()
+            ));
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "linked Markdown targets must use the vocabulary page and current senses:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_markdown_paths(&path, paths);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("md") {
+            paths.push(path);
+        }
+    }
+}
+
+fn markdown_link_targets(text: &str) -> Vec<&str> {
+    let mut targets = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("](") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(')') else { break };
+        targets.push(after[..end].split_whitespace().next().unwrap_or_default());
+        rest = &after[end + 1..];
+    }
+    targets
+}
+
+fn contains_word(text: &str, needle: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let needle = needle.to_ascii_lowercase();
+    let mut offset = 0;
+    while let Some(found) = text[offset..].find(&needle) {
+        let start = offset + found;
+        let end = start + needle.len();
+        let before = text[..start].chars().next_back();
+        let after = text[end..].chars().next();
+        if !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return true;
+        }
+        offset = end;
+    }
+    false
+}
+
+fn retired_vocabulary_senses(text: &str) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for line in text.lines() {
+        let line = line.to_ascii_lowercase();
+        let called = line.contains("called") || line.contains("as a");
+        if called && line.contains("codec") && contains_word(&line, "stream") {
+            found.push("codec mode called a stream");
+        }
+        if called && line.contains("event") && contains_word(&line, "stream") {
+            found.push("event called a stream");
+        }
+        if called && line.contains("collecting loop") && line.contains("yielding") {
+            found.push("collecting loop called yielding");
+        }
+    }
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

@@ -356,7 +356,7 @@ fn parse_target(name: &str, value: &str) -> Result<Target, PackageParseError> {
         }
         None => (value.trim(), None),
     };
-    if keyword == Syntax::TARGET_PLUGIN {
+    if keyword == Syntax::TARGET_SANDBOX || keyword == Syntax::RETIRED_TARGET_PLUGIN {
         let export = match block {
             Some(body) => validate_plugin_block(name, body)?,
             None => None,
@@ -420,7 +420,7 @@ fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, Packa
         if !seen.insert(key.clone()) {
             return Err(PackageParseError::BadTargetField {
                 name: name.to_string(),
-                detail: format!("plugin field `{key}` is declared more than once"),
+                detail: format!("sandbox field `{key}` is declared more than once"),
             });
         }
         if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
@@ -431,7 +431,7 @@ fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, Packa
             return Err(PackageParseError::BadTargetField {
                 name: name.to_string(),
                 detail: format!(
-                    "unknown field `{key}` on `plugin` (allowed: `{}`, `{}`, `{}`)",
+                    "unknown field `{key}` on `sandbox` (allowed: `{}`, `{}`, `{}`)",
                     Syntax::TARGET_FIELD_ENTRY,
                     Syntax::TARGET_FIELD_NAME,
                     Syntax::TARGET_FIELD_EXPORT,

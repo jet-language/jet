@@ -5,6 +5,8 @@ D-LIB-EXPORT1=C, D-LIB-DYNTRUST1=A, D-LIB-NAME1=A, D-LIB-CALLGRANT1=A
 (2026-08-08).
 **Status:** ratified, unbuilt.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Goal
 
 Say how Jet reuses compiled dependency work, and what Jet hands to the world as
@@ -42,7 +44,7 @@ Verified in the tree, not assumed.
   D-ECO-OUTPUT1=A). A package declares `outputs: .{ core: .Library.{ … } }`
   (D-CONF-NAME1=A). What that output *becomes as a file* was undecided until
   D-LIB-EXPORT1 and D-LIB-NAME1.
-- Jet already ships a **sandboxed plugin mechanism**: `target: plugin` compiles
+- Jet already ships a **sandboxed package mechanism**: `target: sandbox` compiles
   to a WebAssembly component (D-PLUGIN1=B, D-DEP-WASM1=A, D-PLUGIN-EXPORT1=A,
   card c81). Its exported surface is the entry module's `pub` items, frozen by
   `Sema::ApiFreeze`. A plugin runs with **zero host capabilities**, and E1258

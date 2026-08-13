@@ -10,6 +10,28 @@ use jetpack::Toolchain;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[test]
+fn target_sandbox_manifest_runs() {
+    let source = r#"
+name: "mathkit"
+version: "0.1.0"
+packages: {
+    mathkit: sandbox { export: "mathkit" },
+}
+"#;
+    let facts = jetpack::Package::PackageFacts::parse(source, "package.jet")
+        .expect("sandbox target manifest should parse");
+    assert!(matches!(
+        facts.packages[0].targets.as_slice(),
+        [jetpack::Package::Target::Plugin { export: Some(name) }] if name == "mathkit"
+    ));
+    let (rewritten, count) = jetpack::Package::rewrite_retired_targets(
+        &source.replace("sandbox", "plugin"),
+    );
+    assert_eq!(count, 1);
+    assert!(rewritten.contains("mathkit: sandbox"), "{rewritten}");
+}
+
 fn scratch(tag: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(
         "build-sandbox-{tag}-{}",

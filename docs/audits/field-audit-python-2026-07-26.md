@@ -2,6 +2,8 @@
 
 Date: 2026-07-26
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Decision
 
 Jet is not easier than Python overall today.

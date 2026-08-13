@@ -2910,7 +2910,7 @@ fn run() {
 | `scope.cancel()` / `scope.active_count()` | — / `Int` | cancel all owned subscriptions and count active ones |
 | `trace.summary()` | `String` | compact delivery trace for logs/tests |
 
-`Event<T>` is for "something happened" streams. `Hook<T, R>` is for ordered
+`Event<T>` represents something that happened. `Hook<T, R>` is for ordered
 intervention points before/during/after an operation. Default dispatch is sync,
 priority-descending, then registration order. `EventScope` is the beginner-safe
 lifetime owner; explicit `Subscription` handles give experts manual control.

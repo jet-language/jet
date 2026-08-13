@@ -5,6 +5,8 @@ outcome A. Implementation cards: #1546–#1556.
 Scope: types, numbers, units, refinements, measures, fact planes, reflection — the whole compile-time
 knowledge surface. Sources: six research passes over spec, sema, prelude, Tower, and the 2026-07/08 audits.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Executive summary
 
 **The finding.** Six research passes over the whole corpus found the same pattern everywhere:

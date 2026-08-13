@@ -1130,6 +1130,17 @@ const TRUTH_ROWS: &[RegistryRow] = &[
         },
         "D-ONCE-RETIRE1",
     ),
+    truth_row(
+        "JetVocabulary",
+        "docs/spec/vocabulary.md",
+        &["Markdown docs"],
+        Guard {
+            test: "vocabulary_page_has_one_definition_and_no_retired_senses",
+            file: "tests/truthfulness.rs",
+            proof: GuardProof::CountsSites,
+        },
+        "D-ONCE-WORD1=A",
+    ),
 ];
 
 /// The one table. Marker rows come from the marker registry, fact rows from

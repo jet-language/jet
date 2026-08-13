@@ -574,9 +574,9 @@ use std::collections::HashSet;
                 let item_ty = item_ty.unwrap_or_else(|| {
                     self.diags.push(Diagnostic::error(
                         "E0073",
-                        "this yielding loop path produces no item".to_string(),
+                        "this collecting loop path produces no item".to_string(),
                         "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
-                        "add a yielded value, or remove `->`".to_string(),
+                        "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects".to_string(),
                         Some(lam.span),
                     ));
                     Type::Int

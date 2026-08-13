@@ -2,6 +2,8 @@
 
 **Status:** executable master plan. **Audit date:** 2026-07-09.
 
+Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+
 This plan covers the language, compiler, runtime, Core, interoperability, and
 developer-facing product surfaces. It does not duplicate the Epoch 4 Jetpack
 program in `world-class-package-manager.md`, the Epoch 6 Canvas program, the

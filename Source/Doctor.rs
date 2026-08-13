@@ -343,11 +343,11 @@ fn check_cross_target(triple: &str) -> Check {
     if triple == crate::Syntax::BUILD_TARGET_WEB {
         return Check::ok("cross", triple, "Jet web backend target (WASM + JS)");
     }
-    // D-DEP-WASM1=A (c81): `--target=plugin` needs `wasm-tools` on PATH (to
+    // D-DEP-WASM1=A (c81): `--target=sandbox` needs `wasm-tools` on PATH (to
     // lift the rustc-built core wasm module into a Component Model binary)
     // in addition to the ordinary `wasm32-unknown-unknown` rustc target this
     // function's normal path below already checks.
-    if triple == crate::Syntax::TARGET_PLUGIN {
+    if triple == crate::Syntax::TARGET_SANDBOX {
         let have_wasm_tools = Command::new("wasm-tools")
             .arg("--version")
             .output()
@@ -357,7 +357,7 @@ fn check_cross_target(triple: &str) -> Check {
             return Check::problem(
                 "cross",
                 triple,
-                "`wasm-tools` isn't on PATH (needed to build a plugin's Component)",
+                "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)",
                 "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH",
                 false,
             );

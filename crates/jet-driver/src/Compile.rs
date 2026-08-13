@@ -24,7 +24,7 @@ pub struct CompileOutput {
     /// D-WASM1: partition report when `--target=web`.
     pub web_partition_report: Option<String>,
     /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when
-    /// `--target=plugin` (the `.wit` world + wasm32 guest Rust source).
+    /// `--target=sandbox` (the `.wit` world + wasm32 guest Rust source).
     pub plugin: Option<crate::Codegen::PluginArtifacts>,
     /// D-LIB-EXPORT1=C: native Library Rust wrappers and foreign projections.
     pub library: Option<crate::Codegen::LibraryArtifacts>,

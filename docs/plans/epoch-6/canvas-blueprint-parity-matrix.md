@@ -9,6 +9,8 @@ Status vocabulary:
 - `rejected-as-Blueprint-semantic-debt`
 - `not-yet-applicable`
 
+Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+
 This matrix is the Epoch 6 ratchet. A row may move to `shipped` only when the
 implementation is source-backed, verified by a real browser interaction
 scenario, and does not add a hidden graph asset or semantic sidecar. `claimed`

@@ -9,6 +9,8 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - `unsupported`: deliberately not graph-editable; Canvas must keep source truth
   and avoid pretending support.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Items
 
 - [Item::Func] status=graph function graph, signature/source edits.

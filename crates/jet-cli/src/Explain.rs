@@ -64,7 +64,7 @@ pub fn live_codes() -> Vec<String> {
 /// checked artifact; this function is its only producer.
 pub fn diagnostics_reference_markdown() -> String {
     let mut out = String::from(
-        "# Typed diagnostic rows\n\nGenerated from `crates/jet-codegen/src/Prelude/Diagnostics.jet`.\n\n| Code | Stage | Severity | Moment | Status | Meaning | What | Why | Fix |\n|---|---|---|---|---|---|---|---|---|\n",
+        "# Typed diagnostic rows\n\nGenerated from `crates/jet-codegen/src/Prelude/Diagnostics.jet`.\n\nVocabulary: [Jet vocabulary](vocabulary.md).\n\n| Code | Stage | Severity | Moment | Status | Meaning | What | Why | Fix |\n|---|---|---|---|---|---|---|---|---|\n",
     );
     for row in jet_foundation::Registry::diagnostic_rows() {
         let severity = match row.severity {

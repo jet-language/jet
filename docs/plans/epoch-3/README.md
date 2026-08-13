@@ -16,7 +16,7 @@ Dated syntax/marker matrices and capability dumps live in
 [`docs/archive/`](../../archive/). Regenerate with
 `.agents/skills/spec-compliance-audit/`.
 
-Application `target: plugin` shipped (D-PLUGIN1). Compiler-extension hooks are
+Application `target: sandbox` shipped (D-PLUGIN1). Compiler-extension hooks are
 Tower #549 / D-DX5-HOOK1=A (typed post-sema WASM host in jet-pkg-model).
 
 Per-feature plans belong on Tower cards. Delete completed, superseded, or

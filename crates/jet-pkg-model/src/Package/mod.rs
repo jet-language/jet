@@ -25,6 +25,7 @@ pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_dep, remove_dep};
 
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
+use crate::Lexer;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
@@ -1083,6 +1084,78 @@ impl ConfigFacts {
     }
 }
 
+/// Rewrite the retired package target spelling while preserving all other text.
+/// The lexer keeps comments and string values out of the edit set, so the
+/// migration only touches an unquoted target value in a package declaration.
+pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
+    let (tokens, lex_diags) = Lexer::lex(text);
+    if !lex_diags.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let tokens: Vec<&Lexer::Token> = tokens
+        .iter()
+        .filter(|token| !Lexer::is_comment(&token.kind) && !matches!(token.kind, Lexer::TokKind::Eof))
+        .collect();
+    let mut package_ranges = Vec::new();
+    for index in 0..tokens.len() {
+        let Lexer::TokKind::Ident(name) = &tokens[index].kind else { continue };
+        if name != crate::Syntax::MANIFEST_BLOCK_PACKAGES
+            || !matches!(tokens.get(index + 1).map(|token| &token.kind), Some(Lexer::TokKind::Colon))
+        {
+            continue;
+        }
+        let mut open = index + 2;
+        if matches!(tokens.get(open).map(|token| &token.kind), Some(Lexer::TokKind::Dot)) {
+            open += 1;
+        }
+        if !matches!(tokens.get(open).map(|token| &token.kind), Some(Lexer::TokKind::LBrace)) {
+            continue;
+        }
+        let mut depth = 1usize;
+        for close in open + 1..tokens.len() {
+            match tokens[close].kind {
+                Lexer::TokKind::LBrace => depth += 1,
+                Lexer::TokKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        package_ranges.push((open + 1, close));
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut spans = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if !matches!(&token.kind, Lexer::TokKind::Ident(name) if name == crate::Syntax::RETIRED_TARGET_PLUGIN) {
+            continue;
+        }
+        let in_packages = package_ranges
+            .iter()
+            .any(|(start, end)| *start <= index && index < *end);
+        let package_value = in_packages
+            && index > 0
+            && matches!(
+                tokens[index - 1].kind,
+                Lexer::TokKind::Colon | Lexer::TokKind::Comma | Lexer::TokKind::LBracket
+            );
+        let target_field = index >= 2
+            && matches!(tokens[index - 1].kind, Lexer::TokKind::Colon)
+            && matches!(&tokens[index - 2].kind, Lexer::TokKind::Ident(name) if name == "target");
+        if package_value || target_field {
+            spans.push(token.span);
+        }
+    }
+
+    let mut rewritten = text.to_string();
+    for span in spans.iter().rev() {
+        rewritten.replace_range(span.start..span.end, crate::Syntax::TARGET_SANDBOX);
+    }
+    (rewritten, spans.len())
+}
+
 /// Format one canonical Package or Config source file.
 ///
 /// These files use the typed ecosystem surface rather than the compiler's
@@ -1093,6 +1166,8 @@ impl ConfigFacts {
 /// as clean or discarding authored comments.
 pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, String> {
     let origin = origin.into();
+    let (canonical_text, _) = rewrite_retired_targets(text);
+    let text = canonical_text.as_str();
     let stripped = strip_comments(text);
     let trimmed = stripped.trim();
     if trimmed.is_empty() {
