@@ -225,6 +225,7 @@ impl<'a> Parser<'a> {
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    undo: None,
                     markers: Vec::new(),
                     body,
                 });
@@ -284,6 +285,7 @@ impl<'a> Parser<'a> {
                 pre: Vec::new(),
                 post: Vec::new(),
                 inline_foreign: None,
+                undo: None,
                 markers: Vec::new(),
                 body,
             })

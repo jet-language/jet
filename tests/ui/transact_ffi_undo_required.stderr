@@ -1,0 +1,7 @@
+Error [E0746]: `mutate` has the `FFI` effect, which can't be rolled back inside a `#Transact` block
+  --> tests/ui/transact_ffi_undo_required.jet:7:9
+    |
+  7 |         mutate(1, 2)
+    |         ^^^^^^
+ Why: a foreign function can change external state that the compiler cannot undo automatically
+ Fix: move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse

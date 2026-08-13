@@ -71,6 +71,10 @@ pub const MARKER_ROOT: &str = "Root";
 /// declarations. C remains the implicit default; alternate ABIs never inherit.
 pub const MARKER_ABI: &str = "ABI"; // D-CABI-PLATFORM1
 
+/// D-BOUND-UNDO1=A: `#Undo(inverse)` names the compensating function a
+/// foreign binding registers on the enclosing transaction's rollback path.
+pub const MARKER_UNDO: &str = "Undo"; // D-BOUND-UNDO1
+
 /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
 /// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
 /// silences the default-on money lint L0504). Deliberately lowercase: it

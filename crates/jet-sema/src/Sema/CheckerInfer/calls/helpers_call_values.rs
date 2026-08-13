@@ -115,6 +115,11 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            if let Expr::Ident(name, _) = callee.as_ref() {
+                if let Some(sig) = self.funcs.get(name).cloned() {
+                    self.check_foreign_transaction_call(&sig, name, span);
+                }
+            }
             match effect_bound {
                 // A yielding loop uses a compiler-private immediately evaluated
                 // carrier. Its body already records effects in the enclosing
@@ -217,6 +222,7 @@ impl<'a> Checker<'a> {
                     is_c_abi: false,
                     c_abi_name: None,
                     foreign_effect_root: None,
+                    undo: None,
                     param_info: (0..params.len())
                         .map(|index| {
                             (

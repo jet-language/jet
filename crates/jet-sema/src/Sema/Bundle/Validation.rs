@@ -1044,6 +1044,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    undo: None,
                     markers: Vec::new(),
                     body: std::mem::take(&mut t.body),
                 };
@@ -1123,6 +1124,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    undo: None,
                     markers: Vec::new(),
                     body: std::mem::take(&mut b.body),
                 };
@@ -1260,6 +1262,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    undo: None,
                     markers: Vec::new(),
                     body: std::mem::take(&mut ec.body),
                 };

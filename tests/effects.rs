@@ -2,6 +2,7 @@
 //! call graph, the `#(…)` boundary check (E0740), and `#Pure` reconciliation.
 
 mod common;
+mod tir_support;
 
 use std::fs;
 use std::process::Command;
@@ -845,6 +846,144 @@ fn run() {
         "Net in #Transact should be E0746: {:?}",
         codes(src)
     );
+}
+
+/// D-BOUND-UNDO1=A: a foreign call is irreversible inside a transaction unless
+/// the binding names its compensating function.
+#[test]
+fn transact_ffi_without_undo_is_e0746() {
+    let src = r#"
+extern rust "std" {
+    fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+}
+fn run() {
+    #Transact(tx) {
+        mutate(1, 2)
+    }
+}
+"#;
+    assert!(
+        codes(src).iter().any(|c| c == "E0746"),
+        "FFI in #Transact should be E0746: {:?}",
+        codes(src)
+    );
+}
+
+/// D-BOUND-UNDO1=A: an explicit undo contract uses the existing rollback hook
+/// and keeps the foreign call itself as the only bridge expression.
+#[test]
+fn transact_ffi_with_undo_registers_rollback_hook() {
+    let src = r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+}
+fn undo_mutate(left: Int, right: Int) { print(left + right) }
+fn run() {
+    #Transact(tx) {
+        mutate(1, 2)
+    }
+}
+"#;
+    let output = jet::compile(src).expect("FFI with #Undo should compile");
+    assert!(
+        output.rust.contains(".on_rollback(Box::new("),
+        "#Undo must lower to the existing rollback hook: {}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("__jet_undo_arg_"),
+        "#Undo must capture the foreign arguments before the bridge call: {}",
+        output.rust
+    );
+}
+
+/// D-BOUND-UNDO1=A: the native inline-FFI bridge executes the compensating
+/// function when the transaction fails, so the declaration cannot bypass the
+/// existing rollback guard at runtime.
+#[test]
+fn transact_inline_ffi_undo_runs_and_unwinds_lifo() {
+    if !common::have_rustc() {
+        return;
+    }
+    let src = r#"
+enum Failed { Bad }
+
+#[Unsafe("the scalar ABI contract matches the C definition"), FFI(c), Undo(undo_first)]
+fn mutate_first(value: Int) => Int {
+    """int64_t mutate_first(int64_t value) { return value; }"""
+}
+
+#[Unsafe("the scalar ABI contract matches the C definition"), FFI(c), Undo(undo_second)]
+fn mutate_second(value: Int) => Int {
+    """int64_t mutate_second(int64_t value) { return value; }"""
+}
+
+fn undo_first(value: Int) { print("first") }
+fn undo_second(value: Int) { print("second") }
+
+fn change() => Int ? Failed {
+    #Transact(tx) {
+        #Unsafe("call the audited inline C contract") {
+            mutate_first(1)
+        }
+        tx.on_rollback(() => { print("manual") })
+        #Unsafe("call the audited inline C contract") {
+            mutate_second(2)
+        }
+        return Err(Failed.Bad)
+    }
+    return Ok(0)
+}
+
+fn run() {
+    _ :: change() ?? 0
+    print("done")
+}
+"#;
+    let (code, stdout, stderr) = common::build_and_run("jet_effects_ffi", "undo", src);
+    assert_eq!(code, 0, "inline FFI rollback run failed: {stderr}");
+    assert_eq!(stdout, "second\nmanual\nfirst\ndone\n");
+    let (jit_code, jit_stdout, jit_stderr) =
+        tir_support::jit_run_traced("jet_effects_ffi_jit", src);
+    assert_eq!(jit_code, 0, "inline FFI JIT rollback run failed: {jit_stderr}");
+    assert_eq!(jit_stdout, "second\nmanual\nfirst\ndone\n");
+    assert!(
+        jit_stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "declared FFI undo must stay on the native JIT tier: {jit_stderr}"
+    );
+    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
+}
+
+/// Tier 0 does not execute native foreign code. Its boundary must reject the
+/// program instead of silently running a foreign call without its undo hook.
+#[test]
+fn transact_ffi_interpreter_rejects_native_boundary() {
+    let dir = common::unique_tmp("jet_effects_ffi_interpreter");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    let src = r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+}
+fn undo_mutate(left: Int, right: Int) { print(left + right) }
+fn run() {
+    #Transact(tx) {
+        mutate(1, 2)
+    }
+}
+"#;
+    std::fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+    match outcome {
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E2201"),
+            "native FFI must be an explicit interpreter boundary: {diagnostics:?}"
+        ),
+        other => panic!("interpreter ran native FFI: {other:?}"),
+    }
 }
 
 /// D-TXN2: a reversible-or-benign effect (IO via `print`) is NOT rejected inside

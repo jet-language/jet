@@ -20,6 +20,7 @@
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
+// D-BOUND-UNDO1=A: MARKER_UNDO owns the `#Undo(inverse)` binding contract.
 // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
 // call-site type-argument markers; they reuse the existing angle tokens.
 // D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type

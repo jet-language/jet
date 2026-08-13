@@ -41,7 +41,9 @@ use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// Preserve contextual union typing when a sema-resolved comptime value stays
@@ -3227,6 +3229,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
                 slot
             });
+            let synthesized_handle = TLocal::generated("txn");
+            let txn_undo_needed = Rc::new(Cell::new(false));
+            scoped.txn_handle = Some(
+                handle
+                    .clone()
+                    .unwrap_or_else(|| synthesized_handle.clone()),
+            );
+            scoped.txn_undo_needed = Some(txn_undo_needed.clone());
             // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
             // assigned anywhere in the block (recursing into nested control flow, but
             // NOT into nested `#Transact` blocks or lambda bodies — those own their
@@ -3261,6 +3271,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     let stm = cx.stm_touched.get().then(TLocal::stm);
                     cx.in_stm_transact.set(prev_in);
                     cx.stm_touched.set(prev_touched);
+                    let handle = handle.or_else(|| {
+                        (txn_undo_needed.get() || !snapshots.is_empty())
+                            .then_some(synthesized_handle)
+                    });
                     TStmt::Transact {
                         handle,
                         snapshots,

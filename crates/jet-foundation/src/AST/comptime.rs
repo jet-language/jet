@@ -159,6 +159,8 @@ pub struct FuncSig {
     /// Narrow compiler-owned effect for a generated foreign binding. `None`
     /// keeps ordinary extern calls maximally effectful.
     pub foreign_effect_root: Option<String>,
+    /// D-BOUND-UNDO1=A: compensating function attached to a foreign binding.
+    pub undo: Option<String>,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,

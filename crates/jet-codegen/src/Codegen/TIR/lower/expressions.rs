@@ -13,7 +13,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::{call_return_type, call_return_type_with_args};
+use crate::Codegen::TIR::{call_return_type, call_return_type_with_args, emit_tir_expr};
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -44,11 +44,15 @@ use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
 use crate::Codegen::TIR::TBuiltinOp;
+use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TLambda;
+use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TStrPart;
@@ -2745,7 +2749,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args: eargs,
                         },
                     };
-                    return match source_arg_order(&call.args) {
+                    let lowered = match source_arg_order(&call.args) {
                         Some(order) => preserve_source_arg_order(
                             lowered,
                             &order,
@@ -2754,6 +2758,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ),
                         None => lowered,
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        cx.foreign_undos.get(&call.name).map(String::as_str),
+                        call.name_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
                 // c109 Phase 14: unqualified inline-module import (`emit_call`'s
                 // `unqualified_inline` arm) → `{root}__jet_{mangled}(args)`.
@@ -2765,6 +2776,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .cloned();
                 if let Some(mangled_key) = inline_mangled
                 {
+                    let undo = cx
+                        .foreign_undos
+                        .get(&mangled_key)
+                        .map(String::as_str);
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let args: Vec<_> = call
                         .args
@@ -2793,7 +2808,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args,
                         },
                     };
-                    return match source_arg_order(&call.args) {
+                    let lowered = match source_arg_order(&call.args) {
                         Some(order) => preserve_source_arg_order(
                             lowered,
                             &order,
@@ -2802,6 +2817,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ),
                         None => lowered,
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        call.name_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
                 // c109 Phase 14: unqualified file-module import (`emit_call`'s
                 // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
@@ -2814,6 +2836,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .cloned();
                 if let Some((rust_mod, fn_name)) = inline_file
                 {
+                    let undo = cx
+                        .foreign_undos
+                        .get(&format!("{rust_mod}::{fn_name}"))
+                        .map(String::as_str);
                     let sig = cx
                         .import_sigs
                         .get(&(call.name.clone(), fn_name.clone()))
@@ -2847,7 +2873,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args,
                         },
                     };
-                    return match source_arg_order(&call.args) {
+                    let lowered = match source_arg_order(&call.args) {
                         Some(order) => preserve_source_arg_order(
                             lowered,
                             &order,
@@ -2856,6 +2882,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ),
                         None => lowered,
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        call.name_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
             }
             // D-ZIPPAD1: free zip-family calls carry their complete result type
@@ -4666,6 +4699,239 @@ pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize
         slots.extend(defaults);
     }
     Some(slots)
+}
+
+/// D-BOUND-UNDO1=A: turn a proven foreign undo contract into the existing
+/// transaction rollback hook. The foreign expression remains the only bridge
+/// call; this helper only captures its arguments and registers an ordinary
+/// `on_rollback` closure before evaluating it.
+pub(crate) fn wrap_foreign_undo(
+    lowered: TExpr,
+    inverse: Option<&str>,
+    site: u32,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let Some(inverse) = inverse else {
+        return lowered;
+    };
+    let Some(handle) = env.txn_handle.clone() else {
+        return lowered;
+    };
+    let result_ty = lowered.ty.clone();
+    let (mut prefix, foreign) = match lowered.kind {
+        TExprKind::InlineBlock(mut stmts) => {
+            let Some(last) = stmts.pop() else {
+                return TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::InlineBlock(stmts),
+                };
+            };
+            let TStmt::ExprStmt(expr) = last else {
+                stmts.push(last);
+                return TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::InlineBlock(stmts),
+                };
+            };
+            (stmts, expr)
+        }
+        kind => (Vec::new(), TExpr { ty: result_ty.clone(), kind }),
+    };
+    enum Forward {
+        Extern { wrapper: String },
+        Module {
+            form: TModuleCallForm,
+            type_args: Vec<Type>,
+        },
+    }
+    enum Arg {
+        Extern(TExternArg),
+        Module(TCallArg),
+    }
+    let (forward, args) = match foreign.kind {
+        TExprKind::ExternCall { wrapper, args } => (
+            Forward::Extern { wrapper },
+            args.into_iter().map(Arg::Extern).collect::<Vec<_>>(),
+        ),
+        TExprKind::ModuleCall {
+            form,
+            type_args,
+            args,
+        } => (
+            Forward::Module { form, type_args },
+            args.into_iter().map(Arg::Module).collect::<Vec<_>>(),
+        ),
+        kind => {
+            prefix.push(TStmt::ExprStmt(TExpr {
+                ty: result_ty.clone(),
+                kind,
+            }));
+            return TExpr {
+                ty: result_ty,
+                kind: TExprKind::InlineBlock(prefix),
+            };
+        }
+    };
+
+    if let Some(flag) = &env.txn_undo_needed {
+        flag.set(true);
+    }
+    let inverse_params = cx.sigs.get(inverse).cloned().unwrap_or_default();
+    let mut forward_extern_args = Vec::with_capacity(args.len());
+    let mut forward_module_args = Vec::with_capacity(args.len());
+    let mut inverse_args = Vec::with_capacity(args.len());
+    let mut captures = Vec::with_capacity(args.len());
+    for (index, arg) in args.into_iter().enumerate() {
+        let (value, module_arg) = match arg {
+            Arg::Extern(arg) => (arg.value, None),
+            Arg::Module(arg) => {
+                let TCallArg {
+                    value,
+                    borrow,
+                    mut_borrow,
+                    fn_coerce,
+                    widen_to_vec,
+                    widen_to_union,
+                    ..
+                } = arg;
+                (
+                    value,
+                    Some((
+                        borrow,
+                        mut_borrow,
+                        fn_coerce,
+                        widen_to_vec,
+                        widen_to_union,
+                    )),
+                )
+            }
+        };
+        let temp = format!("__jet_undo_arg_{site}_{index}");
+        let ty = value.ty.clone();
+        env.note_clone(&ty);
+        captures.push((
+            temp.clone(),
+            crate::Codegen::TIR::local_place(&temp),
+            ty.clone(),
+        ));
+        prefix.push(TStmt::Let {
+            name: temp.clone(),
+            kw: "let",
+            let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+            init: TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Clone(Box::new(value)),
+            },
+            gc_promotion: None,
+            gc_transferred: false,
+        });
+        let local_for_forward = TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::Local(TLocal::user(temp.clone())),
+        };
+        match module_arg {
+            Some((borrow, mut_borrow, fn_coerce, widen_to_vec, widen_to_union)) => {
+                // The capture owns the snapshot. Keep the module-call's boundary
+                // conversions, but do not clone a second time before the forward call.
+                forward_module_args.push(TCallArg {
+                    value: local_for_forward,
+                    borrow,
+                    mut_borrow,
+                    clone: false,
+                    arc_clone: false,
+                    fn_coerce,
+                    widen_to_vec,
+                    widen_to_union,
+                });
+            }
+            None => {
+                // A non-scalar foreign parameter is already passed as a clone by the
+                // normal FFI lowering. Clone the captured slot for the forward call so
+                // the rollback closure keeps its copy alive.
+                forward_extern_args.push(TExternArg {
+                    value: local_for_forward,
+                    clone: !ty.is_scalar(),
+                });
+            }
+        }
+        let (convention, inverse_ty) = inverse_params
+            .get(index)
+            .cloned()
+            .unwrap_or((AccessConvention::Read, ty.clone()));
+        inverse_args.push(TCallArg {
+            value: TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Local(TLocal::user(temp)),
+            },
+            borrow: convention == AccessConvention::Read && !inverse_ty.is_scalar(),
+            mut_borrow: convention == AccessConvention::Write,
+            clone: false,
+            arc_clone: false,
+            fn_coerce: None,
+            widen_to_vec: false,
+            widen_to_union: None,
+        });
+    }
+    let inverse_expr = TExpr {
+        ty: call_return_type(cx, inverse),
+        kind: TExprKind::Call {
+            name: inverse.to_string(),
+            type_args: Vec::new(),
+            args: inverse_args,
+        },
+    };
+    let inverse_ret = (!matches!(
+        &inverse_expr.ty,
+        Type::Named(name) if name == "Unit"
+    ))
+    .then(|| inverse_expr.ty.clone());
+    let closure_body = emit_tir_expr(&inverse_expr, cx);
+    let lambda = TLambda {
+        prep: String::new(),
+        params: Vec::new(),
+        body: closure_body.clone(),
+        executable: TLambdaBody::Expr(Box::new(inverse_expr)),
+        source_params: Vec::new(),
+        jit_name: mangle_generated(&format!("undo_{site}")),
+        param_types: Vec::new(),
+        ret: inverse_ret,
+        is_move: true,
+        boxed: false,
+        rc: false,
+        arc: false,
+        captures,
+    };
+    let registration = TExpr {
+        ty: Type::Named("TransactionGuard".to_string()),
+        kind: TExprKind::CoreClosureCall {
+            kind: TCoreClosureKind::OnRollback {
+                handle: handle.rust_place(),
+                closure: format!("move || {closure_body}"),
+                executable: Box::new(lambda),
+            },
+        },
+    };
+    prefix.push(TStmt::ExprStmt(registration));
+    let forward_kind = match forward {
+        Forward::Extern { wrapper } => TExprKind::ExternCall {
+            wrapper,
+            args: forward_extern_args,
+        },
+        Forward::Module { form, type_args } => TExprKind::ModuleCall {
+            form,
+            type_args,
+            args: forward_module_args,
+        },
+    };
+    prefix.push(TStmt::ExprStmt(TExpr {
+        ty: result_ty.clone(),
+        kind: forward_kind,
+    }));
+    TExpr {
+        ty: result_ty,
+        kind: TExprKind::InlineBlock(prefix),
+    }
 }
 
 pub(crate) fn preserve_source_arg_order(

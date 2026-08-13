@@ -3381,6 +3381,7 @@ pub fn emit_bundle_dbg(
             link,
             &extern_funcs,
         );
+        cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         register_bundle_reflect_paths(&mut cx, bundle, i);
@@ -3435,6 +3436,7 @@ pub fn emit_bundle_dbg(
         link,
         &extern_funcs,
     );
+    cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -3626,6 +3628,7 @@ pub fn emit_bundle_tests_cov(
             link,
             &extern_funcs,
         );
+        cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -3677,6 +3680,7 @@ pub fn emit_bundle_tests_cov(
         link,
         &extern_funcs,
     );
+    cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -3875,6 +3879,7 @@ pub fn emit_bundle_fuzz(
             link,
             &extern_funcs,
         );
+        cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -3924,6 +3929,7 @@ pub fn emit_bundle_fuzz(
         link,
         &extern_funcs,
     );
+    cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4181,6 +4187,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             link,
             &extern_funcs,
         );
+        cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4231,6 +4238,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         link,
         &extern_funcs,
     );
+    cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");

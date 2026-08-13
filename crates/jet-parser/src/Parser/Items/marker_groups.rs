@@ -1199,6 +1199,15 @@ impl<'a> Parser<'a> {
                         });
                     }
                     Syntax::MARKER_FFI if function.inline_foreign.is_some() => {}
+                    Syntax::MARKER_UNDO => {
+                        let Some(crate::AST::Expr::Ident(inverse, span)) = arguments.parameter(0) else {
+                            return Err(crate::Policy::marker_argument_shape_error(
+                                Syntax::MARKER_UNDO,
+                                marker.span,
+                            ));
+                        };
+                        function.undo = Some((inverse.clone(), *span));
+                    }
                     Syntax::MARKER_ABI => {
                         return Err(Diagnostic::error(
                             "E3212",
@@ -1286,6 +1295,7 @@ impl<'a> Parser<'a> {
                     | Syntax::KW_STATE
                     | Syntax::KW_TRANSITION
                     | Syntax::MARKER_FFI
+                    | Syntax::MARKER_UNDO
                     | Syntax::MARKER_ABI
                     | Syntax::MARKER_MUST_USE
                     | Syntax::MARKER_META

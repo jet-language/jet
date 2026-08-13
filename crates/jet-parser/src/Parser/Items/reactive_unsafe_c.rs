@@ -150,6 +150,7 @@ impl<'a> Parser<'a> {
                     source,
                     source_span,
                 }),
+                undo: None,
                 markers: Vec::new(),
                 body: Vec::new(),
             };

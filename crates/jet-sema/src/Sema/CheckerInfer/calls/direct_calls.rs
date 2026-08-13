@@ -839,7 +839,9 @@ impl<'a> Checker<'a> {
                 return None;
             };
             self.record_current_function_reference(&call.name, call.name_span);
-    
+
+            self.check_foreign_transaction_call(&sig, &call.name, call.name_span);
+
             // D-EFF1: record the call-graph edge for transitive effect inference.
             // A foreign (`extern`) callee has an un-inspectable body, so it forces
             // the maximal effect set; a Jet callee's effects flow in via its edge.

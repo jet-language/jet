@@ -882,6 +882,7 @@ mod tests {
             every: None,
             task_metadata: None,
             inline_foreign: None,
+            undo: None,
             is_sanitizer: false,
             scrub_tag: None,
             declared_effects: None,

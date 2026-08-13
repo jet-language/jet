@@ -87,6 +87,7 @@ use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::source_arg_order;
+use crate::Codegen::TIR::wrap_foreign_undo;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
@@ -2552,7 +2553,6 @@ fn lower_method_call_impl(
                             .or_else(|| {
                                 cx.import_signature_for_function(&env.fn_name, leaf, method)
                             });
-                        let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let ret = cx
                             .inline_foreign_reexport_rets
                             .get(&(owner.clone(), leaf.clone(), method.to_string()))
@@ -2562,7 +2562,51 @@ fn lower_method_call_impl(
                             })
                             .flatten()
                             .unwrap_or_else(unit_type);
-                        return TExpr {
+                        // C foreign namespaces mounted through an inline module
+                        // still have a generated wrapper. Keep this branch on the
+                        // same ExternCall path as a direct alias call so #Undo is
+                        // registered before the wrapper runs. Cached JS/other
+                        // foreign modules have no wrapper and remain ModuleCall
+                        // values below.
+                        let wrapper_key = format!("{rust_mod}::{method}");
+                        if let Some(wrapper) = cx.extern_funcs.get(&wrapper_key).cloned() {
+                            let eargs = args
+                                .iter()
+                                .enumerate()
+                                .map(|(index, arg)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|params| params.get(index))
+                                        .map(|(convention, ty)| (*convention, ty.clone()));
+                                    lower_extern_call_arg(arg, conv, env, cx)
+                                })
+                                .collect();
+                            let lowered = TExpr {
+                                ty: ret.clone(),
+                                kind: TExprKind::ExternCall {
+                                    wrapper,
+                                    args: eargs,
+                                },
+                            };
+                            let undo = cx
+                                .foreign_undos
+                                .get(&wrapper_key)
+                                .or_else(|| cx.foreign_undos.get(method))
+                                .map(String::as_str);
+                            return wrap_foreign_undo(
+                                lowered,
+                                undo,
+                                method_span.start as u32,
+                                cx,
+                                env,
+                            );
+                        }
+                        let undo = cx
+                            .foreign_undos
+                            .get(&wrapper_key)
+                            .map(String::as_str);
+                        let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                        let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
                                 form: TModuleCallForm::Qualified {
@@ -2573,6 +2617,13 @@ fn lower_method_call_impl(
                                 args: targs,
                             },
                         };
+                        return wrap_foreign_undo(
+                            lowered,
+                            undo,
+                            method_span.start as u32,
+                            cx,
+                            env,
+                        );
                     }
                 }
             }
@@ -2606,6 +2657,10 @@ fn lower_method_call_impl(
                     .get(&(alias.clone(), method.to_string()))
                     .cloned()
                 {
+                    let undo = cx
+                        .foreign_undos
+                        .get(&format!("{real_mod}::{real_fn}"))
+                        .map(String::as_str);
                     let sig = cx
                         .import_sigs
                         .get(&(alias.clone(), method.to_string()))
@@ -2617,7 +2672,7 @@ fn lower_method_call_impl(
                         .cloned()
                         .flatten()
                         .unwrap_or_else(unit_type);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::Qualified {
@@ -2628,8 +2683,19 @@ fn lower_method_call_impl(
                             args: targs,
                         },
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        method_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
                 if let Some(mod_name) = cx.import_mods.get(alias).cloned() {
+                    let undo = cx
+                        .foreign_undos
+                        .get(&format!("{mod_name}::{method}"))
+                        .map(String::as_str);
                     let sig = cx
                         .import_sigs
                         .get(&(alias.clone(), method.to_string()))
@@ -2656,13 +2722,24 @@ fn lower_method_call_impl(
                             .cloned()
                             .flatten()
                             .unwrap_or_else(unit_type);
-                        return TExpr {
+                        let lowered = TExpr {
                             ty,
                             kind: TExprKind::ExternCall {
                                 wrapper,
                                 args: eargs,
                             },
                         };
+                        let undo = cx
+                            .foreign_undos
+                            .get(&format!("{mod_name}::{method}"))
+                            .map(String::as_str);
+                        return wrap_foreign_undo(
+                            lowered,
+                            undo,
+                            method_span.start as u32,
+                            cx,
+                            env,
+                        );
                     }
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     let ret = cx
@@ -2671,7 +2748,7 @@ fn lower_method_call_impl(
                         .cloned()
                         .flatten()
                         .unwrap_or_else(unit_type);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::Qualified {
@@ -2682,11 +2759,22 @@ fn lower_method_call_impl(
                             args: targs,
                         },
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        method_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
                 if let Some(mod_name) = cx
                     .import_module_for_function(&env.fn_name, alias)
                     .map(str::to_owned)
                 {
+                    let undo = cx
+                        .foreign_undos
+                        .get(&format!("{mod_name}::{method}"))
+                        .map(String::as_str);
                     let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
                     if let Some(wrapper) = cx
                         .extern_funcs
@@ -2708,20 +2796,31 @@ fn lower_method_call_impl(
                             .import_return_for_function(&env.fn_name, alias, method)
                             .flatten()
                             .unwrap_or_else(unit_type);
-                        return TExpr {
+                        let lowered = TExpr {
                             ty,
                             kind: TExprKind::ExternCall {
                                 wrapper,
                                 args: eargs,
                             },
                         };
+                        let undo = cx
+                            .foreign_undos
+                            .get(&format!("{mod_name}::{method}"))
+                            .map(String::as_str);
+                        return wrap_foreign_undo(
+                            lowered,
+                            undo,
+                            method_span.start as u32,
+                            cx,
+                            env,
+                        );
                     }
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     let ret = cx
                         .import_return_for_function(&env.fn_name, alias, method)
                         .flatten()
                         .unwrap_or_else(unit_type);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::Qualified {
@@ -2732,12 +2831,23 @@ fn lower_method_call_impl(
                             args: targs,
                         },
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        method_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
                 if cx.code_modules.contains(alias.as_str()) {
                     let mangled_key = jet_foundation::Names::member_name(alias, method);
+                    let undo = cx
+                        .foreign_undos
+                        .get(&format!("{alias}::{method}"))
+                        .map(String::as_str);
                     let sig = cx.sigs.get(&mangled_key).cloned();
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
-                    return TExpr {
+                    let lowered = TExpr {
                         ty: call_return_type_with_args(
                             cx,
                             &mangled_key,
@@ -2752,6 +2862,13 @@ fn lower_method_call_impl(
                             args: targs,
                         },
                     };
+                    return wrap_foreign_undo(
+                        lowered,
+                        undo,
+                        method_span.start as u32,
+                        cx,
+                        env,
+                    );
                 }
             }
         }

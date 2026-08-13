@@ -20,6 +20,9 @@ pub enum Effect {
     Exec,
     Log,
     GPU,
+    /// D-BOUND-UNDO1=A: a foreign call is irreversible in a transaction
+    /// unless its binding declares a compensating undo function.
+    FFI,
     /// D-FFI-GO1=A: an in-process Go runtime call may block in Go code.
     Go,
     /// D-FFI-JVM1=A: an embedded JVM invocation.
@@ -93,6 +96,7 @@ impl Effect {
             Effect::Exec => "Exec",
             Effect::Log => "Log",
             Effect::GPU => "GPU",
+            Effect::FFI => "FFI",
             Effect::Go => "Go",
             Effect::Java => "Java",
             Effect::DotNet => "DotNet",
@@ -127,6 +131,7 @@ impl Effect {
             "Exec" => Effect::Exec,
             "Log" => Effect::Log,
             "GPU" => Effect::GPU,
+            "FFI" => Effect::FFI,
             "Go" => Effect::Go,
             "Java" => Effect::Java,
             "DotNet" => Effect::DotNet,
@@ -382,7 +387,7 @@ pub fn core_requires_comptime_gate(module: &str, method: &str) -> bool {
 /// purpose: reads, clock/RNG reads, and logging leave no committed external
 /// state a rollback must undo, and DB rollback is the transaction's own job.
 pub fn is_irreversible_effect(e: Effect) -> bool {
-    matches!(e, Effect::Net | Effect::FS | Effect::Exec)
+    matches!(e, Effect::Net | Effect::FS | Effect::Exec | Effect::FFI)
 }
 /// The effect carried by an ambient builtin call (`print`, `input`, …).
 pub fn builtin_effect(name: &str) -> Option<Effect> {

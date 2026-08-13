@@ -791,6 +791,17 @@ fn check_bundle_opts_for_output_inner(
         // expert cycles use Shared.Weak and are admitted.
         check_strong_shared_cycles(&st.registry, &mut diags);
     }
+    // D-BOUND-UNDO1=A: CFFI may re-home a foreign declaration into a synthetic
+    // module, while its Jet undo function remains in the source module. Validate
+    // against the complete post-registration function view so that re-homing and
+    // declaration order cannot change the rollback contract.
+    let all_funcs: HashMap<String, FuncSig> = states
+        .iter()
+        .flat_map(|state| state.funcs.iter().map(|(name, sig)| (name.clone(), sig.clone())))
+        .collect();
+    for module in bundle.modules.iter() {
+        validate_foreign_undo_contracts(&module.items, &all_funcs, &mut diags);
+    }
     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
     for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {
         state.trait_reg.merge_auto_derives(auto_derives);

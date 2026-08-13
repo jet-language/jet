@@ -1,7 +1,10 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{AccessConvention, CModule, ExternFn, ExternRustBlock, Type, VariantPayload};
+use crate::AST::{
+    AccessConvention, CModule, ExternFn, ExternRustBlock, Func, FuncSig, Item, Type,
+    VariantPayload,
+};
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 
@@ -445,4 +448,98 @@ pub(crate) fn register_extern_fn(
         return;
     }
     funcs.insert(ef.name.clone(), extern_to_sig(ef, is_c_abi));
+}
+
+/// D-BOUND-UNDO1=A: validate foreign undo targets after the complete module
+/// registration pass. A target may be declared later in the file, so checking
+/// while the foreign item is registered would make source order observable.
+pub(crate) fn validate_foreign_undo_contracts(
+    items: &[Item],
+    funcs: &HashMap<String, FuncSig>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for item in items {
+        match item {
+            Item::Func(function) if function.inline_foreign.is_some() => {
+                validate_undo_target(function, funcs, diags);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    validate_foreign_undo_contracts(body, funcs, diags);
+                }
+            }
+            Item::ExternRust(block) => {
+                for foreign in &block.functions {
+                    validate_undo_target_parts(
+                        &foreign.name,
+                        foreign.params.len(),
+                        foreign.undo.as_ref(),
+                        funcs,
+                        diags,
+                    );
+                }
+            }
+            Item::CModule(module) => {
+                for foreign in &module.functions {
+                    validate_undo_target_parts(
+                        &foreign.name,
+                        foreign.params.len(),
+                        foreign.undo.as_ref(),
+                        funcs,
+                        diags,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn validate_undo_target(function: &Func, funcs: &HashMap<String, FuncSig>, diags: &mut Vec<Diagnostic>) {
+    if function.undo.is_none() {
+        return;
+    }
+    validate_undo_target_parts(
+        &function.name,
+        function.params.len(),
+        function.undo.as_ref(),
+        funcs,
+        diags,
+    );
+}
+
+fn validate_undo_target_parts(
+    forward_name: &str,
+    forward_arity: usize,
+    undo: Option<&(String, Span)>,
+    funcs: &HashMap<String, FuncSig>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Some((inverse, span)) = undo else {
+        return;
+    };
+    let Some(inverse_sig) = funcs.get(inverse) else {
+        diags.push(Diagnostic::error(
+            "E0102",
+            format!("undo function `{inverse}` is not defined"),
+            "rollback must call a function that is registered in the same program".to_string(),
+            format!("define `fn {inverse}(…) {{ … }}` or correct the `#Undo` name"),
+            Some(*span),
+        ));
+        return;
+    };
+    if inverse_sig.params.len() != forward_arity {
+        diags.push(Diagnostic::error(
+            "E0104",
+            format!(
+                "undo function `{inverse}` expects {} argument{}, but `{forward_name}` has {forward_arity}",
+                inverse_sig.params.len(),
+                if inverse_sig.params.len() == 1 { "" } else { "s" },
+            ),
+            "the compensating call receives the same captured arguments as the foreign call"
+                .to_string(),
+            format!("give `{inverse}` the same parameter count as `{forward_name}`"),
+            Some(*span),
+        ));
+    }
 }

@@ -568,37 +568,63 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
-            let abi = if matches!(self.peek().kind, TokKind::Hash) {
+            let (abi, undo) = if matches!(self.peek().kind, TokKind::Hash) {
                 let markers = self.parse_attached_marker_sequence(
                     crate::Policy::RuleSite::Function,
                     "C declaration",
                 )?;
-                let marker = markers
-                    .iter()
-                    .find(|marker| marker.name == Syntax::MARKER_ABI);
-                if markers.len() != 1 || marker.is_none() {
-                    let marker = markers
-                        .iter()
-                        .find(|marker| marker.name != Syntax::MARKER_ABI)
-                        .or_else(|| markers.first())
-                        .expect("attached marker sequence is non-empty");
-                    return Err(Diagnostic::error(
-                        "E3212",
-                        format!("unknown C ABI marker `#{}`", marker.name),
-                        "C declarations only accept the per-function `#ABI(name)` marker"
-                            .to_string(),
-                        "use `#ABI(system)` or remove the marker for the default C ABI".to_string(),
-                        Some(marker.name_span),
-                    ));
+                let mut abi = None;
+                let mut undo = None;
+                for marker in &markers {
+                    match marker.name.as_str() {
+                        Syntax::MARKER_ABI => {
+                            if abi.is_some() {
+                                return Err(Diagnostic::error(
+                                    "E3212",
+                                    "a foreign declaration may have only one `#ABI` marker".to_string(),
+                                    "the calling convention is one property of the binding".to_string(),
+                                    "remove the repeated `#ABI(...)` marker".to_string(),
+                                    Some(marker.span),
+                                ));
+                            }
+                            let arguments = self.bound_registered_rule_arguments(marker)?;
+                            let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
+                                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_ABI, marker.span));
+                            };
+                            abi = Some((name.clone(), *span));
+                        }
+                        Syntax::MARKER_UNDO => {
+                            if undo.is_some() {
+                                return Err(Diagnostic::error(
+                                    "E3212",
+                                    "a foreign declaration may have only one `#Undo` marker".to_string(),
+                                    "one binding has one compensating function".to_string(),
+                                    "remove the repeated `#Undo(...)` marker".to_string(),
+                                    Some(marker.span),
+                                ));
+                            }
+                            let arguments = self.bound_registered_rule_arguments(marker)?;
+                            let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
+                                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_UNDO, marker.span));
+                            };
+                            undo = Some((name.clone(), *span));
+                        }
+                        _ => {
+                            return Err(Diagnostic::error(
+                                "E3212",
+                                format!("unknown foreign declaration marker `#{}`", marker.name),
+                                "foreign declarations accept `#ABI(name)` and `#Undo(inverse)` markers"
+                                    .to_string(),
+                                "remove the marker or use `#Undo(inverse)` for a compensating call"
+                                    .to_string(),
+                                Some(marker.name_span),
+                            ));
+                        }
+                    }
                 }
-                let marker = marker.expect("one ABI marker");
-                let arguments = self.bound_registered_rule_arguments(marker)?;
-                let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
-                    return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_ABI, marker.span));
-                };
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
-                Some((name.clone(), *span))
-            } else { None };
+                (abi, undo)
+            } else { (None, None) };
             let fn_span = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
             let fn_start = fn_span.start;
@@ -652,6 +678,7 @@ impl<'a> Parser<'a> {
                 rust_path,
                 rust_path_span,
                 effect_root: None,
+                undo,
                 span: Span::new(fn_start, end),
             })
         }
