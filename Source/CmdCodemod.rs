@@ -912,6 +912,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         web_target_ceiling: program.web_target_ceiling,
         pub_file: program.pub_file,
         no_prelude: program.no_prelude,
+        default_target: program.default_target,
         html_path: program.html_path,
         no_alloc_policy: program.no_alloc_policy,
         policy_declarations: program.policy_declarations.clone(),

@@ -33,6 +33,7 @@ fn err_codes(src: &str) -> Vec<String> {
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
+            default_target: prog.default_target,
             html_path: prog.html_path.clone(),
             no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),

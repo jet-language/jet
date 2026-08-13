@@ -46,7 +46,7 @@ pub mod TargetMachine;
 pub mod Terminal;
 pub mod Traits;
 pub mod WasmDebug;
-pub mod WebApp;
+pub mod App;
 pub mod WebPartition;
 pub mod XmlPull;
 pub mod XmlKernel;

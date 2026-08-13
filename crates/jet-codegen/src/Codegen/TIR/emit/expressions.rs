@@ -4131,8 +4131,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "serve" => format!("({}).serve()", recv),
                     _ => format!("({}).{}()", recv, method),
                 },
-                // D-WEBAPP1=D: WebApp builder methods — Rust names match Jet.
-                THandleOp::WebAppMethod { method } => match method.as_str() {
+                // D-WEBAPP1=D: App builder methods — Rust names match Jet.
+                THandleOp::AppMethod { method } => match method.as_str() {
                     "route" | "page" | "layout" | "action" | "form" | "data" => format!(
                         "({}).{}(({}).clone(), {})",
                         recv,
@@ -4164,6 +4164,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     "serve" if args.is_empty() => format!("({}).serve()", recv),
                     "serve" => format!("({}).serve_on({})", recv, a(0)),
+                    "serve_on" => format!("({}).serve_on({})", recv, a(0)),
                     _ => format!("({}).{}()", recv, method),
                 },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.

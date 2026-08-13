@@ -2169,15 +2169,15 @@ fn main() {
                 run_dev_entry(file, mode);
                 return;
             }
-            if entry_returns_web_app(file) {
+            if entry_returns_app(file) {
                 if use_interpreter {
-                    std::env::set_var("JET_WEBAPP_DEV", "1");
+                    std::env::set_var("JET_APP_DEV", "1");
                     let dev_file = std::fs::canonicalize(file)
                         .map(|path| path.display().to_string())
                         .unwrap_or_else(|_| file.to_string());
                     std::env::set_var("JET_DEV_FILE", dev_file);
                     if let Some(port) = dev_port {
-                        std::env::set_var("JET_WEBAPP_PORT", port.to_string());
+                        std::env::set_var("JET_APP_PORT", port.to_string());
                     }
                     run_dev(file, try_anyway, policy, gates, mode, true);
                 }
@@ -2793,7 +2793,7 @@ fn has_dev_entry_fn(file: &str) -> bool {
         .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
 }
 
-fn entry_returns_web_app(file: &str) -> bool {
+fn entry_returns_app(file: &str) -> bool {
     let source = match fs::read_to_string(file) {
         Ok(source) => source,
         Err(_) => return false,
@@ -2814,9 +2814,9 @@ fn entry_returns_web_app(file: &str) -> bool {
             return false;
         }
         match function.return_type.as_ref() {
-            Some(jet::AST::Type::Named(name)) => name == "WebApp",
+            Some(jet::AST::Type::Named(name)) => name == "App",
             Some(jet::AST::Type::Result { ok, .. }) => {
-                matches!(ok.as_ref(), jet::AST::Type::Named(name) if name == "WebApp")
+                matches!(ok.as_ref(), jet::AST::Type::Named(name) if name == "App")
             }
             _ => false,
         }

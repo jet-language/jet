@@ -74,7 +74,7 @@ fn spawn_server(args: &[&str], port: u16) -> ServerChild {
         Command::new(jet_bin())
             .current_dir(repo_root())
             .args(args)
-            .env("JET_WEBAPP_PORT", port.to_string())
+            .env("JET_APP_PORT", port.to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -83,7 +83,7 @@ fn spawn_server(args: &[&str], port: u16) -> ServerChild {
 }
 
 #[test]
-fn web_app_graph_facts_json() {
+fn app_graph_facts_json() {
     let (code, stdout, stderr) = run_jet(&[
         "explain",
         "--web-graph",
@@ -121,7 +121,7 @@ fn web_app_routes_from_exhaustive() {
         r#"
 use core.web as web
 
-fn run() => WebApp {
+fn run() => App {
     return web.app().routes(from: "routes")
 }
 "#,

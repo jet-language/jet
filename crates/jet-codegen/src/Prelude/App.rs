@@ -2,7 +2,7 @@
 // builder value. Sema owns the typed graph; this runtime handle records the
 // same edges for `facts_json()` / serve dogfood. Std-only (I6).
 
-mod jet_webapp_impl {
+mod jet_app_impl {
     use std::sync::{Arc, Mutex};
 
     type PageHandler = Arc<dyn Fn() -> JetWebPage + Send + Sync>;
@@ -10,7 +10,7 @@ mod jet_webapp_impl {
     type MountHandler = Arc<dyn Fn(&String) + Send + Sync>;
 
     #[derive(Default)]
-    struct JetWebAppState {
+    struct JetAppState {
         routes: Vec<(String, PageHandler, String)>,
         actions: Vec<(String, ActionHandler, String)>,
         mounts: Vec<(String, MountHandler)>,
@@ -26,16 +26,16 @@ mod jet_webapp_impl {
     }
 
     #[derive(Clone)]
-    pub struct JetWebApp {
-        state: Arc<Mutex<JetWebAppState>>,
+    pub struct JetApp {
+        state: Arc<Mutex<JetAppState>>,
     }
 
-    pub fn jet_web_app() -> JetWebApp {
-        JetWebApp {
-            state: Arc::new(Mutex::new(JetWebAppState {
+    pub fn jet_app() -> JetApp {
+        JetApp {
+            state: Arc::new(Mutex::new(JetAppState {
                 render: "csr".to_string(),
                 hydration: "dev-overlay".to_string(),
-                ..JetWebAppState::default()
+                ..JetAppState::default()
             })),
         }
     }
@@ -50,23 +50,23 @@ mod jet_webapp_impl {
         JetWebPage { title, body }
     }
 
-    impl JetWebApp {
-        pub fn route(&self, path: String, handler: PageHandler) -> JetWebApp {
+    impl JetApp {
+        pub fn route(&self, path: String, handler: PageHandler) -> JetApp {
             let mut state = self.state.lock().unwrap();
             let render = state.render.clone();
             state.routes.push((path, handler, render));
             self.clone()
         }
 
-        pub fn page(&self, path: String, handler: PageHandler) -> JetWebApp {
+        pub fn page(&self, path: String, handler: PageHandler) -> JetApp {
             self.route(path, handler)
         }
 
-        pub fn layout(&self, path: String, handler: PageHandler) -> JetWebApp {
+        pub fn layout(&self, path: String, handler: PageHandler) -> JetApp {
             self.route(path, handler)
         }
 
-        pub fn action(&self, name: String, handler: ActionHandler) -> JetWebApp {
+        pub fn action(&self, name: String, handler: ActionHandler) -> JetApp {
             self.state.lock().unwrap().actions.push((
                 name,
                 handler,
@@ -75,7 +75,7 @@ mod jet_webapp_impl {
             self.clone()
         }
 
-        pub fn form(&self, name: String, handler: ActionHandler) -> JetWebApp {
+        pub fn form(&self, name: String, handler: ActionHandler) -> JetApp {
             self.state.lock().unwrap().actions.push((
                 name,
                 handler,
@@ -84,7 +84,7 @@ mod jet_webapp_impl {
             self.clone()
         }
 
-        pub fn data(&self, name: String, handler: ActionHandler) -> JetWebApp {
+        pub fn data(&self, name: String, handler: ActionHandler) -> JetApp {
             self.state.lock().unwrap().actions.push((
                 name,
                 handler,
@@ -93,7 +93,7 @@ mod jet_webapp_impl {
             self.clone()
         }
 
-        pub fn mount(&self, prefix: String, handler: MountHandler) -> JetWebApp {
+        pub fn mount(&self, prefix: String, handler: MountHandler) -> JetApp {
             self.state
                 .lock()
                 .unwrap()
@@ -102,66 +102,66 @@ mod jet_webapp_impl {
             self.clone()
         }
 
-        pub fn routes(&self, root: String) -> JetWebApp {
+        pub fn routes(&self, root: String) -> JetApp {
             self.state.lock().unwrap().routes_from.push(root);
             self.clone()
         }
 
-        pub fn csr(&self) -> JetWebApp {
+        pub fn csr(&self) -> JetApp {
             self.state.lock().unwrap().render = "csr".to_string();
             self.clone()
         }
-        pub fn ssr(&self) -> JetWebApp {
+        pub fn ssr(&self) -> JetApp {
             self.state.lock().unwrap().render = "ssr".to_string();
             self.clone()
         }
-        pub fn ssg(&self) -> JetWebApp {
+        pub fn ssg(&self) -> JetApp {
             self.state.lock().unwrap().render = "ssg".to_string();
             self.clone()
         }
-        pub fn stream(&self) -> JetWebApp {
+        pub fn stream(&self) -> JetApp {
             self.state.lock().unwrap().render = "stream".to_string();
             self.clone()
         }
-        pub fn streaming(&self) -> JetWebApp {
+        pub fn streaming(&self) -> JetApp {
             self.stream()
         }
-        pub fn island(&self) -> JetWebApp {
+        pub fn island(&self) -> JetApp {
             self.state.lock().unwrap().render = "island".to_string();
             self.clone()
         }
-        pub fn hydration_dev(&self) -> JetWebApp {
+        pub fn hydration_dev(&self) -> JetApp {
             self.state.lock().unwrap().hydration = "dev-overlay".to_string();
             self.clone()
         }
-        pub fn hydration_release(&self) -> JetWebApp {
+        pub fn hydration_release(&self) -> JetApp {
             self.state.lock().unwrap().hydration = "release-keep-server".to_string();
             self.clone()
         }
-        pub fn security(&self, policy: String) -> JetWebApp {
+        pub fn security(&self, policy: String) -> JetApp {
             self.state.lock().unwrap().security.push(policy);
             self.clone()
         }
-        pub fn assets(&self, path: String) -> JetWebApp {
+        pub fn assets(&self, path: String) -> JetApp {
             self.state.lock().unwrap().assets.push(path);
             self.clone()
         }
-        pub fn split(&self, name: String) -> JetWebApp {
+        pub fn split(&self, name: String) -> JetApp {
             self.state.lock().unwrap().split.push(name);
             self.clone()
         }
-        pub fn code_split(&self, name: String) -> JetWebApp {
+        pub fn code_split(&self, name: String) -> JetApp {
             self.split(name)
         }
-        pub fn cache(&self, policy: String) -> JetWebApp {
+        pub fn cache(&self, policy: String) -> JetApp {
             self.state.lock().unwrap().cache.push(policy);
             self.clone()
         }
-        pub fn a11y(&self, policy: String) -> JetWebApp {
+        pub fn a11y(&self, policy: String) -> JetApp {
             self.state.lock().unwrap().a11y.push(policy);
             self.clone()
         }
-        pub fn adapter(&self, name: String) -> JetWebApp {
+        pub fn adapter(&self, name: String) -> JetApp {
             self.state.lock().unwrap().adapters.push(name);
             self.clone()
         }
@@ -217,8 +217,8 @@ source.onmessage = () => location.reload();
         }
 
         pub fn serve(&self) {
-            let dev = std::env::var_os("JET_WEBAPP_DEV").is_some();
-            let port = std::env::var("JET_WEBAPP_PORT")
+            let dev = std::env::var_os("JET_APP_DEV").is_some();
+            let port = std::env::var("JET_APP_PORT")
                 .ok()
                 .and_then(|value| value.parse::<u16>().ok())
                 .unwrap_or(8080);
@@ -227,16 +227,16 @@ source.onmessage = () => location.reload();
 
         pub fn serve_on(&self, port: i64) {
             let port = u16::try_from(port)
-                .unwrap_or_else(|_| panic!("web app port must be between 0 and 65535"));
+                .unwrap_or_else(|_| panic!("app port must be between 0 and 65535"));
             self.serve_port(port, false);
         }
 
         fn serve_port(&self, port: u16, dev: bool) {
-            let mux = super::jet_webapp_http_mux_new();
+            let mux = super::jet_app_http_mux_new();
             let state = self.state.lock().unwrap();
             for (path, handler, _) in &state.routes {
                 let handler = handler.clone();
-                super::jet_webapp_http_page(&mux, path, move || Self::html(handler(), dev));
+                super::jet_app_http_page(&mux, path, move || Self::html(handler(), dev));
             }
             for (name, handler, _) in &state.actions {
                 let path = if name.starts_with('/') {
@@ -245,23 +245,23 @@ source.onmessage = () => location.reload();
                     format!("/actions/{name}")
                 };
                 let handler = handler.clone();
-                super::jet_webapp_http_action(&mux, &path, move || handler());
+                super::jet_app_http_action(&mux, &path, move || handler());
             }
             for (prefix, handler) in &state.mounts {
                 let handler = handler.clone();
-                super::jet_webapp_http_mount(&mux, prefix, move |path| handler(path));
+                super::jet_app_http_mount(&mux, prefix, move |path| handler(path));
             }
             for root in &state.assets {
-                super::jet_webapp_http_assets(&mux, root);
+                super::jet_app_http_assets(&mux, root);
             }
             if dev {
-                super::jet_webapp_http_reload(&mux);
+                super::jet_app_http_reload(&mux);
             }
             drop(state);
 
-            super::jet_webapp_http_serve(mux, port, dev);
+            super::jet_app_http_serve(mux, port, dev);
         }
     }
 }
 
-pub use jet_webapp_impl::{jet_web_app, jet_web_page, JetWebApp, JetWebPage};
+pub use jet_app_impl::{jet_app, jet_web_page, JetApp, JetWebPage};

@@ -5044,8 +5044,8 @@ pub enum THandleOp {
     DevServerMethod {
         method: String,
     },
-    /// D-WEBAPP1=D: `WebApp` builder methods (`.route`/`.action`/`.mount`/…).
-    WebAppMethod {
+    /// D-WEBAPP1=D: `App` builder methods (`.route`/`.action`/`.mount`/…).
+    AppMethod {
         method: String,
     },
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.

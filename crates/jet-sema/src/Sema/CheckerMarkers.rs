@@ -14,10 +14,33 @@
 //! auto-derive control. It follows the same closed-vocabulary checks as
 //! `Printable` and `Equatable`.
 
-use crate::AST::{Item, Marker};
+use crate::AST::{Item, Marker, ProgramBundle};
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// D-APP-UNIFY1=B: resolve the target fact used by App capability checks. The
+/// module/file marker is the narrowest fact; the driver flag or manifest sets
+/// the broad web backend bit; freestanding is the explicit no-OS target.
+pub(crate) fn resolved_app_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    freestanding: bool,
+) -> &'static str {
+    if freestanding {
+        return "Freestanding";
+    }
+    let module = &bundle.modules[module_idx];
+    if let Some(bucket) = module.web_target_ceiling {
+        return bucket.name();
+    }
+    if bundle.web_partition_enforced
+        || module.default_target.as_deref() == Some(Syntax::BUILD_TARGET_WEB)
+    {
+        return "Web";
+    }
+    "Native"
+}
 
 pub(crate) struct ValidatedRuleArguments {
     pub(crate) bindings: Vec<crate::Policy::RuleArgumentBinding>,

@@ -13,9 +13,9 @@ use super::gap::JitGap;
 
 fn entry_return_supported(ret: Option<&Type>) -> bool {
     ret.is_none()
-        || matches!(ret, Some(Type::Named(name)) if name == "WebApp")
+        || matches!(ret, Some(Type::Named(name)) if name == "App")
         || matches!(ret, Some(Type::Result { ok, err })
-            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "WebApp")
+            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "App")
                 && matches!(err.as_ref(), Type::String | Type::Named(_)))
 }
 

@@ -320,7 +320,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // server value returned by `core.web.devserver.for_app(...)`.
         | "DevServer"
         // D-WEBAPP1=D: full-stack application builder types.
-        | "WebApp"
+        | "App"
         | "WebPage"
         | "WebContext"
         | "WebMount"

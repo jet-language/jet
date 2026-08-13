@@ -1,6 +1,6 @@
-//! D-WEBAPP1=D / D-WEBAUTHOR1=D: one statically known full-stack application graph.
+//! D-WEBAPP1=D / D-WEBAUTHOR1=D / D-APP-UNIFY1=B: one statically known full-stack application graph.
 //!
-//! Sema evaluates the WebApp-returning `fn run` builder chain into this typed graph. Runtime
+//! Sema evaluates the App-returning `fn run` builder chain into this typed graph. Runtime
 //! registration outside a declared `.mount` is a compile diagnostic. Optional
 //! `.routes(from:)` conventions expand only when the builder opts in.
 
@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 /// How a route renders (CSR / SSR / SSG / streaming / island). Bodies stay
 /// executable TIR — the mode is a graph fact, not a second IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebRenderMode {
+pub enum AppRenderMode {
     Csr,
     Ssr,
     Ssg,
@@ -17,24 +17,47 @@ pub enum WebRenderMode {
     Island,
 }
 
-impl WebRenderMode {
+/// D-APP-UNIFY1=B: target capability requirements live with the App contract,
+/// not in an execution engine. `None` means the builder operation is valid on
+/// every App target; the returned target is the narrow target class required by
+/// a target-sensitive operation.
+pub fn app_capability_target(method: &str) -> Option<&'static str> {
+    match method {
+        "csr" | "island" | "hydration_dev" | "hydration_release" => Some("JS"),
+        "serve" | "serve_on" => Some("Native"),
+        _ => None,
+    }
+}
+
+/// D-APP-UNIFY1=B: a broad `Web` build includes the JS browser edge. Native
+/// App capabilities remain valid for an OS-native target, but not freestanding
+/// or a web partition.
+pub fn app_target_supports(required: &str, target: &str) -> bool {
+    match required {
+        "JS" => matches!(target, "Web" | "JS"),
+        "Native" => matches!(target, "Native" | "OS"),
+        _ => false,
+    }
+}
+
+impl AppRenderMode {
     pub fn as_str(self) -> &'static str {
         match self {
-            WebRenderMode::Csr => "csr",
-            WebRenderMode::Ssr => "ssr",
-            WebRenderMode::Ssg => "ssg",
-            WebRenderMode::Stream => "stream",
-            WebRenderMode::Island => "island",
+            AppRenderMode::Csr => "csr",
+            AppRenderMode::Ssr => "ssr",
+            AppRenderMode::Ssg => "ssg",
+            AppRenderMode::Stream => "stream",
+            AppRenderMode::Island => "island",
         }
     }
 
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "csr" => Some(WebRenderMode::Csr),
-            "ssr" => Some(WebRenderMode::Ssr),
-            "ssg" => Some(WebRenderMode::Ssg),
-            "stream" | "streaming" => Some(WebRenderMode::Stream),
-            "island" => Some(WebRenderMode::Island),
+            "csr" => Some(AppRenderMode::Csr),
+            "ssr" => Some(AppRenderMode::Ssr),
+            "ssg" => Some(AppRenderMode::Ssg),
+            "stream" | "streaming" => Some(AppRenderMode::Stream),
+            "island" => Some(AppRenderMode::Island),
             _ => None,
         }
     }
@@ -42,10 +65,10 @@ impl WebRenderMode {
 
 /// One route / page / layout entry in the application graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebAppRoute {
+pub struct AppRoute {
     pub path: String,
     pub handler: String,
-    pub render: WebRenderMode,
+    pub render: AppRenderMode,
     /// Source file that contributed this entry (`builder` or a convention path).
     pub provenance: String,
     pub span_start: usize,
@@ -54,7 +77,7 @@ pub struct WebAppRoute {
 
 /// Server action / form / data dependency registered on the graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebAppAction {
+pub struct AppAction {
     pub name: String,
     pub handler: String,
     pub kind: String,
@@ -65,7 +88,7 @@ pub struct WebAppAction {
 
 /// Declared dynamic mount: prefix / effects / security stay static facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebAppMount {
+pub struct AppMount {
     pub prefix: String,
     pub handler: String,
     pub effects: Vec<String>,
@@ -77,7 +100,7 @@ pub struct WebAppMount {
 
 /// Opt-in file-routing root from `.routes(from: "…")`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebAppRoutesFrom {
+pub struct AppRoutesFrom {
     pub root: String,
     pub span_start: usize,
     pub span_end: usize,
@@ -85,7 +108,7 @@ pub struct WebAppRoutesFrom {
 
 /// Whole-app security / asset / split / cache / a11y / adapter facts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WebAppPolicy {
+pub struct AppPolicy {
     pub security: Vec<String>,
     pub assets: Vec<String>,
     pub split: Vec<String>,
@@ -96,20 +119,20 @@ pub struct WebAppPolicy {
 
 /// One sema-known application graph (D-WEBAPP1=D).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WebAppGraph {
+pub struct AppGraph {
     pub entry_file: String,
-    pub routes: Vec<WebAppRoute>,
-    pub actions: Vec<WebAppAction>,
-    pub mounts: Vec<WebAppMount>,
-    pub routes_from: Vec<WebAppRoutesFrom>,
-    pub policy: WebAppPolicy,
+    pub routes: Vec<AppRoute>,
+    pub actions: Vec<AppAction>,
+    pub mounts: Vec<AppMount>,
+    pub routes_from: Vec<AppRoutesFrom>,
+    pub policy: AppPolicy,
     /// Hydration law: `dev-overlay` | `release-keep-server`.
     pub hydration: String,
     /// True when every body remains executable TIR (no VDOM / second IR).
     pub shared_tir: bool,
 }
 
-impl WebAppGraph {
+impl AppGraph {
     pub fn to_json(&self) -> String {
         let mut out = String::from("{\n");
         out.push_str(&format!("  \"entry\": {},\n", json_str(&self.entry_file)));
@@ -316,14 +339,14 @@ mod tests {
 
     #[test]
     fn json_round_shape() {
-        let mut graph = WebAppGraph::default();
+        let mut graph = AppGraph::default();
         graph.entry_file = "app.jet".into();
         graph.hydration = "dev-overlay".into();
         graph.shared_tir = true;
-        graph.routes.push(WebAppRoute {
+        graph.routes.push(AppRoute {
             path: "/".into(),
             handler: "home".into(),
-            render: WebRenderMode::Csr,
+            render: AppRenderMode::Csr,
             provenance: "builder".into(),
             span_start: 0,
             span_end: 1,

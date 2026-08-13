@@ -2718,12 +2718,12 @@ fn check_bundle_opts_for_output_inner(
     ));
 
     // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #438): one sema-known application graph.
-    let (web_app_graph, web_app_diags) = super::super::WebApp::extract_web_app_graph(bundle);
-    diags.extend(web_app_diags);
+    let (app_graph, app_diags) = super::super::App::extract_app_graph(bundle);
+    diags.extend(app_diags);
 
     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
     // mixed-axis conflicts and unmatched cross-gate calls.
-    diags.extend(check_os_target(bundle));
+    diags.extend(check_os_target(bundle, freestanding));
 
     // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
     // Keep the pass in its own frame; this bundle checker already carries the
@@ -2806,7 +2806,7 @@ fn check_bundle_opts_for_output_inner(
             memory_declarations,
             memory_projections,
             name_ledger: name_ledger.clone(),
-            web_app: web_app_graph,
+            web_app: app_graph,
             fact_registry,
         },
     )

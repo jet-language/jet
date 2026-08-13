@@ -23,7 +23,7 @@ use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_numeric_method;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_devserver_method_name;
-use crate::Codegen::TIR::is_webapp_method_name;
+use crate::Codegen::TIR::is_app_method_name;
 use crate::Codegen::TIR::is_event_handle_type;
 use crate::Codegen::TIR::is_event_method_name;
 use crate::Codegen::TIR::is_http_method_name;
@@ -878,8 +878,8 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    // D-WEBAPP1=D: a WebApp builder method.
-    if recv_type.as_deref() == Some("WebApp") && is_webapp_method_name(method, args.len()) {
+    // D-WEBAPP1=D: an App builder method.
+    if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
         // `.routes(from: "…")` uses a labeled arg; other builder methods stay
         // positional. Labels are erased at emit — only the expression matters.
         return expr_in_subset(receiver, cx, locals)

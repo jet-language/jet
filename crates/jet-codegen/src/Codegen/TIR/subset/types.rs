@@ -63,7 +63,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         "Effect" | "UiNode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError"
         // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
-        | "WebApp" | "WebPage" | "DevServer"
+        | "App" | "WebPage" | "DevServer"
         | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent")) {
         return true;

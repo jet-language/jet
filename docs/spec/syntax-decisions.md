@@ -5268,8 +5268,16 @@ relabeling stored bytes.
 
 #### Full-stack web, compute, and services
 
+**D-APP-UNIFY1=B — one `App` type across targets**: `fn run() => App` is
+the single application return surface for native, web, Wasm, JS, and
+freestanding builds. Platform selection comes from the existing `#Target`
+marker or the package manifest `target:` field, never from the type name.
+Target-sensitive builder capabilities are checked in sema against that
+resolved target and report the capability, required target, and resolved
+target; all execution tiers then consume the same checked App/TIR contract.
+
 **D-WEBAPP1=D — one sema-known application graph**: sema evaluates the
-statically evaluable WebApp-returning `fn run` builder chain into one typed graph. Runtime
+statically evaluable App-returning `fn run` builder chain into one typed graph. Runtime
 registration outside a declared typed `.mount` is a compile diagnostic. Mounts
 keep prefix, effects, and security policy static. Browser/server partition,
 hydration mismatch, executable TIR, and generated-source re-entry laws apply;
@@ -5278,7 +5286,7 @@ hydration mismatch, executable TIR, and generated-source re-entry laws apply;
 **D-ENTRY-VALUE1=B — the entry returns the program** *(card #1446)*: `fn run`
 is the one entry. Its return type says what the program is. No return means a
 script that executes and exits. Returning the App-family value, today spelled
-`WebApp`, serves that value at the runtime edge; `jet dev` serves the same value
+`App`, serves that value at the runtime edge; `jet dev` serves the same value
 with watch, reload, and hot swap. An explicit `fn dev()` remains the expert
 override. The hidden app-name convention, synthesized `run` overlay, and
 run/app/dev precedence table are deleted.

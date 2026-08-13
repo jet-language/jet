@@ -2025,7 +2025,7 @@ pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect
 mod CheckerReferences;
 mod State;
 mod Taint;
-mod WebApp;
+mod App;
 mod WebPartition;
 
 pub(crate) use Bundle::*;
@@ -2060,7 +2060,7 @@ pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
-pub use WebApp::extract_web_app_graph;
+pub use App::extract_app_graph;
 pub(crate) use WebPartition::check_web_partition;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
 pub(crate) use MemberSpread::desugar_member_spreads;

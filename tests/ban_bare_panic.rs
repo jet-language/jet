@@ -83,7 +83,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "include_str! HTTP server runtime template — user-program serving panic path, not compiler code",
     ),
     (
-        "crates/jet-codegen/src/Prelude/WebApp.rs",
+        "crates/jet-codegen/src/Prelude/App.rs",
         1,
         "include_str! web-app runtime template — user-program serving panic path, not compiler code",
     ),

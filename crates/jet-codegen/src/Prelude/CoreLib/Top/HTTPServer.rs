@@ -4785,11 +4785,11 @@ fn jet_http_srv_static_files_mount_defaulted(
     );
 }
 
-pub(crate) fn jet_webapp_http_mux_new() -> JetHTTPMux {
+pub(crate) fn jet_app_http_mux_new() -> JetHTTPMux {
     jet_http_mux_new()
 }
 
-pub(crate) fn jet_webapp_http_page<F>(mux: &JetHTTPMux, path: &str, handler: F)
+pub(crate) fn jet_app_http_page<F>(mux: &JetHTTPMux, path: &str, handler: F)
 where
     F: Fn() -> String + Send + Sync + 'static,
 {
@@ -4803,7 +4803,7 @@ where
     });
 }
 
-pub(crate) fn jet_webapp_http_action<F>(mux: &JetHTTPMux, path: &str, handler: F)
+pub(crate) fn jet_app_http_action<F>(mux: &JetHTTPMux, path: &str, handler: F)
 where
     F: Fn() + Send + Sync + 'static,
 {
@@ -4813,7 +4813,7 @@ where
     });
 }
 
-pub(crate) fn jet_webapp_http_mount<F>(mux: &JetHTTPMux, path: &str, handler: F)
+pub(crate) fn jet_app_http_mount<F>(mux: &JetHTTPMux, path: &str, handler: F)
 where
     F: Fn(&String) + Send + Sync + 'static,
 {
@@ -4823,7 +4823,7 @@ where
     });
 }
 
-pub(crate) fn jet_webapp_http_assets(mux: &JetHTTPMux, root: &String) {
+pub(crate) fn jet_app_http_assets(mux: &JetHTTPMux, root: &String) {
     jet_http_srv_static_files_mount(
         mux,
         &"/assets".to_string(),
@@ -4832,7 +4832,7 @@ pub(crate) fn jet_webapp_http_assets(mux: &JetHTTPMux, root: &String) {
     );
 }
 
-pub(crate) fn jet_webapp_http_reload(mux: &JetHTTPMux) {
+pub(crate) fn jet_app_http_reload(mux: &JetHTTPMux) {
     jet_http_mux_add(mux, "GET", "/__jet/reload", move |_| {
         let watched = std::env::var("JET_DEV_FILE").ok();
         let fingerprint = |path: &str| {
@@ -4870,7 +4870,7 @@ pub(crate) fn jet_webapp_http_reload(mux: &JetHTTPMux) {
     });
 }
 
-pub(crate) fn jet_webapp_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
+pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
     use std::io::Write;
     let server = jet_http_server_bind(&format!("127.0.0.1:{port}"), mux)
         .unwrap_or_else(|error| panic!("web app server failed: {error}"));

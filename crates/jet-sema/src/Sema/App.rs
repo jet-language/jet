@@ -1,38 +1,38 @@
-//! D-WEBAPP1=D / D-WEBAUTHOR1=D: extract the `fn run` WebApp builder into one typed
+//! D-WEBAPP1=D / D-WEBAUTHOR1=D: extract the `fn run` App builder into one typed
 //! application graph and diagnose undeclared dynamic edges, stray convention
 //! files, and builder/file collisions.
 
 use crate::AST::{Expr, Item, ProgramBundle, Stmt, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::WebApp::{
-    WebAppAction, WebAppGraph, WebAppMount, WebAppRoute, WebAppRoutesFrom, WebRenderMode,
+use jet_foundation::App::{
+    AppAction, AppGraph, AppMount, AppRoute, AppRoutesFrom, AppRenderMode,
 };
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// Walk the entry module for the WebApp-returning `fn run` and record the static
+/// Walk the entry module for the App-returning `fn run` and record the static
 /// builder graph.
-pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Vec<Diagnostic>) {
+pub fn extract_app_graph(bundle: &ProgramBundle) -> (Option<AppGraph>, Vec<Diagnostic>) {
     let Some(module) = bundle.modules.get(bundle.entry) else {
         return (None, Vec::new());
     };
-    let Some(run_fn) = find_web_app_run_fn(&module.items) else {
+    let Some(run_fn) = find_app_run_fn(&module.items) else {
         return (None, Vec::new());
     };
 
-    let mut graph = WebAppGraph {
+    let mut graph = AppGraph {
         entry_file: module.display.clone(),
         hydration: "dev-overlay".to_string(),
         shared_tir: true,
-        ..WebAppGraph::default()
+        ..AppGraph::default()
     };
     let known_fns: HashMap<String, ()> = collect_fn_names(&module.items)
         .into_iter()
         .map(|n| (n, ()))
         .collect();
     let mut diags = Vec::new();
-    let mut current_render = WebRenderMode::Csr;
+    let mut current_render = AppRenderMode::Csr;
     let mut seen_paths: HashMap<String, (String, Span)> = HashMap::new();
 
     for stmt in &run_fn.body {
@@ -50,7 +50,7 @@ pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Ve
     }
 
     // D-WEBAUTHOR1=D: expand each `.routes(from:)` root exhaustively.
-    let roots: Vec<WebAppRoutesFrom> = graph.routes_from.clone();
+    let roots: Vec<AppRoutesFrom> = graph.routes_from.clone();
     for root in roots {
         expand_routes_from(
             bundle,
@@ -65,15 +65,15 @@ pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Ve
     (Some(graph), diags)
 }
 
-fn find_web_app_run_fn(items: &[Item]) -> Option<&crate::AST::Func> {
+fn find_app_run_fn(items: &[Item]) -> Option<&crate::AST::Func> {
     for item in items {
         match item {
-            Item::Func(f) if f.name == "run" && returns_web_app(f.return_type.as_ref()) => {
+            Item::Func(f) if f.name == "run" && returns_app(f.return_type.as_ref()) => {
                 return Some(f)
             }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
-                    if let Some(f) = find_web_app_run_fn(body) {
+                    if let Some(f) = find_app_run_fn(body) {
                         return Some(f);
                     }
                 }
@@ -84,11 +84,11 @@ fn find_web_app_run_fn(items: &[Item]) -> Option<&crate::AST::Func> {
     None
 }
 
-fn returns_web_app(ty: Option<&crate::AST::Type>) -> bool {
+fn returns_app(ty: Option<&crate::AST::Type>) -> bool {
     match ty {
-        Some(crate::AST::Type::Named(name)) => name == "WebApp",
+        Some(crate::AST::Type::Named(name)) => name == "App",
         Some(crate::AST::Type::Result { ok, .. }) => {
-            matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "WebApp")
+            matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "App")
         }
         _ => false,
     }
@@ -122,9 +122,9 @@ fn stmt_expr(stmt: &Stmt) -> Option<&Expr> {
 
 fn walk_builder(
     expr: &Expr,
-    graph: &mut WebAppGraph,
+    graph: &mut AppGraph,
     diags: &mut Vec<Diagnostic>,
-    current_render: &mut WebRenderMode,
+    current_render: &mut AppRenderMode,
     seen_paths: &mut HashMap<String, (String, Span)>,
     known_fns: &HashMap<String, ()>,
     provenance: &str,
@@ -159,7 +159,7 @@ fn walk_builder(
             );
         }
         Expr::Call(call) => {
-            if is_web_app_ctor_name(&call.name) && call.args.is_empty() {
+            if is_app_ctor_name(&call.name) && call.args.is_empty() {
                 return;
             }
             for arg in &call.args {
@@ -181,7 +181,7 @@ fn walk_builder(
     }
 }
 
-fn is_web_app_ctor_name(name: &str) -> bool {
+fn is_app_ctor_name(name: &str) -> bool {
     matches!(name, "app" | "web.app" | "core.web.app")
 }
 
@@ -189,9 +189,9 @@ fn apply_method(
     method: &str,
     args: &[crate::AST::CallArg],
     method_span: Span,
-    graph: &mut WebAppGraph,
+    graph: &mut AppGraph,
     diags: &mut Vec<Diagnostic>,
-    current_render: &mut WebRenderMode,
+    current_render: &mut AppRenderMode,
     seen_paths: &mut HashMap<String, (String, Span)>,
     known_fns: &HashMap<String, ()>,
     provenance: &str,
@@ -213,7 +213,7 @@ fn apply_method(
                 graph,
                 diags,
                 seen_paths,
-                WebAppRoute {
+                AppRoute {
                     path,
                     handler,
                     render: *current_render,
@@ -235,7 +235,7 @@ fn apply_method(
                     Some(method_span),
                 ));
             }
-            graph.actions.push(WebAppAction {
+            graph.actions.push(AppAction {
                 name,
                 handler,
                 kind: method.to_string(),
@@ -259,7 +259,7 @@ fn apply_method(
                     security.push(s);
                 }
             }
-            graph.mounts.push(WebAppMount {
+            graph.mounts.push(AppMount {
                 prefix,
                 handler,
                 effects,
@@ -282,18 +282,18 @@ fn apply_method(
                     Some(method_span),
                 ));
             } else {
-                graph.routes_from.push(WebAppRoutesFrom {
+                graph.routes_from.push(AppRoutesFrom {
                     root,
                     span_start: method_span.start,
                     span_end: method_span.end,
                 });
             }
         }
-        "csr" => *current_render = WebRenderMode::Csr,
-        "ssr" => *current_render = WebRenderMode::Ssr,
-        "ssg" => *current_render = WebRenderMode::Ssg,
-        "stream" | "streaming" => *current_render = WebRenderMode::Stream,
-        "island" => *current_render = WebRenderMode::Island,
+        "csr" => *current_render = AppRenderMode::Csr,
+        "ssr" => *current_render = AppRenderMode::Ssr,
+        "ssg" => *current_render = AppRenderMode::Ssg,
+        "stream" | "streaming" => *current_render = AppRenderMode::Stream,
+        "island" => *current_render = AppRenderMode::Island,
         "security" => {
             if let Some(s) = const_string_arg(args, 0) {
                 graph.policy.security.push(s);
@@ -335,10 +335,10 @@ fn apply_method(
 }
 
 fn record_route(
-    graph: &mut WebAppGraph,
+    graph: &mut AppGraph,
     diags: &mut Vec<Diagnostic>,
     seen_paths: &mut HashMap<String, (String, Span)>,
-    route: WebAppRoute,
+    route: AppRoute,
 ) {
     let span = Span::new(route.span_start, route.span_end);
     if let Some((prev_prov, prev_span)) = seen_paths.get(&route.path) {
@@ -369,11 +369,11 @@ fn record_route(
 
 fn expand_routes_from(
     bundle: &ProgramBundle,
-    root: &WebAppRoutesFrom,
-    graph: &mut WebAppGraph,
+    root: &AppRoutesFrom,
+    graph: &mut AppGraph,
     diags: &mut Vec<Diagnostic>,
     seen_paths: &mut HashMap<String, (String, Span)>,
-    render: WebRenderMode,
+    render: AppRenderMode,
 ) {
     let dir = bundle.project_root.join(&root.root);
     if !dir.is_dir() {
@@ -427,7 +427,7 @@ fn expand_routes_from(
             graph,
             diags,
             seen_paths,
-            WebAppRoute {
+            AppRoute {
                 path,
                 handler,
                 render,

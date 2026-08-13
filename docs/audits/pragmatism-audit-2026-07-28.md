@@ -146,7 +146,7 @@ Ranked by damage to a person finishing a real job.
     `dead-end-magic`, domain web. Evidence:
     `examples/features/web/web_app.jet:13-35` ends in
     `print("web-app-graph-ok")`; runtime records edges only
-    (`crates/jet-codegen/src/Prelude/WebApp.rs:1-58`). Companion friction:
+    (`crates/jet-codegen/src/Prelude/App.rs:1-58`). Companion friction:
     the flagship browser click demo keeps state in hand-written HTML/JS
     (`ui_web_click.html:91-98`) while `web.on` exists in docs. Smallest
     fix: `jet run` serves the graph through `core.http.server`, and the

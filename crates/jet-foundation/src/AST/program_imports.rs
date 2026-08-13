@@ -613,6 +613,10 @@ pub struct LoadedModule {
     pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
+    /// D-APP-UNIFY1=B / D-WEBDEFAULT1: the file-level `#Target(Web)` default
+    /// survives loading so sema resolves App capabilities from the same
+    /// target fact that the CLI uses for the web backend.
+    pub default_target: Option<String>,
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,

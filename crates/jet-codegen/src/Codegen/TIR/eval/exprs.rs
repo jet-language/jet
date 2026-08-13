@@ -5083,8 +5083,8 @@ impl<'a> EvalCtx<'a> {
                     // pure core display semantics match AOT `jet_display()`.
                     return self.show_value(value, scope).map(CtValue::Str);
                 }
-                if let crate::Codegen::TIR::THandleOp::WebAppMethod { method } = op {
-                    return self.eval_web_app_method(&r, method, argv);
+                if let crate::Codegen::TIR::THandleOp::AppMethod { method } = op {
+                    return self.eval_app_method(&r, method, argv);
                 }
                 if let Some(index) = handle_index(&r, "__JetTirClock") {
                     let delta = argv.first().and_then(|value| match value {

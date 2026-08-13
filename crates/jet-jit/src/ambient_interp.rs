@@ -3109,30 +3109,30 @@ fn interp_web_field<'a>(
 
 fn interp_web_steps(value: &CtValue, span: Span) -> Result<Vec<(String, Vec<CtValue>)>, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
-        return Err(unsupported("WebApp state", span));
+        return Err(unsupported("App state", span));
     };
-    if type_name != "__JetTirWebAppState" {
-        return Err(unsupported("WebApp state", span));
+    if type_name != "__JetTirAppState" {
+        return Err(unsupported("App state", span));
     }
     let Some(CtValue::List(steps)) = interp_web_field(fields, "steps") else {
-        return Err(unsupported("WebApp steps", span));
+        return Err(unsupported("App steps", span));
     };
     steps
         .iter()
         .map(|step| {
             let CtValue::Struct { type_name, fields } = step else {
-                return Err(unsupported("WebApp step", span));
+                return Err(unsupported("App step", span));
             };
-            if type_name != "__JetTirWebAppStep" {
-                return Err(unsupported("WebApp step", span));
+            if type_name != "__JetTirAppStep" {
+                return Err(unsupported("App step", span));
             }
             let method = match interp_web_field(fields, "method") {
                 Some(CtValue::Str(method)) => method.clone(),
-                _ => return Err(unsupported("WebApp step method", span)),
+                _ => return Err(unsupported("App step method", span)),
             };
             let args = match interp_web_field(fields, "args") {
                 Some(CtValue::List(args)) => args.clone(),
-                _ => return Err(unsupported("WebApp step arguments", span)),
+                _ => return Err(unsupported("App step arguments", span)),
             };
             Ok((method, args))
         })
@@ -3142,7 +3142,7 @@ fn interp_web_steps(value: &CtValue, span: Span) -> Result<Vec<(String, Vec<CtVa
 fn interp_web_string(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
-        _ => Err(unsupported("WebApp text argument", span)),
+        _ => Err(unsupported("App text argument", span)),
     }
 }
 
@@ -3181,12 +3181,12 @@ fn interp_web_page(value: CtValue) -> crate::Web::web_rt::JetWebPage {
     crate::Web::web_rt::jet_web_page(text("title"), text("body"))
 }
 
-fn materialize_interp_web_app(
+fn materialize_interp_app(
     state: &CtValue,
     sender: Option<&mpsc::Sender<InterpWebCallback>>,
     span: Span,
-) -> Result<crate::Web::web_rt::JetWebApp, Diagnostic> {
-    let mut app = crate::Web::web_rt::jet_web_app();
+) -> Result<crate::Web::web_rt::JetApp, Diagnostic> {
+    let mut app = crate::Web::web_rt::jet_app();
     for (method, args) in interp_web_steps(state, span)? {
         app = match method.as_str() {
             "route" | "page" | "layout" => {
@@ -3194,7 +3194,7 @@ fn materialize_interp_web_app(
                 let callable = args
                     .get(1)
                     .cloned()
-                    .ok_or_else(|| unsupported("WebApp page callback", span))?;
+                    .ok_or_else(|| unsupported("App page callback", span))?;
                 let callback_sender = sender.cloned();
                 let handler = move || {
                     callback_sender
@@ -3219,7 +3219,7 @@ fn materialize_interp_web_app(
                 let callable = args
                     .get(1)
                     .cloned()
-                    .ok_or_else(|| unsupported("WebApp action callback", span))?;
+                    .ok_or_else(|| unsupported("App action callback", span))?;
                 let callback_sender = sender.cloned();
                 let handler = move || {
                     if let Some(sender) = &callback_sender {
@@ -3237,7 +3237,7 @@ fn materialize_interp_web_app(
                 let callable = args
                     .get(1)
                     .cloned()
-                    .ok_or_else(|| unsupported("WebApp mount callback", span))?;
+                    .ok_or_else(|| unsupported("App mount callback", span))?;
                 let callback_sender = sender.cloned();
                 app.mount(prefix, std::sync::Arc::new(move |path: &String| {
                     if let Some(sender) = &callback_sender {
@@ -3265,31 +3265,31 @@ fn materialize_interp_web_app(
             "island" => app.island(),
             "hydration_dev" => app.hydration_dev(),
             "hydration_release" => app.hydration_release(),
-            _ => return Err(unsupported(&format!("WebApp.{method}"), span)),
+            _ => return Err(unsupported(&format!("App.{method}"), span)),
         };
     }
     Ok(app)
 }
 
-fn ambient_webapp_handle(
+fn ambient_app_handle(
     op: &str,
     recv: &mut CtValue,
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let result = match op {
-        "WebAppFacts" => materialize_interp_web_app(recv, None, span)
+        "AppFacts" => materialize_interp_app(recv, None, span)
             .map(|app| CtValue::Str(app.facts_json())),
-        "WebAppServe" => {
+        "AppServe" => {
             let (requests, receiver) = mpsc::channel();
-            let app = match materialize_interp_web_app(recv, Some(&requests), span) {
+            let app = match materialize_interp_app(recv, Some(&requests), span) {
                 Ok(app) => app,
                 Err(error) => return Some(Err(error)),
             };
             let port = match args.first() {
                 Some(CtValue::Int(port)) => Some(*port),
                 None => None,
-                _ => return Some(Err(unsupported("WebApp serve port", span))),
+                _ => return Some(Err(unsupported("App serve port", span))),
             };
             std::thread::spawn(move || match port {
                 Some(port) => app.serve_on(port),
@@ -3301,29 +3301,29 @@ fn ambient_webapp_handle(
             });
             let mut servers = interp_web_servers()
                 .lock()
-                .expect("interpreter WebApp registry poisoned");
+                .expect("interpreter App registry poisoned");
             let index = servers.len();
             servers.push(server);
             Ok(interp_web_server_value(index))
         }
-        "WebAppNext" => {
+        "AppNext" => {
             let server = match interp_web_server(recv) {
                 Some(server) => server,
-                None => return Some(Err(unsupported("WebApp server handle", span))),
+                None => return Some(Err(unsupported("App server handle", span))),
             };
             let request = match server
                 .requests
                 .lock()
-                .expect("interpreter WebApp request queue poisoned")
+                .expect("interpreter App request queue poisoned")
                 .recv()
             {
                 Ok(request) => request,
-                Err(_) => return Some(Err(unsupported("WebApp request queue", span))),
+                Err(_) => return Some(Err(unsupported("App request queue", span))),
             };
             server
                 .replies
                 .lock()
-                .expect("interpreter WebApp reply queue poisoned")
+                .expect("interpreter App reply queue poisoned")
                 .insert(request.id, request.reply);
             Ok(CtValue::Struct {
                 type_name: "__JetInterpWebCallback".to_string(),
@@ -3334,27 +3334,27 @@ fn ambient_webapp_handle(
                 ],
             })
         }
-        "WebAppReply" => {
+        "AppReply" => {
             let server = match interp_web_server(recv) {
                 Some(server) => server,
-                None => return Some(Err(unsupported("WebApp server handle", span))),
+                None => return Some(Err(unsupported("App server handle", span))),
             };
             let id = match args.first() {
                 Some(CtValue::Int(id)) => *id,
-                _ => return Some(Err(unsupported("WebApp callback id", span))),
+                _ => return Some(Err(unsupported("App callback id", span))),
             };
             let value = args.get(1).cloned().unwrap_or(CtValue::Unit);
             let reply = server
                 .replies
                 .lock()
-                .expect("interpreter WebApp reply queue poisoned")
+                .expect("interpreter App reply queue poisoned")
                 .remove(&id);
             match reply {
                 Some(reply) => reply
                     .send(value)
                     .map(|_| CtValue::Unit)
-                    .map_err(|_| unsupported("WebApp callback reply", span)),
-                None => Err(unsupported("WebApp callback reply id", span)),
+                    .map_err(|_| unsupported("App callback reply", span)),
+                None => Err(unsupported("App callback reply id", span)),
             }
         }
         _ => return None,
@@ -3388,7 +3388,7 @@ pub fn ambient_handle(
     if let Some(result) = ambient_net_handle(op, recv, args, span) {
         return Some(result);
     }
-    if let Some(result) = ambient_webapp_handle(op, recv, args, span) {
+    if let Some(result) = ambient_app_handle(op, recv, args, span) {
         return Some(result);
     }
     if let Some(result) = ambient_http_handle(op, recv, args, span) {

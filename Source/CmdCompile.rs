@@ -999,7 +999,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
     exit(child_exit_code(status));
 }
 
-/// D-WEBAPP-SERVE1=D: `jet dev` serves a WebApp returned by `fn run`
+/// D-WEBAPP-SERVE1=D: `jet dev` serves an App returned by `fn run`
 /// through the same native app entry as `jet run`, adding only the reload
 /// response flag. A user-authored `fn dev()` is selected before this helper.
 pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<u16>) {
@@ -1019,10 +1019,10 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     });
     let mut command = Command::new(jet_bin);
     command.arg("run").arg(file);
-    command.env("JET_WEBAPP_DEV", "1");
+    command.env("JET_APP_DEV", "1");
     command.env("JET_DEV_FILE", dev_file);
     if let Some(port) = port {
-        command.env("JET_WEBAPP_PORT", port.to_string());
+        command.env("JET_APP_PORT", port.to_string());
     }
     let status = command.status().unwrap_or_else(|error| {
         crate::cli_error!("E2105", "couldn't run the web app: {error}");

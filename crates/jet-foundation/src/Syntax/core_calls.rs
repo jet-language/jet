@@ -919,7 +919,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.ui", "aria_role_container", "jet_ui_aria_role_container", true, &[])
         .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.web", "app", "jet_web_app", true, &[]), // D-WEBAPP1=D: application builder + page helper.
+    CoreCallRecord::new("core.web", "app", "jet_app", true, &[]), // D-WEBAPP1=D: application builder + page helper.
     CoreCallRecord::new("app", "live_get", "jet_app_live_get", true, &[true]),
     CoreCallRecord::new("core.web", "live_get", "jet_app_live_get", true, &[true]),
     CoreCallRecord::new("app", "live_show", "jet_app_live_show", true, &[true]),

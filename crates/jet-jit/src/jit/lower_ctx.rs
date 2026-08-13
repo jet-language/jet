@@ -22240,7 +22240,7 @@ impl LowerCtx<'_, '_> {
                 }
                 _ => Err(format!("jit DevServerMethod unsupported: {method}")),
             },
-            THandleOp::WebAppMethod { method } => {
+            THandleOp::AppMethod { method } => {
                 let method_s = self.runtime.heap.alloc_string(method.clone());
                 let method_v = self.b.ins().iconst(types::I64, method_s);
                 let a0 = if args.is_empty() {

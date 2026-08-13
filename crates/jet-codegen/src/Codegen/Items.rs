@@ -685,7 +685,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            output.return_type.as_ref().is_some_and(returns_web_app),
+            output.return_type.as_ref().is_some_and(returns_app),
             output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
@@ -703,7 +703,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            run_fn.return_type.as_ref().is_some_and(returns_web_app),
+            run_fn.return_type.as_ref().is_some_and(returns_app),
             false,
         )
     } else {
@@ -1094,10 +1094,10 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
     })
 }
 
-fn returns_web_app(ty: &Type) -> bool {
+fn returns_app(ty: &Type) -> bool {
     match ty {
-        Type::Named(name) => name == "WebApp",
-        Type::Result { ok, .. } => matches!(ok.as_ref(), Type::Named(name) if name == "WebApp"),
+        Type::Named(name) => name == "App",
+        Type::Result { ok, .. } => matches!(ok.as_ref(), Type::Named(name) if name == "App"),
         _ => false,
     }
 }

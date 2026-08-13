@@ -740,6 +740,7 @@ fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
         bundle.entry,
         &bundle.project_root,
         bundle.active_os,
+        bundle.web_partition_enforced,
         &bundle.build_facts,
         bundle.layer_ceiling,
     ));
@@ -753,6 +754,7 @@ fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
             module.web_target_ceiling,
             module.pub_file,
             module.no_prelude,
+            &module.default_target,
             &module.html_path,
             &module.policy_declarations,
         );
@@ -1954,6 +1956,7 @@ mod structure_tests {
                 web_target_ceiling: program.web_target_ceiling,
                 pub_file: program.pub_file,
                 no_prelude: program.no_prelude,
+                default_target: program.default_target,
                 html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations,

@@ -488,6 +488,7 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
+| E-APP-TARGET-CAPABILITY | sema | an App capability is not available for the resolved target (D-APP-UNIFY1=B) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
 | E-OSTARGET-BUILD-CONTEXT | sema | an `@if … == { }` OS dispatch's subject is not `@build.os` (D-OSTARGET2) |
@@ -1246,6 +1247,7 @@ server built on top. E28xx is the block for M10.
 | E2806 | Convention file `{path}` has no `fn page`. | Files under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze. | Add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory. |
 | E2807 | Route `{path}` is registered both by `{a}` and `{b}`. | Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1). | Remove one registration, or rename the convention file. |
 | E2810 | `{kind}` `{name}` is not a statically known handler. | D-WEBAPP1 records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge. | Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees. |
+| E-APP-TARGET-CAPABILITY | App capability `.{capability}` needs target `{required}`, but the resolved target is `{target}`. | App is one type across targets, but each capability must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). | Choose a build target that supports `.{capability}` (for example `#Target(JS)` for browser capabilities or a native target for server capabilities), or remove that capability. |
 | L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `task { … }` so each connection runs in its own task. |
 
 ## Testing and tooling diagnostics (E2-M11)

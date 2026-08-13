@@ -1,5 +1,5 @@
 //! D-WEBAPP1 / c-devserver / D-FLAGSHIP-WEBAPI1: resident-JIT web host.
-//! Thin opaque-handle adapters over Prelude/WebApp.rs + DevServer.rs.
+//! Thin opaque-handle adapters over Prelude/App.rs + DevServer.rs.
 //! `core.web.on` / `core.web.value` are native no-ops (match AOT emit).
 
 use super::Concurrency;
@@ -10,13 +10,13 @@ use cranelift_module::{FuncId, Linkage, Module};
 #[allow(dead_code, unused_imports)]
 pub(crate) mod web_rt {
     pub(crate) use crate::net_http_rt::{
-        jet_webapp_http_action, jet_webapp_http_assets, jet_webapp_http_mount,
-        jet_webapp_http_mux_new, jet_webapp_http_page, jet_webapp_http_reload,
-        jet_webapp_http_serve,
+        jet_app_http_action, jet_app_http_assets, jet_app_http_mount,
+        jet_app_http_mux_new, jet_app_http_page, jet_app_http_reload,
+        jet_app_http_serve,
     };
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/WebApp.rs");
+    include!("../../jet-codegen/src/Prelude/App.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/DevServer.rs");
@@ -24,7 +24,7 @@ pub(crate) mod web_rt {
 
 #[derive(Default)]
 pub(crate) struct WebState {
-    pub(crate) apps: Vec<web_rt::JetWebApp>,
+    pub(crate) apps: Vec<web_rt::JetApp>,
     pub(crate) pages: Vec<web_rt::JetWebPage>,
     pub(crate) servers: Vec<web_rt::JetDevServer>,
 }
@@ -47,7 +47,7 @@ extern "C" fn jet_jit_web_value() -> i64 {
 
 extern "C" fn jet_jit_web_app() -> i64 {
     with_rt(|rt| {
-        rt.web.apps.push(web_rt::jet_web_app());
+        rt.web.apps.push(web_rt::jet_app());
         rt.web.apps.len() as i64
     })
 }
@@ -61,10 +61,10 @@ extern "C" fn jet_jit_web_page(title: i64, body: i64) -> i64 {
     })
 }
 
-/// Entry-boundary adapter for a WebApp returned by `fn run`. The operation is
-/// still the Prelude WebApp `serve` method; this function only supplies the
+/// Entry-boundary adapter for an App returned by `fn run`. The operation is
+/// still the Prelude App `serve` method; this function only supplies the
 /// opaque JIT handle and releases the runtime borrow before the server blocks.
-pub(crate) fn serve_web_app(app: i64) {
+pub(crate) fn serve_app(app: i64) {
     let app_handle = with_rt(|rt| {
         rt.web
             .apps
@@ -77,10 +77,21 @@ pub(crate) fn serve_web_app(app: i64) {
 
 extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
     let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
-    if method_name == "serve" {
+    if method_name == "serve" || method_name == "serve_on" {
         // Serving blocks. Keep the resident runtime published, but release its
         // access lock so HTTP worker callbacks can enter Jet one at a time.
-        serve_web_app(app);
+        let app_handle = with_rt(|rt| {
+            rt.web
+                .apps
+                .get(app.saturating_sub(1) as usize)
+                .cloned()
+        })
+        .expect("jit app: bad handle");
+        if method_name == "serve_on" {
+            app_handle.serve_on(a0);
+        } else {
+            app_handle.serve();
+        }
         return app;
     }
     with_rt(|rt| {
@@ -272,7 +283,5 @@ host_fns! {
     devserver_port: "jet_jit_devserver_port" => jet_jit_devserver_port: binary;
     devserver_serve: "jet_jit_devserver_serve" => jet_jit_devserver_serve: unary_void;
 }
-
-
 
 

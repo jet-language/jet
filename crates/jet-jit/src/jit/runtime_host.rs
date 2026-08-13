@@ -350,7 +350,7 @@ pub(crate) struct ResidentModule {
     pub(crate) host: HostFns,
     pub(crate) main_id: FuncId,
     pub(crate) main_returns_result: bool,
-    pub(crate) main_returns_web_app: bool,
+    pub(crate) main_returns_app: bool,
     pub(crate) main_returns_default_err: bool,
     pub(crate) main_error_type: Option<jet_foundation::AST::Type>,
     pub(crate) main_error_is_packed: bool,

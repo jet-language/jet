@@ -1218,17 +1218,17 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-WEBAPP1=D: `core.web.app` full-stack application builder.
-const WEBAPP_PRELUDE: &str = include_str!("../Prelude/WebApp.rs");
+const APP_PRELUDE: &str = include_str!("../Prelude/App.rs");
 const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
 
-fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
-    // WebApp/DevServer call into HTTPServer helpers. Emit them only when the
+fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
+    // App/DevServer call into HTTPServer helpers. Emit them only when the
     // program uses web/HTTP surfaces — bare `app.live` / `app.auth` must not
     // drag the full HTTP server templates (R10).
-    let needs_webapp = core_usage_matches(
+    let needs_app_runtime = core_usage_matches(
         used_core,
         &[
             "core.web",
@@ -1239,9 +1239,9 @@ fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet
         ],
     );
     let needs_live = core_usage_matches(used_core, &["app", "core.web", "core.db"]);
-    if needs_webapp {
+    if needs_app_runtime {
         out.push_str(DEVSERVER_PRELUDE);
-        out.push_str(WEBAPP_PRELUDE);
+        out.push_str(APP_PRELUDE);
     }
     if needs_live {
         out.push_str(LIVEQUERY_PRELUDE);
@@ -2767,7 +2767,8 @@ mod tests {
                 imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
-                no_prelude: program.no_prelude, html_path: program.html_path,
+                no_prelude: program.no_prelude,
+                default_target: program.default_target, html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut program.rule_facts),
@@ -2843,6 +2844,7 @@ mod tests {
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
                 no_prelude: prog.no_prelude,
+                default_target: prog.default_target,
                 html_path: prog.html_path.clone(),
                 no_alloc_policy: prog.no_alloc_policy,
                 policy_declarations: prog.policy_declarations.clone(),
@@ -3414,7 +3416,7 @@ pub fn emit_bundle_dbg(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        push_web_app_preludes(&mut out, &bundle.used_core);
+        push_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -3656,7 +3658,7 @@ pub fn emit_bundle_tests_cov(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        push_web_app_preludes(&mut out, &bundle.used_core);
+        push_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -3914,7 +3916,7 @@ pub fn emit_bundle_fuzz(
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        push_web_app_preludes(&mut out, &bundle.used_core);
+        push_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 
@@ -4223,7 +4225,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
         }
-        push_web_app_preludes(&mut out, &bundle.used_core);
+        push_app_preludes(&mut out, &bundle.used_core);
     }
     out.push('\n');
 

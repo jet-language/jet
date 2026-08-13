@@ -448,15 +448,15 @@ pub(crate) fn devserver_method_return(
     }
 }
 
-/// D-WEBAPP1=D / D-WEBAUTHOR1=D: builder methods on `WebApp`. Chainable methods
-/// return `WebApp`; zero-arg render-mode setters also return `WebApp`.
-pub(crate) fn webapp_method_return(
+/// D-WEBAPP1=D / D-WEBAUTHOR1=D: builder methods on `App`. Chainable methods
+/// return `App`; zero-arg render-mode setters also return `App`.
+pub(crate) fn app_method_return(
     method: &str,
     n_args: usize,
     _span: Span,
     _diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Type>> {
-    let app = Type::Named("WebApp".to_string());
+    let app = Type::Named("App".to_string());
     let unit = unit_ty();
     match (method, n_args) {
         ("route" | "page" | "layout", 2) => Some(Some(app)),
@@ -472,7 +472,7 @@ pub(crate) fn webapp_method_return(
             Some(Some(app))
         }
         ("facts_json", 0) => Some(Some(Type::String)),
-        ("serve", 0) => Some(Some(unit)),
+        ("serve", 0 | 1) | ("serve_on", 1) => Some(Some(unit)),
         _ => None,
     }
 }

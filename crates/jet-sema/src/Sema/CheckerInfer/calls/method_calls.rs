@@ -10,7 +10,7 @@ use crate::Sema::CheckerCoreLib::{
     alloc_method_return, args_spec_method_return, binary_reader_method_return, is_allocator_type,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
     decode_error_ty,
-    devserver_method_return, webapp_method_return, db_value_method_return, expiring_method_return,
+    devserver_method_return, app_method_return, db_value_method_return, expiring_method_return,
     email_method_return, encoding_handle_method_return, file_handle_method_return, http_type_method_return, is_db_value_type_name,
     is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
     is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
@@ -307,7 +307,7 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     match type_name {
         "HTTPRouter" => matches!(method, "get" | "post" | "put" | "delete"),
         "HTTPMux" => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options"),
-        "WebApp" => matches!(method, "route" | "page" | "layout"),
+        "App" => matches!(method, "route" | "page" | "layout"),
         _ => false,
     }
 }
@@ -3445,18 +3445,18 @@ impl<'a> Checker<'a> {
                         return ret;
                     }
                 }
-                // D-WEBAPP1=D: WebApp builder chain (.route/.action/.mount/…).
-                if handle_ty == "WebApp" {
+                // D-WEBAPP1=D: App builder chain (.route/.action/.mount/…).
+                if handle_ty == "App" {
                     if matches!(method, "route" | "page" | "layout") {
-                        self.check_http_route_constant("WebApp", method, args);
+                        self.check_http_route_constant("App", method, args);
                     }
                     if let Some(ret) =
-                        webapp_method_return(method, args.len(), span, &mut self.diags)
+                        app_method_return(method, args.len(), span, &mut self.diags)
                     {
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);
                         }
-                        *recv_type_out = Some("WebApp".to_string());
+                        *recv_type_out = Some("App".to_string());
                         return ret;
                     }
                 }

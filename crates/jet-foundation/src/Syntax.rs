@@ -110,7 +110,7 @@
 // unit-fallible function writes `? E` or bare `?` directly after its parameters;
 // value-returning fallible functions keep OP_CALLABLE_ARROW.
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
-// its return value is the program. A returned WebApp is served at the runtime
+// its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop

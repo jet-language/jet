@@ -1059,7 +1059,7 @@ pub(super) fn eval_handle_with_type(
         }
         THandleOp::UiBackendMethod { .. } => Err(unsupported("handle `UiBackendMethod`", span)),
         THandleOp::DevServerMethod { .. } => Err(unsupported("handle `DevServerMethod`", span)),
-        THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
+        THandleOp::AppMethod { .. } => Err(unsupported("handle `AppMethod`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
         // D-LIB-CALLGRANT1=A: interpreter ambient owns the actual loader and

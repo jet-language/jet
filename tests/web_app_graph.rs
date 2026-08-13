@@ -31,7 +31,7 @@ fn example_app_hello_graph_records_policy_and_modes() {
         env!("CARGO_MANIFEST_DIR")
     );
     let facts = check_facts(&path);
-    let graph = facts.web_app.expect("fn run() WebApp graph");
+    let graph = facts.web_app.expect("fn run() App graph");
     assert!(graph.shared_tir);
     assert_eq!(graph.hydration, "dev-overlay");
     assert_eq!(graph.routes.len(), 1);
@@ -48,13 +48,13 @@ fn example_app_hello_graph_records_policy_and_modes() {
 
 #[test]
 fn routes_from_expands_convention_files() {
-    let root = common::unique_tmp("jet_web_app_routes_from");
+    let root = common::unique_tmp("jet_app_routes_from");
     fs::create_dir_all(root.join("routes/about")).unwrap();
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
 fn about_page() => WebPage { return web.page("About", "us") }
-fn run() => WebApp { return web.app().routes(from: "routes").ssr() }
+fn run() => App { return web.app().routes(from: "routes").ssr() }
 "#,
     )
     .unwrap();
@@ -80,15 +80,16 @@ fn run() => WebApp { return web.app().routes(from: "routes").ssr() }
 
 #[test]
 fn collision_and_stray_and_dynamic_diagnose() {
-    let root = common::unique_tmp("jet_web_app_diags");
+    let root = common::unique_tmp("jet_app_diags");
     fs::create_dir_all(root.join("routes")).unwrap();
     fs::write(root.join("routes/index.jet"), "fn page() {}\n").unwrap();
     fs::write(root.join("routes/stray.jet"), "fn helper() {}\n").unwrap();
     fs::write(
         root.join("collision.jet"),
         r#"use core.web as web
+#Target(Web)
 fn home() => WebPage { return web.page("h", "b") }
-fn run() => WebApp { return web.app().route("/", home).routes(from: "routes").csr() }
+fn run() => App { return web.app().route("/", home).routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -98,7 +99,8 @@ fn run() => WebApp { return web.app().route("/", home).routes(from: "routes").cs
     fs::write(
         root.join("stray.jet"),
         r#"use core.web as web
-fn run() => WebApp { return web.app().routes(from: "routes").csr() }
+#Target(Web)
+fn run() => App { return web.app().routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -108,8 +110,9 @@ fn run() => WebApp { return web.app().routes(from: "routes").csr() }
     fs::write(
         root.join("dynamic.jet"),
         r#"use core.web as web
+#Target(Web)
 fn pick() => Int { return 1 }
-fn run() => WebApp {
+fn run() => App {
     return web.app().route("/", pick()).csr()
 }
 "#,
@@ -121,15 +124,16 @@ fn run() => WebApp {
 
 #[test]
 fn render_modes_mount_island_and_shared_tir() {
-    let root = common::unique_tmp("jet_web_app_modes");
+    let root = common::unique_tmp("jet_app_modes");
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
+#Target(Web)
 fn home() => WebPage { return web.page("H", "b") }
 fn dash() => WebPage { return web.page("D", "b") }
 fn plugins(prefix: String) {}
-fn run() => WebApp {
+fn run() => App {
     return web.app()
         .route("/", home)
         .ssg()

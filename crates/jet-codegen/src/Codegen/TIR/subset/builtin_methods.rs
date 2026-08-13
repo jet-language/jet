@@ -269,8 +269,8 @@ pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
     matches!((method, nargs), ("html", 1) | ("port", 1) | ("serve", 0))
 }
 
-/// D-WEBAPP1=D: is `(method, nargs)` a `WebApp` builder method?
-pub(crate) fn is_webapp_method_name(method: &str, nargs: usize) -> bool {
+/// D-WEBAPP1=D: is `(method, nargs)` an `App` builder method?
+pub(crate) fn is_app_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
         ("route" | "page" | "layout" | "action" | "form" | "data", 2)
@@ -281,7 +281,7 @@ pub(crate) fn is_webapp_method_name(method: &str, nargs: usize) -> bool {
                     | "hydration_release" | "facts_json",
                 0
             )
-            | ("serve", 0 | 1)
+            | ("serve", 0 | 1) | ("serve_on", 1)
     )
 }
 

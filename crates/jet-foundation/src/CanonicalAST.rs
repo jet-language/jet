@@ -61,6 +61,10 @@ pub fn canonical_bytes(bundle: &ProgramBundle) -> Vec<u8> {
         s.push('\u{1}');
         let _ = write!(s, "{:?}", m.web_target_ceiling);
         s.push('\u{1}');
+        // D-APP-UNIFY1=B / D-WEBDEFAULT1: the default backend changes App
+        // capability resolution and therefore belongs in the build identity.
+        let _ = write!(s, "{:?}", m.default_target);
+        s.push('\u{1}');
         let _ = write!(s, "{:?}", m.html_path);
         s.push('\u{1}');
         let _ = write!(s, "{:?}", m.imports);

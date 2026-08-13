@@ -3079,8 +3079,8 @@ pub fn core_fixed_sig(
             None,
         )),
         ("core.web", "value") => Some((vec![(read, string.clone())], Some(Type::String))),
-        // D-WEBAPP1=D: `web.app()` → WebApp builder; `web.page(title, body)` → WebPage.
-        ("core.web", "app") => Some((vec![], Some(Type::Named("WebApp".to_string())))),
+        // D-WEBAPP1=D: `web.app()` → App builder; `web.page(title, body)` → WebPage.
+        ("core.web", "app") => Some((vec![], Some(Type::Named("App".to_string())))),
         ("core.web", "page") => Some((
             vec![(read, string.clone()), (read, string)],
             Some(Type::Named("WebPage".to_string())),

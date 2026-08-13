@@ -551,8 +551,8 @@ pub struct SemIndexEffectFacts {
     /// One name ledger produced by sema. Tooling reads it and never resolves
     /// names independently from spelling or proximity.
     pub name_ledger: jet_foundation::Names::NameLedger,
-    /// D-WEBAPP1=D: statically known WebApp-returning `fn run` graph (Tower #438).
-    pub web_app: Option<jet_foundation::WebApp::WebAppGraph>,
+    /// D-WEBAPP1=D: statically known App-returning `fn run` graph (Tower #438).
+    pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-FACTMODEL1=A: the one checked registry used by tag, effect, state,
     /// diagnostics, semantic tooling, and reflection consumers.
     pub fact_registry: jet_foundation::Facts::FactRegistry,

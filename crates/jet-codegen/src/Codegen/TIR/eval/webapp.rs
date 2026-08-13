@@ -1,13 +1,13 @@
-//! Interpreter marshalling for the canonical Prelude WebApp runtime.
+//! Interpreter marshalling for the canonical Prelude App runtime.
 
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 
-use super::{unsupported, EvalCtx, EvalWebApp, EvalWebAppStep};
+use super::{unsupported, EvalCtx, EvalApp, EvalAppStep};
 
-const APP_HANDLE: &str = "__JetTirWebApp";
-const APP_STATE: &str = "__JetTirWebAppState";
-const APP_STEP: &str = "__JetTirWebAppStep";
+const APP_HANDLE: &str = "__JetTirApp";
+const APP_STATE: &str = "__JetTirAppState";
+const APP_STEP: &str = "__JetTirAppStep";
 const PAGE_VALUE: &str = "__JetTirWebPage";
 
 fn field<'a>(fields: &'a [(String, CtValue)], name: &str) -> Option<&'a CtValue> {
@@ -36,7 +36,7 @@ fn handle_value(index: usize) -> CtValue {
     }
 }
 
-fn step_value(step: &EvalWebAppStep) -> CtValue {
+fn step_value(step: &EvalAppStep) -> CtValue {
     CtValue::Struct {
         type_name: APP_STEP.to_string(),
         fields: vec![
@@ -55,8 +55,8 @@ impl EvalCtx<'_> {
         match (method, args.as_slice()) {
             ("app", []) => {
                 let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-                let index = runtime.web_apps.len();
-                runtime.web_apps.push(EvalWebApp { steps: Vec::new() });
+                let index = runtime.apps.len();
+                runtime.apps.push(EvalApp { steps: Vec::new() });
                 Ok(handle_value(index))
             }
             ("page", [CtValue::Str(title), CtValue::Str(body)]) => Ok(CtValue::Struct {
@@ -73,12 +73,12 @@ impl EvalCtx<'_> {
         }
     }
 
-    fn web_app_state_value(&self, index: usize) -> Result<CtValue, Diagnostic> {
+    fn app_state_value(&self, index: usize) -> Result<CtValue, Diagnostic> {
         let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let app = runtime
-            .web_apps
+            .apps
             .get(index)
-            .ok_or_else(|| unsupported("WebApp handle", self.span()))?;
+            .ok_or_else(|| unsupported("App handle", self.span()))?;
         Ok(CtValue::Struct {
             type_name: APP_STATE.to_string(),
             fields: vec![(
@@ -88,14 +88,14 @@ impl EvalCtx<'_> {
         })
     }
 
-    pub(super) fn eval_web_app_method(
+    pub(super) fn eval_app_method(
         &mut self,
         recv: &CtValue,
         method: &str,
         args: Vec<CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let index = handle_index(recv)
-            .ok_or_else(|| unsupported("WebApp interpreter handle", self.span()))?;
+            .ok_or_else(|| unsupported("App interpreter handle", self.span()))?;
         match method {
             "route" | "page" | "layout" | "action" | "form" | "data" | "mount"
             | "routes" | "security" | "assets" | "split" | "code_split" | "cache"
@@ -103,75 +103,75 @@ impl EvalCtx<'_> {
             | "island" | "hydration_dev" | "hydration_release" => {
                 let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                 let app = runtime
-                    .web_apps
+                    .apps
                     .get_mut(index)
-                    .ok_or_else(|| unsupported("WebApp handle", self.span()))?;
-                app.steps.push(EvalWebAppStep {
+                    .ok_or_else(|| unsupported("App handle", self.span()))?;
+                app.steps.push(EvalAppStep {
                     method: method.to_string(),
                     args,
                 });
                 Ok(recv.clone())
             }
             "facts_json" => {
-                let mut state = self.web_app_state_value(index)?;
+                let mut state = self.app_state_value(index)?;
                 crate::Comptime::try_ambient_handle(
-                    "WebAppFacts",
+                    "AppFacts",
                     &mut state,
                     &mut [],
                     self.span(),
                 )
-                .unwrap_or_else(|| Err(unsupported("WebApp facts host", self.span())))
+                .unwrap_or_else(|| Err(unsupported("App facts host", self.span())))
             }
-            "serve" => {
-                let mut state = self.web_app_state_value(index)?;
+            "serve" | "serve_on" => {
+                let mut state = self.app_state_value(index)?;
                 let mut port = args;
                 let server = crate::Comptime::try_ambient_handle(
-                    "WebAppServe",
+                    "AppServe",
                     &mut state,
                     &mut port,
                     self.span(),
                 )
-                .unwrap_or_else(|| Err(unsupported("WebApp serve host", self.span())))?;
-                self.run_web_app_server(server)
+                .unwrap_or_else(|| Err(unsupported("App serve host", self.span())))?;
+                self.run_app_server(server)
             }
             _ => Err(unsupported(
-                &format!("WebApp.{method} interpreter method"),
+                &format!("App.{method} interpreter method"),
                 self.span(),
             )),
         }
     }
 
-    fn run_web_app_server(&mut self, mut server: CtValue) -> Result<CtValue, Diagnostic> {
+    fn run_app_server(&mut self, mut server: CtValue) -> Result<CtValue, Diagnostic> {
         loop {
             let request = crate::Comptime::try_ambient_handle(
-                "WebAppNext",
+                "AppNext",
                 &mut server,
                 &mut [],
                 self.span(),
             )
-            .unwrap_or_else(|| Err(unsupported("WebApp callback host", self.span())))?;
+            .unwrap_or_else(|| Err(unsupported("App callback host", self.span())))?;
             let CtValue::Struct { fields, .. } = request else {
-                return Err(unsupported("WebApp callback request", self.span()));
+                return Err(unsupported("App callback request", self.span()));
             };
             let id = field(&fields, "id")
                 .cloned()
-                .ok_or_else(|| unsupported("WebApp callback request id", self.span()))?;
+                .ok_or_else(|| unsupported("App callback request id", self.span()))?;
             let callable = field(&fields, "callable")
                 .cloned()
-                .ok_or_else(|| unsupported("WebApp callback callable", self.span()))?;
+                .ok_or_else(|| unsupported("App callback callable", self.span()))?;
             let argv = match field(&fields, "args") {
                 Some(CtValue::List(args)) => args.clone(),
-                _ => return Err(unsupported("WebApp callback arguments", self.span())),
+                _ => return Err(unsupported("App callback arguments", self.span())),
             };
             let result = self.call_callable(&callable, argv)?;
             let mut reply_args = [id, result];
             crate::Comptime::try_ambient_handle(
-                "WebAppReply",
+                "AppReply",
                 &mut server,
                 &mut reply_args,
                 self.span(),
             )
-            .unwrap_or_else(|| Err(unsupported("WebApp callback reply host", self.span())))?;
+            .unwrap_or_else(|| Err(unsupported("App callback reply host", self.span())))?;
         }
     }
 }

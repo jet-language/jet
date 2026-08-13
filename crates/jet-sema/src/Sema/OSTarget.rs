@@ -315,7 +315,7 @@ fn empty_stmt(span: Span) -> Stmt {
 /// never call bodies. The existing effect call-graph (`fx_edges`) only
 /// records bare-name calls (`CheckerInfer/calls.rs`), never method calls, so
 /// it can't see a caller reaching a gated `impl`'s methods either way.
-pub fn check_os_target(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+pub fn check_os_target(bundle: &ProgramBundle, freestanding: bool) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut gate_of_type: HashMap<String, OS> = HashMap::new();
 
@@ -339,15 +339,148 @@ pub fn check_os_target(bundle: &ProgramBundle) -> Vec<Diagnostic> {
         }
     }
 
-    if gate_of_type.is_empty() {
-        return diags;
+    if !gate_of_type.is_empty() {
+        for module in &bundle.modules {
+            check_items_signatures(&module.items, &gate_of_type, &mut diags);
+        }
     }
 
-    for module in &bundle.modules {
-        check_items_signatures(&module.items, &gate_of_type, &mut diags);
-    }
+    check_app_capabilities(bundle, freestanding, &mut diags);
 
     diags
+}
+
+/// D-APP-UNIFY1=B: one App type has target-sensitive methods, but target
+/// resolution and rejection stay in sema so AOT, JIT, interpreter, and web
+/// adapters all consume the same checked call shape.
+fn check_app_capabilities(
+    bundle: &ProgramBundle,
+    freestanding: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let target = super::CheckerMarkers::resolved_app_target(bundle, module_idx, freestanding);
+        check_app_items(&module.items, target, diags);
+    }
+}
+
+fn check_app_items(items: &[Item], target: &str, diags: &mut Vec<Diagnostic>) {
+    for item in items {
+        match item {
+            Item::Func(f) => check_app_body(
+                &f.body,
+                f.web_marker
+                    .map(|marker| marker.bucket().name())
+                    .unwrap_or(target),
+                diags,
+            ),
+            Item::Impl(i) => {
+                for method in &i.methods {
+                    check_app_body(
+                        &method.body,
+                        method
+                            .web_marker
+                            .map(|marker| marker.bucket().name())
+                            .unwrap_or(target),
+                        diags,
+                    );
+                }
+            }
+            Item::Struct(s) => {
+                for method in &s.methods {
+                    check_app_body(
+                        &method.body,
+                        method
+                            .web_marker
+                            .map(|marker| marker.bucket().name())
+                            .unwrap_or(target),
+                        diags,
+                    );
+                }
+                for trait_impl in &s.trait_impls {
+                    for method in &trait_impl.methods {
+                        check_app_body(
+                            &method.body,
+                            method
+                                .web_marker
+                                .map(|marker| marker.bucket().name())
+                                .unwrap_or(target),
+                            diags,
+                        );
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for method in &e.methods {
+                    check_app_body(
+                        &method.body,
+                        method
+                            .web_marker
+                            .map(|marker| marker.bucket().name())
+                            .unwrap_or(target),
+                        diags,
+                    );
+                }
+                for trait_impl in &e.trait_impls {
+                    for method in &trait_impl.methods {
+                        check_app_body(
+                            &method.body,
+                            method
+                                .web_marker
+                                .map(|marker| marker.bucket().name())
+                                .unwrap_or(target),
+                            diags,
+                        );
+                    }
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    check_app_items(
+                        body,
+                        module
+                            .web_target
+                            .map(|bucket| bucket.name())
+                            .unwrap_or(target),
+                        diags,
+                    );
+                }
+            }
+            Item::GenericModule(module) => check_app_items(&module.body, target, diags),
+            _ => {}
+        }
+    }
+}
+
+fn check_app_body(body: &[Stmt], target: &str, diags: &mut Vec<Diagnostic>) {
+    for original in body {
+        let mut stmt = original.clone();
+        stmt.for_each_expr_mut(|expr| {
+            let Expr::MethodCall {
+                recv_type: Some(receiver_type),
+                method,
+                method_span,
+                ..
+            } = expr
+            else {
+                return;
+            };
+            if receiver_type.as_str() != "App" {
+                return;
+            }
+            let Some(required) = jet_foundation::App::app_capability_target(method.as_str()) else {
+                return;
+            };
+            if jet_foundation::App::app_target_supports(required, target) {
+                return;
+            }
+            diags.push(Diagnostic::from_row(
+                "E-APP-TARGET-CAPABILITY",
+                &[("capability", method.as_str()), ("required", required), ("target", target)],
+                Some(*method_span),
+            ));
+        });
+    }
 }
 
 fn check_items_signatures(
