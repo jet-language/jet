@@ -8943,6 +8943,7 @@ impl LowerCtx<'_, '_> {
                 signed,
                 bits,
                 signed,
+                line,
             );
         }
         if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
@@ -11384,6 +11385,7 @@ impl LowerCtx<'_, '_> {
                                 true,
                                 *bits,
                                 true,
+                                0,
                             )?
                         }
                         Type::Float => self.b.ins().fneg(inner),
@@ -11410,6 +11412,7 @@ impl LowerCtx<'_, '_> {
                                 *signed,
                                 *bits,
                                 true,
+                                0,
                             )?
                         }
                         _ => {
@@ -17150,6 +17153,7 @@ impl LowerCtx<'_, '_> {
                     signed,
                     bits,
                     right_signed,
+                    0,
                 )
             }
             TExprKind::FnValue { kind } => match kind {
@@ -22716,6 +22720,7 @@ impl LowerCtx<'_, '_> {
         signed: bool,
         bits: u8,
         right_signed: bool,
+        line: u32,
     ) -> Result<Value, String> {
         let op = match op {
             BinOp::Add => INTN_OP_ADD,
@@ -22743,6 +22748,7 @@ impl LowerCtx<'_, '_> {
             self.b
                 .ins()
                 .iconst(types::I64, i64::from(right_signed)),
+            self.b.ins().iconst(types::I32, line as i64),
         ];
         let host = self
             .module
@@ -22951,6 +22957,7 @@ impl LowerCtx<'_, '_> {
                 signed,
                 bits,
                 right_signed,
+                line,
             );
         }
         if overflow {

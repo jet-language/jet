@@ -306,6 +306,7 @@ impl JitRuntime {
 
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
         const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
+        self.source_file = file.to_string();
         self.stack_depth = self.stack_depth.saturating_add(1);
         if self.stack_depth > LIMIT {
             let message = jet_foundation::Outcome::jet_stack_overflow_message(fn_name);
@@ -546,6 +547,7 @@ extern "C" fn jet_jit_intn_binop(
     signed: i64,
     bits: i64,
     right_signed: i64,
+    line: u32,
 ) -> i64 {
     use jet_codegen::AST::BinOp;
     use jet_codegen::Comptime::{CtReport, CtValue, MathLayout};
@@ -565,7 +567,7 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_MOD => BinOp::Mod,
         _ => {
             with_runtime_mut(|rt| {
-                rt.set_runtime_stop("E3010", 0, "unknown fixed-width integer operation")
+                rt.set_runtime_stop("E3010", line, "unknown fixed-width integer operation")
             });
             return 0;
         }
@@ -575,18 +577,18 @@ extern "C" fn jet_jit_intn_binop(
     let right_signed = right_signed != 0;
     let shift_count = MathLayout::integer_widen(right, right_signed);
     if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, &message));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, &message));
         return 0;
     }
     // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
     // into the shared "this division can't be done" wording below.
     if mode == INTN_MODE_TRAP && matches!(op, BinOp::FloorDiv | BinOp::Mod) && right == 0 {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_DIVIDE_ZERO));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
         if let Some(message) = MathLayout::integer_remainder_trap(right) {
-            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, message));
+            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, message));
             return 0;
         }
     }
@@ -642,10 +644,10 @@ extern "C" fn jet_jit_intn_binop(
             // here as it does on every other tier.
             match op {
                 BinOp::FloorDiv | BinOp::Mod => {
-                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_DIVIDE_OVERFLOW));
+                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
                 }
                 BinOp::Pow => {
-                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_POWER_OVERFLOW));
+                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_POWER_OVERFLOW));
                 }
                 _ => {
                     let name = match op {
@@ -655,7 +657,7 @@ extern "C" fn jet_jit_intn_binop(
                         BinOp::Div => "div",
                         _ => "shift",
                     };
-                    jet_trap_overflow(name, 0);
+                    jet_trap_overflow(name, line);
                 }
             }
             0
@@ -2224,6 +2226,7 @@ host_fns! {
         for _ in 0..7 {
             sig_intn_binop.params.push(AbiParam::new(types::I64));
         }
+        sig_intn_binop.params.push(AbiParam::new(types::I32));
         sig_intn_binop.returns.push(AbiParam::new(types::I64));
 
         let mut sig_i64 = Signature::new(cc);
