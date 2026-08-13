@@ -28,7 +28,7 @@ fn selector_routes_exactly_one_fixture_category() {
 /// cannot weaken this acceptance lane.
 #[test]
 fn full_corpus_meets_minimum_case_count() {
-    // CAPABILITY_CLAIM: claim.native-language / corpus-size-floor
+    // FEATURE_CLAIM: claim.native-language / corpus-size-floor
     if case_filter().is_some() {
         selector_routes_exactly_one_fixture_category();
     }

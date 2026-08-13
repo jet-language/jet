@@ -1,6 +1,6 @@
 #[test]
 fn executable_corpus_matches_aot_and_default_dev() {
-    // CAPABILITY_CLAIM: claim.native-language / accepted-native-semantics
+    // FEATURE_CLAIM: claim.native-language / accepted-native-semantics
     let filter = case_filter();
     let all = selected_cases("differential", filter.as_deref());
     let selected = if filter.is_some() {

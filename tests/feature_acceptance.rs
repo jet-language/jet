@@ -1,9 +1,9 @@
-//! Capability-claim acceptance lanes (UL0 / pre-push ledger).
+//! Feature-claim acceptance lanes (UL0 / pre-push ledger).
 //!
-//! Each `#[test]` named in `docs/spec/capability-claim-manifest.json` must
-//! contain the exact lane marker `CAPABILITY_CLAIM: <claim-id> / <lane-id>`
+//! Each `#[test]` named in `docs/spec/feature-claim-manifest.json` must
+//! contain the exact lane marker `FEATURE_CLAIM: <claim-id> / <lane-id>`
 //! in its body. Proven claims run these via
-//! `check-capability-ledger.mjs --verify-focused`.
+//! `check-feature-ledger.mjs --verify-focused`.
 
 mod common;
 
@@ -23,7 +23,7 @@ fn lex_probe(source: &str) -> Vec<jet::Lexer::Token> {
     let (tokens, diagnostics) = jet::Lexer::lex(source);
     assert!(
         diagnostics.is_empty(),
-        "capability probe source must lex cleanly: {diagnostics:#?}\n{source}"
+        "feature probe source must lex cleanly: {diagnostics:#?}\n{source}"
     );
     tokens
 }
@@ -142,7 +142,7 @@ fn run_example(rel: &str) -> String {
 /// claim.metaprogramming / source-reentry — D-META-CODE1.
 #[test]
 fn derive_source_reentry() {
-    // CAPABILITY_CLAIM: claim.metaprogramming / source-reentry
+    // FEATURE_CLAIM: claim.metaprogramming / source-reentry
     let serde_registration = read("crates/jet-sema/src/Sema/Registration/Serde.rs");
     let codegen_items = read("crates/jet-codegen/src/Codegen/Items.rs");
     assert!(
@@ -180,7 +180,7 @@ fn run() {
 }
 "#;
     let dir = std::env::temp_dir().join(format!(
-        "jet_capability_derive_reentry_{}",
+        "jet_feature_derive_reentry_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
@@ -201,7 +201,7 @@ fn run() {
 /// claim.discard-control / audited-discard — D-IGNORERET2=A + D-MARK-DISCARD1=A.
 #[test]
 fn audited_discard() {
-    // CAPABILITY_CLAIM: claim.discard-control / audited-discard
+    // FEATURE_CLAIM: claim.discard-control / audited-discard
     let syntax = read("crates/jet-foundation/src/Syntax/package_files.rs");
     assert!(
         syntax.contains("METHOD_DROP") || syntax.contains("\"drop\""),
@@ -289,7 +289,7 @@ fn audited_discard() {
 /// claim.prelude-control / prelude-opt-out — D-PRELUDEX1=A.
 #[test]
 fn prelude_opt_out() {
-    // CAPABILITY_CLAIM: claim.prelude-control / prelude-opt-out
+    // FEATURE_CLAIM: claim.prelude-control / prelude-opt-out
     let syntax = read("crates/jet-foundation/src/Syntax/core_surface.rs");
     let package = read("crates/jet-foundation/src/Syntax/package_files.rs");
     assert!(
@@ -328,7 +328,7 @@ fn prelude_opt_out() {
 /// claim.maturity-tags / maturity-convention — D-MARK-META1=B.
 #[test]
 fn maturity_convention() {
-    // CAPABILITY_CLAIM: claim.maturity-tags / maturity-convention
+    // FEATURE_CLAIM: claim.maturity-tags / maturity-convention
     let docs = read("docs/reference/maturity-tags.md");
     assert!(
         docs.contains("#Meta(maturity: .Experimental)")
@@ -394,7 +394,7 @@ fn maturity_convention() {
 /// claim.package-build / public-build-product — D-BUILDENTRY1 + D-BUILDQUERY1.
 #[test]
 fn public_build_product() {
-    // CAPABILITY_CLAIM: claim.package-build / public-build-product
+    // FEATURE_CLAIM: claim.package-build / public-build-product
     let example = read("examples/features/tooling/programmable_build/main.jet");
     assert!(
         example.contains("fn build(b: BuildContext)")
@@ -539,7 +539,7 @@ fn public_build_product() {
 /// refinements, contracts, taint/IFC, budgets, bounds, and replay.
 #[test]
 fn static_guarantees_shared_engine() {
-    // CAPABILITY_CLAIM: claim.static-guarantees / shared-facts-engine
+    // FEATURE_CLAIM: claim.static-guarantees / shared-facts-engine
     let src = r#"
 #Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
@@ -631,7 +631,7 @@ fn run() {
 /// claim.format-test / project-format-test — D-FMTPROJECT1 + D-TOOL4.
 #[test]
 fn project_format_and_test() {
-    // CAPABILITY_CLAIM: claim.format-test / project-format-test
+    // FEATURE_CLAIM: claim.format-test / project-format-test
     let cmd = read("Source/CmdCompile.rs");
     assert!(
         cmd.contains("JET_UPDATE_SNAPSHOTS")

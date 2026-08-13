@@ -9,26 +9,26 @@ full expert control behind explicit opt-in. You write Jet; the compiler checks
 everything in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
-<!-- Stable IDs bind advertised claims to docs/spec/capability-claim-manifest.json. -->
-<!-- CAPABILITY_CLAIMS:BEGIN -->
-<!-- CAPABILITY_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
-<!-- CAPABILITY_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
-<!-- CAPABILITY_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
-<!-- CAPABILITY_CLAIM: claim.tier-parity | AOT, JIT, interpreter, and web share one Prelude/CoreLib meaning (I9/R12); engines only marshal and call it. -->
-<!-- CAPABILITY_CLAIM: claim.static-guarantees | Static guarantees share one facts model. -->
-<!-- CAPABILITY_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
-<!-- CAPABILITY_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
-<!-- CAPABILITY_CLAIM: claim.maturity-tags | Maturity is declared without runtime ambiguity. -->
-<!-- CAPABILITY_CLAIM: claim.generic-modules | Modules instantiate with types and closed Bool, Int, Char, String, or fieldless-enum values. -->
-<!-- CAPABILITY_CLAIM: claim.metaprogramming | Generated source re-enters Jet semantics. -->
-<!-- CAPABILITY_CLAIM: claim.embedded | Target machines produce embedded artifacts. -->
-<!-- CAPABILITY_CLAIM: claim.adaptive-runtime | Runtime policy consumes measured environment facts. -->
-<!-- CAPABILITY_CLAIM: claim.logic-programming | Jet exposes a bounded logic subset. -->
-<!-- CAPABILITY_CLAIM: claim.structural-merge | Programs merge by semantic identity. -->
-<!-- CAPABILITY_CLAIM: claim.proof-replay | Proof and replay share typed facts. -->
-<!-- CAPABILITY_CLAIM: claim.performance-budgets | Budgets enforce pinned expectations. -->
-<!-- CAPABILITY_CLAIM: claim.product-boundaries | jet, jetpack, and jetos have canonical owners. -->
-<!-- CAPABILITY_CLAIMS:END -->
+<!-- Stable IDs bind advertised claims to docs/spec/feature-claim-manifest.json. -->
+<!-- FEATURE_CLAIMS:BEGIN -->
+<!-- FEATURE_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
+<!-- FEATURE_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
+<!-- FEATURE_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
+<!-- FEATURE_CLAIM: claim.tier-parity | AOT, JIT, interpreter, and web share one Prelude/CoreLib meaning (I9/R12); engines only marshal and call it. -->
+<!-- FEATURE_CLAIM: claim.static-guarantees | Static guarantees share one facts model. -->
+<!-- FEATURE_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
+<!-- FEATURE_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
+<!-- FEATURE_CLAIM: claim.maturity-tags | Maturity is declared without runtime ambiguity. -->
+<!-- FEATURE_CLAIM: claim.generic-modules | Modules instantiate with types and closed Bool, Int, Char, String, or fieldless-enum values. -->
+<!-- FEATURE_CLAIM: claim.metaprogramming | Generated source re-enters Jet semantics. -->
+<!-- FEATURE_CLAIM: claim.embedded | Target machines produce embedded artifacts. -->
+<!-- FEATURE_CLAIM: claim.adaptive-runtime | Runtime policy consumes measured environment facts. -->
+<!-- FEATURE_CLAIM: claim.logic-programming | Jet exposes a bounded logic subset. -->
+<!-- FEATURE_CLAIM: claim.structural-merge | Programs merge by semantic identity. -->
+<!-- FEATURE_CLAIM: claim.proof-replay | Proof and replay share typed facts. -->
+<!-- FEATURE_CLAIM: claim.performance-budgets | Budgets enforce pinned expectations. -->
+<!-- FEATURE_CLAIM: claim.product-boundaries | jet, jetpack, and jetos have canonical owners. -->
+<!-- FEATURE_CLAIMS:END -->
 
 Live development status and work order are in [Tower](docs/README.md); the
 [roadmap](docs/spec/roadmap.md) records verified history and durable program

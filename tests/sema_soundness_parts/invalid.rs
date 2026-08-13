@@ -1,6 +1,6 @@
 #[test]
 fn exact_invalid_corpus_rejects_in_jet() {
-    // CAPABILITY_CLAIM: claim.native-language / invalid-front-end-boundary
+    // FEATURE_CLAIM: claim.native-language / invalid-front-end-boundary
     let filter = case_filter();
     let selected = selected_cases("invalid", filter.as_deref());
     require_lane_selection("invalid", filter.as_deref(), selected.len());

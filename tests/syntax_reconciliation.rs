@@ -330,7 +330,7 @@ fn old_binding_migration_paths_stay_removed() {
 
 #[test]
 fn syntax_status_matrix_covers_unbuilt_notes() {
-    // CAPABILITY_CLAIM: claim.syntax-law / syntax-matrix
+    // FEATURE_CLAIM: claim.syntax-law / syntax-matrix
     let spec = fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
     assert!(spec.contains("A ratified entry may sit unbuilt **only** when gated on"));
 

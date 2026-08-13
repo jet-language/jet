@@ -1156,7 +1156,7 @@ Leo hits two errors in one afternoon. One says a value needs a write capability 
 // Same word, two shipped diagnostic families:
 // E07xx: "the loop takes the write capability (&) for items"   <- borrowing
 // E0711: "the Capability handle escapes the #Grant region"     <- authority
-// plus: capability-claim-manifest.json, card #1499 "Capability ledger",
+// plus: feature-claim-manifest.json, card #1499 "Capability ledger",
 // card #422 "Remote builders: capability model"
 ```
 

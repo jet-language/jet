@@ -1,6 +1,6 @@
 #[test]
 fn valid_corpus_reaches_rustc() {
-    // CAPABILITY_CLAIM: claim.native-language / valid-native-execution
+    // FEATURE_CLAIM: claim.native-language / valid-native-execution
     let filter = case_filter();
     let selected = selected_cases("valid", filter.as_deref());
     require_lane_selection("valid", filter.as_deref(), selected.len());
@@ -34,7 +34,7 @@ fn valid_corpus_reaches_rustc() {
 /// I1 check, applied across the whole soundness corpus.
 #[test]
 fn generated_rust_has_no_unaudited_unsafe() {
-    // CAPABILITY_CLAIM: claim.native-language / safe-codegen-boundary
+    // FEATURE_CLAIM: claim.native-language / safe-codegen-boundary
     let filter = case_filter();
     let mut selected = selected_cases("valid", filter.as_deref());
     selected.extend(selected_cases("differential", filter.as_deref()));

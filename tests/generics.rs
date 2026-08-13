@@ -34,7 +34,7 @@ fn run() {
 
 #[test]
 fn generic_modules_complete_instantiation() {
-    // CAPABILITY_CLAIM: claim.generic-modules / complete-instantiation
+    // FEATURE_CLAIM: claim.generic-modules / complete-instantiation
     let complete = include_str!("../examples/features/modules/generic_modules.jet");
     let compiled = jet::compile(complete)
         .unwrap_or_else(|diags| panic!("closed generic-module surface failed: {diags:#?}"));

@@ -316,7 +316,7 @@ fn readme_subcommands_exist_in_cli() {
 // ---------------------------------------------------------------------------
 #[test]
 fn every_feature_example_has_expected_output() {
-    // CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs
+    // FEATURE_CLAIM: claim.examples-spec / expected-output-pairs
     let root = root();
     let ex_dir = root.join("examples/features");
     let expected_dir = ex_dir.join("expected");
@@ -923,43 +923,43 @@ fn dependency_scanner_accepts_commented_headers_and_rejects_junk() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 9: E3 capability claims stay bound to executable proof
+// Check 9: E3 feature claims stay bound to executable proof
 // ---------------------------------------------------------------------------
 #[test]
-fn epoch3_capability_manifest_is_current_and_owned() {
+fn epoch3_feature_manifest_is_current_and_owned() {
     let root = root();
     let output = Command::new("node")
-        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("scripts/agent/check-feature-ledger.mjs")
         .arg("--check")
         .arg("--tower")
         .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
-        .expect("node must run the capability-ledger checker");
+        .expect("node must run the feature-ledger checker");
 
     assert!(
         output.status.success(),
-        "capability ledger rejected:\nstdout:\n{}\nstderr:\n{}",
+        "feature ledger rejected:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
 #[test]
-fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
+fn epoch3_feature_manifest_rejects_hostile_real_card_fixtures() {
     let root = root();
     let output = Command::new("node")
-        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("scripts/agent/check-feature-ledger.mjs")
         .arg("--hostile-fixtures")
         .arg("--tower")
         .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
-        .expect("node must run the capability-claim hostile fixtures");
+        .expect("node must run the feature-claim hostile fixtures");
 
     assert!(
         output.status.success(),
-        "capability-claim hostile fixtures failed:\nstdout:\n{}\nstderr:\n{}",
+        "feature-claim hostile fixtures failed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const MANIFEST_PATH = join(ROOT, "docs/spec/capability-claim-manifest.json");
-const REGISTRY_PATH = join(ROOT, "docs/reference/capability-claims.md");
+const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claim-manifest.json");
+const REGISTRY_PATH = join(ROOT, "docs/reference/feature-claims.md");
 const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/capability-ledger-report.json");
-const FIXTURES_PATH = join(ROOT, "tests/fixtures/capability-claims/hostile-cases.json");
+const FIXTURES_PATH = join(ROOT, "tests/fixtures/feature-claims/hostile-cases.json");
 const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
 const DEFAULT_HISTORY_PATH = join(ROOT, ".tower/history.json");
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
@@ -69,8 +69,8 @@ function declarationClaims(overrides) {
   const found = [];
   for (const path of PUBLIC_DECLARATION_FILES) {
     const text = fileText(path, overrides);
-    const begin = "CAPABILITY_CLAIMS:BEGIN";
-    const end = "CAPABILITY_CLAIMS:END";
+    const begin = "FEATURE_CLAIMS:BEGIN";
+    const end = "FEATURE_CLAIMS:END";
     const beginAt = text.indexOf(begin);
     const endAt = text.indexOf(end);
     if (beginAt < 0 || endAt < 0 || beginAt >= endAt || text.indexOf(begin, beginAt + begin.length) >= 0 || text.indexOf(end, endAt + end.length) >= 0) {
@@ -82,7 +82,7 @@ function declarationClaims(overrides) {
     const block = text.slice(blockStart + 1, blockEnd + 1);
     for (const line of block.split(/\r?\n/)) {
       if (!line.trim()) continue;
-      const match = line.match(/CAPABILITY_CLAIM:\s*(claim\.[a-z0-9-]+)\s*\|\s*([^<\n]+?)(?:\s*-->|\s*$)/);
+      const match = line.match(/FEATURE_CLAIM:\s*(claim\.[a-z0-9-]+)\s*\|\s*([^<\n]+?)(?:\s*-->|\s*$)/);
       if (!match || !match[2].trim().endsWith(".")) {
         throw new Error(`unmarked broad claim declaration in ${path}: ${line.trim()}`);
       }
@@ -226,7 +226,7 @@ function validateCommand(command, proven, claimId, laneId) {
   if (proven) {
     const testPath = join(ROOT, "tests", `${command[3]}.rs`);
     if (!existsSync(testPath)) throw new Error(`proven acceptance test does not exist: ${relative(ROOT, testPath)}`);
-    const marker = `CAPABILITY_CLAIM: ${claimId} / ${laneId}`;
+    const marker = `FEATURE_CLAIM: ${claimId} / ${laneId}`;
     const body = rustTestBody(testBinarySource(testPath), command[4]);
     if (!body.includes(marker)) {
       throw new Error(`exact acceptance test body lacks lane marker ${marker}`);
@@ -374,7 +374,7 @@ function validateCurrent(towerPath, writeReport = false) {
     writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
   } else {
     const recorded = readJson(REPORT_PATH);
-    if (stable(recorded) !== stable(report)) throw new Error("compact capability report drifted; review manifest/board then regenerate");
+    if (stable(recorded) !== stable(report)) throw new Error("compact feature report drifted; review manifest/board then regenerate");
   }
   return { manifest, board, report };
 }
@@ -454,7 +454,7 @@ function hostileFixtures(towerPath) {
       case "unmarked-broad-claim": {
         const path = "README.md";
         const text = fileText(path);
-        overrides.set(path, text.replace("<!-- CAPABILITY_CLAIMS:END -->", "<!-- Jet replaces every database without limits. -->\n<!-- CAPABILITY_CLAIMS:END -->"));
+        overrides.set(path, text.replace("<!-- FEATURE_CLAIMS:END -->", "<!-- Jet replaces every database without limits. -->\n<!-- FEATURE_CLAIMS:END -->"));
         break;
       }
       default:
@@ -482,7 +482,7 @@ function main() {
     process.stdout.write(`wrote ${relative(ROOT, REPORT_PATH)}\n`);
   } else if (args.includes("--check")) {
     validateCurrent(boardPath);
-    process.stdout.write("capability claims: explicit, owned, and current\n");
+    process.stdout.write("feature claims: explicit, owned, and current\n");
   } else if (args.includes("--verify-focused")) {
     verifyFocused(boardPath);
   } else if (args.includes("--hostile-fixtures")) {
@@ -491,7 +491,7 @@ function main() {
     refreshDigests(boardPath);
     process.stdout.write(`refreshed normalized decisive-content digests in ${relative(ROOT, MANIFEST_PATH)}\n`);
   } else {
-    throw new Error("usage: check-capability-ledger.mjs --refresh-digests|--generate-report|--check|--verify-focused|--hostile-fixtures [--tower PATH]");
+    throw new Error("usage: check-feature-ledger.mjs --refresh-digests|--generate-report|--check|--verify-focused|--hostile-fixtures [--tower PATH]");
   }
 }
 

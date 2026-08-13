@@ -17,7 +17,7 @@ const AUDITED: &[u64] = &[
 
 #[test]
 fn canonical_product_ownership_is_split() {
-    // CAPABILITY_CLAIM: claim.product-boundaries / canonical-product-split
+    // FEATURE_CLAIM: claim.product-boundaries / canonical-product-split
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root_manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
     let driver_manifest =

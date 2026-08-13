@@ -69,7 +69,7 @@ All replacement binaries stayed below 900 seconds in the final inventory. The em
 | `canvas` | FAIL | 8.603 | test result: FAILED. 63 passed; 15 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.65s  |
 | `canvas_scenarios` | FAIL | 1.632 | test result: FAILED. 44 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s  |
 | `capabilities` | PASS | 1.197 | test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s  |
-| `capability_acceptance` | PASS | 147.988 | test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.01s  |
+| `feature_acceptance` | PASS | 147.988 | test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 147.01s  |
 | `cffi` | FAIL | 5.661 | test result: FAILED. 54 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.75s  |
 | `cffi_native_matrix` | FAIL | 0.912 | test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s  |
 | `cli` | FAIL | 307.782 | test result: FAILED. 13 passed; 9 failed; 0 ignored; 0 measured; 0 filtered out; finished in 306.81s  |
