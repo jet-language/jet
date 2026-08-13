@@ -756,11 +756,11 @@ fn run() {
 /// JetMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_builtin_methods() {
-    if !have_rustc() {
-        return;
-    }
     let src = "\
 fn run() {
+    probe := [String: Int].{ "k": 41 }
+    print(probe.add(\"k\", 5) ?? 0)
+    print(probe.add(\"new\", 9) ?? -99)
     m := [String: Int].{}
     print(m.add(\"banana\", 3) ?? 0)
     print(m.add(\"apple\", 5) ?? 0)
@@ -777,9 +777,11 @@ fn run() {
     print(vs.len())
 }
 ";
-    let (code, stdout) = build_and_run("tir_map_builtins", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n");
+    assert_tiers_agree(
+        "tir_map_builtins",
+        src,
+        "41\n-99\n0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n",
+    );
 }
 
 /// D-ONCE-VERB1=A: every collection's removal operation returns the removed

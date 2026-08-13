@@ -489,7 +489,10 @@ impl LowerCtx<'_, '_> {
                 } if self.meta.result_option_target(name)
             ),
             TExprKind::BuiltinMethod { op, recv, .. } => match op {
-                TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
+                // Map hosts return result-arena Option handles for both get and add.
+                TBuiltinOp::GetMap | TBuiltinOp::InsertMap => {
+                    matches!(&recv.ty, Type::Map { .. })
+                }
                 TBuiltinOp::First | TBuiltinOp::Last => {
                     Self::receiver_is(&recv.ty, "SortedSet")
                 }
