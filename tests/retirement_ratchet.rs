@@ -39,6 +39,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("manifest-identity", 7),
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
+    ("comptime-mark", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -199,6 +200,26 @@ fn writes_interpolation_selector(text: &str, retired: bool) -> bool {
     scan(&tokens, retired)
 }
 
+fn has_retired_comptime_mark(tokens: &[jet::Lexer::Token]) -> bool {
+    for token in tokens {
+        if matches!(&token.kind, jet::Lexer::TokKind::Dollar) {
+            return true;
+        }
+        let jet::Lexer::TokKind::Str(parts) = &token.kind else {
+            continue;
+        };
+        for part in parts {
+            let jet::Lexer::StrTokPart::Interp(inner) = part else {
+                continue;
+            };
+            if has_retired_comptime_mark(inner) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Files on the retired form and files on the canonical form, for one row.
 fn tally(row: &Retirement) -> (usize, usize) {
     match row.id {
@@ -253,6 +274,30 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if has_retired {
                     retired += 1;
                 } else if writes_interpolation_selector(&text, false) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "comptime-mark" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                let (tokens, lex_diags) = jet::Lexer::lex(&text);
+                if !lex_diags.is_empty() {
+                    continue;
+                }
+                let old = has_retired_comptime_mark(&tokens);
+                let current = tokens.iter().any(|token| {
+                    matches!(&token.kind, jet::Lexer::TokKind::Ident(name) if name.starts_with(jet::Syntax::COMPTIME_MARK))
+                });
+                if old {
+                    retired += 1;
+                } else if current {
                     canonical += 1;
                 }
             }

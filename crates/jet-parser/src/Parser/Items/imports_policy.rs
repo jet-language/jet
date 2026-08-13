@@ -1104,7 +1104,7 @@ impl<'a> Parser<'a> {
                     TokKind::Ident(n) if n == Syntax::KW_MARKER && self.at_marker_decl() => {
                         self.marker_decl().map(Item::MarkerDecl)
                     }
-                    // D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` — a
+                    // D-FACTDECL1=A: `fact Name(@holds: …, @safe: …, …)` — a
                     // non-code registry declaration with the shared parameter shape.
                     TokKind::Ident(n) if n == Syntax::KW_FACT && self.at_fact_decl() => {
                         self.fact_decl().map(Item::FactDecl)
@@ -1181,16 +1181,20 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_known_lead() => {
                         self.comptime_def().map(Item::Const)
                     }
-                    // D-META-STAGE1=B: a top-level `$name :: expr` binding.
+                    // D-META-STAGE1=B: a top-level `@name :: expr` binding.
                     TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
                         self.comptime_def().map(Item::Const)
+                    }
+                    TokKind::Dollar => {
+                        let span = self.bump().span;
+                        Err(self.retired_comptime_mark(span))
                     }
                     TokKind::At => {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(
                             "E0063",
                             "applied rules use `#`, not `@`".to_string(),
-                            "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
+                            "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)".to_string(),
                             "replace the leading `@` with `#`".to_string(),
                             Some(t.span),
                         ));

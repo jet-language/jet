@@ -58,7 +58,7 @@ fn declaration(line: &str) -> AppliedRule {
             .split_once(':')
             .unwrap_or_else(|| panic!("marker parameter without `:` in {line}: {entry}"));
         let (label, value) = (label.trim(), value.trim());
-        if let Some(fact) = label.strip_prefix('$') {
+        if let Some(fact) = label.strip_prefix(crate::Syntax::COMPTIME_MARK) {
             match fact {
                 "sites" => sites = list(value).iter().map(|item| site(item, line)).collect(),
                 "scopes" => scopes = list(value).iter().map(|item| scope(item, line)).collect(),
@@ -68,7 +68,7 @@ fn declaration(line: &str) -> AppliedRule {
                 "resolution" => resolution = rule_resolution(value, line),
                 "companion" => {
                     let parts = list(value);
-                    assert_eq!(parts.len(), 2, "`$companion` reads `[Rule, .Site]` in {line}");
+                    assert_eq!(parts.len(), 2, "`@companion` reads `[Rule, .Site]` in {line}");
                     companion_site = Some(CompanionSite {
                         rule: leak(parts[0]),
                         site: site(parts[1], line),

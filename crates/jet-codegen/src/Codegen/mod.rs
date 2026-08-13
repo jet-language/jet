@@ -3299,7 +3299,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
-/// active target OS is Linux. `used_core` is collected before `$if
+/// active target OS is Linux. `used_core` is collected before `@if
 /// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is

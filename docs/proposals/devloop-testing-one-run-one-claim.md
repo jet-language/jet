@@ -79,7 +79,7 @@ Five sibling first-principles audits ratified this month, and each one owns a ra
 | `jet test --json` and live dev output | D-REPORT-MACHINE1=A | one self-contained JSON report object per line, streamed as they happen — "live test runs and the dev loop included" is its own wording |
 | `.expect_fail(E…)` asserting a stop | D-FAIL-BREACH1=A | tests assert a specific registered stop code |
 | ambient `case` binding in `.cases` | D-FAIL-BIND1=A precedent | ambient `err` inside a fallback, no lambda — the same no-ceremony binding shape |
-| project switches (refuse doctests, pin modes) | D-CONF-KEY1=A, D-CONF-READ1=A | declared typed settings in `package.jet` (`settings: .{ … }`), read anywhere via the one `$build.settings.*` splice |
+| project switches (refuse doctests, pin modes) | D-CONF-KEY1=A, D-CONF-READ1=A | declared typed settings in `package.jet` (`settings: .{ … }`), read anywhere via the one `@build.settings.*` splice |
 | new members `.measure`, `.cases` | D-DOTSCOPE1=B | members are the only spelling for scope vocabulary; "each addition is an API decision, not a syntax one" |
 | REPL lines, notebook cells, script files | D-ENTRY-SCRIPT1=B | bare code under one entry law — the session's attachment substrate |
 | `assert`/`assert_eq` rich diff | D-CORE-PRELUDE1=A | prelude assertions with structural diff (the D-CLAIM-WORD1 ballot resolves the word) |
@@ -333,7 +333,7 @@ Every magic default keeps its three exits:
 | Magic | See it | Spell it | Refuse it |
 |-------|--------|----------|-----------|
 | dev auto-detect (resident vs re-run) | the `[hot-swap]`/`[restart]` lines name the choice and reason | `--swap` or `--restart` pins the mode; `--interpret` pins the tier | pinning a mode is the refusal of auto-detect; `--watch=off` refuses the loop itself |
-| claim discovery | `jet test --list` (proposed) | `--filter=`, `-p member` | no refusal exists today; proposed on the D-CONF rails: `settings: .{ testing: .{ doctests: Bool = true } }` in `package.jet`, read via `$build.settings.*` |
+| claim discovery | `jet test --list` (proposed) | `--filter=`, `-p member` | no refusal exists today; proposed on the D-CONF rails: `settings: .{ testing: .{ doctests: Bool = true } }` in `package.jet`, read via `@build.settings.*` |
 | build/run caching | `jet explain-build` (D-BUILDQUERY1=A) | pinned profiles | `--no-cache` (D-BUILDCACHE1=A) |
 | tier selection | `--trace-tiers` | `jet build` for pure AOT | no exit by ratified choice — deopt is silent (D-LENS-RUN2=A); `jet build` sidesteps the tier choice entirely |
 | affected-only watch re-run | the "N claims re-run (affected)" line | plain `jet test` for the full suite | proposed: `--watch --all` re-runs the full suite on every change |

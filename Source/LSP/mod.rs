@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn compiler_layout_fact_lsp_surface_is_visible_and_fixed() {
-        let src = "struct Packet { count: Int }\nderive T.LayoutFacts { info :: T.$layout }\nfn run() {}\n";
+        let src = "struct Packet { count: Int }\nderive T.LayoutFacts { info :: T.@layout }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(
             diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
@@ -262,7 +262,7 @@ mod tests {
         );
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
-        let layout_offset = src.find("$layout").expect("layout fact") + 2;
+        let layout_offset = src.find("@layout").expect("layout fact") + 2;
         let completions = compute_completions(
             &db,
             src,
@@ -273,7 +273,7 @@ mod tests {
         );
         assert!(
             completions.iter().any(|item| {
-                item.label == "$layout"
+                item.label == "@layout"
                     && item.detail.as_deref() == Some("compiler fact: LayoutInfo")
             }),
             "compiler fact completion missing: {}",
@@ -288,16 +288,16 @@ mod tests {
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
         let hover = compute_hover(&db, &tokens, src, project.entry(), layout_offset)
             .expect("layout fact hover");
-        assert!(hover.contains("$layout"), "{hover}");
+        assert!(hover.contains("@layout"), "{hover}");
 
         // Definition lookup is driven by the receiver type. The compiler
         // accepts the focused fact on the derive type parameter `T`; use the
         // same resolver with a concrete receiver to prove navigation lands on
         // that type declaration.
-        let navigation_src = "struct Packet { count: Int }\nfn run() { info :: Packet.$layout }\n";
+        let navigation_src = "struct Packet { count: Int }\nfn run() { info :: Packet.@layout }\n";
         let (navigation_tokens, navigation_diagnostics) = crate::Lexer::lex(navigation_src);
         assert!(navigation_diagnostics.is_empty(), "{navigation_diagnostics:#?}");
-        let navigation_offset = navigation_src.find("$layout").expect("layout fact") + 2;
+        let navigation_offset = navigation_src.find("@layout").expect("layout fact") + 2;
         let (definition_path, definition_span) = compute_definition(
             &db,
             &navigation_tokens,
@@ -317,7 +317,7 @@ mod tests {
             "Other",
         )
         .expect_err("compiler facts are not renameable");
-        assert!(rename_error.contains("compiler-owned $layout"), "{rename_error}");
+        assert!(rename_error.contains("compiler-owned @layout"), "{rename_error}");
     }
 
     #[test]

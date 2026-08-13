@@ -21,7 +21,7 @@ pub use core_calls::{
     apply_impure_core_call_with_type, data_status_rows, display_core_pure_value,
     eval_regex_replace_all_with,
 };
-pub use dispatch::apply_dollar_splices;
+pub use dispatch::apply_at_splices;
 /// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;

@@ -3,7 +3,7 @@ Error [E0988]: named loops use `::`, not `@`
     |
   2 |     outer@ loop i, [1, 2, 3] {
     |     ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Why: prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)
  Fix: write `outer :: loop { … }`
 
 Error [E0988]: named loop exits use target arguments
@@ -11,7 +11,7 @@ Error [E0988]: named loop exits use target arguments
     |
   3 |         break outer@
     |               ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Why: prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)
  Fix: write `break(outer)`
 
 Error [E0988]: named loops use `::`, not `@`
@@ -19,7 +19,7 @@ Error [E0988]: named loops use `::`, not `@`
     |
   8 |     outer@ loop i, [1, 2, 3] {
     |     ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Why: prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)
  Fix: write `outer :: loop { … }`
 
 Error [E0988]: named loop exits use target arguments
@@ -27,37 +27,21 @@ Error [E0988]: named loop exits use target arguments
     |
   9 |         next outer@
     |              ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Why: prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)
  Fix: write `next(outer)`
 
-Error [E0988]: named loops use `::`, not `@`
-  --> tests/ui/loop_label_prefix_old_form.jet:14:5
+Error [E0003]: something unexpected appeared after this line, found the keyword `loop`
+  --> tests/ui/loop_label_prefix_old_form.jet:14:12
     |
  14 |     @outer loop {
-    |     ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
- Fix: write `outer :: loop { … }`
+    |            ^^^^
+ Why: each line ends where the line break is (no `;` needed)
+ Fix: put the next line of code on a new line
 
-Error [E0988]: named loop exits use target arguments
-  --> tests/ui/loop_label_prefix_old_form.jet:15:15
-    |
- 15 |         break @outer
-    |               ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
- Fix: write `break(outer)`
-
-Error [E0988]: named loops use `::`, not `@`
-  --> tests/ui/loop_label_prefix_old_form.jet:20:5
+Error [E0003]: something unexpected appeared after this line, found the keyword `loop`
+  --> tests/ui/loop_label_prefix_old_form.jet:20:12
     |
  20 |     @outer loop {
-    |     ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
- Fix: write `outer :: loop { … }`
-
-Error [E0988]: named loop exits use target arguments
-  --> tests/ui/loop_label_prefix_old_form.jet:21:14
-    |
- 21 |         next @outer
-    |              ^^^^^^
- Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
- Fix: write `next(outer)`
+    |            ^^^^
+ Why: each line ends where the line break is (no `;` needed)
+ Fix: put the next line of code on a new line

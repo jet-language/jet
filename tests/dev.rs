@@ -4128,7 +4128,7 @@ derive T.Access {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn make(value: ^$param) => $name<$param> {{ return $name<$param>.{{ value: value }} }} fn marker() => Int {{ return 17 }} fn get_value(self) => $param {{ return ~self.value }} fn type_name(self) => String {{ return \"$name\" }} }}")
+    emit("impl @name {{ fn make(value: ^@param) => @name<@param> {{ return @name<@param>.{{ value: value }} }} fn marker() => Int {{ return 17 }} fn get_value(self) => @param {{ return ~self.value }} fn type_name(self) => String {{ return \"@name\" }} }}")
 }
 
 derive T.NumericAccess {
@@ -4136,13 +4136,13 @@ derive T.NumericAccess {
     name :: info.name
     param :: info.type_params[0].name
     emit("""
-impl $name {{
-    fn replace(&self, value: ^$param) => $param {{
+impl @name {{
+    fn replace(&self, value: ^@param) => @param {{
         self.value = value
         return ~self.value
     }}
-    fn plus(self, rhs: $param) => $param {{ return self.value + rhs }}
-    fn equal_to(self, rhs: $param) => Bool {{ return self.value == rhs }}
+    fn plus(self, rhs: @param) => @param {{ return self.value + rhs }}
+    fn equal_to(self, rhs: @param) => Bool {{ return self.value == rhs }}
 }}
 """)
 }
@@ -4257,7 +4257,7 @@ fn run() {
 derive T.GenericMethod {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn keep<T>(self, value: ^T) => T {{ return value }} }}")
+    emit("impl @name {{ fn keep<T>(self, value: ^T) => T {{ return value }} }}")
 }
 #GenericMethod
 struct Shadow<T: Printable> { value: T }
@@ -4311,7 +4311,7 @@ derive T.Access {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn get_value(self) => $param {{ return ~self.value }} }}")
+    emit("impl @name {{ fn get_value(self) => @param {{ return ~self.value }} }}")
 }
 
 #Access
@@ -6662,12 +6662,12 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     }
 
     let source = r#"
-$f32_nan :: F32.NAN
-$f32_inf :: F32.INFINITY
-$f32_neg_inf :: F32.NEG_INFINITY
-$f64_nan :: Float.NAN
-$f64_inf :: Float.INFINITY
-$f64_neg_inf :: Float.NEG_INFINITY
+@f32_nan :: F32.NAN
+@f32_inf :: F32.INFINITY
+@f32_neg_inf :: F32.NEG_INFINITY
+@f64_nan :: Float.NAN
+@f64_inf :: Float.INFINITY
+@f64_neg_inf :: Float.NEG_INFINITY
 
 fn run() {
     print(f32_nan)

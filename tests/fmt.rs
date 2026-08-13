@@ -370,12 +370,12 @@ fn fmt_keeps_optional_return_sugar() {
 
 #[test]
 fn fmt_comptime_os_dispatch_round_trips() {
-    // D-OSTARGET2=B (ratified 2026-07-03): `$if build.os == { … }` — the
-    // OS-target dispatch. New token shape: the `$if <subject> == { }`
+    // D-OSTARGET2=B (ratified 2026-07-03): `@if build.os == { … }` — the
+    // OS-target dispatch. New token shape: the `@if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    $if build.os == {
+    @if build.os == {
         .Linux -> {
             b :: LinuxBackend.{ name: "gtk" }
             print(b.label())
@@ -387,8 +387,8 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("$if build.os == {"),
-        "expected the `$if build.os == {{` dispatch head, got:\n{out}"
+        out.contains("@if build.os == {"),
+        "expected the `@if build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. Braceless simple arms stay concise; the
     // author-written scoped arm stays braced.
@@ -1674,13 +1674,13 @@ fn fmt_keeps_parens_around_binary_receiver() {
 
 #[test]
 fn fmt_comptime_block_is_idempotent() {
-    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` formatting
+    // D-META-STAGE1=B: `@ { … }` formatting
     // round-trips — the block keyword, brace, and body all survive a second fmt.
-    let src = r#"$limit :: 1000
+    let src = r#"@limit :: 1000
 
 fn run() {
-    $ {
-        $ratio :: limit / 10
+    @ {
+        @ratio :: limit / 10
         if ratio < 1 { panic("bad") }
     }
     print("ok")
@@ -1688,7 +1688,7 @@ fn run() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept comptime block");
     assert!(
-        out.contains("$ {"),
+        out.contains("@ {"),
         "comptime block keyword + open brace must survive fmt, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
@@ -1811,37 +1811,37 @@ fn run() {
 
 #[test]
 fn fmt_comptime_splice_stability() {
-    // D-CTMARKER1=C: `$name` comptime splice is a first-class AST node
-    // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that
-    // the round-trip is stable (previously the `$` would be silently dropped
+    // D-ONCE-AT1=D: `@name` compile-time value is a first-class AST node
+    // (Expr::ComptimeName). The formatter must emit it as `@name` so that
+    // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    info :: T.reflect()\n    tname :: info.name\n    emit(\"impl $tname {{ fn tag(self) => String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
-    let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
+    let src = "derive T.Debug {\n    info :: T.reflect()\n    tname :: info.name\n    emit(\"impl @tname {{ fn tag(self) => String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept derive with @name in string");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
         once, twice,
-        "derive body with $name in emit string must be fmt-idempotent"
+        "derive body with @name in emit string must be fmt-idempotent"
     );
 
-    // Standalone `$name` expression (outside emit string) round-trips as `$name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn run() {}\n";
-    let splice_once = jet::format_source(splice_src).expect("fmt should accept $name expression");
+    // Standalone `@name` expression (outside emit string) round-trips as `@name`.
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    emit(\"impl @tname {{ }}\")\n}\n\nfn run() {}\n";
+    let splice_once = jet::format_source(splice_src).expect("fmt should accept @name expression");
     assert!(
-        splice_once.contains("$tname"),
-        "`$tname` expression must survive fmt, got:\n{splice_once}"
+        splice_once.contains("@tname"),
+        "`@tname` expression must survive fmt, got:\n{splice_once}"
     );
-    let splice_twice = jet::format_source(&splice_once).expect("$name fmt must be idempotent");
+    let splice_twice = jet::format_source(&splice_once).expect("@name fmt must be idempotent");
     assert_eq!(
         splice_once, splice_twice,
-        "`$name` expression must be fmt-idempotent"
+        "`@name` expression must be fmt-idempotent"
     );
 }
 
 #[test]
 fn fmt_layout_compiler_fact_and_field_selector_stability() {
-    let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+    let src = "derive T.LayoutFacts {\n    info :: T.@layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
     let once = jet::format_source(src).expect("layout compiler fact should parse");
-    assert!(once.contains("T.$layout"), "fact spelling was lost:\n{once}");
+    assert!(once.contains("T.@layout"), "fact spelling was lost:\n{once}");
     assert!(once.contains("info[.count]"), "typed selector spelling was lost:\n{once}");
     assert!(once.contains("T.reflect().layout"), "reflection projection was lost:\n{once}");
     let twice = jet::format_source(&once).expect("formatted layout fact should parse");
@@ -1849,24 +1849,24 @@ fn fmt_layout_compiler_fact_and_field_selector_stability() {
 }
 
 #[test]
-fn layout_compiler_fact_rejects_unknown_and_user_owned_dollar_members() {
+fn layout_compiler_fact_rejects_unknown_and_user_owned_at_members() {
     let unknown = jet::Compiler::parse_source(
-        "derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n",
+        "derive T.LayoutFacts { info :: T.@unknown }\nfn run() {}\n",
     );
     let unknown = unknown
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0302")
         .expect("unknown compiler fact should have a registered diagnostic");
-    assert!(unknown.message.contains("$unknown"), "{unknown:?}");
-    assert!(unknown.fix.contains("$layout"), "{unknown:?}");
+    assert!(unknown.message.contains("@unknown"), "{unknown:?}");
+    assert!(unknown.fix.contains("@layout"), "{unknown:?}");
 
     let user_member = jet::Compiler::parse_source(
-        "struct Bad { $layout: Int }\nfn run() {}\n",
+        "struct Bad { @layout: Int }\nfn run() {}\n",
     );
     assert!(
         user_member.diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
-        "user declarations must not claim the compiler-owned dollar member: {:?}",
+        "user declarations must not claim the compiler-owned @ member: {:?}",
         user_member.diagnostics
     );
 }
@@ -2913,7 +2913,7 @@ fn fmt_verbatim_derive_body_comment_not_duplicated() {
     // body. The next item's `emit_leading` then found that comment
     // "unconsumed" and re-emitted it a second time before `#Label struct
     // Cube` — the comment kept duplicating on every subsequent fmt pass.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) => String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    emit(\"impl @lbl {{ fn label(self) => String {{ return \\\"@lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -3143,7 +3143,7 @@ fn fmt_preserves_casing_errors_for_sema() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T, capacity: Int, label: String> {
 #Meta(category: label)
-$size :: capacity
+@size :: capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) => U { return ~value } }
 module inner = nested<T>
@@ -3364,7 +3364,7 @@ struct Widget {
     #Doc("display name") label: String
 }
 
-$limit :: 32
+@limit :: 32
 
 #Inline
 fn hot(a: Int) => Int {
@@ -3382,7 +3382,7 @@ fn run() {
     for needle in [
         "#Codable",
         "#Doc(\"display name\") label: String",
-        "$limit :: 32",
+        "@limit :: 32",
         "#Inline",
         "#Off print(\"off\")",
         "#Impure(\"reads the wall clock\") {",

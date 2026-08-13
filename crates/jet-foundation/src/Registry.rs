@@ -324,7 +324,7 @@ impl DiagnosticRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FactDeclaration {
     /// The identifier written after `fact`. A compiler namespace may publish a
-    /// dotted registry name through the `$name` column while keeping the
+    /// dotted registry name through the `@name` column while keeping the
     /// declaration ordinary Jet source.
     pub source_name: &'static str,
     pub name: &'static str,
@@ -610,13 +610,13 @@ fn fact_declaration(line: &str) -> FactDeclaration {
             .unwrap_or_else(|| panic!("fact parameter without `:` in {line}: {entry}"));
         let (label, value) = (label.trim(), value.trim());
         match label {
-            "$holds" => target = Some(fact_target(value, line)),
-            "$safe" => safe_direction = Some(fact_direction(value, line)),
-            "$gates" => gates = Some(fact_gates(value, line)),
-            "$proved_by" => published_by = Some(leak(value)),
-            "$name" => name = leak(&unquote(value, line)),
-            "$identity" => identity_bearing = fact_bool(value, line),
-            "$decision" => decision = Some(leak(&unquote(value, line))),
+            "@holds" => target = Some(fact_target(value, line)),
+            "@safe" => safe_direction = Some(fact_direction(value, line)),
+            "@gates" => gates = Some(fact_gates(value, line)),
+            "@proved_by" => published_by = Some(leak(value)),
+            "@name" => name = leak(&unquote(value, line)),
+            "@identity" => identity_bearing = fact_bool(value, line),
+            "@decision" => decision = Some(leak(&unquote(value, line))),
             other => panic!("unknown fact column `{other}` in {line}"),
         }
     }
@@ -624,12 +624,12 @@ fn fact_declaration(line: &str) -> FactDeclaration {
     FactDeclaration {
         source_name,
         name,
-        target: target.unwrap_or_else(|| panic!("fact declaration without `$holds`: {line}")),
+        target: target.unwrap_or_else(|| panic!("fact declaration without `@holds`: {line}")),
         safe_direction: safe_direction
-            .unwrap_or_else(|| panic!("fact declaration without `$safe`: {line}")),
-        gates: gates.unwrap_or_else(|| panic!("fact declaration without `$gates`: {line}")),
+            .unwrap_or_else(|| panic!("fact declaration without `@safe`: {line}")),
+        gates: gates.unwrap_or_else(|| panic!("fact declaration without `@gates`: {line}")),
         published_by,
-        decision: decision.unwrap_or_else(|| panic!("fact declaration without `$decision`: {line}")),
+        decision: decision.unwrap_or_else(|| panic!("fact declaration without `@decision`: {line}")),
         identity_bearing,
     }
 }

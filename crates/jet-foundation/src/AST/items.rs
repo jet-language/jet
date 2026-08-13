@@ -84,7 +84,7 @@ pub enum Item {
     /// parsed declaration into the runtime registry row the rest of the
     /// compiler consumes is #1457's and #1458's job.
     MarkerDecl(MarkerDecl),
-    /// D-FACTDECL1=A: `fact Name($holds: …, $safe: …, …)` declares one
+    /// D-FACTDECL1=A: `fact Name(@holds: …, @safe: …, …)` declares one
     /// non-code registry row. It erases before TIR after the registry has read
     /// the same source declaration.
     FactDecl(FactDecl),
@@ -98,7 +98,7 @@ pub struct EffectDecl {
 }
 
 /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`. The rule's own
-/// arguments and facts about the rule ($sites, $repeatable, …) share one
+/// arguments and facts about the rule (@sites, @repeatable, …) share one
 /// named-parameter list; a fact is a parameter whose name carries the
 /// compile-time sigil (`Syntax::is_comptime_name`). No `on` clause, no
 /// second parameter list, no scope block — D-META-FORM1=A rejected all
@@ -114,8 +114,8 @@ pub struct MarkerDecl {
 /// D-META-FORM1=A: one entry in a `marker Name(...)` parameter list. An
 /// ordinary entry is `name: Type [= default]` — an argument the marker's
 /// own use site supplies (`ty` carries the type, `value` an optional
-/// default). A `$`-marked entry (`Syntax::is_comptime_name(&name)`) is
-/// `$name: value` — a fixed fact about the rule itself ($sites, $repeatable,
+/// default). An `@`-marked entry (`Syntax::is_comptime_name(&name)`) is
+/// `@name: value` — a fixed fact about the rule itself (@sites, @repeatable,
 /// …), so it carries no type and `value` is always present.
 #[derive(Debug, Clone)]
 pub struct MarkerDeclParam {
@@ -124,12 +124,12 @@ pub struct MarkerDeclParam {
     pub ty: Option<Type>,
     pub value: Option<Box<Expr>>,
     /// D-VARIADIC1: `name: ...T` — the marker takes a list of arguments of this
-    /// type rather than one. Always false on a `$`-marked fact.
+    /// type rather than one. Always false on an `@`-marked fact.
     pub variadic: bool,
 }
 
 /// D-FACTDECL1=A: one `fact Name(params…)` declaration. Fact columns reuse the
-/// marker declaration parameter shape; every fact column is `$`-marked.
+/// marker declaration parameter shape; every fact column is `@`-marked.
 #[derive(Debug, Clone)]
 pub struct FactDecl {
     pub name: String,

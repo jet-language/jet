@@ -54,12 +54,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0989",
                     format!(
-                        "a `$if` condition must be {}, not another type",
+                        "an `@if` condition must be {}, not another type",
                         Type::Bool.show()
                     ),
                     "the condition selects a branch at compile time — it must be true or false"
                         .to_string(),
-                    "write a Bool known-time expression, like `$if flag { … }`"
+                    "write a Bool known-time expression, like `@if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));
@@ -68,9 +68,9 @@ impl<'a> Checker<'a> {
             Err(_) => {
                 self.diags.push(Diagnostic::error(
                     "E0989",
-                    "this `$if` condition can't be known at compile time".to_string(),
-                    "a `$if` condition must be a known-time expression — a `$` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
-                    "use a `$` binding: `$flag :: …; $if flag { … }`"
+                    "this `@if` condition can't be known at compile time".to_string(),
+                    "an `@if` condition must be a known-time expression — an `@` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
+                    "use an `@` binding: `@flag :: …; @if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));

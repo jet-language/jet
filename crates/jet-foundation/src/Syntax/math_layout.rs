@@ -562,7 +562,7 @@ pub const KW_TAG: &str = "tag";
 pub const KW_DERIVE: &str = "derive";
 
 /// D-VERDICT-1308-1: retired compile-time spelling. The lexer retains a token
-/// only so the parser can emit E0374 and offer `$`; this is not live Jet.
+/// only so the parser can emit E0374 and offer `@`; this is not live Jet.
 pub const KW_COMPTIME: &str = "comptime";
 
 /// S28: foreign trait spellings for teaching error E0022.

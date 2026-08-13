@@ -81,7 +81,7 @@ Error [E0620]: `tools.jet` is a script, so importing it is not allowed
 
 The exact rule: a file with any bare statement is a script. A script executes only as the direct target of `jet run` / `jet dev` / `jet test`. Every other consumption path — `use`, package module discovery — reports E0620. Remove the last bare statement and the file is an ordinary module; its `pub` functions import normally. The import spelling itself belongs to the open D-NAME-FILES1 slate (card #1625); this rule attaches to whichever spelling wins there.
 
-**What a script may contain (under D-ENTRY-SCRIPT1 option B, recommended).** Bare statements plus any top-level declaration: `fn`, `struct`, `#Test`, `use`, `$` constants, `#Job` fns, `fn build`, `fn dev`. Only an explicit `fn run` conflicts with bare code (E0621), because both claim the entry. Option A narrows this to `jet run` only; option C of the ordering ballot would forbid declarations entirely.
+**What a script may contain (under D-ENTRY-SCRIPT1 option B, recommended).** Bare statements plus any top-level declaration: `fn`, `struct`, `#Test`, `use`, `@` constants, `#Job` fns, `fn build`, `fn dev`. Only an explicit `fn run` conflicts with bare code (E0621), because both claim the entry. Option A narrows this to `jet run` only; option C of the ordering ballot would forbid declarations entirely.
 
 **One shared rule under both ordering options.** A bare binding is a local of the implicit `fn run` body. A top-level `fn` never sees it — otherwise scripts would grow hidden mutable globals:
 
@@ -94,12 +94,12 @@ print(total(10.0))
 ```text
 Error [E0622]: `tax` is script code, so `total` cannot use it
  Why: loose bindings live in the script body; a function sees only its parameters and file-wide declarations
- Fix: pass `tax` as a parameter, or make it a `$` constant
+ Fix: pass `tax` as a parameter, or make it a `@` constant
 ```
 
 ```jet
-$tax :: 0.2                                                // fixed: file-wide comptime constant (D-META-STAGE1=B)
-fn total(price: Float) => Float { price * (1.0 + $tax) }
+ :: 0.2                                                // fixed: file-wide comptime constant (D-META-STAGE1=B)
+fn total(price: Float) => Float { price * (1.0 + ) }
 print(total(10.0))
 ```
 

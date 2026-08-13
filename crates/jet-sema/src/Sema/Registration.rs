@@ -678,7 +678,7 @@ fn scan_stmt_for_variadic_uses(
             }
         }
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `task.group`, `#Transact`, `$ { }`, …) is out of scope
+        // `region`, `task.group`, `#Transact`, `@ { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.

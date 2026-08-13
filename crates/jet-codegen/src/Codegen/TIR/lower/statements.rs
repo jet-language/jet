@@ -1997,14 +1997,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 gc_transferred: false,
                 });
             }
-            // c109 (S57/M9.5): a comptime LOCAL `$name :: expr`. The AST `emit_let`
+            // c109 (S57/M9.5): a comptime LOCAL `@name :: expr`. The AST `emit_let`
             // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
             // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
             // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
             // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
-            // A comptime local inside a `$ { … }` block is evaluated by
+            // A comptime local inside a `@ { … }` block is evaluated by
             // the interpreter itself, so sema never pre-resolves `b.ct`. There
             // the binding is an ordinary one whose init runs now; only a
             // pre-resolved value becomes literal data.
@@ -2938,7 +2938,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             else_body,
             span,
         } => return lower_switch(subject, arms, else_body, *span, cx, env),
-        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` runs at
+        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `@ { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.

@@ -1,15 +1,15 @@
 Error [E3410]: `core.files.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
   --> tests/ui/impure_tier2_no_gate.jet:4:16
     |
-  4 |     $cfg :: fs.read("config.txt")
+  4 |     @cfg :: fs.read("config.txt")
     |                ^^^^
  Why: effectful Core APIs are not allowed in pure comptime evaluation
  Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build, or keep the call at runtime
 
-Error [E0107]: nothing named `$cfg` exists here
+Error [E0107]: nothing named `@cfg` exists here
   --> tests/ui/impure_tier2_no_gate.jet:5:13
     |
-  5 |     print("{$cfg}")
+  5 |     print("{@cfg}")
     |             ^^^^
  Why: a name must be declared before it's used
- Fix: did you mean `$cfg`?
+ Fix: did you mean `@cfg`?

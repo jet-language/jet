@@ -548,7 +548,7 @@ pub struct ProgramBundle {
     /// this build — resolved from `--target=<triple>` (host OS when absent or a
     /// web/wasm pseudo-target). Seeded by the driver right after load; defaults
     /// to the host OS for every other bundle constructor (LSP, tests). Sema's
-    /// `$if build.os == { … }` desugar reads it to fold the switch to
+    /// `@if build.os == { … }` desugar reads it to fold the switch to
     /// the arm matching this OS, and it must equal codegen's `active_os` so the
     /// selected arm's gated `impl` is the one codegen keeps.
     pub active_os: crate::OSTarget::OSTarget,

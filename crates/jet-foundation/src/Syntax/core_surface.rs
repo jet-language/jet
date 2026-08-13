@@ -93,33 +93,35 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 /// D-BIND-BARE1 retires typed bindings (`name: Type := expr`).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
-/// D-EACH1=C / D-VERDICT-1320-1: open/close a lock-step statement-expansion
+/// D-EACH1=C / D-FENCE-GLYPH1=A: open/close a lock-step statement-expansion
 /// fence. Binding fences carry plain names; expression fences carry names or
 /// expression entries.
-pub const SIGIL_FENCE_OPEN: &str = "$[";
-pub const SIGIL_FENCE_CLOSE: &str = "]$";
+pub const SIGIL_FENCE_OPEN: &str = "@[";
+pub const SIGIL_FENCE_CLOSE: &str = "]@";
 
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const MARKER_TRACK: &str = "Track";
 
-/// S57 (ratified, as amended by D-META-STAGE1=B): compile-time demand.
-/// D-META-STAGE1=B (ratified 2026-08-06, amends D-VERDICT-1308-1/2 and retires
-/// D-CTMARKER1): `$` is the one compile-time mark. It belongs to the name, so
-/// it is written at every mention — `$limit :: 1000` then `print("{$limit}")`.
-/// A bare mark opens a compile-time block (`$ { … }`) and precedes the `if` and
-/// `loop` verbs at compile time (`$if`, `$loop`). Ordinary foldable expressions
-/// need no mark. The retired `#Known` spellings teach E0377.
-pub const COMPTIME_MARK: &str = "$";
+/// S57 (ratified, as amended by D-META-STAGE1=B and D-ONCE-AT1=D): compile-time
+/// demand. The mark belongs to the name, so it is written at every mention —
+/// `@limit :: 1000` then `print("{@limit}")`. A bare mark opens a compile-time
+/// block (`@ { … }`) and precedes the `if` and `loop` verbs at compile time
+/// (`@if`, `@loop`). Ordinary foldable expressions need no mark. The retired
+/// `#Known` spellings teach E0377.
+pub const COMPTIME_MARK: &str = "@";
+/// D-ONCE-AT1=D: the retired compile-time mark. It is accepted only for the
+/// E0003 teaching diagnostic outside config surfaces.
+pub const RETIRED_COMPTIME_MARK: &str = "$";
 
 /// Is this identifier a compile-time name? The mark is part of the identifier,
 /// so a plain name and a marked name never denote the same binding.
 pub fn is_comptime_name(name: &str) -> bool {
-    name.starts_with('$')
+    name.starts_with(COMPTIME_MARK)
 }
 
 /// D-META-STAGE1=B: the retired marker spelling for compile-time demand. It is
-/// kept only so the parser can recognize it and teach the `$` mark (E0377); no
+/// kept only so the parser can recognize it and teach the `@` mark (E0377); no
 /// current Jet source writes it.
 pub const RETIRED_MARKER_KNOWN: &str = "Known";
 
@@ -528,7 +530,7 @@ pub const TARGET_OS_MACOS: &str = "MacOS";
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
-/// `build` and its `.os` field — the subject of a `$if build.os == { }`
+/// `build` and its `.os` field — the subject of an `@if build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
 /// ordinary local named `build` is still fine); a `build.os` anywhere else has
@@ -848,12 +850,12 @@ pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
 pub const TYPE_TYPE_INFO: &str = "TypeInfo";
 pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
 
-/// D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned type facts. The
-/// parser accepts these after `.` only in the contextual `$fact` form; they are
+/// D-LAYOUT-FACTS1=B / D-ONCE-AT1=D: the compiler-owned type facts. The
+/// parser accepts these after `.` only in the contextual `@fact` form; they are
 /// not user-declarable member names.
-pub const COMPILER_FACT_LAYOUT: &str = "$layout";
-pub const COMPILER_FACT_NAME: &str = "$name";
-pub const COMPILER_FACT_FIELDS: &str = "$fields";
+pub const COMPILER_FACT_LAYOUT: &str = "@layout";
+pub const COMPILER_FACT_NAME: &str = "@name";
+pub const COMPILER_FACT_FIELDS: &str = "@fields";
 /// Each compiler fact and the `TypeInfo` member it projects.
 pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_LAYOUT, "layout"),
@@ -878,7 +880,7 @@ pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
     )
 }
 
-/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
+/// Internal AST spelling for the typed selector in `T.@layout[.field]`.
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST
 /// variant for a compile-time-only projection. It is never formatted as this
 /// sentinel and never appears in generated Jet source.

@@ -481,7 +481,7 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// c109 (S57/M9.5): a comptime LOCAL `$name :: expr` in a function body. Sema
+/// c109 (S57/M9.5): a comptime LOCAL `@name :: expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
 /// (`let __jet_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
@@ -500,9 +500,9 @@ fn build() => [Int] {
     return xs
 }
 fn run() {
-    $xs :: build()
-    print(\"{$xs}\")
-    print(\"{$xs[1]}\")
+    @xs :: build()
+    print(\"{@xs}\")
+    print(\"{@xs[1]}\")
 }
 ";
     let (code, stdout) = build_and_run("tir_comptime_local", src);
@@ -688,8 +688,8 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`$pair_value :: Pair{…}`;
-/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`$light_value ::
+/// c109: a field read off a comptime-const STRUCT value (`@pair_value :: Pair{…}`;
+/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`@light_value ::
 /// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
 /// Rust value; the field read / comparison uses the canonical Equatable hook.
 /// `main` routes through the TIR; runs to the round-trip output.
@@ -709,17 +709,17 @@ enum Light {
     Green
 }
 
-$pair_value :: Pair.{left: 7, right: \"seven\"}
-$light_value :: Light.Green
+@pair_value :: Pair.{left: 7, right: \"seven\"}
+@light_value :: Light.Green
 
 fn run() {
     p :: Pair.{left: 7, right: \"seven\"}
     l :: Light.Green
-    print(\"{$pair_value.left}\")
+    print(\"{@pair_value.left}\")
     print(\"{p.left}\")
-    print(\"{$pair_value.right}\")
+    print(\"{@pair_value.right}\")
     print(\"{p.right}\")
-    print(\"{$light_value == Light.Green}\")
+    print(\"{@light_value == Light.Green}\")
     print(\"{l == Light.Green}\")
 }
 ";

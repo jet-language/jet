@@ -81,7 +81,9 @@ The law is enforced, not only written. Every row in the one fact registry states
 its safe direction and its gate words, and a drift guard fails a row that states
 neither (D-FACT-LAW1=B). Every gate lands in one ledger, read by
 `jet inspect gates` (D-FACT-GATE1=A). Every registered fact is read with one
-mark, `T.$range`, `f.$effects`, `$build.profile` (D-FACT-READ1=A).
+mark, `T.@range`, `f.@effects`, `@build.profile` (D-FACT-READ1=A, amended by
+D-ONCE-AT1=D, which supersedes the former prefix `$` spelling while preserving
+infix `@` package references).
 
 Two walls stand on purpose. The borrow checker is a **prover**, never a plane:
 alias and flow analysis over places cannot be a fold of per-operation rules, so

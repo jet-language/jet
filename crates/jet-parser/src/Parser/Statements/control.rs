@@ -455,7 +455,7 @@ impl<'a> Parser<'a> {
         let Some(i) = self.meta_attr_next_index() else {
             return false;
         };
-        // D-META-STAGE1=B: `#Meta(...) $name :: …` is a marked compile-time
+        // D-META-STAGE1=B: `#Meta(...) @name :: …` is a marked compile-time
         // binding; the retired `#Known` lead still routes here to teach.
         if matches!(
             self.toks.get(i).map(|t| &t.kind),
@@ -1584,14 +1584,14 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::KwComptime => {
-                // D-WHEN1 (ratified 2026-06-19): `$if <cond> { … }` is
+                // D-WHEN1 (ratified 2026-06-19): `@if <cond> { … }` is
                 // a compile-time conditional — not a binding. Detect by peeking
                 // at the second token; `comptime NAME` is always a binding.
                 if matches!(self.peek2().kind, TokKind::KwIf) {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
-                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` block.
+                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `@ { … }` block.
                 if matches!(self.peek2().kind, TokKind::LBrace) {
                     let stmt = self.comptime_block_stmt()?;
                     return Ok(stmt);
@@ -1611,9 +1611,9 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // D-META-STAGE1=B: the bare mark opens a compile-time block and
+            // D-ONCE-AT1=D: the bare `@` mark opens a compile-time block and
             // precedes the `if` and `loop` verbs at compile time.
-            TokKind::Dollar => {
+            TokKind::At => {
                 if matches!(self.peek2().kind, TokKind::KwIf) {
                     return self.comptime_if_stmt();
                 }
@@ -1621,6 +1621,10 @@ impl<'a> Parser<'a> {
                     return self.comptime_loop_stmt();
                 }
                 self.comptime_block_stmt()
+            }
+            TokKind::Dollar => {
+                let span = self.bump().span;
+                Err(self.retired_comptime_mark(span))
             }
             TokKind::Ident(n) if false && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();
@@ -1803,7 +1807,7 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0988",
                             "named loop exits use target arguments".to_string(),
-                            "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                            "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                                 .to_string(),
                             format!("write `break({name})`"),
                             Some(Span::new(name_span.start, end)),
@@ -1819,7 +1823,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0988",
                         "named loop exits use target arguments".to_string(),
-                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                        "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                             .to_string(),
                         format!("write `break({name})`"),
                         Some(Span::new(at_span.start, name_span.end)),
@@ -1862,7 +1866,7 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0988",
                             "named loop exits use target arguments".to_string(),
-                            "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                            "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                                 .to_string(),
                             format!("write `next({name})`"),
                             Some(Span::new(name_span.start, end)),
@@ -1878,7 +1882,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0988",
                         "named loop exits use target arguments".to_string(),
-                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                        "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                             .to_string(),
                         format!("write `next({name})`"),
                         Some(Span::new(at_span.start, name_span.end)),
@@ -1943,7 +1947,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0988",
                     "named loops use `::`, not `@`".to_string(),
-                    "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                    "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                         .to_string(),
                     format!("write `{label} :: loop {{ … }}`"),
                     Some(Span::new(lspan.start, end)),
@@ -2129,7 +2133,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0988",
                         "named loops use `::`, not `@`".to_string(),
-                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                    "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)"
                             .to_string(),
                         format!("write `{label} :: loop {{ … }}`"),
                         Some(Span::new(at_span.start, lspan.end)),
@@ -2140,7 +2144,7 @@ impl<'a> Parser<'a> {
                 Err(Diagnostic::error(
                     "E0063",
                     "applied rules use `#`, not `@`".to_string(),
-                    "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
+                    "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)".to_string(),
                     "replace the leading `@` with `#`".to_string(),
                     Some(t.span),
                 ))
@@ -2221,7 +2225,7 @@ impl<'a> Parser<'a> {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
-                    // D-META-STAGE1=B (formerly D-CTMARKER1=C): `$name;` as a standalone statement — valid in comptime contexts.
+                    // D-META-STAGE1=B (formerly D-CTMARKER1=C): `@name;` as a standalone statement — valid in comptime contexts.
                     | Expr::ComptimeName { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _, _)

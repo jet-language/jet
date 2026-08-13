@@ -25,8 +25,9 @@
 //! pairs them; it never restates them.
 
 use super::{
-    DEFAULT_ENTRY_FILE, LEGACY_ENTRY_FILE, PACKAGE_FILE, PAYLOAD_FILE,
-    INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_INTERPOLATION_SELECTOR_EXAMPLE,
+    COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, LEGACY_ENTRY_FILE,
+    PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK,
+    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE,
 };
 
 /// How the compiler answers a file still written in the retired form.
@@ -103,6 +104,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         canonical: INTERPOLATION_SELECTOR_EXAMPLE,
         kind: RetirementKind::Rename,
         decision: "D-ONCE-HASH1",
+        since: "2026-08-07",
+        code: None,
+    },
+    Retirement {
+        id: "comptime-mark",
+        retired: RETIRED_COMPTIME_MARK,
+        canonical: COMPTIME_MARK,
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-AT1",
         since: "2026-08-07",
         code: None,
     },
@@ -207,6 +217,7 @@ mod tests {
             rename_target(RETIRED_INTERPOLATION_SELECTOR_EXAMPLE),
             Some(INTERPOLATION_SELECTOR_EXAMPLE)
         );
+        assert_eq!(rename_target(RETIRED_COMPTIME_MARK), Some(COMPTIME_MARK));
         assert_eq!(rename_target("payload: {"), None);
         assert_eq!(rename_target("provider@target"), None);
     }

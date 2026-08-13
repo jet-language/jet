@@ -172,7 +172,7 @@ pub(crate) fn register_type_alias(
     );
 }
 
-/// S57 (M9.5): evaluate every `$name :: expr;` in `items`. Purity and
+/// S57 (M9.5): evaluate every `@name :: expr;` in `items`. Purity and
 /// fuel are enforced by the interpreter (E3401/E0952); panics surface as
 /// E0953. Each result's Jet type is registered in `consts` so references
 /// type-check, and the value is stashed on the item for codegen to inline.
@@ -182,7 +182,7 @@ pub(crate) fn eval_comptime_items(
     base_dir: &std::path::Path,
     diags: &mut Vec<Diagnostic>,
     // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
-    // effect-approved Core calls (e.g. `$value :: math.sqrt(4.0)`).
+    // effect-approved Core calls (e.g. `@value :: math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {

@@ -78,9 +78,9 @@ pub(super) fn substitute_expr(
             return;
         }
     }
-    // D-META-STAGE1=B: `$` is part of the identifier, so generic-module
+    // D-META-STAGE1=B: `@` is part of the identifier, so generic-module
     // instantiation must substitute marked names by their written spelling.
-    // Otherwise a generated `alias_$value` declaration leaves `$value`
+    // Otherwise a generated `alias_@value` declaration leaves `@value`
     // references pointing at the template name, which is absent from the
     // instantiated comptime environment.
     if let Expr::ComptimeName { name, span, .. } = expr {

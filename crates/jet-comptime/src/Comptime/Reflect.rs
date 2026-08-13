@@ -109,7 +109,7 @@ fn layout_info_for_struct(s: &StructDef) -> CtValue {
 }
 
 /// Build the focused layout projection for a struct without exposing the
-/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
 pub fn build_struct_layout_info(s: &StructDef) -> CtValue {
     layout_info_for_struct(s)
 }
@@ -139,7 +139,7 @@ fn layout_info_for_enum(def: &EnumDef) -> CtValue {
 }
 
 /// Build the focused layout projection for an enum without exposing the
-/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.$layout`.
+/// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
 pub fn build_enum_layout_info(def: &EnumDef) -> CtValue {
     layout_info_for_enum(def)
 }
@@ -265,7 +265,7 @@ fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
         facts.push(fact_info(
             "Range",
             "range",
-            format!("{path}.$range"),
+            format!("{path}.@range"),
             fact_value(
                 "Range",
                 "range",
@@ -279,7 +279,7 @@ fn type_fact_rows(path: &str, ty: &Type) -> Vec<CtValue> {
         facts.push(fact_info(
             "Dimension",
             "dimension",
-            format!("{path}.$dimension"),
+            format!("{path}.@dimension"),
             fact_value(
                 "Dimension",
                 "dimension",
@@ -298,7 +298,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
         facts.push(fact_info(
             "Range",
             "range",
-            format!("{}.$range", definition.name),
+            format!("{}.@range", definition.name),
             fact_value(
                 "Range",
                 "range",
@@ -312,7 +312,7 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
         facts.push(fact_info(
             "Dimension",
             "dimension",
-            format!("{}.$dimension", definition.name),
+            format!("{}.@dimension", definition.name),
             fact_value(
                 "Dimension",
                 "dimension",

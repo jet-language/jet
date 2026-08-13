@@ -124,7 +124,7 @@ impl<'a> Parser<'a> {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),
-                        "write `T.$layout`, `T.$name`, or `T.$fields`".to_string(),
+                        "write `T.@layout`, `T.@name`, or `T.@fields`".to_string(),
                         Some(member_span),
                     ));
                 }

@@ -38,7 +38,7 @@ pub const TEACHING_RESERVED: &[ReservedEntry] = &[
     ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)" },
     ReservedEntry { spelling: crate::Syntax::KW_MUTATE, kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)" },
     ReservedEntry { spelling: crate::Syntax::KW_MOVE, kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method" },
-    ReservedEntry { spelling: crate::Syntax::KW_CONST, kind: "teaching-reserved word", note: "retired; write `$name` instead (E0374)" },
+    ReservedEntry { spelling: crate::Syntax::KW_CONST, kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)" },
     ReservedEntry { spelling: crate::Syntax::FOREIGN_UNSAFE, kind: "teaching-reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") { … }` instead (E0031/E0003)" },
 ];
 

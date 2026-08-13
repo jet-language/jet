@@ -117,8 +117,8 @@ The head list is closed: SQL, HTML, Sh, Regex, plus binary patterns. D-META-DSL1
 ```jet
 // library code — proposed spelling, option A
 marker Selector on [.Text] {
-    check css.parse($body)?              // comptime: bad selector = compile error
-    hole  css.escape($value)             // the hole law for this head
+    check css.parse(@body)?              // comptime: bad selector = compile error
+    hole  css.escape(@value)             // the hole law for this head
 }
 ```
 
@@ -164,15 +164,15 @@ The three exits every magic owes: **see it** — the generated file is on disk w
 
 The fact plane (ratified 2026-08-07) gives Jet one flow store where taint spreads silently and one gate word, `#Scrub`, where it clears. What nothing ratified yet says: **who writes the first taint fact, and why a decode is not a scrub.** This ballot answers both with the lesson that killed Perl taint and Ruby `$SAFE` twice: laundering must construct a value that could not have been built from garbage — which is exactly what a typed decode is.
 
-- Core boundary functions — `net.*`, `fs.read*`, `env.*`, `process.*` output, FFI marshalling — write an origin fact on what they return: `$origin.net`, `$origin.fs`, `$origin.ffi`.
+- Core boundary functions — `net.*`, `fs.read*`, `env.*`, `process.*` output, FFI marshalling — write an origin fact on what they return: `@origin.net`, `@origin.fs`, `@origin.ffi`.
 - The fact spreads through ordinary code silently, free of ceremony, exactly as D-FACT-LAW1=B already rules (facts tighten silently; gates loosen loudly).
 - A successful typed construction clears it: `json.decode<Config>` — the value that comes out has the shape `Config` promised, so the origin fact has done its job. `#Scrub` stays as the expert word for hand-written sanitizers, per D-TAG-SURFACE1.
-- The audited escape hatches refuse tainted raw text: `SQL.raw(s)`, `HTML.raw(s)`, `Sh.raw(s)` on an `$origin.*` string is a compile-time error naming the flow path.
+- The audited escape hatches refuse tainted raw text: `SQL.raw(s)`, `HTML.raw(s)`, `Sh.raw(s)` on an `@origin.*` string is a compile-time error naming the flow path.
 
 Beginner writes this, types nothing new, and is injection-safe end to end:
 
 ```jet
-body :: net.get(endpoint)?               // body: String, fact $origin.net — invisible
+body :: net.get(endpoint)?               // body: String, fact @origin.net — invisible
 cfg  :: json.decode<Config>(body)?       // decode succeeds => origin fact cleared
 q    :: SQL.{"select * from t where name = {cfg.name}"}   // fine: cfg is shaped data
 ```
@@ -181,7 +181,7 @@ The one program the compiler now stops — the injection every taint system was 
 
 ```jet
 body :: net.get(endpoint)?
-q :: SQL.raw(body)          // error: $origin.net text reaches an unaudited sink
+q :: SQL.raw(body)          // error: @origin.net text reaches an unaudited sink
                             // fix: decode it, match it, or gate the fn with #Scrub
 ```
 
@@ -303,7 +303,7 @@ use bindings.repo                     // from: jet inspect bind json fixtures/re
 
 fn sync(db: DB) =[Net, FFI.Java, IO]=> Result<(), Error> {      // one FFI root [ROOTS1, ratified]
     endpoint :: URL.{"https://api.example.com/v2"}              // compile-checked      [HEAD1]
-    body :: net.get(endpoint)?                                  // fact: $origin.net    [TAINT1]
+    body :: net.get(endpoint)?                                  // fact: @origin.net    [TAINT1]
     repo :: json.decode<Repo>(body)?                            // decode clears taint  [TAINT1]
                                                                 // unknowns preserved   [EVOLVE1]
     #Transact(tx) {
@@ -337,7 +337,7 @@ one crossing law: name the schema, leave the fact
      ├─ shape            #Codable + FieldError list                    (shipped)
      ├─ evolution        migration { } + unknown-field preservation    [EVOLVE1]
      ├─ exactness        raw number token => Decimal                   (#1395, ratified)
-     └─ origin           $origin.* seeded at the boundary,
+     └─ origin           @origin.* seeded at the boundary,
                          cleared by decode, gated at .raw()            [TAINT1]
 ```
 
@@ -369,7 +369,7 @@ Each ballot stands alone; any subset can be adopted. Full profiles and options a
 | D-BOUND-RAW1 | Head bodies own their escapes (backslash literal) | **amends** D-UNIFYLIT1's body lexing; hole policy per head unchanged (D-REGEX-LIT1 stays); plain strings untouched |
 | D-BOUND-SINK1 | User-declared heads on the marker rail; sinks = parameter types | extends D-META-DSL1 from `[.Block]` to `[.Text]`; diverges openly from the F9 audit note ("types, not markers") — both shapes on the ballot |
 | D-BOUND-BIND1 | `jet inspect bind` accepts data schemas (json/csv/sql/xml/proto) | rides the shipped binder pattern; respects D-NAME-FILES1=C |
-| D-BOUND-TAINT1 | Boundary fns seed `$origin.*`; typed decode clears it; `.raw()` gates it | connects D-FACT-FLOW1/HOME1 with D-VALIDATE-DECODE1 — no amendment |
+| D-BOUND-TAINT1 | Boundary fns seed `@origin.*`; typed decode clears it; `.raw()` gates it | connects D-FACT-FLOW1/HOME1 with D-VALIDATE-DECODE1 — no amendment |
 | D-BOUND-UNDO1 | FFI joins E0746; `#Undo(inverse)` legalizes it in `#Transact` | **amends** the D-TXN2-era irreversible set; rides D-ROLLBACK-TRAIT |
 | D-BOUND-EVOLVE1 | `#PublishedSchema` preserves unknown fields by default | extends D-MIGRATE1-4 |
 | D-BOUND-PROV1 | Provenance read surface + verified-not-required default | implements D-JPK-TRUSTROOT1=D; **amends** D-AUTHORITY-MANIFEST1's trust block with a `require:` row |

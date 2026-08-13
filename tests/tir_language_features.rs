@@ -788,10 +788,10 @@ fn comptime_const_inline() {
         return;
     }
     let src = "\
-$version :: \"1.0\"
-$banner :: \"logbook {$version}\"
+@version :: \"1.0\"
+@banner :: \"logbook {@version}\"
 fn wrap(s: String) => String {
-    return \"{$banner}: {s}\"
+    return \"{@banner}: {s}\"
 }
 fn run() {
     print(wrap(\"hi\"))

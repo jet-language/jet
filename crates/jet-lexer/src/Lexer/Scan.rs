@@ -239,9 +239,9 @@ impl<'a> Lexer<'a> {
                 '{' => toks.push(simple(self, TokKind::LBrace, 1)),
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
-                // D-VERDICT-1320-1: fence close digraph `]$` is longest-match
-                // before plain `]`. No legal program puts `$` right after `]`.
-                ']' if next == '$' => toks.push(simple(self, TokKind::FenceClose, 2)),
+                // D-FENCE-GLYPH1=A: fence close digraph `]@` is longest-match
+                // before plain `]`.
+                ']' if next == '@' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
                 // D-BIND4: `:=` mutable binding sigil.
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
@@ -249,18 +249,15 @@ impl<'a> Lexer<'a> {
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
-                '@' => toks.push(simple(self, TokKind::At, 1)),
-                '#' => toks.push(simple(self, TokKind::Hash, 1)),
-                // D-VERDICT-1320-1: fence open digraph `$[` is longest-match
-                // before the D-META-STAGE1 compile-time mark.
-                '$' if next == '[' => toks.push(simple(self, TokKind::FenceOpen, 2)),
-                // D-META-STAGE1=B: the compile-time mark belongs to the name,
-                // so `$word` is one identifier whose text carries the mark. A
-                // keyword after the mark stays a bare `$` plus that keyword
-                // (`$if`, `$loop`), and a lone `$` opens a compile-time block.
-                '$' if next.is_alphabetic() || next == '_' => {
+                // D-ONCE-AT1=D: prefix `@name` is one marked identifier, but
+                // an adjacent `name@source` remains the package-source ref.
+                '@' if next == '[' => toks.push(simple(self, TokKind::FenceOpen, 2)),
+                '@' if (next.is_alphabetic() || next == '_')
+                    && !self.at(self.i.saturating_sub(1)).is_alphanumeric()
+                    && self.at(self.i.saturating_sub(1)) != '_' =>
+                {
                     let mut j = self.i + 1;
-                    let mut name = String::from("$");
+                    let mut name = String::from("@");
                     while j < self.chars.len() {
                         let ch = self.at(j);
                         if ch.is_alphanumeric() || ch == '_' {
@@ -271,13 +268,17 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     if keyword(&name[1..]).is_some() {
-                        toks.push(simple(self, TokKind::Dollar, 1));
+                        toks.push(simple(self, TokKind::At, 1));
                     } else {
                         self.i = j;
                         let span = Span::new(start, self.pos(self.i));
                         toks.push(Token { kind: TokKind::Ident(name), span });
                     }
                 }
+                '@' => toks.push(simple(self, TokKind::At, 1)),
+                '#' => toks.push(simple(self, TokKind::Hash, 1)),
+                // D-ONCE-AT1=D: `$` is no longer a compile-time mark. Keep it
+                // as a standalone token so the parser can teach the `@` swap.
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
@@ -735,5 +736,30 @@ fn add(a: Int, b: Int) => Int {
             )),
             "{tokens:?}"
         );
+    }
+
+    #[test]
+    fn at_distinguishes_prefix_package_ref_and_fence() {
+        let (tokens, diagnostics) = lex_raw("foo@bar @baz T.@layout @[0, 1]@ $old $[x]$");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let kinds = tokens
+            .into_iter()
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+        assert!(matches!(kinds[0], TokKind::Ident(ref name) if name == "foo"));
+        assert!(matches!(kinds[1], TokKind::At));
+        assert!(matches!(kinds[2], TokKind::Ident(ref name) if name == "bar"));
+        assert!(matches!(kinds[3], TokKind::Ident(ref name) if name == "@baz"));
+        assert!(matches!(kinds[4], TokKind::Ident(ref name) if name == "T"));
+        assert!(matches!(kinds[5], TokKind::Dot));
+        assert!(matches!(kinds[6], TokKind::Ident(ref name) if name == "@layout"));
+        assert!(matches!(kinds[7], TokKind::FenceOpen));
+        assert!(matches!(kinds[11], TokKind::FenceClose));
+        assert!(matches!(kinds[12], TokKind::Dollar));
+        assert!(matches!(kinds[13], TokKind::Ident(ref name) if name == "old"));
+        assert!(matches!(kinds[14], TokKind::Dollar));
+        assert!(matches!(kinds[15], TokKind::LBracket));
+        assert!(matches!(kinds[17], TokKind::RBracket));
+        assert!(matches!(kinds[18], TokKind::Dollar));
     }
 }

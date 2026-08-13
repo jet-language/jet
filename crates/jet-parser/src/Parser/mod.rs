@@ -253,6 +253,27 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
 }
 
 impl<'a> Parser<'a> {
+    pub(super) fn retired_comptime_mark(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0003",
+            format!(
+                "the compile-time prefix `{}` is retired",
+                Syntax::RETIRED_COMPTIME_MARK
+            ),
+            format!(
+                "D-ONCE-AT1=D gives `{}` one prefix mark for compile-time names and fact reads; infix `@` package refs stay unchanged",
+                Syntax::COMPTIME_MARK
+            ),
+            format!(
+                "write `{}name`, `{}if <condition> {{ … }}`, or `T.{}layout`",
+                Syntax::COMPTIME_MARK,
+                Syntax::COMPTIME_MARK,
+                Syntax::COMPTIME_MARK
+            ),
+            Some(span),
+        )
+    }
+
     fn span_has_authored_line_break(&self, start: usize, end: usize) -> bool {
         self.toks[start..end].iter().any(|token| {
             matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end

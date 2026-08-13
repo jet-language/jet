@@ -189,7 +189,7 @@ renumbered, and no new `W` code may be allocated.
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
-| E0063 | parse | teaching: applied rules use `#`, not the location/address/source sigil `@` (D-VERDICT-732-1) |
+| E0063 | parse | teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D) |
 | E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
 | E0066 | parse | retired function effect syntax; use exact `=[Effects]=>` or `=[]=>` (D-SHAPE8, D-ARROW-CONTROL1) |
 | E0067 | lex | source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A) |
@@ -228,7 +228,7 @@ renumbered, and no new `W` code may be allocated.
 | E0115 | sema  | `break`/`next` outside a loop             |
 | E0987 | sema  | `break(name)`/`next(name)` names no enclosing `name :: loop` (D-LOOPLABEL3, D-LOOPSTATE1) |
 | E0988 | parse/sema | retired dot/`@` loop exits, `name := loop`, or runtime use of a loop name (D-LOOPSTATE1) |
-| E0989 | sema  | `$if` condition is not a comptime expression (D-WHEN1) |
+| E0989 | sema  | `@if` condition is not a comptime expression (D-WHEN1) |
 | E0990 | parse | *retired by D-MARKER-CANON1* (was: `@` marker-prefix teaching) |
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
@@ -258,7 +258,7 @@ renumbered, and no new `W` code may be allocated.
 | E0143 | sema  | `consume` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP/D-DROP-WORD1) |
 | E0144 | sema  | `result` used inside a `#Pre` condition — it only exists once the function has returned (D-PREPOST1) |
 | E0145 | parse | `#Persist` on a binding that isn't module-level (D-PERSIST1) |
-| E0146 | parse | retired `const` keyword — write `$` (D-VERDICT-1308-1) |
+| E0146 | parse | retired `const` keyword — write `@` (D-VERDICT-1308-1, spelling amended by D-ONCE-AT1=D) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
 | E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
@@ -373,7 +373,7 @@ renumbered, and no new `W` code may be allocated.
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
-| E0368 | parse | fence expansion has no entries (D-EACH1=C, D-VERDICT-1320-1) |
+| E0368 | parse | fence expansion has no entries (D-EACH1=C, D-FENCE-GLYPH1=A) |
 | E0369 | parse | one binding fence repeats a name (D-EACH1=C, D-VERDICT-1320-1) |
 | E0370 | parse | lock-step fences have different entry counts (D-EACH1=C, D-VERDICT-1320-1) |
 | E0371 | parse | fence appears outside a binding target or expression statement, or a binding fence carries a non-name entry (D-EACH1=C, D-VERDICT-1320-1) |
@@ -382,8 +382,8 @@ renumbered, and no new `W` code may be allocated.
 | E0374 | parse | teaching: retired `comptime`; use implicit folding or `$` (D-VERDICT-1308-1) |
 | E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
-| E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B) |
-| E0381 | parse | `marker Name(...)` fact stated as an `on` clause, a second parameter list, or a scope block, not a `$`-marked named parameter (D-META-FORM1=A) |
+| E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
+| E0381 | parse | `marker Name(...)` fact stated as an `on` clause, a second parameter list, or a scope block, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -490,9 +490,9 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
-| E-OSTARGET-BUILD-CONTEXT | sema | a `$if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-ARM | sema | a `$if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `$if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
+| E-OSTARGET-BUILD-CONTEXT | sema | an `@if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-ARM | sema | an `@if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | an `@if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -615,7 +615,7 @@ renumbered, and no new `W` code may be allocated.
 | E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
-| E0953 | sema  | $panic :: user-authored compile error (message verbatim) |
+| E0953 | sema  | @panic :: user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
 | E0955 | sema  | comptime file input missing / unreadable (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation; `core.compiler` is also explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
@@ -1323,7 +1323,7 @@ runtime value it can't see.
 
 ## Compiler-owned layout fact diagnostics (D-LAYOUT-FACTS1=B)
 
-`T.$layout` and `T.reflect().layout` preserve typed optional byte facts. The
+`T.@layout` and `T.reflect().layout` preserve typed optional byte facts. The
 inspect lens reports the same absence explicitly when the selected target has
 no canonical physical layout engine yet; it never turns absence into a false
 zero or a blank field.
@@ -1490,17 +1490,17 @@ already-freed arena), these track the views themselves.
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 | E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
-| E0368 | This fence is empty. | A fenced statement needs at least one entry to expand. | Write one or more entries between `$[` and `]$`. |
+| E0368 | This fence is empty. | A fenced statement needs at least one entry to expand. | Write one or more entries between `@[` and `]@`. |
 | E0369 | `{name}` appears twice in this fence. | One binding fence must name each generated copy once. | Remove the second name or give it a different name. |
 | E0370 | Fences on one statement have different entry counts. | Multiple fences expand in lock-step, so every fence needs one entry for each copy. | Give every fence the same number of entries. |
 | E0371 | This fence is not in an allowed statement position, or one of its entries has the wrong shape (empty entry, trailing comma, non-name in a binding fence, malformed numbered range). | D-EACH1 expands complete binding or expression statements; a binding fence takes plain names or one ascending numbered-name range, an expression fence takes comma-separated expressions. | Move the fence to a binding target or a complete expression statement, or fix the entry. |
 | E0372 | This `{body}` body needs braces. | Braces make the body's boundary visible to readers, editors, and the compiler. | Wrap the body in `{ ... }`; `jet fmt` applies this fix. |
 | E0373 | This loop header uses a semicolon. | Commas separate loop clauses; semicolons separate statements. | Replace `;` with `,`; `jet fmt` applies this fix. |
-| E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build. |
+| E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build. |
 | E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
-| E0377 | `#Known` is retired. | Compile time has one mark, `$`, and the mark belongs to the name, so it is written at every mention. | Write `$name :: …` for a binding, `$if <condition> { … }` for a compile-time branch, and `$ { … }` for a compile-time block. |
+| E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
-| E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause, a second parameter list, or a scope block. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `$` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as a `$`-marked named parameter, e.g. `$sites: [.Function, …]`, `$repeatable: true`. |
+| E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause, a second parameter list, or a scope block. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as an `@`-marked named parameter, e.g. `@sites: [.Function, …]`, `@repeatable: true`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 
@@ -1551,7 +1551,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 |------|------|-----|-----|
 | E-OSTARGET-MIXED-AXIS | `#Target(OS.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`OS.Linux`/`OS.MacOS`/`OS.Windows`, native platform gating) and the web axis (`Wasm`/`JS`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(OS.{os})` marker or the web-axis marker. |
 | E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(OS.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(OS.{os})`, or move `{caller}`'s body into one. |
-| E-OSTARGET-BUILD-CONTEXT | a `$if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `$if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
+| E-OSTARGET-BUILD-CONTEXT | an `@if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `@if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
 | E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
 
@@ -1690,7 +1690,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time (`$` blocks, `$name :: expr` bindings) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `=[]=>` function name to report. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`; at compile time, compute the value at runtime instead. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `fn … =[]=>` may only call other `fn … =[]=>`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time (`@` blocks, `@name :: expr` bindings) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `=[]=>` function name to report. | Mark `{call}` as `fn … =[]=>`, or remove the call from `{pure_fn}`; at compile time, compute the value at runtime instead. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or remove the enclosing function's explicit empty effect bound. |
 

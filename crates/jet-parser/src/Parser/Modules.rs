@@ -892,16 +892,20 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
-            // D-META-STAGE1=B: a module-level `$name :: expr` binding.
+            // D-META-STAGE1=B: a module-level `@name :: expr` binding.
             TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
                 self.comptime_def().map(Item::Const)
+            }
+            TokKind::Dollar => {
+                let span = self.bump().span;
+                Err(self.retired_comptime_mark(span))
             }
             TokKind::At => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0063",
                     "applied rules use `#`, not `@`".to_string(),
-                    "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
+                    "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)".to_string(),
                     "replace the leading `@` with `#`".to_string(),
                     Some(span),
                 ))

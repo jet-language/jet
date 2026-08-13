@@ -284,7 +284,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `$if <cond> { … } else { … }`.
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `@if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
     /// `else_body` is None when no `else` clause is written (statement position
@@ -299,7 +299,7 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
-    /// D-OSTARGET2 (=B, ratified 2026-07-03): `$if build.os == { .Linux
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `@if build.os == { .Linux
     /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
     /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
     /// compiler-known comptime value; the switch folds to the arm matching the
@@ -317,12 +317,12 @@ pub enum Stmt {
         span: Span,
     },
     /// D-META-STAGE1=B (ratified 2026-08-06, card #1537, retires D-CTMARKER1's
-    /// splice-only spelling): `$ { … }` — a build-time execution block. Runs
+    /// splice-only spelling): `@ { … }` — a build-time execution block. Runs
     /// at compile time via the tree-walking comptime interpreter; erases
     /// entirely (no runtime Rust emitted, I3).
     /// Purity-checked (E3401, D-META-EFFECT1 c3) then tree-walked
     /// (E0953/E0956); effect tiers per D-CTEFFECT1. Bindings inside do not
-    /// leak to the enclosing scope. `$name` splice (piece 1) deferred to c155.
+    /// leak to the enclosing scope. `@name` splice (piece 1) deferred to c155.
     ComptimeBlock {
         body: Vec<Stmt>,
         span: Span,

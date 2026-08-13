@@ -204,7 +204,7 @@ fn expand_layout_human_and_json_are_deterministic() {
     let human = scrub_fixture(&String::from_utf8_lossy(&first.stdout), &fixture);
     assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
     for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
-        assert!(human.contains(&format!("{type_name}.$layout")), "{type_name}: {human}");
+        assert!(human.contains(&format!("{type_name}.@layout")), "{type_name}: {human}");
     }
     assert!(human.contains("size=unknown") && human.contains("offset=unknown"));
     assert!(human.contains("byte_facts=unavailable") && human.contains("E0959"));
@@ -257,7 +257,7 @@ fn expand_effects_and_layout_report_checked_facts() {
         .unwrap();
     assert_eq!(layout.status.code(), Some(0));
     let layout_human = scrub_fixture(&String::from_utf8_lossy(&layout.stdout), &fixture);
-    assert!(layout_human.contains("AuditPacket.$layout"), "{layout_human}");
+    assert!(layout_human.contains("AuditPacket.@layout"), "{layout_human}");
     assert!(layout_human.contains("byte_facts=unavailable"), "{layout_human}");
     assert!(layout_human.contains("[E0959]"), "{layout_human}");
     check_snapshot(

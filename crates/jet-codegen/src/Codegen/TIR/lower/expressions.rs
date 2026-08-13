@@ -1960,7 +1960,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         // Fragment eval must win over the sema value stamp: a baked CtLit is a
         // value, not a place, so a marked receiver could never advance
-        // (`$r.read_u8()` folded the same byte forever). Mirror the Ident
+        // (`@r.read_u8()` folded the same byte forever). Mirror the Ident
         // consts branch: scalars inline, everything else is a ConstRef place
         // that the evaluator reads and writes back through the comptime scope.
         Expr::ComptimeName { name, .. }
@@ -1981,7 +1981,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             kind: TExprKind::CtLit(value.clone()),
         },
         Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
-            // `$name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
+            // `@name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
             if !env.locals.contains_key(name) {
                 env.bind(name, TLocal::user(name), None);
             }
@@ -3530,8 +3530,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Field(receiver, member, _) => {
             // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
             // comptime `TypeInfo` value, but fragment lowering has no ordinary
-            // local type fact for that binding. Keep `$layout` on the field
-            // path so `T.$layout` is not mistaken for an enum literal.
+            // local type fact for that binding. Keep `@layout` on the field
+            // path so `T.@layout` is not mistaken for an enum literal.
             let compiler_fact_receiver = match receiver.as_ref() {
                 // A qualified type path lowers as a field chain. The final
                 // segment is still the type name (`module.Packet`), while a
