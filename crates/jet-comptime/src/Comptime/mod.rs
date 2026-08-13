@@ -1442,6 +1442,24 @@ pub fn expand_derive_body(
     expand_template_body(body, &scope, funcs, base_dir)
 }
 
+/// D-META-USER1=A: adapt a statement-only declared rule body to the same
+/// typed template engine as derive bodies. The AST stays statement-only for
+/// marker declarations; no source text is serialized or parsed again.
+pub fn expand_statement_body(
+    body: &[crate::AST::Stmt],
+    type_param: &str,
+    type_info: CtValue,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+    let typed_body = body
+        .iter()
+        .cloned()
+        .map(crate::AST::DeriveBodyItem::Stmt)
+        .collect::<Vec<_>>();
+    expand_derive_body(&typed_body, type_param, type_info, funcs, base_dir)
+}
+
 /// D-META-BODY1=A: expand the same typed item-template block for a build
 /// generated module. The caller supplies the current compile-time scope, so
 /// `@` holes in `b.generate` see the same values as a derive body.

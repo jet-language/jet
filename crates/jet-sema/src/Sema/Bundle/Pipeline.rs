@@ -1067,7 +1067,7 @@ fn check_bundle_opts_for_output_inner(
                     &type_path,
                     Some(&marker_vocabulary),
                 );
-                match crate::Comptime::expand_derive_body(
+                match crate::Comptime::expand_statement_body(
                     body,
                     "target",
                     type_info,
@@ -1157,7 +1157,7 @@ fn check_bundle_opts_for_output_inner(
                     continue;
                 };
                 let target_info = crate::Comptime::build_function_type_info(&target);
-                match crate::Comptime::expand_derive_body(
+                match crate::Comptime::expand_statement_body(
                     body,
                     "target",
                     target_info,
@@ -1189,7 +1189,7 @@ fn check_bundle_opts_for_output_inner(
                 let Some(body) = declaration.body.as_ref() else {
                     continue;
                 };
-                match crate::Comptime::expand_derive_body(
+                match crate::Comptime::expand_statement_body(
                     body,
                     "target",
                     crate::AST::CtValue::Str(block_text),
