@@ -249,6 +249,10 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
                     OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
                         expr_has_comptime_evaluation(value)
                     }
+                    OrFallback::Block { body, value, .. } => {
+                        stmts_have_comptime_evaluation(body)
+                            || expr_has_comptime_evaluation(value)
+                    }
                     _ => false,
                 }
         }

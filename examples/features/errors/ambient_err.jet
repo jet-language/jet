@@ -1,0 +1,31 @@
+struct AmbientError {
+    message: String
+    code: String
+    cause: String
+    partial: [String]
+    notes: [String]
+}
+
+fn fail() => String ? AmbientError {
+    return Err(AmbientError.{
+        message: "row 3 is invalid",
+        code: "ROW003",
+        cause: "parser stopped after row 2",
+        partial: ["row 1", "row 2"],
+        notes: ["2 rows kept"]
+    })
+}
+
+fn run() {
+    message :: fail() ?? err.message
+    print(message)
+
+    recovered :: fail() ?? {
+        print(err.code)
+        print(err.cause)
+        print(err.partial.join(", "))
+        print(err.notes.join(" / "))
+        return "recovered"
+    }
+    print(recovered)
+}

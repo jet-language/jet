@@ -25,6 +25,8 @@
 // D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type
 // and constructor name. core_surface::RETIRED_TYPE_ERROR exists only for the
 // E0432 teaching diagnostic; it never resolves as a type.
+// D-FAIL-BIND1=A: core_surface::AMBIENT_ERR owns the contextual lowercase
+// `err` binder inside a fallible `??` fallback. It is not a lexer keyword.
 //
 // D-APILABEL1=A adds the two parameter-zone separators
 // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in

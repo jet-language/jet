@@ -1,7 +1,7 @@
-Error [E0003]: a `??` fallback cannot be a bare block
-  --> tests/ui/qq_block_fallback.jet:3:25
+Error [E0003]: a `??` fallback block needs a value
+  --> tests/ui/qq_block_fallback.jet:6:5
     |
-  3 |     value :: maybe() ?? {
-    |                         ^
- Why: `??` accepts one fallback value or a control action, not a block with several steps
- Fix: write `value ?? fallback`, `value ?? return`, or `value ?? make_fallback()`
+  6 |     }
+    |     ^
+ Why: a fallback block runs its statements and then produces one value
+ Fix: add a final value, such as `{ log(err); default_value }`

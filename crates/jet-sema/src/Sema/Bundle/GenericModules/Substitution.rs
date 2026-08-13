@@ -260,6 +260,10 @@ pub(super) fn substitute_expr(
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
                     substitute_expr(value, types, values)
                 }
+                OrFallback::Block { body, value, .. } => {
+                    substitute_stmts(body, types, values);
+                    substitute_expr(value, types, values);
+                }
                 OrFallback::Panic { args, .. } => args
                     .iter_mut()
                     .for_each(|arg| substitute_expr(&mut arg.expr, types, values)),

@@ -372,6 +372,10 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             expr_names(value, out);
             match fallback {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => expr_names(value, out),
+                OrFallback::Block { body, value, .. } => {
+                    stmt_names(body, out);
+                    expr_names(value, out);
+                }
                 OrFallback::Panic { args, .. } => for arg in args { expr_names(&arg.expr, out); },
                 OrFallback::Return(None, _)
                 | OrFallback::Break(_)

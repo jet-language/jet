@@ -215,6 +215,10 @@ pub(crate) fn walk_expr_for_const_refs(
             walk_expr_for_const_refs(value, const_names, taken);
             match fallback {
                 OrFallback::Value(e) => walk_expr_for_const_refs(e, const_names, taken),
+                OrFallback::Block { body, value, .. } => {
+                    walk_stmts_for_const_refs(body, const_names, taken);
+                    walk_expr_for_const_refs(value, const_names, taken);
+                }
                 OrFallback::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
                 OrFallback::Return(None, _)
                 | OrFallback::Panic { .. }
@@ -385,6 +389,10 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             expr_refs_name(value, name)
                 || match fallback {
                     OrFallback::Value(e) => expr_refs_name(e, name),
+                    OrFallback::Block { body, value, .. } => {
+                        body.iter().any(|stmt| stmt_refs_name(stmt, name))
+                            || expr_refs_name(value, name)
+                    }
                     OrFallback::Return(Some(e), _) => expr_refs_name(e, name),
                     _ => false,
                 }
@@ -734,6 +742,13 @@ pub(crate) fn expr_collect_captures(
             expr_collect_captures(value, bound, read, mut_cap);
             match fallback {
                 OrFallback::Value(ex) => expr_collect_captures(ex, bound, read, mut_cap),
+                OrFallback::Block { body, value, .. } => {
+                    let mut block_bound = bound.clone();
+                    for stmt in body {
+                        stmt_collect_captures(stmt, &mut block_bound, read, mut_cap);
+                    }
+                    expr_collect_captures(value, &block_bound, read, mut_cap);
+                }
                 OrFallback::Return(Some(ex), _) => {
                     expr_collect_captures(ex, bound, read, mut_cap);
                 }

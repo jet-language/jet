@@ -739,6 +739,10 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(value);
                 match fallback {
                     crate::AST::OrFallback::Value(e) => self.check_expr(e),
+                    crate::AST::OrFallback::Block { body, value, .. } => {
+                        self.check_block(body);
+                        self.check_expr(value);
+                    }
                     crate::AST::OrFallback::Return(Some(e), _) => self.check_expr(e),
                     _ => {}
                 }

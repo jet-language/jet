@@ -7,7 +7,7 @@ use cranelift_frontend::{FunctionBuilder, Switch, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
-    self, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
+    self, ambient_err_local, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
     TForInMethod, THandleOp, THostArg, THostCall, TIfCond, TJitSpawnLambda, TLambda, TLambdaBody,
     TLocal,
     ListSpreadPart,
@@ -15290,6 +15290,20 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(merge, &[ok_val]);
                 self.b.switch_to_block(fail_block);
                 self.b.seal_block(fail_block);
+                // D-FAIL-BIND1=A: the failed report is already a Prelude
+                // result handle. Materialize that handle in the shared
+                // compiler-generated slot; fallback lowering only reads it.
+                let ambient_local = ambient_err_local();
+                let ambient_key = ambient_local.rust_name();
+                let ambient_var = self.fresh_var(types::I64);
+                let ambient_value = self.call_host(self.host.result_get_i64, &[handle]);
+                self.b.def_var(ambient_var, ambient_value);
+                let old_ambient_var = self.vars.insert(ambient_key.clone(), ambient_var);
+                let ambient_ty = match &value.ty {
+                    Type::Result { err, .. } => (**err).clone(),
+                    _ => Type::Named(jet_foundation::Syntax::TYPE_ERR.to_string()),
+                };
+                let old_ambient_ty = self.var_tys.insert(ambient_key.clone(), ambient_ty);
                 match fallback {
                     TOrFallback::Value(e) => {
                         let fb = self.lower_expr(e)?;
@@ -15328,6 +15342,16 @@ impl LowerCtx<'_, '_> {
                     TOrFallback::ContinueLabel(name) => {
                         self.emit_loop_fallback(Some(name), "continue", true)?;
                     }
+                }
+                if let Some(old) = old_ambient_var {
+                    self.vars.insert(ambient_key.clone(), old);
+                } else {
+                    self.vars.remove(&ambient_key);
+                }
+                if let Some(old) = old_ambient_ty {
+                    self.var_tys.insert(ambient_key.clone(), old);
+                } else {
+                    self.var_tys.remove(&ambient_key);
                 }
                 self.b.switch_to_block(merge);
                 self.b.seal_block(merge);

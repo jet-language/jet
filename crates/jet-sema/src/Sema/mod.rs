@@ -1382,6 +1382,10 @@ pub(crate) struct Checker<'a> {
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.
     in_pre_clause: bool,
+    /// D-FAIL-BIND1=A: `None` means no fallback is being checked; `Some(true)`
+    /// is a fallible fallback with an ambient `err`; `Some(false)` is an
+    /// optional fallback, where the spelling is rejected by E0408.
+    pub(crate) fallback_has_err: Option<bool>,
     /// True while inferring a comptime binding's RHS or inside a comptime
     /// context (D-META-STAGE1=B).
     in_comptime: bool,

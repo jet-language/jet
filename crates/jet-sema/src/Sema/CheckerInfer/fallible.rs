@@ -396,6 +396,16 @@ impl<'a> Checker<'a> {
                     Stmt::Return(ret_expr.map(|e| *e), span),
                 );
             }
+            OrFallback::Block { span: fallback_span, .. } => {
+                mark_value_loop_route_unattached(&mut value);
+                self.diags.push(Diagnostic::error(
+                    "E0405",
+                    "a finite value loop cannot use a multi-step `??` fallback".to_string(),
+                    "the loop's exhaustion route carries one value or control action, not a fallback block".to_string(),
+                    "use one fallback value, or move the loop into a named block and handle the report there".to_string(),
+                    Some(fallback_span),
+                ));
+            }
             OrFallback::Panic { name_span, args } => {
                 let mut call = Call {
                     name: Syntax::BUILTIN_PANIC.to_string(),
@@ -413,7 +423,7 @@ impl<'a> Checker<'a> {
                 let (route, route_span) = match &route {
                     OrFallback::Break(span) => ("break".to_string(), *span),
                     OrFallback::Continue(span) => ("next".to_string(), *span),
-                    OrFallback::Value(_) | OrFallback::Return(..) | OrFallback::Panic { .. }
+                    OrFallback::Value(_) | OrFallback::Block { .. } | OrFallback::Return(..) | OrFallback::Panic { .. }
                     | OrFallback::BreakLabel(..)
                     | OrFallback::ContinueLabel(..) => {
                         unreachable!("matched immediate loop-control fallback")
@@ -505,7 +515,39 @@ impl<'a> Checker<'a> {
             Some(&payload),
             "supply an owned fallback payload",
         );
-        match fallback {
+        // D-FAIL-BIND1=A: make the report a normal typed local in a fresh
+        // scope while checking every fallback form. Optional fallbacks keep
+        // the context marker without declaring a local, so `err` receives the
+        // dedicated E0408 instead of resolving an outer binding.
+        let saved_fallback_has_err = self.fallback_has_err;
+        self.fallback_has_err = Some(!*is_option);
+        let ambient_scope = !*is_option;
+        if ambient_scope {
+            let err_ty = match &val_ty {
+                Type::Result { err, .. } => (**err).clone(),
+                _ => unreachable!("non-result fallback cannot expose err"),
+            };
+            self.push_scope();
+            self.declare_in_scope(
+                Syntax::AMBIENT_ERR,
+                LocalInfo {
+                    def_span: span,
+                    ty: err_ty,
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    interrupt_sendable: false,
+                    reactive_local: false,
+                    reactive_shared: false,
+                    task_lint_span: None,
+                    single_use_span: None,
+                    constant_value: None,
+                    invalid: false,
+                },
+            );
+        }
+        let result = match fallback {
             OrFallback::Value(e) => {
                 // Infer in place: sema rewrites inside the fallback (index
                 // kinds, S25 distribution, field clones) must reach codegen.
@@ -515,7 +557,13 @@ impl<'a> Checker<'a> {
                 self.expected_type = Some(payload.clone());
                 let ft = self.infer(e);
                 self.expected_type = saved;
-                let ft = ft?;
+                let Some(ft) = ft else {
+                    if ambient_scope {
+                        self.pop_scope();
+                    }
+                    self.fallback_has_err = saved_fallback_has_err;
+                    return None;
+                };
                 if ft != payload {
                     self.diags.push(Diagnostic::error(
                         "E0405",
@@ -531,6 +579,32 @@ impl<'a> Checker<'a> {
                         type_fix_hint(&payload, &ft),
                         Some(e.span()),
                     ));
+                }
+                Some(payload)
+            }
+            OrFallback::Block { body, value, .. } => {
+                self.check_block(body, false);
+                let saved = self.expected_type.clone();
+                self.expected_type = Some(payload.clone());
+                let value_ty = self.infer(value);
+                self.expected_type = saved;
+                if let Some(value_ty) = value_ty {
+                    if value_ty != payload {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!(
+                                "the fallback is {}, but the success value is {}",
+                                value_ty.show(),
+                                payload.show()
+                            ),
+                            format!(
+                                "both sides of `{}` must be the same type",
+                                Syntax::OP_FALLBACK
+                            ),
+                            type_fix_hint(&payload, &value_ty),
+                            Some(value.span()),
+                        ));
+                    }
                 }
                 Some(payload)
             }
@@ -641,7 +715,12 @@ impl<'a> Checker<'a> {
                 }
                 Some(payload)
             }
+        };
+        if ambient_scope {
+            self.pop_scope();
         }
+        self.fallback_has_err = saved_fallback_has_err;
+        result
     }
 
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {

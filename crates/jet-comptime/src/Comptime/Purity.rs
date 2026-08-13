@@ -487,6 +487,12 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
                     walk_expr_nodes(value, opts, f);
                 }
+                OrFallback::Block { body, value, .. } => {
+                    for stmt in body {
+                        walk_stmt_expr_nodes(stmt, opts, f);
+                    }
+                    walk_expr_nodes(value, opts, f);
+                }
                 OrFallback::Panic { args, .. } => {
                     for arg in args {
                         walk_expr_nodes(&arg.expr, opts, f);

@@ -6,7 +6,7 @@ use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::{
-    ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
+    ambient_err_local, ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
     THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
     TStmt,
 };
@@ -1289,11 +1289,13 @@ enum EvalExprWork<'a> {
     OrAfterFallback {
         original: &'a TExpr,
         fallback: &'a TOrFallback,
+        previous_ambient_err: Option<CtValue>,
     },
     OrAfterPanic {
         original: &'a TExpr,
         loc: &'a crate::Codegen::TIR::TPanicLoc,
         message: &'a TExpr,
+        previous_ambient_err: Option<CtValue>,
     },
     RequireStart(EvalRequireWork<'a>),
     RequireAfterCond(EvalRequireWork<'a>),
@@ -1321,6 +1323,17 @@ fn datatree_kind(value: &CtValue) -> &'static str {
         Some(("Object", _)) => "an object",
         Some(("Bytes", _)) => "Bytes",
         _ => "value",
+    }
+}
+
+fn restore_ambient_err(scope: &mut HashMap<String, CtValue>, previous: Option<CtValue>) {
+    match previous {
+        Some(value) => {
+            scope.insert(ambient_err_local().name, value);
+        }
+        None => {
+            scope.remove(&ambient_err_local().name);
+        }
     }
 }
 
@@ -3181,15 +3194,24 @@ impl<'a> EvalCtx<'a> {
                             );
                             continue;
                         }
+                        let previous_ambient_err = scope.get(&ambient_err_local().name).cloned();
+                        if let CtValue::Failed(CtReport::Told(error)) = &value {
+                            // D-FAIL-BIND1=A: the interpreter carries the
+                            // same typed report slot that AOT and JIT bind in
+                            // the failed `Err` arm.
+                            scope.insert(ambient_err_local().name, (**error).clone());
+                        }
                         match state.fallback {
                             TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => {
                                 work.push(EvalExprWork::OrAfterFallback {
                                     original: state.original,
                                     fallback: state.fallback,
+                                    previous_ambient_err,
                                 });
                                 work.push(EvalExprWork::Enter(expr));
                             }
                             TOrFallback::Return(None) => {
+                                restore_ambient_err(scope, previous_ambient_err);
                                 self.pending_return = Some(CtValue::Unit);
                                 eval_expr_cache_put(state.original, CtValue::Unit);
                             }
@@ -3198,13 +3220,21 @@ impl<'a> EvalCtx<'a> {
                                     original: state.original,
                                     loc,
                                     message: msg,
+                                    previous_ambient_err,
                                 });
                                 work.push(EvalExprWork::Enter(msg));
                             }
-                            _ => return Err(unsupported("or-fallback form", self.span())),
+                            _ => {
+                                restore_ambient_err(scope, previous_ambient_err);
+                                return Err(unsupported("or-fallback form", self.span()));
+                            }
                         }
                     }
-                    EvalExprWork::OrAfterFallback { original, fallback } => {
+                    EvalExprWork::OrAfterFallback {
+                        original,
+                        fallback,
+                        previous_ambient_err,
+                    } => {
                         let expr = match fallback {
                             TOrFallback::Value(expr) | TOrFallback::Return(Some(expr)) => expr,
                             _ => unreachable!("invalid fallback continuation"),
@@ -3218,17 +3248,20 @@ impl<'a> EvalCtx<'a> {
                         } else {
                             eval_expr_cache_put(original, value);
                         }
+                        restore_ambient_err(scope, previous_ambient_err);
                     }
                     EvalExprWork::OrAfterPanic {
                         original,
                         loc,
                         message,
+                        previous_ambient_err,
                     } => {
                         let message = eval_expr_cache_take(message).ok_or_else(|| {
                             unreachable!("fallback panic message missing from evaluator worklist")
                         })?;
                         self.eval_or_fallback_panic(message, loc)?;
                         eval_expr_cache_put(original, CtValue::Unit);
+                        restore_ambient_err(scope, previous_ambient_err);
                     }
                     EvalExprWork::RequireStart(state) => {
                         if state.always_stops {

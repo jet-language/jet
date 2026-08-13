@@ -120,6 +120,7 @@ struct CallerFrame {
 
 struct WalkCtx<'a> {
     db: &'a mut SymbolDB,
+    module: &'a LoadedModule,
     caller: Option<CallerFrame>,
     scope_identity: String,
     name_ledger: &'a jet_foundation::Names::NameLedger,
@@ -757,6 +758,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
             .unwrap_or(&module.alias);
         let mut ctx = WalkCtx {
             db: &mut db,
+            module,
             caller: None,
             scope_identity: root_identity(module_alias),
             name_ledger: &facts.name_ledger,
@@ -991,6 +993,7 @@ pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode
     let name_ledger = jet_foundation::Names::NameLedger::default();
     let mut ctx = WalkCtx {
         db: &mut db,
+        module,
         caller: None,
         scope_identity: root_identity(&mp),
         name_ledger: &name_ledger,
@@ -2345,6 +2348,13 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
             match fallback {
                 AST::OrFallback::Value(v) => structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(v, mp, ctx)),
+                AST::OrFallback::Block { body, value, .. } => {
+                    structural_slot(ctx, "fallback_body", StructuralSlotKind::List, |ctx| {
+                        let module = ctx.module;
+                        collect_stmts(body, mp, module, ctx);
+                    });
+                    structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
+                }
                 AST::OrFallback::Panic { args, .. } => {
                     structural_slot(ctx, "fallback_args", StructuralSlotKind::List, |ctx| {
                         for a in args { collect_expr(&a.expr, mp, ctx); }

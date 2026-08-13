@@ -828,6 +828,10 @@ pub(crate) fn collect_core_expr(
             collect_core_expr(value, imports, used, spans, ffi_cb);
             match fallback {
                 OrFallback::Value(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
+                OrFallback::Block { body, value, .. } => {
+                    collect_core_stmts(body, imports, used, spans, ffi_cb);
+                    collect_core_expr(value, imports, used, spans, ffi_cb);
+                }
                 OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
                 OrFallback::Return(None, _) => {}
                 OrFallback::Panic { args, .. } => {

@@ -359,6 +359,12 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
             collect_expr_operations(value, out);
             match fallback {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => collect_expr_operations(value, out),
+                OrFallback::Block { body, value, .. } => {
+                    for statement in body {
+                        collect_shallow_operations(statement, out);
+                    }
+                    collect_expr_operations(value, out);
+                }
                 OrFallback::Panic { args, .. } => for argument in args { collect_expr_operations(&argument.expr, out); },
                 OrFallback::Return(None, _)
                 | OrFallback::Break(_)

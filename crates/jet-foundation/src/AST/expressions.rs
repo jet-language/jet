@@ -1163,6 +1163,10 @@ impl Expr {
         fn walk_fallback(fallback: &mut OrFallback, f: &mut impl FnMut(&mut Expr)) {
             match fallback {
                 OrFallback::Value(value) => walk(value, f),
+                OrFallback::Block { body, value, .. } => {
+                    walk_stmts(body, f);
+                    walk(value, f);
+                }
                 OrFallback::Return(Some(value), _) => walk(value, f),
                 OrFallback::Panic { args, .. } => walk_args(args, f),
                 _ => {}

@@ -405,6 +405,18 @@ impl<'a> Checker<'a> {
             if let Some(meta) = &mut b.meta {
                 self.check_meta_attr(meta);
             }
+            // D-FAIL-BIND1=A: a user binding with the ambient spelling remains
+            // legal, but it is easy to mistake for the fallback report and is
+            // shadowed by that report inside a fallible `??` fallback.
+            if b.name == Syntax::AMBIENT_ERR {
+                self.diags.push(Diagnostic::lint(
+                    "L0511",
+                    "binding `err` shadows the fallback's ambient failure report".to_string(),
+                    "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there".to_string(),
+                    "rename the binding, or use it outside a fallback".to_string(),
+                    Some(b.name_span),
+                ));
+            }
             // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
             let prev_binding_name = self.current_binding_name.take();
             self.current_binding_name = Some(b.name.clone());

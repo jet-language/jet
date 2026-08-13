@@ -240,6 +240,10 @@ pub(crate) fn rewrite_inline_calls_expr(
             rewrite_inline_calls_expr(value, siblings, modname);
             match fallback {
                 OrFallback::Value(e) => rewrite_inline_calls_expr(e, siblings, modname),
+                OrFallback::Block { body, value, .. } => {
+                    rewrite_inline_calls_stmts(body, siblings, modname);
+                    rewrite_inline_calls_expr(value, siblings, modname);
+                }
                 OrFallback::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
                 OrFallback::Return(None, _)
                 | OrFallback::Panic { .. }
