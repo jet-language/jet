@@ -8248,17 +8248,6 @@ impl<'a> EvalCtx<'a> {
             }
             return Ok(CtValue::Unit);
         }
-        // D-METADERIVE1=A: `emit(source_string)` — push a re-entry fragment.
-        if name == "emit" {
-            let Some(CtValue::Str(s)) = argv.into_iter().next() else {
-                return Err(unsupported("`emit` argument must be a string", self.span()));
-            };
-            let fragment = crate::Comptime::apply_at_splices(&s, scope);
-            if let Some(out) = self.emitted_fragments.as_mut() {
-                out.push(fragment);
-            }
-            return Ok(CtValue::Unit);
-        }
         // D-META-USER1=A: the TIR evaluator marshals the ordered fields to
         // the comptime registry helper; it does not invent diagnostic rules.
         if name == "reject" {
