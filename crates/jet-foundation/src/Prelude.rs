@@ -1,10 +1,11 @@
 //! Readable Core prelude registry (D-NAME-ALIAS1=A).
 //!
 //! The source file is the one human-readable home for ambient names. This
-//! module only parses its declarations into compiler facts; the facts do not
-//! implement any runtime behavior.
+//! module also owns small diagnostic kernels shared by every execution tier.
 
 use std::sync::LazyLock;
+
+use crate::Diagnostics::{Diagnostic, Span};
 
 pub const SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/core/prelude.jet");
 
@@ -41,6 +42,11 @@ pub fn entry(name: &str) -> Option<&'static Entry> {
 
 pub fn names() -> impl Iterator<Item = &'static str> {
     entries().iter().map(|entry| entry.name)
+}
+
+/// The one registered refusal for a construct that no evaluator can run yet.
+pub fn jet_e0956_unsupported(what: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E0956", &[("what", what)], Some(span))
 }
 
 fn parse(source: &'static str) -> Vec<Entry> {

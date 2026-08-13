@@ -512,7 +512,7 @@ pub enum CtValue {
 
 /// The one `[U8]` conversion and rejection voice shared by every evaluator.
 pub fn as_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    let reject = || Diagnostic::e0956_unsupported("this `as_bytes` call", span);
+    let reject = || crate::Prelude::jet_e0956_unsupported("this `as_bytes` call", span);
 
     match value {
         CtValue::Bytes(bytes) => Ok(bytes.clone()),

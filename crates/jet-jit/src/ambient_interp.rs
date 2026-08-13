@@ -31,7 +31,7 @@ mod wire {
 }
 
 fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(what, span)
+    jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
 // The interpreter only owns CtValue handles. Process policy and lifecycle

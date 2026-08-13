@@ -36,11 +36,6 @@ pub fn task_cancelled(span: Option<Span>) -> Diagnostic {
     Diagnostic::task_cancelled(span)
 }
 
-/// E0956 for an execution adapter that cannot support the requested operation.
-pub fn e0956_unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(what, span)
-}
-
 /// E1403 when an evaluator crosses the shared source-nesting limit.
 pub fn source_nesting_exceeded(depth: usize, span: Span) -> Diagnostic {
     Diagnostic::source_nesting_exceeded(depth, span)
@@ -49,7 +44,7 @@ pub fn source_nesting_exceeded(depth: usize, span: Span) -> Diagnostic {
 /// E0956 for the tier-0 Browser adapter. The host supplies only the dynamic
 /// value fact; the registered row owns the user-facing wording and fix.
 pub fn browser_tier0_unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::e0956_unsupported(&format!("Browser {what}"), span)
+    jet_foundation::Prelude::jet_e0956_unsupported(&format!("Browser {what}"), span)
 }
 
 /// D-BOUND-HEAD1: validate a raw boundary literal before the TIR evaluator
