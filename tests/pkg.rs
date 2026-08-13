@@ -1966,6 +1966,7 @@ fn lock_file_content_hash_roundtrip() {
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
+        build_stamp: None,
     };
     let serialized = jet::Lock::write(&lock);
     assert!(
@@ -3264,6 +3265,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
+        build_stamp: None,
     }
 }
 
@@ -3367,6 +3369,7 @@ fn e1217_missing_locked_revision() {
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
+        build_stamp: None,
     };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
         .expect_err("missing locked revision must fail");

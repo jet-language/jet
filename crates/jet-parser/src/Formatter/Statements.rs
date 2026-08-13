@@ -633,7 +633,7 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
-            // D-OSTARGET2=B (ratified 2026-07-03): `@if build.os == { … }`
+            // D-OSTARGET2=B (ratified 2026-07-03): `@if @build.os == { … }`
             // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
             // (D-IF3 arm grammar) with an `@if` lead.
             Stmt::ComptimeSwitch {

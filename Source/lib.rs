@@ -170,8 +170,28 @@ pub fn compile_with_target_and_gates(
     gates: Policy::GateSet,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_with_target_and_gates_and_profile(src, file, gates, cross_target, "dev")
+}
+
+pub fn compile_with_target_and_gates_and_profile(
+    src: &str,
+    file: &str,
+    gates: Policy::GateSet,
+    cross_target: Option<&str>,
+    profile: &str,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     let _ = src;
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, cross_target)
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_with_profile(
+            file,
+            Sema::CompileMode::Run,
+            false,
+            gates,
+            false,
+            cross_target,
+            profile,
+        )
+    })
 }
 
 /// Front-end check for a file on disk (and its imports). Library modules
@@ -302,6 +322,32 @@ pub fn compile_programmable_build_opts_with_builder(
     cross_target: Option<&str>,
     remote_builder: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder_and_profile(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        "dev",
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder_and_profile(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -313,6 +359,7 @@ pub fn compile_programmable_build_opts_with_builder(
         cross_target,
         false,
         remote_builder,
+        profile,
     )
 }
 
@@ -354,6 +401,32 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
     cross_target: Option<&str>,
     remote_builder: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_emit_generated_opts_with_builder_and_profile(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        "dev",
+    )
+}
+
+pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -365,6 +438,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
         cross_target,
         true,
         remote_builder,
+        profile,
     )
 }
 
@@ -379,6 +453,7 @@ fn compile_programmable_build_opts_inner(
     cross_target: Option<&str>,
     emit_generated: bool,
     remote_builder: Option<&str>,
+    profile: &str,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -405,6 +480,7 @@ fn compile_programmable_build_opts_inner(
                 cross_target,
                 emit_generated,
                 remote,
+                profile,
                 checked_workspace,
             );
         }
@@ -427,6 +503,7 @@ fn compile_programmable_build_opts_inner(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
+                profile: profile.to_string(),
                 remote,
             },
         )?;
@@ -452,6 +529,7 @@ fn compile_workspace_build_opts(
     cross_target: Option<&str>,
     emit_generated: bool,
     remote: Option<Comptime::Build::RemoteBuildBinding>,
+    profile: &str,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
@@ -537,6 +615,7 @@ fn compile_workspace_build_opts(
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
+                profile: profile.to_string(),
                 remote: remote.clone(),
             },
         )?;
@@ -602,6 +681,7 @@ fn compile_workspace_build_opts(
             web_target,
             plugin_target,
             cross_target: cross_target.map(str::to_string),
+            profile: profile.to_string(),
             remote,
         },
     )?;

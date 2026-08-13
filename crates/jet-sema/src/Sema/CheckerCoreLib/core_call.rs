@@ -4002,7 +4002,7 @@ impl<'a> Checker<'a> {
                             "E3101",
                             format!("`core.os.{name}` requires an audited `#Unsafe` region"),
                             "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
-                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `@if build.os` / `#Target(OS.*)`"),
+                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `@if @build.os` / `#Target(OS.*)`"),
                             Some(span),
                         ));
                     }

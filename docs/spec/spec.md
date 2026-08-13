@@ -830,7 +830,8 @@ impl Circle {
   code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
   in every build, emits only in debug/dev builds, and strips from release output.
   Names introduced inside either marker are scoped to that marker body.
-  `build.profile` is not a user-typeable comptime value.
+  Bare `build.profile` is not a user-typeable comptime value; the registered
+  fact spelling is `@build.profile`.
 - **Canvas metadata (D-CANVASMETA1):** `#Meta(category: "Movement", tunable)`
   attaches checked tooling facts to bindings, top-level consts, and functions.
   `category` must be a non-empty plain string literal; `tunable` is a bare flag.
@@ -839,11 +840,11 @@ impl Circle {
   |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
-  **`@if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
-  }`** — `build.os` is a compiler-known comptime value, the switch folds to the
+  **`@if @build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
+  }`** — `@build.os` is a compiler-known comptime value, the switch folds to the
   arm matching the build's target OS and discards the rest before any gating
   check runs. Arms must cover every OS or carry an `else`
-  (**E-OSTARGET-DISPATCH-EXHAUSTIVE**); the subject must be `build.os`
+  (**E-OSTARGET-DISPATCH-EXHAUSTIVE**); the subject must be `@build.os`
   (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
@@ -2158,7 +2159,7 @@ Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
 `sync`, `set_current_dir`, `on_interrupt`.
 
 POSIX process/session control requires an audited `#Unsafe("…")` region and a
-host-OS gate (`@if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
+host-OS gate (`@if @build.os` / `#Target(OS.*)`): `fork`, `setuid`,
 `setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
 `waitpid`, `pipe`, `close_fd`, `mkfifo`, `umask`, `getpriority`,
 `setpriority`, `utime`, `atexit`, `stop`. Those helpers do not fake POSIX

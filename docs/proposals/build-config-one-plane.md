@@ -6,9 +6,9 @@ and slate. Ratified outcomes are settled law.
 
 ## Executive summary
 
-Jet has exactly one configuration fact a program can meet: `build.os`. It is
-typed, the compiler knows it, and `#Known if` folds on it with zero runtime
-cost. And it is caged: D-OSTARGET2 makes `build.os` legal in one dispatch
+Jet has exactly one configuration fact a program can meet: `@build.os`. It is
+typed, the compiler knows it, and `@if` folds on it with zero runtime
+cost. And it is caged: D-OSTARGET2 makes `@build.os` legal in one dispatch
 position only, and D-CANVASSTATE1 hides `build.profile` from programs on
 purpose. The best mechanism on the whole plane exists — restricted to one
 fact in one position.
@@ -103,7 +103,7 @@ effective value with `jet explain`.
 
 | # | Mechanism | Home | Defect |
 |---|-----------|------|--------|
-| 1 | `build.os` dispatch subject | `docs/spec/syntax-decisions.md:3423-3425` (D-OSTARGET2) | The right mechanism, caged: one fact, one position; `build.profile` deliberately hidden (`docs/spec/spec.md:813`, D-CANVASSTATE1). |
+| 1 | `@build.os` dispatch subject | `docs/spec/syntax-decisions.md:3423-3425` (D-OSTARGET2) | The right mechanism, caged: one fact, one position; `build.profile` deliberately hidden (`docs/spec/spec.md:813`, D-CANVASSTATE1). |
 | 2 | Legacy flat manifest parser (`payload:`, `effects:`, `build:`) | `crates/jet-pkg-model/src/PackageManifest/mod.rs` (1,645 lines); wired at `crates/jet-driver/src/Loader.rs:349` | What `jet build` reads from `package.jet` today. Pre-dates the ratified shape. |
 | 3 | Role-typed `Package` parser (`identity:`, `outputs:`, `policy: .{}`) | `crates/jet-pkg-model/src/Package.rs` (2,830 lines); D-SHAPE5a/b | Ratified shape; never called by the compile path. Accepts identity two ways (`identity: .{ }` block and bare `name:`/`version:` — `examples/jetpack/epoch5/package.jet`). |
 | 4 | `policy:` governance namespace | both parsers (D-POLICY-WORD1=A) | The namespace is ratified; the defect is two spellings across two parsers for its keys. |
@@ -197,7 +197,7 @@ contributions to declared facts.
 ### The connections
 
 - A setting and `@build.os` are the same thing: a fact. Conditional
-  compilation needs no new construct — `#Known if` folds on closed values.
+  compilation needs no new construct — `@if` folds on closed values.
 - An optimization bundle and a `#Policy` scope are the same thing: a named bundle
   of contributions.
 - A package is a configured module: value parameters and settings are one
@@ -245,7 +245,7 @@ contributions to declared facts.
 Configuration is the program's knowledge about itself. Every build fact is a
 typed value on one registered plane, with one contribution law and one audit
 command. The role-typed `Package` shape is the only manifest vocabulary. The
-legacy flat parser is deleted. `build.os` is the plane's first row. The fact
+legacy flat parser is deleted. `@build.os` is the plane's first row. The fact
 registry follows D-VERDICT-1455-1 and D-TYPE2-PLANE1: every fact is nameable,
 reflectable, and registered. Facts are comptime values that erase at codegen;
 S26 stands. This implements D-SHAPE5a/b and D-ECO-DECL1 on the compile path.
@@ -299,14 +299,14 @@ The record is `@build.package.name`, `@build.package.version`, `@build.os`,
 `@build.target.arch`, `@build.profile`, `@build.settings.<key>`, and
 `@build.stamp.*`. Reads fold to constants. Bare scripts read fallback
 identity (file name, `0.0.0`). The dispatch subject is
-`#Known if @build.os == { ... }`. Value-position reads are legal. `build`
+`@if @build.os == { ... }`. Value-position reads are legal. `build`
 stays an ordinary identifier. This rides D-META-ONE1/S4.
 
 ### 4. Declared settings replace the string tables (D-CONF-KEY1=A; amends D-BUILDPROFILE1)
 
 The package declares each setting with a type and a default. Optimization bundles and the
 command line contribute values by the contribution law. Code branches with
-`#Known if`, or reads the value as a constant. Undeclared settings are compile
+`@if`, or reads the value as a constant. Undeclared settings are compile
 errors. `features:` and `env:` are deleted from `Build.{}`.
 
 ```jet
@@ -319,7 +319,7 @@ build: .{ release: .{ settings: .{ tls: true } } }
 ```
 
 ```jet
-#Known if @build.settings.tls == {
+@if @build.settings.tls == {
     true -> use core.crypto.tls
     else -> {}
 }
@@ -417,9 +417,10 @@ arity and type meanings.
 ### 9. Provenance facts (D-CONF-STAMP1=B)
 
 `@build.stamp.git` is the commit hash, with a `-dirty` suffix for an unclean
-tree and no value outside a repository. `@build.stamp.toolchain` is the Jet
-version. `@build.stamp.at` is captured once when the lock is written and
-replayed from the lock. All stamps are recorded in `.jet/lock`; a locked
+tree and no value outside a repository. `@build.stamp.dirty` is the explicit
+working-tree state. `@build.stamp.toolchain` is the Jet version.
+`@build.stamp.at` is captured once when the lock is written and replayed from
+the lock. All stamps are recorded in `.jet/lock`; a locked
 rebuild does not read the wall clock. Repository state is a Tier-1 locked
 input under D-CTEFFECT1. The timestamp describes lock history, not source.
 
@@ -461,7 +462,7 @@ one security ledger, with the injection hole closed.
 
 ## What stays
 
-- **S26** — facts are values, never types; `#Known if` folding is the
+- **S26** — facts are values, never types; `@if` folding is the
   dispatch-free mechanism; the `[T#capacity]` extension is named in
   D-CONF-MODULE1.
 - **No macros, no AST mutation** (D-METAMUTATE1, D-METADEPTH1/2).

@@ -1887,6 +1887,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OSTarget::host(),
+        build_facts: Default::default(),
         edition: crate::Manifest::latest_edition().to_string(),
     }
 }

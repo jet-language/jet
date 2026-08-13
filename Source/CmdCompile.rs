@@ -493,7 +493,7 @@ pub(crate) fn run_compile_cmd(
             cross_target,
         )
     } else if cmd == "build" && emit_generated {
-        jet::compile_programmable_build_emit_generated_opts_with_builder(
+        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile(
             file,
             build_grants,
             freestanding,
@@ -503,9 +503,10 @@ pub(crate) fn run_compile_cmd(
             is_plugin,
             cross_target,
             remote_builder,
+            profile.budget_name(),
         )
     } else if cmd == "build" {
-        jet::compile_programmable_build_opts_with_builder(
+        jet::compile_programmable_build_opts_with_builder_and_profile(
             file,
             build_grants,
             freestanding,
@@ -515,6 +516,7 @@ pub(crate) fn run_compile_cmd(
             is_plugin,
             cross_target,
             remote_builder,
+            profile.budget_name(),
         )
     } else if is_web {
         jet::compile_web_with_gates(file, gates)
@@ -528,7 +530,13 @@ pub(crate) fn run_compile_cmd(
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
         // codegen only emits/links `#Target(OS.*)`-gated impls for the OS
         // that triple builds for (host OS when the flag is absent).
-        jet::compile_with_target_and_gates(&src, file, gates, cross_target)
+        jet::compile_with_target_and_gates_and_profile(
+            &src,
+            file,
+            gates,
+            cross_target,
+            profile.budget_name(),
+        )
     };
     let (
         rust_code,
@@ -1193,6 +1201,7 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
+        build_stamp: None,
     });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);

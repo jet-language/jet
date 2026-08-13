@@ -123,31 +123,28 @@ pub fn os_target_unmatched_call(
 }
 
 /// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `@if … == { }` OS
-/// dispatch whose subject is not `build.os`. The comptime dispatch that reaches
-/// OS-gated `impl`s only branches on the compiler-known `build.os` value.
+/// dispatch whose subject is not `@build.os`. The comptime dispatch that reaches
+/// OS-gated `impl`s only branches on the compiler-known `@build.os` value.
 pub fn os_target_build_context(
     span: Option<crate::Diagnostics::Span>,
 ) -> crate::Diagnostics::Diagnostic {
     crate::Diagnostics::Diagnostic::error(
         "E-OSTARGET-BUILD-CONTEXT",
         format!(
-            "a `{} {} … == {{ … }}` dispatch branches on `{}.{}`",
+            "a `{} {} … == {{ … }}` dispatch branches on `{}`",
             Syntax::COMPTIME_MARK,
             Syntax::KW_IF,
-            Syntax::BUILD_INFO,
-            Syntax::BUILD_INFO_OS,
+            Syntax::COMPILER_BUILD_FACT_OS,
         ),
         format!(
-            "`{}.{}` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
-            Syntax::BUILD_INFO,
-            Syntax::BUILD_INFO_OS,
+            "`{}` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
+            Syntax::COMPILER_BUILD_FACT_OS,
         ),
         format!(
-            "write `{} {} {}.{} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
+            "write `{} {} {} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
             Syntax::COMPTIME_MARK,
             Syntax::KW_IF,
-            Syntax::BUILD_INFO,
-            Syntax::BUILD_INFO_OS,
+            Syntax::COMPILER_BUILD_FACT_OS,
             Syntax::TARGET_OS_LINUX,
             Syntax::TARGET_OS_MACOS,
             Syntax::TARGET_OS_WINDOWS,
@@ -158,7 +155,7 @@ pub fn os_target_build_context(
 }
 
 /// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `@if
-/// build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.MacOS`/
+/// @build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.MacOS`/
 /// `.Windows`), or repeats one.
 pub fn os_target_dispatch_arm(
     found: &str,
@@ -167,9 +164,8 @@ pub fn os_target_dispatch_arm(
     crate::Diagnostics::Diagnostic::error(
         "E-OSTARGET-DISPATCH-ARM",
         format!(
-            "`{found}` is not an OS arm — a `{}.{}` dispatch matches `.{}`, `.{}`, or `.{}`",
-            Syntax::BUILD_INFO,
-            Syntax::BUILD_INFO_OS,
+            "`{found}` is not an OS arm — a `{}` dispatch matches `.{}`, `.{}`, or `.{}`",
+            Syntax::COMPILER_BUILD_FACT_OS,
             Syntax::TARGET_OS_LINUX,
             Syntax::TARGET_OS_MACOS,
             Syntax::TARGET_OS_WINDOWS,
@@ -188,7 +184,7 @@ pub fn os_target_dispatch_arm(
     )
 }
 
-/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `@if build.os ==
+/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `@if @build.os ==
 /// { }` dispatch's arms leave some target OS uncovered and there is no `else`.
 /// Build-independent: enforced regardless of the current `--target` so the same
 /// source compiles (or fails) identically on every platform.
@@ -200,9 +196,8 @@ pub fn os_target_dispatch_exhaustive(
     crate::Diagnostics::Diagnostic::error(
         "E-OSTARGET-DISPATCH-EXHAUSTIVE",
         format!(
-            "this `{}.{}` dispatch doesn't cover every target OS — missing: {list}",
-            Syntax::BUILD_INFO,
-            Syntax::BUILD_INFO_OS,
+            "this `{}` dispatch doesn't cover every target OS — missing: {list}",
+            Syntax::COMPILER_BUILD_FACT_OS,
         ),
         "a build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run"
             .to_string(),

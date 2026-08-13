@@ -2729,6 +2729,7 @@ mod tests {
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
             edition: "2027".to_string(),
         };
         let diagnostics = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
@@ -2812,6 +2813,7 @@ mod tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
             edition: "2027".to_string(),
         };
 
@@ -3299,7 +3301,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
 /// active target OS is Linux. `used_core` is collected before `@if
-/// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
+/// @build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is
 /// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out

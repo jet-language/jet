@@ -381,6 +381,7 @@ mod tests {
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         }
     }
 

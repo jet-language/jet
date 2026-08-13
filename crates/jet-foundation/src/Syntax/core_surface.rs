@@ -523,15 +523,25 @@ pub const TARGET_OS_MACOS: &str = "MacOS";
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
-/// `build` and its `.os` field — the subject of an `@if build.os == { }`
+/// `@build` and its `.os` field — the subject of an `@if @build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
-/// ordinary local named `build` is still fine); a `build.os` anywhere else has
+/// ordinary local named `build` is still fine); a `@build.os` anywhere else has
 /// no compiler meaning.
 pub const BUILD_INFO: &str = "build";
 /// D-OSTARGET2=B: the `.os` field of the comptime `build` value.
 pub const BUILD_INFO_OS: &str = "os";
 pub const BUILD_INFO_PROFILE: &str = "profile";
+
+/// D-CONF-READ1=A / D-CONF-STAMP1=B: registered complete build-fact paths.
+pub const COMPILER_BUILD_FACT_PACKAGE_NAME: &str = "@build.package.name";
+pub const COMPILER_BUILD_FACT_PACKAGE_VERSION: &str = "@build.package.version";
+pub const COMPILER_BUILD_FACT_OS: &str = "@build.os";
+pub const COMPILER_BUILD_FACT_PROFILE_PATH: &str = "@build.profile";
+pub const COMPILER_BUILD_FACT_STAMP_GIT: &str = "@build.stamp.git";
+pub const COMPILER_BUILD_FACT_STAMP_DIRTY: &str = "@build.stamp.dirty";
+pub const COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: &str = "@build.stamp.toolchain";
+pub const COMPILER_BUILD_FACT_STAMP_AT: &str = "@build.stamp.at";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
@@ -854,6 +864,8 @@ pub const COMPILER_FACT_RANGE: &str = "@range";
 pub const COMPILER_FACT_DIMENSION: &str = "@dimension";
 pub const COMPILER_FACT_STATES: &str = "@states";
 pub const COMPILER_FACT_EFFECTS: &str = "@effects";
+/// The marked member used by the old TypeInfo reader. The complete build
+/// path is `COMPILER_BUILD_FACT_PROFILE_PATH` above.
 pub const COMPILER_BUILD_FACT_PROFILE: &str = "@profile";
 /// Each compiler fact and the `TypeInfo` member it projects.
 pub const COMPILER_FACTS: &[(&str, &str)] = &[

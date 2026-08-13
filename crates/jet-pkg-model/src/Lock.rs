@@ -5,6 +5,7 @@
 //! `jet.lock`/`pack.lock`.
 
 use crate::Diagnostics::Diagnostic;
+use jet_foundation::Facts::BuildStamp;
 use crate::Manifest::{DepSpec, GitSelector, Manifest};
 use crate::Overlay::{OverlayPolicy, OverlaySet, PackageOverride, ProviderOverride};
 use crate::Syntax;
@@ -178,6 +179,9 @@ pub struct LockFile {
     pub browsers: Vec<LockedBrowser>,
     /// D-JPK-CHANNEL1=A: named source channels resolved to exact source refs.
     pub source_channels: Vec<LockedSourceChannel>,
+    /// D-CONF-STAMP1=B: provenance for the build fact plane. The timestamp is
+    /// lock history and is replayed verbatim by later locked builds.
+    pub build_stamp: Option<BuildStamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +201,19 @@ pub struct LockedWorkspaceMember {
 pub fn write(lock: &LockFile) -> String {
     let mut out = String::new();
     out.push_str(&format!("version = {}\n", lock.version));
+
+    if let Some(stamp) = &lock.build_stamp {
+        out.push_str("\n[build.stamp]\n");
+        if let Some(git) = &stamp.git {
+            out.push_str(&format!("git = \"{}\"\n", escape_str(git)));
+        }
+        out.push_str(&format!("dirty = {}\n", stamp.dirty));
+        out.push_str(&format!(
+            "toolchain = \"{}\"\n",
+            escape_str(&stamp.toolchain)
+        ));
+        out.push_str(&format!("at = \"{}\"\n", escape_str(&stamp.at)));
+    }
 
     for pkg in &lock.packages {
         out.push('\n');
@@ -487,6 +504,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut toolchains: Vec<LockedToolchain> = Vec::new();
     let mut browsers: Vec<LockedBrowser> = Vec::new();
     let mut source_channels: Vec<LockedSourceChannel> = Vec::new();
+    let mut build_stamp: Option<BuildStamp> = None;
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
     let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
@@ -497,6 +515,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut current_workspace_overlay_package: Option<PartialWorkspaceOverlayPackage> = None;
     let mut current_workspace_build_grant: Option<PartialWorkspaceBuildGrant> = None;
     let mut in_root = false;
+    let mut in_build_stamp = false;
 
     for line in raw.lines() {
         let line = line.trim();
@@ -537,6 +556,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 workspace_build_grants.push(grant.finish()?);
             }
             in_root = false;
+            in_build_stamp = false;
             match line {
                 "[[comptime_inputs]]" => current_ci = Some(PartialCi::default()),
                 "[[package]]" => current_pkg = Some(PartialPkg::default()),
@@ -559,6 +579,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     current_workspace_build_grant = Some(PartialWorkspaceBuildGrant::default())
                 }
                 "[root]" => in_root = true,
+                "[build.stamp]" => in_build_stamp = true,
                 _ => {}
             }
             continue;
@@ -577,6 +598,24 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             && !in_root
         {
             version = val.trim_matches('"').parse().ok();
+            continue;
+        }
+
+        if in_build_stamp {
+            let stamp = build_stamp.get_or_insert_with(BuildStamp::default);
+            match key {
+                "git" => stamp.git = Some(val.trim_matches('"').to_string()),
+                "dirty" => {
+                    stamp.dirty = match val {
+                        "true" => true,
+                        "false" => false,
+                        _ => return Err(format!("invalid build stamp dirty value: {val}")),
+                    }
+                }
+                "toolchain" => stamp.toolchain = val.trim_matches('"').to_string(),
+                "at" => stamp.at = val.trim_matches('"').to_string(),
+                _ => return Err(format!("unknown build stamp field `{key}`")),
+            }
             continue;
         }
 
@@ -792,6 +831,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         toolchains,
         browsers,
         source_channels,
+        build_stamp,
     })
 }
 
@@ -1324,6 +1364,92 @@ pub fn load(project_root: &Path) -> Option<LockFile> {
     parse(&raw).ok()
 }
 
+/// D-CONF-STAMP1=B: return the lock-pinned provenance or capture one stamp
+/// for the lock-writing operation. A locked build may not fall back to the
+/// wall clock; a missing stamp is a stale lock input.
+pub fn build_stamp(project_root: &Path, locked: bool) -> Result<BuildStamp, String> {
+    if let Some(stamp) = load(project_root).and_then(|lock| lock.build_stamp) {
+        return Ok(stamp);
+    }
+    if locked {
+        return Err(format!(
+            "locked build has no `[build.stamp]` in `{}`",
+            project_root.join(Syntax::UNIFIED_LOCK_FILE).display()
+        ));
+    }
+    Ok(capture_build_stamp(project_root))
+}
+
+/// Pin provenance on every writer of the unified lock. Existing stamps are
+/// immutable; a new lock gets one capture at the write boundary.
+pub fn ensure_build_stamp(project_root: &Path, lock: &mut LockFile) {
+    if lock.build_stamp.is_none() {
+        lock.build_stamp = Some(capture_build_stamp(project_root));
+    }
+}
+
+fn capture_build_stamp(project_root: &Path) -> BuildStamp {
+    let Some(revision) = git_output(project_root, &["rev-parse", "HEAD"]) else {
+        return BuildStamp {
+            at: timestamp_now(),
+            ..BuildStamp::default()
+        };
+    };
+    let dirty = git_output(project_root, &["status", "--porcelain", "--untracked-files=all"])
+        .is_some_and(|status| !status.is_empty());
+    let git = Some(if dirty {
+        format!("{revision}-dirty")
+    } else {
+        revision
+    });
+    BuildStamp {
+        git,
+        dirty,
+        at: timestamp_now(),
+        ..BuildStamp::default()
+    }
+}
+
+fn git_output(project_root: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Minimal RFC3339 UTC rendering keeps the lock model std-only (I6).
+fn timestamp_now() -> String {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = elapsed.as_secs() as i64;
+    let days = seconds.div_euclid(86_400);
+    let second = seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }).div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096).div_euclid(365);
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let month_part = (5 * doy + 2).div_euclid(153);
+    let day = doy - (153 * month_part + 2).div_euclid(5) + 1;
+    let month = month_part + if month_part < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",
+        second / 3_600,
+        (second % 3_600) / 60,
+        second % 60,
+        elapsed.subsec_nanos()
+    )
+}
+
 /// D-RINGLAYER1=A M2: persist inferred runtime profile for the root package after build.
 pub fn record_inferred_layer(
     project_root: &Path,
@@ -1341,6 +1467,7 @@ pub fn record_inferred_layer(
         return;
     };
     pkg.inferred_layer = Some(layer);
+    ensure_build_stamp(project_root, &mut lock);
     let _ = std::fs::write(lock_path, write(&lock));
 }
 
@@ -1361,6 +1488,7 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
         return;
     };
     pkg.envelope = Some(envelope);
+    ensure_build_stamp(project_root, &mut lock);
     let _ = std::fs::write(lock_path, write(&lock));
 }
 
@@ -1399,6 +1527,7 @@ pub fn record_nix_realization(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         },
         Err(error) => {
             return Err(format!(
@@ -1434,6 +1563,7 @@ pub fn record_nix_realization(
     } else {
         lock.packages.push(entry);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -1540,6 +1670,7 @@ pub fn record_cran_realization(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     lock.version = LOCK_VERSION;
     let entry = LockedPackage {
@@ -1569,6 +1700,7 @@ pub fn record_cran_realization(
     } else {
         lock.packages.push(entry);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1619,6 +1751,7 @@ pub fn record_luarocks_realization(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     lock.version = LOCK_VERSION;
     let entry = LockedPackage {
@@ -1648,6 +1781,7 @@ pub fn record_luarocks_realization(
     } else {
         lock.packages.push(entry);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1699,6 +1833,7 @@ pub fn record_registry_realization(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     lock.version = LOCK_VERSION;
     let entry = LockedPackage {
@@ -1730,6 +1865,7 @@ pub fn record_registry_realization(
     } else {
         lock.packages.push(entry);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1783,6 +1919,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     // A project has exactly one `jet` self-toolchain pin (its object id is
     // `jet-<version>-<fp>`), kept distinct from any bridge build-toolchain
@@ -1797,6 +1934,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
     } else {
         lock.toolchains.push(tc);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1820,6 +1958,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
@@ -1831,6 +1970,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
     } else {
         lock.browsers.push(browser);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1873,6 +2013,7 @@ pub fn record_generated_inputs(
     project_root: &Path,
     generated: &[ComptimeInput],
     locked: bool,
+    stamp: &BuildStamp,
 ) -> Result<(), Diagnostic> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let mut lock = std::fs::read_to_string(&lock_path)
@@ -1889,6 +2030,7 @@ pub fn record_generated_inputs(
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
     });
     if locked {
         let mut expected = lock.comptime_inputs.clone();
@@ -1912,6 +2054,9 @@ pub fn record_generated_inputs(
             ));
         }
         return Ok(());
+    }
+    if lock.build_stamp.is_none() {
+        lock.build_stamp = Some(stamp.clone());
     }
     for input in generated {
         if let Some(existing) = lock.comptime_inputs.iter_mut().find(|old| old.path == input.path) {
@@ -1970,6 +2115,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
             toolchains: Vec::new(),
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         });
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
@@ -1981,6 +2127,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
     } else {
         lock.source_channels.push(source);
     }
+    ensure_build_stamp(project_root, &mut lock);
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -2246,6 +2393,7 @@ mod a4_envelope_tests {
             toolchains,
             browsers: Vec::new(),
             source_channels: Vec::new(),
+            build_stamp: None,
         }
     }
 

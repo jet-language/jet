@@ -1,7 +1,113 @@
 //! Shared compile-time fact model (D-FACTMODEL1=A).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::Path;
 use std::sync::LazyLock;
+
+/// D-CONF-STAMP1=B: the provenance carried by the build fact plane. `at` is
+/// deliberately a lock-history value; it is empty until a lock-writing path
+/// supplies the first stamp and is never refreshed while a lock already has
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildStamp {
+    pub git: Option<String>,
+    pub dirty: bool,
+    pub toolchain: String,
+    pub at: String,
+}
+
+impl Default for BuildStamp {
+    fn default() -> Self {
+        Self {
+            git: None,
+            dirty: false,
+            toolchain: env!("CARGO_PKG_VERSION").to_string(),
+            at: String::new(),
+        }
+    }
+}
+
+/// The one typed snapshot consumed by every front-end fact reader. Engines do
+/// not discover any of these values; they only receive the folded literals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildFactSnapshot {
+    pub package_name: String,
+    pub package_version: String,
+    pub os: crate::OSTarget::OSTarget,
+    pub profile: String,
+    pub stamp: BuildStamp,
+}
+
+impl Default for BuildFactSnapshot {
+    fn default() -> Self {
+        Self {
+            package_name: "script".to_string(),
+            package_version: "0.0.0".to_string(),
+            os: crate::OSTarget::OSTarget::host(),
+            profile: "dev".to_string(),
+            stamp: BuildStamp::default(),
+        }
+    }
+}
+
+impl BuildFactSnapshot {
+    /// D-CONF-READ1=A: the manifest-less rung uses the entry filename as its
+    /// package identity and `0.0.0` as its version.
+    pub fn script(file: &Path, os: crate::OSTarget::OSTarget, profile: &str) -> Self {
+        let package_name = file
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("script")
+            .to_string();
+        Self {
+            package_name,
+            package_version: "0.0.0".to_string(),
+            os,
+            profile: profile.to_string(),
+            stamp: BuildStamp::default(),
+        }
+    }
+
+    /// Resolve a registered build leaf into a value shape. The registry owns
+    /// the path-to-row mapping; this snapshot owns only the values.
+    pub fn value(&self, read: crate::Registry::FactRead) -> Option<BuildFactValue> {
+        match read {
+            crate::Registry::FactRead::BuildPackageName => {
+                Some(BuildFactValue::Text(self.package_name.clone()))
+            }
+            crate::Registry::FactRead::BuildPackageVersion => {
+                Some(BuildFactValue::Text(self.package_version.clone()))
+            }
+            crate::Registry::FactRead::BuildOS => {
+                Some(BuildFactValue::Text(self.os.name().to_string()))
+            }
+            crate::Registry::FactRead::BuildProfile => {
+                Some(BuildFactValue::Text(self.profile.clone()))
+            }
+            crate::Registry::FactRead::BuildStampGit => {
+                Some(BuildFactValue::OptionalText(self.stamp.git.clone()))
+            }
+            crate::Registry::FactRead::BuildStampDirty => {
+                Some(BuildFactValue::Bool(self.stamp.dirty))
+            }
+            crate::Registry::FactRead::BuildStampToolchain => {
+                Some(BuildFactValue::Text(self.stamp.toolchain.clone()))
+            }
+            crate::Registry::FactRead::BuildStampAt => {
+                Some(BuildFactValue::Text(self.stamp.at.clone()))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildFactValue {
+    Text(String),
+    OptionalText(Option<String>),
+    Bool(bool),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FactKind {

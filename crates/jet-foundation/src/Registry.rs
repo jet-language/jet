@@ -568,7 +568,14 @@ pub enum FactRead {
     Dimension,
     States,
     Effects,
+    BuildPackageName,
+    BuildPackageVersion,
+    BuildOS,
     BuildProfile,
+    BuildStampGit,
+    BuildStampDirty,
+    BuildStampToolchain,
+    BuildStampAt,
 }
 
 /// Resolve a marked member through the registered fact planes.
@@ -581,15 +588,47 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
         crate::Syntax::COMPILER_FACT_DIMENSION => ("Type.Dimension", FactRead::Dimension),
         crate::Syntax::COMPILER_FACT_STATES => ("States", FactRead::States),
         crate::Syntax::COMPILER_FACT_EFFECTS => ("Effects", FactRead::Effects),
-        crate::Syntax::COMPILER_BUILD_FACT_PROFILE => ("BuildSettings", FactRead::BuildProfile),
+        crate::Syntax::COMPILER_BUILD_FACT_PROFILE => ("Build.Profile", FactRead::BuildProfile),
         _ => return None,
     };
 
-    if fact_declarations().iter().any(|declaration| declaration.name == row_name) {
+    if row(row_name).is_some_and(|registered| registered.kind() == RowKind::Fact) {
         Some(read)
     } else {
         None
     }
+}
+
+/// D-CONF-READ1=A / D-CONF-STAMP1=B: resolve one complete `@build.*` path
+/// through the same registered fact table used by every other plane.
+pub fn build_fact_read(path: &str) -> Option<FactRead> {
+    let (row_name, read) = match path {
+        crate::Syntax::COMPILER_BUILD_FACT_PACKAGE_NAME => {
+            ("Build.Package.Name", FactRead::BuildPackageName)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_PACKAGE_VERSION => {
+            ("Build.Package.Version", FactRead::BuildPackageVersion)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_OS => ("Build.OS", FactRead::BuildOS),
+        crate::Syntax::COMPILER_BUILD_FACT_PROFILE_PATH => {
+            ("Build.Profile", FactRead::BuildProfile)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_STAMP_GIT => {
+            ("Build.Stamp.Git", FactRead::BuildStampGit)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_STAMP_DIRTY => {
+            ("Build.Stamp.Dirty", FactRead::BuildStampDirty)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_STAMP_TOOLCHAIN => {
+            ("Build.Stamp.Toolchain", FactRead::BuildStampToolchain)
+        }
+        crate::Syntax::COMPILER_BUILD_FACT_STAMP_AT => {
+            ("Build.Stamp.At", FactRead::BuildStampAt)
+        }
+        _ => return None,
+    };
+    row(row_name).is_some_and(|registered| registered.kind() == RowKind::Fact)
+        .then_some(read)
 }
 
 /// The one authority for the non-code registration rows.

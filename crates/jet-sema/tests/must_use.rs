@@ -51,6 +51,7 @@ fn err_codes(src: &str) -> Vec<String> {
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: Syntax::OSTarget::host(),
+        build_facts: Default::default(),
         edition: "2027".to_string(),
     };
     check_bundle(&mut bundle, CompileMode::Eval)

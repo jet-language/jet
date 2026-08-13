@@ -740,6 +740,7 @@ fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
         bundle.entry,
         &bundle.project_root,
         bundle.active_os,
+        &bundle.build_facts,
         bundle.layer_ceiling,
     ));
     out.extend(format!("{:?}", bundle.project_root).into_bytes());
@@ -1971,6 +1972,7 @@ mod structure_tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
             edition: "2027".to_string(),
         }
     }

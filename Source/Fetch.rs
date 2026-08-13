@@ -76,7 +76,8 @@ pub fn fetch(
 
     // Resolve the full dependency graph.
     let mut resolver = Resolver::new(project_root, existing_lock, opts);
-    let (new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
+    let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
+    Lock::ensure_build_stamp(project_root, &mut new_lock);
 
     // Write the lock file, inside the project's `.jet/` managed folder (U2).
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
@@ -223,6 +224,9 @@ impl<'a> Resolver<'a> {
                 .existing_lock
                 .map(|lock| lock.source_channels.clone())
                 .unwrap_or_default(),
+            build_stamp: self
+                .existing_lock
+                .and_then(|lock| lock.build_stamp.clone()),
         };
 
         // Build dep_dirs map.

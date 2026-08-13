@@ -1045,10 +1045,19 @@ pub fn build_effect_info(effects: &[String]) -> CtValue {
 /// bindings are evaluated. This pass runs before sema has built a module
 /// `TypeRegistry`, so it reads the same registered plane through the source
 /// declarations that will be registered moments later.
-pub fn fact_read_value(expr: &Expr, items: &[Item]) -> Option<CtValue> {
+pub fn fact_read_value(
+    expr: &Expr,
+    items: &[Item],
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+) -> Option<CtValue> {
     let Expr::Field(subject, member, _) = expr else {
         return None;
     };
+    if let Some(path) = fact_path(expr) {
+        if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
+            return build_fact_value(build_facts, read);
+        }
+    }
     let is_build_subject = matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
     let read = if member == crate::Syntax::BUILD_INFO_PROFILE {
         if !is_build_subject {
@@ -1060,8 +1069,7 @@ pub fn fact_read_value(expr: &Expr, items: &[Item]) -> Option<CtValue> {
     };
     let subject_name = match subject.as_ref() {
         Expr::Ident(name, _) => name.as_str(),
-        _ => return (read == jet_foundation::Registry::FactRead::BuildProfile)
-            .then(|| CtValue::Str("dev".to_string())),
+        _ => return None,
     };
     match read {
         jet_foundation::Registry::FactRead::Range => items.iter().find_map(|item| match item {
@@ -1111,12 +1119,45 @@ pub fn fact_read_value(expr: &Expr, items: &[Item]) -> Option<CtValue> {
             )),
             _ => None,
         }),
-        jet_foundation::Registry::FactRead::BuildProfile => {
-            Some(CtValue::Str("dev".to_string()))
+        jet_foundation::Registry::FactRead::BuildProfile
+        | jet_foundation::Registry::FactRead::BuildPackageName
+        | jet_foundation::Registry::FactRead::BuildPackageVersion
+        | jet_foundation::Registry::FactRead::BuildOS
+        | jet_foundation::Registry::FactRead::BuildStampGit
+        | jet_foundation::Registry::FactRead::BuildStampDirty
+        | jet_foundation::Registry::FactRead::BuildStampToolchain
+        | jet_foundation::Registry::FactRead::BuildStampAt => {
+            build_fact_value(build_facts, read)
         }
         jet_foundation::Registry::FactRead::Layout
         | jet_foundation::Registry::FactRead::Name
         | jet_foundation::Registry::FactRead::Fields => None,
+    }
+}
+
+fn fact_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::ComptimeName { name, .. } | Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, member, _) => Some(format!("{}.{}", fact_path(base)?, member)),
+        _ => None,
+    }
+}
+
+/// D-FACT-READ1=A: convert one registered build row to the shared compile-time
+/// value carrier. Sema and comptime use this same conversion before codegen.
+pub fn build_fact_value(
+    snapshot: &jet_foundation::Facts::BuildFactSnapshot,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<CtValue> {
+    match snapshot.value(read)? {
+        jet_foundation::Facts::BuildFactValue::Text(value) => Some(CtValue::Str(value)),
+        jet_foundation::Facts::BuildFactValue::OptionalText(Some(value)) => {
+            Some(CtValue::Present(Box::new(CtValue::Str(value))))
+        }
+        jet_foundation::Facts::BuildFactValue::OptionalText(None) => {
+            Some(CtValue::absent(crate::AST::Type::String))
+        }
+        jet_foundation::Facts::BuildFactValue::Bool(value) => Some(CtValue::Bool(value)),
     }
 }
 

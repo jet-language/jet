@@ -194,6 +194,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                 }
             }
         }
+        Lock::ensure_build_stamp(workspace_root, &mut lock);
         std::fs::write(lock_path, Lock::write(&lock))
     })
     .map_err(|error| format!("could not write workspace lock: {error}"))
@@ -211,6 +212,7 @@ fn empty_lock() -> LockFile {
         toolchains: Vec::new(),
         browsers: Vec::new(),
         source_channels: Vec::new(),
+        build_stamp: None,
     }
 }
 

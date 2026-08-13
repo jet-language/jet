@@ -231,7 +231,7 @@ fn check_bundle_opts_for_output_inner(
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
-    // D-OSTARGET2=B (ratified 2026-07-03): fold every `@if build.os == {
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `@if @build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
     // meet the taken arm. Rewrites into an `@if` chain (reuses D-WHEN1).
@@ -265,6 +265,7 @@ fn check_bundle_opts_for_output_inner(
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
             module_alias: m.alias.clone(),
+            build_facts: bundle.build_facts.clone(),
             allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
             funcs: HashMap::new(),
             registry: builtin_type_registry(),
@@ -524,6 +525,7 @@ fn check_bundle_opts_for_output_inner(
             &base,
             &mut diags,
             &ct_core_imports[idx],
+            &bundle.build_facts,
             Some(&mut top_level_embed_inputs),
         );
         super::super::Registration::resolve_comptime_declaration_values(

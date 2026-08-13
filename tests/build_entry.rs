@@ -37,6 +37,7 @@ fn opts() -> BuildRunOptions {
         web_target: false,
         plugin_target: false,
         cross_target: None,
+        profile: "dev".to_string(),
         remote: None,
     }
 }

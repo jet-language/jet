@@ -490,9 +490,9 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
-| E-OSTARGET-BUILD-CONTEXT | sema | an `@if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-ARM | sema | an `@if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | an `@if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
+| E-OSTARGET-BUILD-CONTEXT | sema | an `@if … == { }` OS dispatch's subject is not `@build.os` (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-ARM | sema | an `@if @build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | an `@if @build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -1555,9 +1555,9 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 |------|------|-----|-----|
 | E-OSTARGET-MIXED-AXIS | `#Target(OS.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`OS.Linux`/`OS.MacOS`/`OS.Windows`, native platform gating) and the web axis (`Wasm`/`JS`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(OS.{os})` marker or the web-axis marker. |
 | E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(OS.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(OS.{os})`, or move `{caller}`'s body into one. |
-| E-OSTARGET-BUILD-CONTEXT | an `@if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `@if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
-| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
+| E-OSTARGET-BUILD-CONTEXT | an `@if … == { … }` dispatch branches on `@build.os`. | `@build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `@if @build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
+| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — an `@build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | this `@build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 

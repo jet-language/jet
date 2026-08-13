@@ -1204,6 +1204,9 @@ pub enum CompileMode {
 pub(crate) struct ModuleState {
     module_path: String,
     module_alias: String,
+    /// The bundle-wide build fact snapshot, copied into each module state so
+    /// the checker can fold facts without an engine or global lookup.
+    build_facts: jet_foundation::Facts::BuildFactSnapshot,
     /// True only for the explicitly selected package/workspace build entry.
     /// Ordinary `fn build` names do not grant compiler-host capabilities.
     allow_compiler_api: bool,

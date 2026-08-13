@@ -1,7 +1,7 @@
-Error [E-OSTARGET-BUILD-CONTEXT]: a `@ if … == { … }` dispatch branches on `build.os`
+Error [E-OSTARGET-BUILD-CONTEXT]: a `@ if … == { … }` dispatch branches on `@build.os`
   --> tests/ui/os_target_build_context.jet:2:15
     |
   2 |     @if build.arch == {
     |               ^^^^
- Why: `build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)
- Fix: write `@ if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time
+Why: `@build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)
+Fix: write `@ if @build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time

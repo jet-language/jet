@@ -74,6 +74,7 @@
             web_partition_report: None,
             dep_roots: std::collections::HashMap::new(),
             active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
             edition: "2027".to_string(),
         };
         // No C imports in unit tests; CFfi::default() is the correct empty state.

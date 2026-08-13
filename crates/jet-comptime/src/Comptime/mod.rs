@@ -65,7 +65,7 @@ pub use EventLite::{
     core_event_policy_sync, core_event_scope, core_event_with_policy,
     eval_method as eval_event_method, reset as reset_event_lite,
 };
-pub use Reflect::fact_read_value;
+pub use Reflect::{build_fact_value, fact_read_value};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -869,6 +869,9 @@ pub struct ProgramInfo<'a> {
     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: HashMap<String, Type>,
     pub core_imports: HashMap<String, String>,
+    /// D-CONF-READ1=A: the same pre-sema build snapshot used to fold source
+    /// facts. The dev/build interpreter never probes the host for it.
+    pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
     /// Card #392 pass 5: `TypeName -> migration { }` blocks (source order) for
     /// `decode_traced<T>`'s runtime chain-walker (see `Interp::migrations`).
     pub migrations: HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
@@ -885,6 +888,7 @@ impl<'a> ProgramInfo<'a> {
             distinct_ranges: HashMap::new(),
             distinct_bases: HashMap::new(),
             core_imports: HashMap::new(),
+            build_facts: jet_foundation::Facts::BuildFactSnapshot::default(),
             migrations: HashMap::new(),
         }
     }

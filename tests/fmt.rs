@@ -390,12 +390,12 @@ fn fmt_keeps_optional_return_sugar() {
 
 #[test]
 fn fmt_comptime_os_dispatch_round_trips() {
-    // D-OSTARGET2=B (ratified 2026-07-03): `@if build.os == { … }` — the
+    // D-OSTARGET2=B (ratified 2026-07-03): `@if @build.os == { … }` — the
     // OS-target dispatch. New token shape: the `@if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    @if build.os == {
+    @if @build.os == {
         .Linux -> {
             b :: LinuxBackend.{ name: "gtk" }
             print(b.label())
@@ -407,8 +407,8 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("@if build.os == {"),
-        "expected the `@if build.os == {{` dispatch head, got:\n{out}"
+        out.contains("@if @build.os == {"),
+        "expected the `@if @build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. Braceless simple arms stay concise; the
     // author-written scoped arm stays braced.

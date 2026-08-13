@@ -184,6 +184,7 @@ pub(crate) fn eval_comptime_items(
     // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
     // effect-approved Core calls (e.g. `@value :: math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
     if !items
@@ -250,7 +251,11 @@ pub(crate) fn eval_comptime_items(
                     // the same reader used after registration; the early pass
                     // only supplies source declarations because sema has not
                     // built the module registry yet.
-                    if let Some(value) = crate::Comptime::fact_read_value(&c.value, &eval_items)
+                    if let Some(value) = crate::Comptime::fact_read_value(
+                        &c.value,
+                        &eval_items,
+                        build_facts,
+                    )
                     {
                         let ty = value.jet_type();
                         consts.insert(c.name.clone(), ty);

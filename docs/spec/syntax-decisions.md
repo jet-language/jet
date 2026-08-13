@@ -1648,8 +1648,9 @@ type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>
 parses and type-checks the statement in every build, emits in debug/dev builds,
 and strips from release output. Both attach to statements only; item position is
 E0342, expression position is E0343, and doubled switch attributes are E0344.
-Names introduced inside the marker body do not escape. `build.profile` is not a
-user-typeable comptime value.
+Names introduced inside the marker body do not escape. Bare `build.profile` is
+not a user-typeable comptime value; the registered fact spelling is
+`@build.profile`.
 
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
@@ -2766,7 +2767,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `@if build.os ==` /
+Target variants select via the existing `@if @build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -3799,18 +3800,18 @@ page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
 **D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
-the surviving OS-gated impl through a comptime dispatch on `build.os` — a
+the surviving OS-gated impl through a comptime dispatch on `@build.os` — a
 compiler-known comptime value matched with `.Linux`/`.MacOS`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
-build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
+@build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 `if subject == { }` if-table) with the existing `@if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    @if build.os == {
+    @if @build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
@@ -3818,7 +3819,7 @@ fn run() {
 }
 ```
 
-`build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
+`@build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
 `OSTarget::active`). Sema desugars the dispatch into an `@if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
@@ -3828,9 +3829,9 @@ inside the taken arm is legal and dead arms never trip
 `E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
 set must cover `.Linux`, `.MacOS`, and `.Windows`, or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
-compiles or fails identically on every platform). A non-`build.os` subject is
+compiles or fails identically on every platform). A non-`@build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
-`build.os` is meaningful *only* as this dispatch's subject — `build` is not a
+`@build.os` is meaningful *only* as this dispatch's subject — `build` is not a
 reserved word, so anywhere else it is an ordinary identifier (undefined at
 runtime → E0107), never a magic runtime value.
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
@@ -3845,7 +3846,7 @@ handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
 in place (the shipped reactive core, I8). Selected by the shipped `@if
-build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
+@build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
 c.gtk4` through the S59 `pkg-config gtk4` path; a missing gtk4 at build time is
@@ -6368,7 +6369,7 @@ now teach their replacement and apply nothing.
 card #1517)*: configuration is the program's knowledge about itself. Every
 build fact is a typed value on one registered plane, with one contribution law
 and one audit command. The role-typed `Package` shape is the only manifest
-vocabulary. The legacy flat parser is deleted. `build.os` is the plane's first
+vocabulary. The legacy flat parser is deleted. `@build.os` is the plane's first
 row. The fact registry follows D-VERDICT-1455-1 and D-TYPE2-PLANE1: every fact
 is nameable, reflectable, and registered. Facts are comptime values that erase
 at codegen; S26 stands. This implements D-SHAPE5a/b and D-ECO-DECL1 on the
@@ -6401,7 +6402,7 @@ metaprogramming mark: `@build.package.version`, `@build.os`, and
 the compile-time meaning, so `build` remains an ordinary identifier. One
 spelling covers compiler facts, identity, settings, and stamps. Reads fold to
 constants before codegen; bare scripts use fallback identity from the file
-name and `0.0.0`. The `build.os` dispatch subject becomes
+name and `0.0.0`. The `@build.os` dispatch subject becomes
 `@if @build.os == { ... }`, and value-position fact reads are legal.
 This amends D-OSTARGET2 and D-CANVASSTATE1 and rides D-META-ONE1/S4. All I9
 tiers see one folded program.
@@ -6409,7 +6410,7 @@ tiers see one folded program.
 **D-CONF-KEY1=A — declared typed settings** *(ratified 2026-08-06, card
 #1519)*: a package declares each setting with a Tier-0 type and a default in a
 `settings:` block. Optimization bundles and the command line contribute
-values by the contribution law. `#Known if` can fold on a setting, and a fact read is a
+values by the contribution law. `@if` can fold on a setting, and a fact read is a
 constant. Undeclared settings are compile errors. `--set key=value` is the CLI
 spelling. `features:` and `env:` are deleted from `Build.{}`. This amends
 D-BUILDPROFILE1. The setting value set is Bool, Int, Char, String, and
@@ -6483,6 +6484,7 @@ value position.
 2026-08-06, card #1525; spelling amended by D-ONCE-AT1=D)*: `@build.stamp.git`
 is the commit hash, with a
 `-dirty` suffix for an unclean tree and no value outside a repository.
+`@build.stamp.dirty` is the explicit working-tree state.
 `@build.stamp.toolchain` is the Jet version. `@build.stamp.at` is captured once
 when the lock is written and replayed from the lock. All stamps are recorded
 in `.jet/lock`; a locked rebuild does not read the wall clock. Repository state

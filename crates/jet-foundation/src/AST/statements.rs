@@ -299,14 +299,14 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
-    /// D-OSTARGET2 (=B, ratified 2026-07-03): `@if build.os == { .Linux
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `@if @build.os == { .Linux
     /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
-    /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
+    /// that lets ungated code reach an OS-gated `impl`. `@build.os` is a
     /// compiler-known comptime value; the switch folds to the arm matching the
     /// build's active OS (`ProgramBundle.active_os`), discarding the others
     /// *before* any OS-gating check or full type-check sees them. Sema desugars
     /// this node into a chain of `ComptimeIf` (each arm's condition is the
-    /// compile-time constant `build.os == .OS`) as the very first step of
+    /// compile-time constant `@build.os == .OS`) as the very first step of
     /// `check_bundle`, so no later sema/codegen pass ever sees this variant —
     /// only the parser, formatter, and semindex do. Arm heads are bare OS
     /// variants (reuses the `Stmt::Switch` arm IR / `SwitchArm`).

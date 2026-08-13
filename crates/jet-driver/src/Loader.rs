@@ -980,6 +980,11 @@ fn load_entry_with_overlays_mode_with_sink(
         dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
     }
 
+    let build_facts = jet_foundation::Facts::BuildFactSnapshot::script(
+        &modules[entry_idx].path,
+        Syntax::OSTarget::host(),
+        "dev",
+    );
     let mut bundle = ProgramBundle {
         entry: entry_idx,
         project_root,
@@ -999,6 +1004,7 @@ fn load_entry_with_overlays_mode_with_sink(
         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OSTarget::host(),
+        build_facts,
         edition: package_edition,
     };
     if bundle.modules.iter().any(|module| {

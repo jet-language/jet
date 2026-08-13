@@ -55,6 +55,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
         web_partition_report: None,
         dep_roots: HashMap::new(),
         active_os: Syntax::OSTarget::host(),
+        build_facts: Default::default(),
         edition: "2027".to_string(),
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
@@ -99,6 +100,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
         dep_roots: HashMap::new(),
         active_os: Syntax::OSTarget::host(),
+        build_facts: Default::default(),
         edition: "2027".to_string(),
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);

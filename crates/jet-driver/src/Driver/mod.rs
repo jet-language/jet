@@ -132,6 +132,34 @@ pub fn compile_bundle_path_opts(
         false,
         cross_target,
         None,
+        "dev",
+    )
+}
+
+/// Profile-aware native front-end entry used by the CLI. Existing callers
+/// keep the `dev` default; the selected profile is a build fact, not an engine
+/// branch.
+pub fn compile_bundle_path_opts_with_profile(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(
+        file,
+        mode,
+        freestanding,
+        gates,
+        web_target,
+        false,
+        false,
+        false,
+        cross_target,
+        None,
+        profile,
     )
 }
 
@@ -166,6 +194,7 @@ pub fn compile_bundle_path_with_target_machine(
         false,
         Some(machine.triple.as_str()),
         None,
+        "dev",
     )
     .map_err(TargetMachineCompileError::Diagnostics)
 }
@@ -473,7 +502,7 @@ pub fn compile_bundle_path_opts_plugin_with_gates(
     gates: crate::Policy::GateSet,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None)
+    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None, "dev")
 }
 
 /// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
@@ -505,6 +534,7 @@ pub fn compile_bundle_path_opts_library_with_gates(
         false,
         None,
         explicit_output,
+        "dev",
     )
 }
 
@@ -533,6 +563,7 @@ pub fn compile_bundle_path_opts_dbg(
         debug_linemap,
         cross_target,
         None,
+        "dev",
     )
 }
 
@@ -573,6 +604,7 @@ pub fn compile_bundle_path_output_opts(
         false,
         cross_target,
         Some(output),
+        "dev",
     )
 }
 
@@ -956,6 +988,9 @@ pub struct BuildRunOptions {
     pub web_target: bool,
     pub plugin_target: bool,
     pub cross_target: Option<String>,
+    /// D-CONF-WORD1=A: the selected optimization bundle, exposed as the
+    /// compile-time `@build.profile` fact.
+    pub profile: String,
     /// Optional host-owned remote builder binding. Source and CLI input cannot
     /// construct an endpoint or credential; `None` is always local.
     pub remote: Option<crate::Comptime::Build::RemoteBuildBinding>,
@@ -975,9 +1010,60 @@ impl Default for BuildRunOptions {
             web_target: false,
             plugin_target: false,
             cross_target: None,
+            profile: "dev".to_string(),
             remote: None,
         }
     }
+}
+
+/// Seed the one build-fact snapshot before sema. Package identity comes from
+/// `PackageFacts`; a manifest-less entry keeps the loader's filename fallback.
+/// Provenance comes from the lock model, so no JIT/interpreter engine probes
+/// the host and a locked build never consults the wall clock.
+pub fn seed_build_facts(
+    bundle: &mut crate::AST::ProgramBundle,
+    profile: &str,
+    locked: bool,
+) -> Result<(), Vec<Diagnostic>> {
+    let manifest = crate::Package::PackageFacts::load(&bundle.project_root)
+        .and_then(Result::ok);
+    let package_name = manifest
+        .as_ref()
+        .map(|facts| facts.name.clone())
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            bundle.modules.get(bundle.entry).and_then(|module| {
+                module
+                    .path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_else(|| "script".to_string());
+    let package_version = manifest
+        .as_ref()
+        .and_then(|facts| facts.version.clone())
+        .unwrap_or_else(|| "0.0.0".to_string());
+    let stamp = crate::Lock::build_stamp(&bundle.project_root, locked).map_err(|error| {
+        vec![Diagnostic::error(
+            "E3512",
+            "the build provenance stamp is unavailable".to_string(),
+            error,
+            "run an unlocked build to create the lock stamp, then rerun with `--locked`"
+                .to_string(),
+            None,
+        )]
+    })?;
+    bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
+        package_name,
+        package_version,
+        os: bundle.active_os,
+        profile: profile.to_string(),
+        stamp,
+    };
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -1204,6 +1290,7 @@ fn build_query_options() -> BuildRunOptions {
         web_target: false,
         plugin_target: false,
         cross_target: None,
+        profile: "dev".to_string(),
         remote: None,
     }
 }
@@ -1396,6 +1483,7 @@ fn compile_bundle_path_build_inner(
         crate::Sema::CompileMode::Run
     };
     bundle.active_os = active_os;
+    seed_build_facts(&mut bundle, &options.profile, options.locked)?;
     bundle.web_partition_enforced = options.web_target;
     let local_build_indices = bundle.modules[bundle.entry]
         .items
@@ -1449,6 +1537,7 @@ fn compile_bundle_path_build_inner(
                 false,
             )?;
             bundle.active_os = active_os;
+            seed_build_facts(&mut bundle, &options.profile, options.locked)?;
             bundle.web_partition_enforced = options.web_target;
         }
     }
@@ -1667,6 +1756,7 @@ fn compile_bundle_path_build_inner(
             distinct_ranges,
             distinct_bases,
             core_imports,
+            build_facts: bundle.build_facts.clone(),
             migrations,
         };
         let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
@@ -1947,6 +2037,7 @@ fn compile_bundle_path_build_inner(
         });
         bundle = planned_bundle;
         bundle.active_os = active_os;
+        seed_build_facts(&mut bundle, &options.profile, options.locked)?;
         bundle.web_partition_enforced = options.web_target;
     }
 
@@ -2001,7 +2092,12 @@ fn compile_bundle_path_build_inner(
     }
 
     if let Some(provenance) = generated_lock_provenance.take() {
-        crate::Lock::record_generated_inputs(&bundle.project_root, &provenance, options.locked)
+        crate::Lock::record_generated_inputs(
+            &bundle.project_root,
+            &provenance,
+            options.locked,
+            &bundle.build_facts.stamp,
+        )
             .map_err(|diagnostic| vec![diagnostic])?;
     }
 
@@ -3471,6 +3567,7 @@ fn compile_bundle_path_opts_full(
     debug_linemap: bool,
     cross_target: Option<&str>,
     explicit_output: Option<&str>,
+    profile: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
@@ -3479,10 +3576,11 @@ fn compile_bundle_path_opts_full(
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    // D-OSTARGET2=B: the `@if build.os == { … }` desugar (run in sema)
+    // D-OSTARGET2=B: the `@if @build.os == { … }` desugar (run in sema)
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;
+    seed_build_facts(&mut bundle, profile, false)?;
     if web_target {
         bundle.web_partition_enforced = true;
     }
@@ -3749,6 +3847,11 @@ fn compile_src_with_options_and_policy(
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OSTarget::host(),
+        build_facts: jet_foundation::Facts::BuildFactSnapshot::script(
+            std::path::Path::new(file),
+            crate::Syntax::OSTarget::host(),
+            "dev",
+        ),
         edition: crate::Manifest::latest_edition().to_string(),
     };
     // Active foreign caches may contribute generated C-ABI bridge modules.
@@ -4068,6 +4171,7 @@ pub fn check_eval_with_effect_facts(
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OSTarget::host(),
+        build_facts: Default::default(),
         edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {

@@ -8,7 +8,7 @@ use crate::Syntax::{self, OSTarget as OS};
 use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use std::collections::HashMap;
 
-/// D-OSTARGET2=B (ratified 2026-07-03): fold every `@if build.os == {
+/// D-CONF-READ1=A: fold every `@if @build.os == {
 /// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
 /// matching this build's active OS (`bundle.active_os`), discarding the rest.
 ///
@@ -17,44 +17,56 @@ use std::collections::HashMap;
 /// only ever meet the *taken* arm (constructing an OS-gated type inside it is
 /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
 /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
-/// whose arm conditions are the compile-time constants `build.os == .OS`
+/// whose arm conditions are the compile-time constants `@build.os == .OS`
 /// (emitted here as a `Bool` literal), so all the existing `@if`
 /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
-/// handles it unchanged. `build.os` is meaningful only as this switch's
-/// subject; anywhere else `build` is an ordinary identifier (unknown at
-/// runtime → E0107), never a magic runtime value.
+/// handles it unchanged. `@build.os` is a compile-time fact value; ordinary
+/// `build` remains an ordinary identifier everywhere else.
 pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     let active = bundle.active_os;
     let mut diags = Vec::new();
     for module in &mut bundle.modules {
-        for item in &mut module.items {
-            match item {
-                Item::Func(f) => desugar_stmts(&mut f.body, active, &mut diags),
-                Item::Struct(s) => {
-                    for m in &mut s.methods {
-                        desugar_stmts(&mut m.body, active, &mut diags);
-                    }
-                    for b in &mut s.trait_impls {
-                        for m in &mut b.methods {
-                            desugar_stmts(&mut m.body, active, &mut diags);
-                        }
-                    }
-                }
-                Item::Enum(e) => {
-                    for m in &mut e.methods {
-                        desugar_stmts(&mut m.body, active, &mut diags);
-                    }
-                }
-                Item::Impl(i) => {
-                    for m in &mut i.methods {
-                        desugar_stmts(&mut m.body, active, &mut diags);
-                    }
-                }
-                _ => {}
-            }
-        }
+        desugar_items(&mut module.items, active, &mut diags);
     }
     diags
+}
+
+/// Walk nested code and generic modules before generic expansion. This keeps
+/// `@build.os` dispatch in a template on the same pre-registration path as a
+/// top-level function; expansion then copies the already-folded body.
+fn desugar_items(items: &mut [Item], active: OS, diags: &mut Vec<Diagnostic>) {
+    for item in items {
+        match item {
+            Item::Func(f) => desugar_stmts(&mut f.body, active, diags),
+            Item::Struct(s) => {
+                for m in &mut s.methods {
+                    desugar_stmts(&mut m.body, active, diags);
+                }
+                for b in &mut s.trait_impls {
+                    for m in &mut b.methods {
+                        desugar_stmts(&mut m.body, active, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &mut e.methods {
+                    desugar_stmts(&mut m.body, active, diags);
+                }
+            }
+            Item::Impl(i) => {
+                for m in &mut i.methods {
+                    desugar_stmts(&mut m.body, active, diags);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    desugar_items(body, active, diags);
+                }
+            }
+            Item::GenericModule(module) => desugar_items(&mut module.body, active, diags),
+            _ => {}
+        }
+    }
 }
 
 /// Recurse through every body-bearing statement, rewriting `ComptimeSwitch` in
@@ -161,7 +173,7 @@ fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Validate one `@if build.os == { … }` switch and rewrite it into the
+/// Validate one `@if @build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
 fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
@@ -175,11 +187,11 @@ fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
         unreachable!("fold_switch only called on ComptimeSwitch");
     };
 
-    // The subject must be exactly `build.os`.
+    // The subject must be exactly `@build.os`.
     let subject_ok = matches!(
         &subject,
         Expr::Field(base, member, _)
-            if matches!(base.as_ref(), Expr::Ident(n, _) if n == Syntax::BUILD_INFO)
+            if matches!(base.as_ref(), Expr::ComptimeName { name: n, .. } if n == "@build")
                 && member == Syntax::BUILD_INFO_OS
     );
     if !subject_ok {

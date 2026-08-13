@@ -404,6 +404,9 @@ fn checked_bundle(
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
+                if let Err(diags) = crate::Driver::seed_build_facts(&mut bundle, "dev", false) {
+                    return Err(diags);
+                }
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle_gates(
                     &mut bundle,

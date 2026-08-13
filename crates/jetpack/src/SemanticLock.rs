@@ -3683,9 +3683,19 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         let machine = strip_semantic_sections(&existing);
         // Machine half must remain Lock-parseable when present.
-        if !machine.trim().is_empty() {
-            crate::Lock::parse(&machine).map_err(std::io::Error::other)?;
-        }
+        let machine = if machine.trim().is_empty() {
+            let mut lock = crate::Lock::parse("version = 1\n").map_err(std::io::Error::other)?;
+            crate::Lock::ensure_build_stamp(&project, &mut lock);
+            crate::Lock::write(&lock)
+        } else {
+            let mut lock = crate::Lock::parse(&machine).map_err(std::io::Error::other)?;
+            if lock.build_stamp.is_none() {
+                crate::Lock::ensure_build_stamp(&project, &mut lock);
+                crate::Lock::write(&lock)
+            } else {
+                machine
+            }
+        };
         let semantic = write(&lock);
         let body = if machine.trim().is_empty() {
             format!("version = 1\n\n{semantic}")

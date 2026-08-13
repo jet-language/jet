@@ -19,7 +19,7 @@ use std::collections::HashSet;
 
 fn field_path(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
         Expr::Field(base, field, _) => Some(format!("{}.{}", field_path(base)?, field)),
         _ => None,
     }
@@ -30,9 +30,39 @@ impl<'a> Checker<'a> {
     /// then replace the read with its typed compile-time value. Codegen never
     /// receives a fact read, so facts cannot become runtime dispatch.
     fn fold_fact_read(&mut self, expr: &mut Expr) -> Option<Option<Type>> {
+        let path = field_path(expr);
         let Expr::Field(inner, member, span) = expr else {
             return None;
         };
+        if let Some(path) = path {
+            if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
+                let snapshot = self
+                    .modules
+                    .and_then(|modules| modules.get(self.module_idx))
+                    .map(|state| &state.build_facts);
+                let Some(snapshot) = snapshot else {
+                    return Some(None);
+                };
+                let Some(value) = crate::Comptime::build_fact_value(snapshot, read) else {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!("`{path}` has no registered value"),
+                        "fact reads answer typed values from the registered build snapshot"
+                            .to_string(),
+                        "read a registered `@build.*` fact".to_string(),
+                        Some(*span),
+                    ));
+                    return Some(None);
+                };
+                let ty = value.jet_type();
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span: *span,
+                    value: Some(value),
+                };
+                return Some(Some(ty));
+            }
+        }
         let is_build_subject =
             matches!(&**inner, Expr::ComptimeName { name, .. } if name == "@build");
         let read = if member == Syntax::BUILD_INFO_PROFILE {
@@ -132,10 +162,18 @@ impl<'a> Checker<'a> {
                 }),
                 _ => None,
             },
-            jet_foundation::Registry::FactRead::BuildProfile => Some((
-                Type::String,
-                crate::Comptime::CtValue::Str("dev".to_string()),
-            )),
+            jet_foundation::Registry::FactRead::BuildProfile => self
+                .modules
+                .and_then(|modules| modules.get(self.module_idx))
+                .and_then(|state| crate::Comptime::build_fact_value(&state.build_facts, read))
+                .map(|value| (value.jet_type(), value)),
+            jet_foundation::Registry::FactRead::BuildPackageName
+            | jet_foundation::Registry::FactRead::BuildPackageVersion
+            | jet_foundation::Registry::FactRead::BuildOS
+            | jet_foundation::Registry::FactRead::BuildStampGit
+            | jet_foundation::Registry::FactRead::BuildStampDirty
+            | jet_foundation::Registry::FactRead::BuildStampToolchain
+            | jet_foundation::Registry::FactRead::BuildStampAt => None,
             jet_foundation::Registry::FactRead::Layout
             | jet_foundation::Registry::FactRead::Name
             | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
