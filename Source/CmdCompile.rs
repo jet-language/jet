@@ -1570,6 +1570,10 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
 pub(crate) struct TestRunOpts {
     pub(crate) update_snapshots: bool,
     pub(crate) coverage: bool,
+    /// `--release`: build the test harness with the release AOT profile.
+    pub(crate) release: bool,
+    /// `--trace-tiers`: print the harness execution tier marker.
+    pub(crate) trace_tiers: bool,
     /// `--filter=<substr>`: only run tests whose name contains it.
     pub(crate) filter: Option<String>,
     /// `--shuffle` / `--shuffle=<seed>`: reorder tests before running (order-
@@ -1590,7 +1594,8 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
     )
 }
 
-/// `jet test [--coverage] [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
+/// `jet test [--release] [--trace-tiers] [--coverage] [--filter=<substr>]
+/// [--shuffle[=<seed>]] [--serial]`.
 /// With `coverage`, the harness is built with function/branch probes (D-COV1) and
 /// a function/branch coverage report prints after the test results. A directory
 /// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
@@ -1662,6 +1667,12 @@ pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Ve
 fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     let update_snapshots = opts.update_snapshots;
     let coverage = opts.coverage;
+    let profile = if opts.release {
+        BuildProfile::Release
+    } else {
+        BuildProfile::Default
+    };
+    let profile_tag = profile.cache_tag();
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -1673,7 +1684,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     // D-TEST4: discover and run any `///` doctest examples first. They are
     // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
-    let doctests_ok = run_doctests(path, &shown, &src, update_snapshots, mode);
+    let doctests_ok = run_doctests(path, &shown, &src, update_snapshots, &profile, mode);
 
     // A file with doctests but no `#Test` blocks is testable on its doctests
     // alone — skip the test harness (which would otherwise error E0601 "no #Test
@@ -1698,7 +1709,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         &shown,
         &rust_code,
         bin.clone(),
-        BuildProfile::Default,
+        profile,
         ffi_link.as_ref(),
         &[],
         false,
@@ -1708,10 +1719,10 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         mode,
         // `jet test` caches on the same canonical-AST key, but in its own mode
         // space (the test-harness binary must never be served for a `jet run`);
-        // `--coverage` instrumentation is a distinct binary again.
+        // profile and `--coverage` instrumentation are distinct binaries again.
         native_cache_key(
             shown.as_ref(),
-            &BuildProfile::Default.cache_tag(),
+            &profile_tag,
             if coverage { "testcov" } else { "test" },
         ),
     );
@@ -1743,6 +1754,9 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     }
     if opts.serial {
         cmd.env("JET_TEST_SERIAL", "1");
+    }
+    if opts.trace_tiers {
+        cmd.env("JET_TEST_TRACE_TIERS", "1");
     }
     let out = match cmd.output() {
         Ok(out) => out,
@@ -1777,6 +1791,7 @@ fn run_doctests(
     shown: &str,
     src: &str,
     update_snapshots: bool,
+    profile: &BuildProfile,
     mode: OutputMode,
 ) -> bool {
     let blocks = jet::Doctest::discover(src);
@@ -1825,7 +1840,7 @@ fn run_doctests(
             &tmp_shown,
             &rust_code,
             bin.clone(),
-            BuildProfile::Default,
+            profile.clone(),
             ffi_link.as_ref(),
             &[],
             false,

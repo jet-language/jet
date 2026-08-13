@@ -350,6 +350,17 @@ fn jet_test_print(s: String) {
 fn jet_test_take_output() -> String {
     JET_TEST_OUT.with(|buf| buf.borrow_mut().split_off(0))
 }
+/// D-E3-1905: the test child is an AOT binary. The release profile is encoded
+/// at compile time so `jet test --release --trace-tiers` proves which binary
+/// was built, without claiming that the test harness used a JIT or interpreter.
+fn jet_test_trace_tier() {
+    if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() { return; }
+    if cfg!(jet_release) {
+        println!("tier aot profile=release");
+    } else {
+        println!("tier aot profile=default");
+    }
+}
 /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
 /// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the
 /// file has a property test) so shuffling never depends on the file's contents.
@@ -405,9 +416,13 @@ trait JetGen: Sized + Clone {
 }
 impl JetGen for i64 {
     fn generate(rng: &mut JetRng) -> i64 {
-        // Bias toward small magnitudes (edge cases) but cover the full range.
-        match rng.below(8) {
-            0 => 0, 1 => 1, 2 => -1, 3 => i64::MAX, 4 => i64::MIN,
+        // D-E3-1905: keep common predicate landmarks visible while retaining
+        // a broad random fallback. Test and fuzz use the same case seed stream.
+        match rng.below(32) {
+            0 => 0, 1 => 1, 2 => -1, 3 => 2, 4 => -2,
+            5 => 42, 6 => -42, 7 => 99, 8 => 100, 9 => 255,
+            10 => 256, 11 => 512, 12 => 1024,
+            13 => i64::MIN, 14 => i64::MAX,
             _ => (rng.next_u64() as i64) % 1000,
         }
     }
@@ -3070,6 +3085,7 @@ fn emit_test_main_cov(
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+    out.push_str("    jet_test_trace_tier();\n");
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for test in tests {
@@ -3237,7 +3253,7 @@ fn emit_test_fns(
         let tuple_ty = format!("({},)", types.join(", "));
         out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
         out.push_str("    let seed = jet_prop_seed();\n");
-        out.push_str("    let mut rng = JetRng::new(seed);\n");
+        out.push_str("    let mut driver_rng = JetRng::new(seed);\n");
         // call helper that takes the tuple, returns Result
         let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
         out.push_str(&format!(
@@ -3247,6 +3263,8 @@ fn emit_test_fns(
             call_args.join(", ")
         ));
         out.push_str(&format!("    for case_index in 0..{} {{\n", CASES));
+        out.push_str("        let case_seed = driver_rng.next_u64();\n");
+        out.push_str("        let mut rng = JetRng::new(case_seed);\n");
         let gen_components: Vec<String> = types
             .iter()
             .map(|t| format!("<{} as JetGen>::generate(&mut rng)", t))

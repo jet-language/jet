@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "measured_on": "2026-08-13",
+  "generator": {
+    "source": "crates/jet-codegen/src/Codegen/mod.rs",
+    "algorithm": "splitmix64 JetRng",
+    "case_seed_stream": "driver.next_u64() -> JetRng(case_seed)",
+    "corpus": "empty",
+    "sample_count": 200
+  },
+  "engines": ["jet_test", "jet_fuzz"],
+  "predicates": [
+    {
+      "id": "int_eq_42",
+      "expression": "x == 42",
+      "meaning": "planted bug boundary"
+    },
+    {
+      "id": "int_small_anchor",
+      "expression": "x == 0 || x == 1 || x == -1",
+      "meaning": "small integer landmarks"
+    },
+    {
+      "id": "int_extreme",
+      "expression": "x == Int.MIN || x == Int.MAX",
+      "meaning": "integer extremes"
+    },
+    {
+      "id": "int_random_fallback",
+      "expression": "x is outside the 15 explicit i64 landmarks",
+      "meaning": "random fallback bucket"
+    }
+  ],
+  "seeds": {
+    "jet_test": 168,
+    "jet_fuzz": 168
+  },
+  "sample_counts": {
+    "jet_test": 200,
+    "jet_fuzz": 200
+  },
+  "hit_counts": {
+    "jet_test": {
+      "int_eq_42": 6,
+      "int_small_anchor": 20,
+      "int_extreme": 15,
+      "int_random_fallback": 108
+    },
+    "jet_fuzz": {
+      "int_eq_42": 6,
+      "int_small_anchor": 20,
+      "int_extreme": 15,
+      "int_random_fallback": 108
+    }
+  },
+  "hit_rates": {
+    "jet_test": {
+      "int_eq_42": 0.03,
+      "int_small_anchor": 0.1,
+      "int_extreme": 0.075,
+      "int_random_fallback": 0.54
+    },
+    "jet_fuzz": {
+      "int_eq_42": 0.03,
+      "int_small_anchor": 0.1,
+      "int_extreme": 0.075,
+      "int_random_fallback": 0.54
+    }
+  },
+  "comparison": {
+    "predicates": "identical",
+    "seeds": "identical",
+    "sample_counts": "identical",
+    "hit_rates": "identical"
+  },
+  "findings": [
+    {
+      "id": "F1905-1",
+      "predicate": "int_eq_42",
+      "finding_card_ids": ["#1905"],
+      "observation": "6/200 cases hit 42; the first hit is case 34."
+    },
+    {
+      "id": "F1905-2",
+      "predicate": "engine_case_seed_stream",
+      "finding_card_ids": ["#1905"],
+      "observation": "jet test and jet fuzz use the same 200 case seeds and identical hit rates."
+    }
+  ],
+  "finding_card_ids": ["#1905"]
+}

@@ -781,7 +781,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
     FlagSpec { long: "--interpret", help: "with dev: force the tier-0 TIR interpreter" },
-    FlagSpec { long: "--trace-tiers", help: "with run/dev: print per-function Cranelift vs interpreter tier selection" },
+    FlagSpec { long: "--trace-tiers", help: "with run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
@@ -815,7 +815,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--emit-generated", help: "with build: copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
-    FlagSpec { long: "--release", help: "with build/run: optimize for release" },
+    FlagSpec { long: "--release", help: "with build/run/test: optimize for release" },
     FlagSpec { long: "--profile", help: "with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
     FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.

@@ -477,6 +477,8 @@ usage:
   {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
   {bin} jobs  [-p member]           list project `#Job` functions
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
+  {bin} test  <file|dir> --release  compile the test harness with the release AOT profile
+  {bin} test  <file|dir> --trace-tiers  print the test harness execution tier marker
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
   {bin} test  <file> --shuffle      run tests in a random (printed) order
@@ -558,13 +560,14 @@ flags:
   --small                      with build/run: smallest binary (S15)
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
   --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
+  --release                    with build/run/test: optimize for release
   --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
   --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
   --gc-trace                   with run/dev: record automatic-GC promotion evidence
-  --trace-tiers                with run/dev: print per-function tier, reason, timing
+  --trace-tiers                with run/dev: print per-function tier, reason, timing; with test: print AOT marker
   --color=auto|always|never    control color (auto: only on a terminal)
   --filter=<substr>            with test/bench: only run regions whose name contains it
   --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
@@ -2382,7 +2385,15 @@ fn main() {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
-                                run_test(&entry_str, false, mode);
+                                run_test_opts(
+                                    &entry_str,
+                                    TestRunOpts {
+                                        release: release_flag,
+                                        trace_tiers: jet_argv.iter().any(|a| a == "--trace-tiers"),
+                                        ..Default::default()
+                                    },
+                                    mode,
+                                );
                                 return;
                             }
                             "bench" => {
@@ -2482,6 +2493,12 @@ fn main() {
             // D-COV1: `jet test --coverage` builds an instrumented harness and
             // reports function and branch coverage after the test results.
             let coverage = jet_argv.iter().any(|a| a == "--coverage");
+            // D-BUILDPROFILE1: `jet test --release` must compile the harness
+            // with the same release AOT profile used by `jet build`/`jet run`.
+            let release = jet_argv.iter().any(|a| a == "--release");
+            // The child harness owns the observable marker; pass the request
+            // across the process boundary instead of relying on parent state.
+            let trace_tiers = jet_argv.iter().any(|a| a == "--trace-tiers");
             // D-TESTKIT1=A gap #4: `--filter=<substr>` keeps only test names
             // containing it (harness-side, `JET_TEST_FILTER`).
             let filter = jet_argv
@@ -2531,6 +2548,8 @@ fn main() {
                 TestRunOpts {
                     update_snapshots,
                     coverage,
+                    release,
+                    trace_tiers,
                     filter,
                     shuffle_seed,
                     serial,

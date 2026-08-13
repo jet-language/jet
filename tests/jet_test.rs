@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use jet_foundation::JSON::{parse_json, JSONValue};
+
 mod common;
 use common::have_rustc;
 
@@ -372,6 +374,149 @@ fn jet_test_fail_then_fixed() {
         String::from_utf8_lossy(&good.stdout).contains("pass"),
         "fixed tests should pass"
     );
+}
+
+#[test]
+fn release_test_uses_aot_tier_marker() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/property_tests.jet");
+    let out = Command::new(&jet)
+        .args(["test", "--release", "--trace-tiers"])
+        .arg(&example)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "release property test failed:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("tier aot profile=release"),
+        "release test did not report its AOT tier:\n{stdout}"
+    );
+    let combined = format!("{stdout}{stderr}").to_ascii_lowercase();
+    assert!(!combined.contains("jit"), "release test reported a JIT tier:\n{combined}");
+    assert!(
+        !combined.contains("interpreter"),
+        "release test reported an interpreter tier:\n{combined}"
+    );
+}
+
+#[test]
+fn property_generator_distribution_report_is_reproducible() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let report_path = root.join("tests/fixtures/property-generator-distribution.json");
+    let report_text = fs::read_to_string(&report_path).expect("property distribution report");
+    let JSONValue::Object(report) = parse_json(&report_text).expect("valid property report JSON") else {
+        panic!("property distribution report must be an object");
+    };
+    assert!(matches!(report.get("schema"), Some(JSONValue::Number(1))));
+
+    let JSONValue::Array(predicates) = report.get("predicates").expect("predicates") else {
+        panic!("predicates must be an array");
+    };
+    let predicate_ids: Vec<&str> = predicates
+        .iter()
+        .map(|predicate| {
+            let JSONValue::Object(predicate) = predicate else {
+                panic!("predicate must be an object");
+            };
+            match predicate.get("id") {
+                Some(JSONValue::String(id)) => id.as_str(),
+                _ => panic!("predicate id must be a string"),
+            }
+        })
+        .collect();
+    assert_eq!(
+        predicate_ids,
+        [
+            "int_eq_42",
+            "int_small_anchor",
+            "int_extreme",
+            "int_random_fallback",
+        ]
+    );
+    let JSONValue::Array(engines) = report.get("engines").expect("engines") else {
+        panic!("engines must be an array");
+    };
+    assert!(engines.iter().any(|engine| matches!(engine, JSONValue::String(engine) if engine == "jet_test")));
+    assert!(engines.iter().any(|engine| matches!(engine, JSONValue::String(engine) if engine == "jet_fuzz")));
+    let JSONValue::Object(comparison) = report.get("comparison").expect("comparison") else {
+        panic!("comparison must be an object");
+    };
+    for field in ["predicates", "seeds", "sample_counts", "hit_rates"] {
+        assert!(matches!(comparison.get(field), Some(JSONValue::String(value)) if value == "identical"));
+    }
+
+    let JSONValue::Object(seeds) = report.get("seeds").expect("seeds") else {
+        panic!("seeds must be an object");
+    };
+    let JSONValue::Object(sample_counts) = report.get("sample_counts").expect("sample_counts") else {
+        panic!("sample_counts must be an object");
+    };
+    for (field, expected) in [("seeds", 168), ("sample_counts", 200)] {
+        let values = if field == "seeds" { seeds } else { sample_counts };
+        assert!(matches!(values.get("jet_test"), Some(JSONValue::Number(value)) if *value == expected));
+        assert!(matches!(values.get("jet_fuzz"), Some(JSONValue::Number(value)) if *value == expected));
+    }
+
+    let JSONValue::Object(hit_rates) = report.get("hit_rates").expect("hit_rates") else {
+        panic!("hit_rates must be an object");
+    };
+    let JSONValue::Object(test_rates) = hit_rates.get("jet_test").expect("jet_test hit rates") else {
+        panic!("jet_test hit rates must be an object");
+    };
+    let JSONValue::Object(fuzz_rates) = hit_rates.get("jet_fuzz").expect("jet_fuzz hit rates") else {
+        panic!("jet_fuzz hit rates must be an object");
+    };
+    for (id, expected) in [
+        ("int_eq_42", 0.03),
+        ("int_small_anchor", 0.10),
+        ("int_extreme", 0.075),
+        ("int_random_fallback", 0.54),
+    ] {
+        let Some(JSONValue::Flt(test_rate)) = test_rates.get(id) else {
+            panic!("missing jet_test rate for {id}");
+        };
+        let Some(JSONValue::Flt(fuzz_rate)) = fuzz_rates.get(id) else {
+            panic!("missing jet_fuzz rate for {id}");
+        };
+        assert_eq!(test_rate, fuzz_rate, "engines disagree for {id}");
+        assert!((*test_rate - expected).abs() < f64::EPSILON, "wrong rate for {id}");
+    }
+
+    let JSONValue::Array(card_ids) = report
+        .get("finding_card_ids")
+        .expect("finding card ids")
+    else {
+        panic!("finding_card_ids must be an array");
+    };
+    assert!(card_ids.iter().any(|id| matches!(id, JSONValue::String(id) if id == "#1905")));
+    let JSONValue::Array(findings) = report.get("findings").expect("findings") else {
+        panic!("findings must be an array");
+    };
+    assert!(!findings.is_empty(), "distribution findings must be carded");
+    for finding in findings {
+        let JSONValue::Object(finding) = finding else {
+            panic!("finding must be an object");
+        };
+        let Some(JSONValue::Array(ids)) = finding.get("finding_card_ids") else {
+            panic!("finding card ids missing from finding");
+        };
+        assert!(ids.iter().any(|id| matches!(id, JSONValue::String(id) if id == "#1905")));
+    }
+
+    let codegen = fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/mod.rs"))
+        .expect("property generator source");
+    assert!(codegen.contains("match rng.below(32)"));
+    assert!(codegen.contains("5 => 42"));
+    assert!(codegen.contains("let case_seed = driver_rng.next_u64();"));
+    assert!(codegen.contains("let seed = driver_rng.next_u64();"));
 }
 
 #[test]
