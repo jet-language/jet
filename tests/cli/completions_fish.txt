@@ -61,6 +61,8 @@ complete -c jet -n '__fish_seen_subcommand_from inspect' -a dossier -d 'Show eve
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a semindex -d 'Search the code index'
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a expand -d 'Show expanded meaning of Jet code (use --json for canonical facts)'
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a unsafe -d 'Review unsafe code and its safeguards'
+complete -c jet -n '__fish_seen_subcommand_from inspect' -a gates -d 'Read the complete compile-time gate ledger'
+complete -c jet -n '__fish_seen_subcommand_from inspect' -a authority -d 'Read rights-bearing gates from the ledger'
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a schema -d 'Inspect saved data schema versions'
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a codemod -d 'Preview or apply code changes'
 complete -c jet -n '__fish_seen_subcommand_from inspect' -a audit -d 'Check dependencies for known vulnerabilities'
@@ -112,6 +114,7 @@ complete -c jet -l out -d 'with structural merge: write the checked result to th
 complete -c jet -l report -d 'with structural diff/merge: text, json, or editor report'
 complete -c jet -l repo -d 'with merge install-driver: Git worktree to configure'
 complete -c jet -l json -d 'emit machine-readable facts or diagnostics'
+complete -c jet -l kind -d 'with inspect gates/authority: filter one gate kind'
 complete -c jet -l quiet -d 'suppress non-error status output'
 complete -c jet -l color -d 'color: auto | always | never'
 complete -c jet -l version -d 'print compiler version'
@@ -172,8 +175,21 @@ complete -c jet -l release -d 'with build/run: optimize for release'
 complete -c jet -l profile -d 'with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle'
 complete -c jet -l builder -d 'with build: select a previously bound remote builder'
 complete -c jet -l a11y -d 'with lint: check roles, labels, and other accessibility basics'
-complete -c jet -l scope -d 'with trust grant: choose user or repository scope'
+1:         if matches!(arg.as_str(), "-p" | "--job" | "--output" | "--gate" | "--scope" | "--kind") {
+2:         if arg.starts_with("--job=") || arg.starts_with("--output=") || arg.starts_with("--scope=") || arg.starts_with("--kind=") {
+3:             if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" {
+4:     FlagSpec { long: "--scope", help: "with inspect gates/authority or trust grant: choose a ledger or trust scope" },
+    // D-TESTKIT1=A / D-BENCH-PARITY1=B: the shared name-selection flag.
+    FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },
+5: cmds="registry inspect hangar project self diff merge run jobs check test prove build dev debug repl notebook import new fmt fix lint explain env cache remote trust image os add remove fetch update init split fold gc clean emit eval budget perf report bench fuzz version help"
+flags="--attach --once --observe --gc-trace --structural --out --report --repo --json --kind --quiet --color --version --check --restore-role-files --diff --changed --skipped --stdin-path --small --job --output --locked --lock -p --annotated --force --no-sign --registry --pkg --clang --ar --from --to --message --before --spdx --cyclonedx --advisory-db --vendor-dir --sbom --verbose --online --fix --dry-run --edition --try-anyway --interpret --trace-tiers --restart --swap --watch --project --pure --freestanding --gate --target --env --preset --explain-partition --capabilities-json --update-snapshots --coverage --rust --emit-generated -u --release --profile --builder --a11y --scope --filter --shuffle --serial --iterations --time --seed --corpus --lens --facts --annotations --baseline --bootstrap --accept-regression --reason --yes -y --allow-net --deny-net --allow-fs --deny-fs --allow-io --deny-io --allow-db --deny-db --allow-time --deny-time --allow-rand --deny-rand --allow-env --deny-env --allow-exec --deny-exec --allow-log --deny-log --allow-gpu --deny-gpu"
+6: complete -c jet -l scope -d 'with inspect gates/authority or trust grant: choose a ledger or trust scope'
 complete -c jet -l filter -d 'with test/bench: only run regions whose name contains --filter=<substr>'
+7: $JetCommands = @('registry','inspect','hangar','project','self','diff','merge','run','jobs','check','test','prove','build','dev','debug','repl','notebook','import','new','fmt','fix','lint','explain','env','cache','remote','trust','image','os','add','remove','fetch','update','init','split','fold','gc','clean','emit','eval','budget','perf','report','bench','fuzz','version','help')
+$JetFlags = @('--attach','--once','--observe','--gc-trace','--structural','--out','--report','--repo','--json','--kind','--quiet','--color','--version','--check','--restore-role-files','--diff','--changed','--skipped','--stdin-path','--small','--job','--output','--locked','--lock','-p','--annotated','--force','--no-sign','--registry','--pkg','--clang','--ar','--from','--to','--message','--before','--spdx','--cyclonedx','--advisory-db','--vendor-dir','--sbom','--verbose','--online','--fix','--dry-run','--edition','--try-anyway','--interpret','--trace-tiers','--restart','--swap','--watch','--project','--pure','--freestanding','--gate','--target','--env','--preset','--explain-partition','--capabilities-json','--update-snapshots','--coverage','--rust','--emit-generated','-u','--release','--profile','--builder','--a11y','--scope','--filter','--shuffle','--serial','--iterations','--time','--seed','--corpus','--lens','--facts','--annotations','--baseline','--bootstrap','--accept-regression','--reason','--yes','-y','--allow-net','--deny-net','--allow-fs','--deny-fs','--allow-io','--deny-io','--allow-db','--deny-db','--allow-time','--deny-time','--allow-rand','--deny-rand','--allow-env','--deny-env','--allow-exec','--deny-exec','--allow-log','--deny-log','--allow-gpu','--deny-gpu')
+$JetGroups = @{ 'registry' = @('publish','yank','keygen','key','vendor'); 'inspect' = @('live','graph','query','explain-build','compiler','impact','dossier','semindex','expand','unsafe','gates','authority','schema','codemod','audit','sbom','bind','logs','search','info','outdated','reserved','facts'); 'hangar' = @('verify','repair','copy','import','export','dump','restore','sign','rollback','generations','du'); 'project' = @('parts'); 'self' = @('toolchain','upgrade','doctor','completions','man','devtools','lsp'); 'os' = @('push','bridge','services','config'); 'gc' = @('report'); 'perf' = @('run','test','bench','attach','view','compare','export') }
+8:         '--scope[with inspect gates/authority or trust grant\: choose a ledger or trust scope]'
+        '--filter[with test/bench\: only run regions whose name contains --filter=<substr>]'
 complete -c jet -l shuffle -d 'with test: run tests in random (or --shuffle=<seed>) order'
 complete -c jet -l serial -d 'with test: run tests one at a time instead of the parallel default'
 complete -c jet -l iterations -d 'with fuzz: case budget --iterations=<n> (default 1000)'

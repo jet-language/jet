@@ -85,6 +85,10 @@ mark, `T.@range`, `f.@effects`, `@build.profile` (D-FACT-READ1=A, amended by
 D-ONCE-AT1=D, which supersedes the former prefix `$` spelling while preserving
 infix `@` package references).
 
+The D-LINTPOLICY1 on-record clause is one law for every gate: each bypass is
+written at its site or on the command line and lands in this ledger. A gate kind
+does not get a private bypass rule or a hidden write surface.
+
 Two walls stand on purpose. The borrow checker is a **prover**, never a plane:
 alias and flow analysis over places cannot be a fold of per-operation rules, so
 the engine stays its own, and the facts it publishes register as read-only rows

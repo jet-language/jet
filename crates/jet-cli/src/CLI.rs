@@ -167,7 +167,7 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Semindex, Expand, Unsafe, Schema, Codemod, Audit, Sbom, Bind, Live,
+    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
     GcReport,
@@ -186,6 +186,7 @@ impl HandlerKey {
             Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Compiler => "compiler", Self::Impact => "impact",
             Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
+            Self::Gates => "gates", Self::Authority => "authority",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
             Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
             Self::Logs => "logs", Self::Search => "search", Self::Info => "info", Self::Outdated => "outdated",
@@ -225,6 +226,8 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
     NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
+    NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
+    NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
     NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
     NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
     NestedCommandSpec { name: "audit", usage: "audit [--advisory-db <path>]", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit, also_canonical_top_level: false },
@@ -731,6 +734,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
     FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
     FlagSpec { long: "--json", help: "emit machine-readable facts or diagnostics" },
+    FlagSpec { long: "--kind", help: "with inspect gates/authority: filter one gate kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
     // confirmations); never suppresses errors or requested data.
@@ -813,9 +817,21 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
-    FlagSpec { long: "--scope", help: "with trust grant: choose user or repository scope" },
+1:         if matches!(arg.as_str(), "-p" | "--job" | "--output" | "--gate" | "--scope" | "--kind") {
+2:         if arg.starts_with("--job=") || arg.starts_with("--output=") || arg.starts_with("--scope=") || arg.starts_with("--kind=") {
+3:             if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" {
+4:     FlagSpec { long: "--scope", help: "with inspect gates/authority or trust grant: choose a ledger or trust scope" },
     // D-TESTKIT1=A / D-BENCH-PARITY1=B: the shared name-selection flag.
     FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },
+5: cmds="registry inspect hangar project self diff merge run jobs check test prove build dev debug repl notebook import new fmt fix lint explain env cache remote trust image os add remove fetch update init split fold gc clean emit eval budget perf report bench fuzz version help"
+flags="--attach --once --observe --gc-trace --structural --out --report --repo --json --kind --quiet --color --version --check --restore-role-files --diff --changed --skipped --stdin-path --small --job --output --locked --lock -p --annotated --force --no-sign --registry --pkg --clang --ar --from --to --message --before --spdx --cyclonedx --advisory-db --vendor-dir --sbom --verbose --online --fix --dry-run --edition --try-anyway --interpret --trace-tiers --restart --swap --watch --project --pure --freestanding --gate --target --env --preset --explain-partition --capabilities-json --update-snapshots --coverage --rust --emit-generated -u --release --profile --builder --a11y --scope --filter --shuffle --serial --iterations --time --seed --corpus --lens --facts --annotations --baseline --bootstrap --accept-regression --reason --yes -y --allow-net --deny-net --allow-fs --deny-fs --allow-io --deny-io --allow-db --deny-db --allow-time --deny-time --allow-rand --deny-rand --allow-env --deny-env --allow-exec --deny-exec --allow-log --deny-log --allow-gpu --deny-gpu"
+6: complete -c jet -l scope -d 'with inspect gates/authority or trust grant: choose a ledger or trust scope'
+complete -c jet -l filter -d 'with test/bench: only run regions whose name contains --filter=<substr>'
+7: $JetCommands = @('registry','inspect','hangar','project','self','diff','merge','run','jobs','check','test','prove','build','dev','debug','repl','notebook','import','new','fmt','fix','lint','explain','env','cache','remote','trust','image','os','add','remove','fetch','update','init','split','fold','gc','clean','emit','eval','budget','perf','report','bench','fuzz','version','help')
+$JetFlags = @('--attach','--once','--observe','--gc-trace','--structural','--out','--report','--repo','--json','--kind','--quiet','--color','--version','--check','--restore-role-files','--diff','--changed','--skipped','--stdin-path','--small','--job','--output','--locked','--lock','-p','--annotated','--force','--no-sign','--registry','--pkg','--clang','--ar','--from','--to','--message','--before','--spdx','--cyclonedx','--advisory-db','--vendor-dir','--sbom','--verbose','--online','--fix','--dry-run','--edition','--try-anyway','--interpret','--trace-tiers','--restart','--swap','--watch','--project','--pure','--freestanding','--gate','--target','--env','--preset','--explain-partition','--capabilities-json','--update-snapshots','--coverage','--rust','--emit-generated','-u','--release','--profile','--builder','--a11y','--scope','--filter','--shuffle','--serial','--iterations','--time','--seed','--corpus','--lens','--facts','--annotations','--baseline','--bootstrap','--accept-regression','--reason','--yes','-y','--allow-net','--deny-net','--allow-fs','--deny-fs','--allow-io','--deny-io','--allow-db','--deny-db','--allow-time','--deny-time','--allow-rand','--deny-rand','--allow-env','--deny-env','--allow-exec','--deny-exec','--allow-log','--deny-log','--allow-gpu','--deny-gpu')
+$JetGroups = @{ 'registry' = @('publish','yank','keygen','key','vendor'); 'inspect' = @('live','graph','query','explain-build','compiler','impact','dossier','semindex','expand','unsafe','gates','authority','schema','codemod','audit','sbom','bind','logs','search','info','outdated','reserved','facts'); 'hangar' = @('verify','repair','copy','import','export','dump','restore','sign','rollback','generations','du'); 'project' = @('parts'); 'self' = @('toolchain','upgrade','doctor','completions','man','devtools','lsp'); 'os' = @('push','bridge','services','config'); 'gc' = @('report'); 'perf' = @('run','test','bench','attach','view','compare','export') }
+8:         '--scope[with inspect gates/authority or trust grant\: choose a ledger or trust scope]'
+        '--filter[with test/bench\: only run regions whose name contains --filter=<substr>]'
     FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
@@ -1455,6 +1471,7 @@ mod tests {
             ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
             ("inspect", "unsafe", Unsafe, "unsafe", false),
+            ("inspect", "gates", Gates, "gates", false), ("inspect", "authority", Authority, "authority", false),
             ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
             ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
             ("inspect", "bind", Bind, "bind", false),

@@ -151,9 +151,10 @@ pub(super) struct Interp<'a> {
     /// the breakpoint banner (`in main()`). Top level / `main` until a call
     /// swaps it.
     pub(super) cur_func: String,
-    /// D-CTEFFECT1: nesting depth of active `#Impure("reason") { … }` blocks.
-    /// Tier-2 comptime effect calls (core.files/env/exec/io) are allowed only
-    /// while this is `> 0` and the invocation gate set allows `impure`.
+    /// D-CTEFFECT1: execution context for active `#Impure("reason") { … }`
+    /// blocks. The source statement is the writer; sema's GateLedger reads
+    /// that same statement. This depth only marshals the checked context to
+    /// comptime evaluation and must not become a second audit record.
     pub(super) impure_depth: usize,
     /// D-CTEFFECT1: true when the caller compiled with `--gate impure=allow`.
     /// Without this, `#Impure` blocks are syntactically valid but Tier-2

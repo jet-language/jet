@@ -2035,6 +2035,7 @@ mod FlowFacts;
 mod MemoryFacts;
 mod MemberSpread;
 pub mod UnsafeObligations;
+pub mod GateLedger;
 mod FFI;
 pub mod HotSwap;
 mod OSTarget;
