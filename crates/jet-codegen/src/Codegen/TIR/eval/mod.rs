@@ -2112,13 +2112,7 @@ impl<'a> EvalCtx<'a> {
                 crate::task_group::JetTaskSelectMode::Race => "`task.race`",
                 crate::task_group::JetTaskSelectMode::Any => "`task.any`",
             };
-            return Err(crate::Sema::Diagnostics::render_registered(
-                "E1112",
-                format!("{method_label} needs at least one task branch"),
-                "a task combinator must have a child to join or select".to_string(),
-                format!("write {method_label} {{ work() }} with one or more branches"),
-                Some(self.span()),
-            ));
+            return Err(crate::Sema::Diagnostics::e1112(method_label, self.span()));
         }
         match select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()) {
             Ok(mut values) => {

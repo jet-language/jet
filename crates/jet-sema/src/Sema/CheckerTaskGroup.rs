@@ -83,11 +83,9 @@ impl<'a> Checker<'a> {
         if !matches!(expr, Expr::ListLit(branches, _) if branches.is_empty()) {
             return false;
         }
-        self.diags.push(Diagnostic::error(
+        self.diags.push(Diagnostic::from_row(
             "E1112",
-            format!("{method_label} needs at least one task branch"),
-            "a task combinator must have a child to join or select".to_string(),
-            format!("write {method_label} {{ work() }} with one or more branches"),
+            &[("method", method_label)],
             Some(expr.span()),
         ));
         true

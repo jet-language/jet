@@ -29,6 +29,67 @@ fn skip_if_cranelift_host_unsupported() -> bool {
 }
 
 #[test]
+fn e1112_row_text_matches_aot_run_and_interpreter() {
+    std::thread::Builder::new()
+        .name("e1112-tier-parity".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(e1112_row_text_matches_aot_run_and_interpreter_inner)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
+    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui/empty_task_combinator.jet");
+    let path = file.to_string_lossy().into_owned();
+    let src = fs::read_to_string(&file).unwrap();
+    let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+
+    let aot = jet::compile_with_path(&src, &path)
+        .expect_err("AOT front end must reject an empty task combinator");
+    let run = match run_jit_once(&path) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("default jet run must reject E1112: {other:?}"),
+    };
+    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("interpreter gate must reject E1112: {other:?}"),
+    };
+
+    let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+        diags
+            .iter()
+            .map(|diag| {
+                (
+                    diag.code.clone(),
+                    diag.what.clone(),
+                    diag.why.clone(),
+                    diag.fix.clone(),
+                    diag.span,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = shape(&aot);
+    assert_eq!(expected.len(), 3);
+    assert!(expected.iter().all(|(code, ..)| code == "E1112"));
+    for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+        assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            jet::render_diagnostics("tests/ui/empty_task_combinator.jet", &src, &diags),
+            snapshot,
+            "{tier} text drifted from the UI snapshot"
+        );
+    }
+    assert_eq!(
+        jet::render_diagnostics("tests/ui/empty_task_combinator.jet", &src, &aot),
+        snapshot,
+        "AOT text drifted from the UI snapshot"
+    );
+}
+
+#[test]
 fn jet_run_e0956_uses_shared_voice() {
     if skip_if_cranelift_host_unsupported() {
         return;
