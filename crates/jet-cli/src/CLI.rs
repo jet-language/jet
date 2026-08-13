@@ -358,6 +358,18 @@ pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandSpec
 }
 
 pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
+    // A nested action may share a word with a canonical top-level command
+    // (`jet env test` and `jet test`). The canonical top-level intent wins
+    // bare-word lookup; grouped dispatch still uses `nested_command` and keeps
+    // the owning group when its handler requires it.
+    if command_groups().any(|group| {
+        group
+            .actions
+            .iter()
+            .any(|action| action.name == name && action.also_canonical_top_level)
+    }) {
+        return None;
+    }
     command_groups().find_map(|group| {
         group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
     }).filter(|(_, action)| {
@@ -1136,6 +1148,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "logs"
             | "clean"
             | "fetch"
+            | "shared-store"
             | "publish"
             | "yank"
             | "keygen"
@@ -1671,7 +1684,12 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in command_groups() {
             for action in group.actions {
-                if !action.also_canonical_top_level {
+                let canonical_bare = COMMANDS.iter().any(|command| {
+                    command.name == action.name
+                        && command.actions.is_empty()
+                        && is_canonical_top_level(command.name)
+                });
+                if !action.also_canonical_top_level && !canonical_bare {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }

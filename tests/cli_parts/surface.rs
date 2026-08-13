@@ -101,6 +101,52 @@ fn target_equals_and_space_forms_match_for_build_run_and_dev() {
 }
 
 #[test]
+fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
+    let has_route = |text: &str, route: &str| {
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line == format!("jet {route}") || line.starts_with(&format!("jet {route} "))
+        })
+    };
+
+    for flag in ["--help", "help"] {
+        let out = Command::new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap();
+        assert!(out.status.success(), "{flag}: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for command in jet::CLI::COMMANDS.iter().filter(|command| jet::CLI::is_canonical_top_level(command.name)) {
+            assert!(has_route(&stdout, command.name), "help omitted {}: {stdout}", command.name);
+        }
+        for retired in jet::CLI::RETIRED_COMMANDS {
+            assert!(!has_route(&stdout, retired.spelling), "help advertised retired {}: {stdout}", retired.spelling);
+        }
+    }
+
+    let env_help = Command::new(jet()).args(["env", "--help"]).output().unwrap();
+    assert!(env_help.status.success(), "env help failed: {:?}", env_help);
+    let env_help = String::from_utf8_lossy(&env_help.stdout);
+    for action in ["hook", "test"] {
+        assert!(env_help.contains(&format!("jet env {action}")), "env help omitted {action}: {env_help}");
+    }
+
+    let completions = [
+        Command::new(jet()).args(["self", "completions", "bash"]).output().unwrap(),
+        Command::new(jet()).args(["self", "completions", "zsh"]).output().unwrap(),
+        Command::new(jet()).args(["self", "completions", "fish"]).output().unwrap(),
+        Command::new(jet()).args(["self", "completions", "powershell"]).output().unwrap(),
+    ];
+    for output in completions {
+        assert!(output.status.success(), "completion failed: {:?}", output);
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("env"), "completion omitted env: {text}");
+    }
+
+    let man = jet::CLI::man_page("0.0.0");
+    for retired in jet::CLI::RETIRED_COMMANDS {
+        assert!(!man.lines().any(|line| line.trim() == format!(".B {}", retired.spelling)), "man advertised retired {}: {man}", retired.spelling);
+    }
+}
+
+#[test]
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
     fs::write(dir.join("commands.jet"), r#"#CLI
