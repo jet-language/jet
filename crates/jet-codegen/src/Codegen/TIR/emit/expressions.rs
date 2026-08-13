@@ -1247,7 +1247,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::Push => format!("({}).push({})", recv, a(0)),
-                TBuiltinOp::Pop => format!("jet_outcome_of(({}).pop())", recv),
+                TBuiltinOp::Pop => format!("jet_list_pop_kernel(&mut ({}))", recv),
+                TBuiltinOp::PriorityQueuePop => {
+                    format!("jet_priority_queue_pop_kernel(&mut ({}))", recv)
+                }
                 TBuiltinOp::InsertMap => {
                     format!("jet_outcome_of(({}).insert(({}).clone(), {}))", recv, a(0), a(1))
                 }
@@ -1270,7 +1273,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::InsertList => {
                     format!("({}).insert({} as usize, {})", recv, a(0), a(1))
                 }
-                TBuiltinOp::RemoveMap => format!("jet_outcome_of(({}).remove(&({}).clone()))", recv, a(0)),
+                TBuiltinOp::RemoveMap => format!("jet_map_pop_kernel(&mut ({}), &({}).clone())", recv, a(0)),
                 TBuiltinOp::RemoveList { line, mode } => match mode {
                     crate::Codegen::TIR::ListRemoveMode::Value => format!(
                         "jet_list_remove_value(&mut ({}), {}, {:?}, {})",
@@ -1557,11 +1560,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "jet_iter_from_vec(({}).iter().cloned().collect::<Vec<_>>())",
                     recv
                 ),
-                // #1478: native swap-in — inserts `a0`, returns the old equal
-                // element if one was present (Rust's own `HashSet::replace`).
-                TBuiltinOp::SetReplace => format!("jet_outcome_of(({}).replace({}))", recv, a(0)),
-                // #1478: native remove-and-return — Rust's own `HashSet::take`.
-                TBuiltinOp::SetTake => format!("jet_outcome_of(({}).take(&({})))", recv, a(0)),
+                // D-ONCE-VERB1=A: Set.pop is remove-and-return.
+                TBuiltinOp::SetPop => format!("jet_set_pop_kernel(&mut ({}), &({}))", recv, a(0)),
                 // D-SET-DECLINE1=C: `set.sort()` — materialize then sort the
                 // copy, same as `set.to_list()` followed by `List.sort()`.
                 TBuiltinOp::SetSort => jet_format!(
@@ -1681,8 +1681,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-COLLBREADTH1=A: Deque<T> operations.
                 TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),
                 TBuiltinOp::DequePushBack => format!("({}).push_back({})", recv, a(0)),
-                TBuiltinOp::DequePopFront => format!("jet_outcome_of(({}).pop_front())", recv),
-                TBuiltinOp::DequePopBack => format!("jet_outcome_of(({}).pop_back())", recv),
+                TBuiltinOp::DequePopFront => {
+                    format!("jet_deque_pop_front_kernel(&mut ({}))", recv)
+                }
+                TBuiltinOp::DequePopBack => {
+                    format!("jet_deque_pop_back_kernel(&mut ({}))", recv)
+                }
                 TBuiltinOp::DequePeekFront => format!("jet_outcome_of(({}).front().cloned())", recv),
                 TBuiltinOp::DequePeekBack => format!("jet_outcome_of(({}).back().cloned())", recv),
                 TBuiltinOp::DequeCapacity => format!("({}).capacity() as i64", recv),
@@ -1869,7 +1873,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::MapFromKeys => format!("jet_map_from_keys(({recv}).clone(), ({}).clone())", a(0)),
                 TBuiltinOp::MapContainsValue => format!("jet_map_contains_value(&({recv}), &({}))", a(0)),
                 TBuiltinOp::MapPopFirst => format!("jet_map_pop_first(&mut ({recv}))"),
-                TBuiltinOp::ListReplace => format!("jet_list_replace(&({recv}), &({}), ({}).clone())", a(0), a(1)),
+                TBuiltinOp::ListReplace => {
+                    format!("jet_list_replace(&({recv}), ({}), ({}).clone())", a(0), a(1))
+                }
                 TBuiltinOp::Indexed { tuple_struct } => jet_name_format!(
                     "jet_iter_enumerate({as_iter}, |i, x| {} {{ {name_prefix}idx: i, {name_prefix}item: x }})",
                     tuple_struct

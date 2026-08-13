@@ -8,6 +8,115 @@ use super::Builtins::{as_int, cmp};
 use super::Diagnostics::{index_oob, unsupported};
 use crate::AST::{as_bytes, CtValue};
 
+#[allow(dead_code, non_camel_case_types, unused_imports)]
+mod collection_semantics {
+    use jet_foundation::StructuralDebug::{
+        jet_debug_map, jet_debug_optional, jet_debug_range,
+    };
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+
+    #[derive(Clone)]
+    struct JetByteBuffer {
+        bytes: Vec<u8>,
+    }
+
+    trait __jet_Display {
+        fn display(&self) -> String;
+    }
+
+    trait __jet_Equatable: Sized {
+        fn equal(&self, rhs: &Self) -> bool;
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct JetMap<K, V>(std::collections::BTreeMap<K, V>);
+
+    impl<K, V> JetMap<K, V> {
+        fn new() -> Self {
+            Self(std::collections::BTreeMap::new())
+        }
+    }
+
+    impl<K: Ord, V> std::iter::FromIterator<(K, V)> for JetMap<K, V> {
+        fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
+            Self(pairs.into_iter().collect())
+        }
+    }
+
+    impl<K, V> std::ops::Deref for JetMap<K, V> {
+        type Target = std::collections::BTreeMap<K, V>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<K, V> std::ops::DerefMut for JetMap<K, V> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
+        panic!("{}", message);
+    }
+
+    include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+        jet_list_pop_kernel(values).ok()
+    }
+
+    pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
+        jet_list_replace(values, index, new)
+    }
+
+    pub(super) fn set_pop<T: PartialEq>(values: &mut Vec<T>, value: &T) -> Option<T> {
+        jet_set_pop_kernel(values, value).ok()
+    }
+
+    pub(super) fn deque_pop_front<T>(values: &mut Vec<T>) -> Option<T> {
+        jet_deque_pop_front_kernel(values).ok()
+    }
+
+    pub(super) fn deque_pop_back<T>(values: &mut Vec<T>) -> Option<T> {
+        jet_deque_pop_back_kernel(values).ok()
+    }
+
+    pub(super) fn priority_queue_pop<T>(values: &mut Vec<T>) -> Option<T> {
+        jet_priority_queue_pop_kernel(values).ok()
+    }
+
+    pub(super) fn map_pop<K: Ord + Clone, V: Clone>(
+        map: &mut std::collections::BTreeMap<K, V>,
+        key: &K,
+    ) -> Option<V> {
+        let mut native = JetMap(std::mem::take(map));
+        let result = jet_map_pop_kernel(&mut native, key);
+        *map = native.0;
+        result.ok()
+    }
+}
+
+pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+    collection_semantics::list_pop(values)
+}
+
+pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
+    collection_semantics::list_replace(values, index, new)
+}
+
+pub(super) fn map_pop<K: Ord + Clone, V: Clone>(
+    map: &mut std::collections::BTreeMap<K, V>,
+    key: &K,
+) -> Option<V> {
+    collection_semantics::map_pop(map, key)
+}
+
 mod set_semantics {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -291,9 +400,7 @@ pub fn apply_mutating(
     let handled = matches!(
         (type_name.as_str(), method),
         ("Bag", "add" | "remove" | "clear")
-            // #1478: `replace`/`take` are Set-only (Rust's native HashSet
-            // contract); SortedSet does not ship them.
-            | ("Set", "add" | "remove" | "clear" | "replace" | "take")
+            | ("Set", "add" | "remove" | "pop" | "clear")
             | ("SortedSet", "add" | "remove" | "clear")
             | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
             | ("BitSet", "add" | "remove" | "clear")
@@ -637,29 +744,11 @@ fn set_mutating(
             }
             CtValue::Unit
         }
-        // #1478: native swap-in — always leaves `value` in the set; returns
-        // the displaced equal element if one was present (Rust's
-        // `HashSet::replace`).
-        "replace" => {
-            let value = args.first().cloned().unwrap_or(CtValue::Unit);
-            let old = match items.iter().position(|item| item == &value) {
-                Some(index) => {
-                    let prior = items[index].clone();
-                    items[index] = value;
-                    Some(prior)
-                }
-                None => {
-                    items.push(value);
-                    None
-                }
-            };
-            old.map_or_else(option_none, |v| CtValue::Present(Box::new(v)))
-        }
-        // #1478: native remove-and-return-if-present (Rust's `HashSet::take`).
-        "take" => {
+        // D-ONCE-VERB1=A: remove-and-return is `pop` on every collection.
+        "pop" => {
             let value = args.first().unwrap_or(&CtValue::Unit);
-            match items.iter().position(|item| item == value) {
-                Some(index) => CtValue::Present(Box::new(items.remove(index))),
+            match collection_semantics::set_pop(&mut items, value) {
+                Some(value) => CtValue::Present(Box::new(value)),
                 None => option_none(),
             }
         }
@@ -714,8 +803,10 @@ fn priority_queue_mutating(
             items = sorted_descending(items, span)?;
             CtValue::Unit
         }
-        "pop" if items.is_empty() => option_none(),
-        "pop" => CtValue::Present(Box::new(items.remove(0))),
+        "pop" => match collection_semantics::priority_queue_pop(&mut items) {
+            Some(value) => CtValue::Present(Box::new(value)),
+            None => option_none(),
+        },
         // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot selector
         // as `List.remove`, over the same highest-first order `push` already
         // maintains — matches the AOT/JIT `BinaryHeap::into_sorted_vec().rev()`
@@ -885,9 +976,11 @@ fn deque_mutating(
             items.push(args.first().cloned().unwrap_or(CtValue::Unit));
             CtValue::Unit
         }
-        "pop_front" if items.is_empty() => option_none(),
-        "pop_front" => CtValue::Present(Box::new(items.remove(0))),
-        "pop_back" => match items.pop() {
+        "pop_front" => match collection_semantics::deque_pop_front(&mut items) {
+            Some(value) => CtValue::Present(Box::new(value)),
+            None => option_none(),
+        },
+        "pop_back" => match collection_semantics::deque_pop_back(&mut items) {
             Some(value) => CtValue::Present(Box::new(value)),
             None => option_none(),
         },

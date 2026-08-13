@@ -579,7 +579,7 @@ pub fn apply_mutating_with_type(
             xs.push(args.into_iter().next().unwrap_or(CtValue::Unit));
             Ok(CtValue::Unit)
         }
-        (CtValue::List(xs), "pop") => Ok(match xs.pop() {
+        (CtValue::List(xs), "pop") => Ok(match super::CollectionEval::list_pop(xs) {
             Some(v) => CtValue::Present(Box::new(v)),
             None => CtValue::absent(Type::Int),
         }),
@@ -646,7 +646,15 @@ pub fn apply_mutating_with_type(
         (CtValue::Map(m), "remove") => {
             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
-            Ok(match m.remove(&k) {
+            Ok(match super::CollectionEval::map_pop(m, &k) {
+                Some(old) => CtValue::Present(Box::new(old)),
+                None => CtValue::absent(Type::Int),
+            })
+        }
+        (CtValue::Map(m), "pop") => {
+            let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
+                .ok_or_else(|| unsupported("this map key type", span))?;
+            Ok(match super::CollectionEval::map_pop(m, &k) {
                 Some(old) => CtValue::Present(Box::new(old)),
                 None => CtValue::absent(Type::Int),
             })
@@ -1360,13 +1368,12 @@ pub fn apply_method(
             Ok(CtValue::Present(Box::new(xs[i].clone())))
         }
         (CtValue::List(xs), "replace") => {
-            let old = args.first().cloned().unwrap_or(CtValue::Int(0));
+            let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             let new = args.get(1).cloned().unwrap_or(CtValue::Int(0));
-            Ok(CtValue::List(
-                xs.iter()
-                    .map(|x| if x == &old { new.clone() } else { x.clone() })
-                    .collect(),
-            ))
+            if index < 0 || index as usize >= xs.len() {
+                return Err(index_oob(xs.len(), index, span));
+            }
+            Ok(CtValue::List(super::CollectionEval::list_replace(xs, index, new)))
         }
         (CtValue::List(xs), "min_max") => {
             if xs.is_empty() { return Ok(CtValue::absent(Type::Int)); }

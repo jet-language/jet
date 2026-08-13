@@ -1177,7 +1177,7 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("clear", 0) => Some(None),
-        ("add" | "replace", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("add_new", 2) => Some(Some(Type::Bool)),
         ("get" | "remove" | "pop", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("has_key", 1) => Some(Some(Type::Bool)),
@@ -1773,8 +1773,8 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         // #1478: ledger closes on Set's remaining order-agnostic surface.
         // `values` is the lazy alias of `to_list` (I8, mirrors `Map.values`).
         ("values", 0) => Some(Some(iter_ty(elem.clone()))),
-        // Native swap-in / remove-and-return — Rust's own HashSet contract.
-        ("replace" | "take", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // D-ONCE-VERB1=A: Set.pop removes and returns a matching value.
+        ("pop", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
         ("all", 1) => Some(Some(Type::Bool)),
         ("each", 1) => Some(None),
         ("filter", 1) => Some(Some(Type::List(Box::new(elem.clone())))),
@@ -1965,12 +1965,11 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         ),
         Type::Map { .. } => matches!(
             method,
-            "add" | "add_new" | "replace" | "remove" | "pop" | "pop_first" | "clear"
+            "add" | "add_new" | "remove" | "pop" | "pop_first" | "clear"
         ),
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
-            // #1478: `.replace`/`.take` are native HashSet `&mut self` methods.
-            matches!(method, "add" | "remove" | "clear" | "replace" | "take")
+            matches!(method, "add" | "remove" | "pop" | "clear")
         }
         Type::Apply { name, .. } if name == Syntax::TYPE_SORTED_SET => {
             matches!(method, "add" | "remove" | "clear")
@@ -2296,7 +2295,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Some(vec![Type::Int])
             }
             "intersperse" | "last_index_of" | "binary_search" => Some(vec![(**inner).clone()]),
-            "replace" => Some(vec![(**inner).clone(), (**inner).clone()]),
+            "replace" => Some(vec![Type::Int, (**inner).clone()]),
             "compare" | "starts_with" | "ends_with" | "equal" | "union" | "intersection"
             | "difference" => Some(vec![Type::List(Box::new((**inner).clone()))]),
             "slice" => Some(vec![Type::Int, Type::Int]),
@@ -2336,7 +2335,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Map { key, value, .. } => match method {
-            "add" | "add_new" | "replace" => Some(vec![(**key).clone(), (**value).clone()]),
+            "add" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "pop" | "has_key" => Some(vec![(**key).clone()]),
             "contains_value" => Some(vec![(**value).clone()]),
             "merge" | "equal" | "intersection" => Some(vec![Type::Map {
@@ -2691,8 +2690,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     name: "Set".to_string(),
                     args: vec![elem.clone()],
                 }]),
-                // #1478: replace(v)/take(v) stay on the native single-value form.
-                "replace" | "take" => Some(vec![elem.clone()]),
+                "pop" => Some(vec![elem.clone()]),
                 "filter" | "all" => Some(vec![Type::Fn {
                     params: vec![elem.clone()],
                     ret: Some(Box::new(Type::Bool)),

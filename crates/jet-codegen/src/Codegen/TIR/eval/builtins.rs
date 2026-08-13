@@ -179,6 +179,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::IsEmpty => apply_method(recv, "is_empty", args, span),
         TBuiltinOp::Push => apply_mutating(recv, "push", args, span),
         TBuiltinOp::Pop => apply_mutating(recv, "pop", args, span),
+        TBuiltinOp::PriorityQueuePop => apply_mutating(recv, "pop", args, span),
         TBuiltinOp::InsertMap => apply_mutating(recv, "add", args, span),
         TBuiltinOp::AddNewMap => apply_mutating(recv, "add_new", args, span),
         TBuiltinOp::MapMerge | TBuiltinOp::MapMergeWith => {
@@ -352,10 +353,9 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetEqual => apply_method(recv, "equal", args, span),
         TBuiltinOp::SetCapacity => apply_method(recv, "capacity", args, span),
         TBuiltinOp::SetFirst => apply_method(recv, "first", args, span),
-        // #1478: values is a read; replace/take are native `&mut self` ops.
+        // `values` is a read; `pop` is the collection remove-and-return op.
         TBuiltinOp::SetValues => apply_method(recv, "values", args, span),
-        TBuiltinOp::SetReplace => apply_mutating(recv, "replace", args, span),
-        TBuiltinOp::SetTake => apply_mutating(recv, "take", args, span),
+        TBuiltinOp::SetPop => apply_mutating(recv, "pop", args, span),
         // D-SET-DECLINE1=C: `sort`/`shuffle` — non-mutating, return a fresh List.
         TBuiltinOp::SetSort => apply_method(recv, "sort", args, span),
         TBuiltinOp::SetShuffle => apply_method(recv, "shuffle", args, span),

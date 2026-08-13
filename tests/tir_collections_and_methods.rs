@@ -782,6 +782,33 @@ fn run() {
     assert_eq!(stdout, "0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n");
 }
 
+/// D-ONCE-VERB1=A: every collection's removal operation returns the removed
+/// value, and List.replace names only an indexed swap.
+#[test]
+fn collection_pop_table() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    xs := [10, 20, 30]
+    print(xs.pop() ?? -1)
+    print(xs.replace(0, 99))
+    counts := [String: Int].{ \"words\": 4 }
+    print(counts.pop(\"words\") ?? -1)
+    seen := Set.from([7, 8])
+    print(seen.pop(8) ?? -1)
+    queue := Deque.init([1, 2, 3])
+    print(queue.pop_front() ?? -1)
+    priorities := PriorityQueue.from([2, 9, 4])
+    print(priorities.pop() ?? -1)
+}
+";
+    let (code, stdout) = build_and_run("tir_collection_pop_table", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "30\n[99, 20]\n4\n8\n1\n9\n");
+}
+
 /// `remove` on both a list (value default and explicit slot mode) and a map
 /// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
 #[test]
