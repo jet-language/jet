@@ -181,6 +181,12 @@ pub(crate) fn bind_call_args(
                     Some(param) if param.zone == ParamZone::LabelOnly => {
                         diags.push(binder_label_required(callee, param.label, arg.span));
                         ok = false;
+                        // Keep recovery aligned with the written argument
+                        // position so consecutive label-only omissions report
+                        // each parameter's registered label.
+                        if !param.variadic {
+                            next_positional += 1;
+                        }
                     }
                     Some(param) => {
                         slots[next_positional].push(index);

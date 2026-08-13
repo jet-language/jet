@@ -636,15 +636,26 @@ fn lower_if_cond_atom(
             }
         }
         if is_binding_free_user_variant_pattern_test(pattern, cx) {
-            let enum_type = match pattern {
-                Pattern::Variant { variant, .. } => {
-                    cx.variant_owner.get(variant).map(String::as_str)
+            let enum_type = match &subj.ty {
+                Type::Named(enum_name) | Type::Apply { name: enum_name, .. } => {
+                    let resolved = cx
+                        .core_qualified_rust_type_name(enum_name)
+                        .unwrap_or(enum_name.as_str());
+                    cx.enum_variants
+                        .get(resolved)
+                        .filter(|variants| {
+                            variants
+                                .iter()
+                                .any(|(candidate, _)| candidate == variant)
+                        })
+                        .map(|_| resolved.to_string())
                 }
                 _ => None,
-            };
+            }
+            .or_else(|| cx.variant_owner.get(variant).cloned());
             return (
                 TIfCond::Matches {
-                    pattern: TPattern::arm(pattern.clone(), enum_type.map(str::to_string)),
+                    pattern: TPattern::arm(pattern.clone(), enum_type),
                     subj,
                 },
                 None,
