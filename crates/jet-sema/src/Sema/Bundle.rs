@@ -1358,7 +1358,7 @@ fn populate_name_ledger(
 /// `helper(x)` must lower to the mangled `__jet_math__helper`. This pre-pass rewrites
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, false, None, None).0
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, None).0
 }
 
 fn validate_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
@@ -1716,7 +1716,7 @@ pub fn check_bundle_for_output(
     mode: CompileMode,
     output: &str,
 ) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, false, Some(output), None).0
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), Some(output), None).0
 }
 
 pub fn check_bundle_for_output_opts(
@@ -1724,13 +1724,13 @@ pub fn check_bundle_for_output_opts(
     mode: CompileMode,
     output: &str,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
 ) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
         freestanding,
-        allow_impure,
+        gates,
         Some(output),
         None,
     )
@@ -1742,7 +1742,7 @@ pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, false, None, None)
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, None)
 }
 
 /// Check the compiler-host build entry with the read-only compiler API enabled.
@@ -1758,7 +1758,7 @@ pub fn check_bundle_with_effect_facts_for_build(
         bundle,
         mode,
         false,
-        false,
+        crate::Policy::GateSet::default(),
         None,
         None,
         true,
@@ -1770,17 +1770,21 @@ pub fn check_bundle_with_effect_facts_incremental(
     mode: CompileMode,
     cache: &mut IncrementalSemaCache,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, false, None, Some(cache))
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, Some(cache))
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
 pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, true, false, None, None).0
+    pipeline_check_bundle_opts_for_output(bundle, mode, true, crate::Policy::GateSet::default(), None, None).0
 }
 
-/// Like `check_bundle` but with D-CTEFFECT1 `--allow-impure` flag.
-pub fn check_bundle_allow_impure(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, true, None, None).0
+pub fn check_bundle_freestanding_with_gates(bundle: &mut ProgramBundle, mode: CompileMode, gates: crate::Policy::GateSet) -> Vec<Diagnostic> {
+    pipeline_check_bundle_opts_for_output(bundle, mode, true, gates, None, None).0
+}
+
+/// Check the audited-escape family with one invocation gate set.
+pub fn check_bundle_gates(bundle: &mut ProgramBundle, mode: CompileMode, gates: crate::Policy::GateSet) -> Vec<Diagnostic> {
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None).0
 }
 
 

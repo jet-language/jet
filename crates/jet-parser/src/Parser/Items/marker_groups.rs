@@ -1347,8 +1347,8 @@ impl<'a> Parser<'a> {
             };
             let value = match mode {
                 "None" => return Ok(None),
-                "Track" => crate::Policy::PolicyValue::UnsafeTrack,
-                "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                "Track" => crate::Policy::PolicyValue::Track,
+                "Skip" => crate::Policy::PolicyValue::Skip,
                 _ => {
                     return Err(Diagnostic::error(
                         "E3108",

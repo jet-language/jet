@@ -788,8 +788,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "with eval: reject code with side effects" },
     FlagSpec { long: "--freestanding", help: "with build/run: target a system without an operating system" },
-    // D-CTEFFECT1: comptime effect tier gate.
-    FlagSpec { long: "--allow-impure", help: "with build/run: allow explicitly gated compile-time effects" },
+    // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
+    FlagSpec { long: "--gate", help: "with build/run/dev: allow one audited gate as --gate name=allow" },
     FlagSpec { long: "--target", help: "with build: select a target: a rustc triple or board.<name>" },
     // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.

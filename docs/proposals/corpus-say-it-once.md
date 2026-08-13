@@ -242,10 +242,10 @@ Three markers share one shape — "I am stepping outside the default, here is my
 | Marker | Reason | Org policy ladder | Scope control | Ledger |
 |---|---|---|---|---|
 | `#Unsafe` | required | 5 scopes, 6 modes, env-var org file | per-site | `jet inspect unsafe` ✓ |
-| `#Impure` | required | — (one CLI bool: `--allow-impure`) | — | — |
+| `#Impure` | required | — (one CLI gate: `--gate impure=allow`) | — | — |
 | `#Nondeterministic` | required | — | — | — |
 
-The ledger half of this is already ratified: D-FACT-GATE1 explicitly names impure marks among what `jet inspect gates` shows, and card #1571 carries it. What remains — and what ballot B7 asks — is the *ladder* half: every audited escape rides the same org-policy ladder (`#Unsafe`'s — it is the good one), and `--allow-impure` retires so the org policy file speaks for all three. A beginner still types exactly one marker with one sentence; the difference is one policy surface instead of three shapes. The same one-depth rule then covers the smaller siblings the audit found: five project-level deny switches in five unrelated shapes, and bounded buffers where the channel can only block while `AsyncEvent` has three overflow policies.
+The ledger half of this is already ratified: D-FACT-GATE1 explicitly names impure marks among what `jet inspect gates` shows, and card #1571 carries it. What remains — and what ballot B7 asks — is the *ladder* half: every audited escape rides the same org-policy ladder (`#Unsafe`'s — it is the good one), and the old boolean retires so the org policy file speaks for all three. A beginner still types exactly one marker with one sentence; the difference is one policy surface instead of three shapes. The same one-depth rule then covers the smaller siblings the audit found: five project-level deny switches in five unrelated shapes, and bounded buffers where the channel can only block while `AsyncEvent` has three overflow policies.
 
 ### 9. One decision ledger **[new — ballot B8]**
 
@@ -373,7 +373,7 @@ Each ballot stands alone; any subset adopts cleanly. Full worked options live in
 | B4 | word: stream/yield | Adopt the vocabulary dispositions (prose + spec renames, zero user spelling changes; `module` excluded — D-NAME-ROLEMOD1 owns it) | amends spec prose only |
 | B5 | word: derive | One request spelling (`#Marker`); body-line `derive X` retires; keyword keeps only the provider meaning | amends D-USERDERIVE1; keeps D-METADERIVE1 |
 | B6 | word: wasm/sandbox | `target: plugin`'s user-facing word becomes `sandbox`; `Wasm` stays the browser bucket | amends D-PLUGIN1 naming |
-| B7 | one gate ladder | `#Unsafe`/`#Impure`/`#Nondeterministic` share one org-policy ladder; `--allow-impure` retires (the shared ledger is already ratified: D-FACT-GATE1, card #1571) | extends ratified gate law; retires a CLI flag |
+| B7 | one gate ladder | `#Unsafe`/`#Impure`/`#Nondeterministic` share one org-policy ladder; the old audited-effect boolean retires (the shared ledger is already ratified: D-FACT-GATE1, card #1571) | extends ratified gate law; retires a CLI flag |
 | B8 | one decision ledger | Tower-as-home (spec rendered) vs spec-as-home (Tower links + spec-walking lint); supersession links mandatory either way | process law; amends tower lint scope |
 | B9 | stdlib verb table | One verb per job across collections (`replace`, `pop`/`take`, bare `.from`), rendered onto CLI verbs too | amends D-API-STORE1 family / D-STDRUBRIC1 |
 | B10 | the @ sigil | The unfulfilled half of the reservation: design the location feature / narrow the reservation to the ratified packaging meaning / publish the reservation with a minting condition. D-JPK-REF1's live meaning stays under every option | amends the reservation text, never D-JPK-REF1 |

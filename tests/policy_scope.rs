@@ -78,17 +78,22 @@ fn unsafe_obligations_are_checked_before_codegen() {
 fn organization_obligations_floor_rejects_package_relaxation() {
     let declaration = |scope, value, source: &str| jet::Policy::PolicyDeclaration { key: PolicyKey::Unsafe, value, scope, span: jet::Diagnostics::Span::new(0, 0), target: None, source: source.to_string() };
     let result = Policy::resolve(PolicyKey::Unsafe, [
-        declaration(jet::Policy::PolicyScope::Organization, PolicyValue::UnsafeObligations, "/admin/policy.jet"),
-        declaration(jet::Policy::PolicyScope::Package, PolicyValue::UnsafeRelaxed, "package.jet"),
+        declaration(jet::Policy::PolicyScope::Organization, PolicyValue::Obligations, "/admin/policy.jet"),
+        declaration(jet::Policy::PolicyScope::Package, PolicyValue::Relaxed, "package.jet"),
     ]);
     assert!(matches!(result, Err(Policy::PolicyError::Widening { .. })));
 }
 
 #[test]
 fn organization_policy_document_is_exact_and_fails_closed() {
-    let valid = jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations }\n").unwrap();
-    assert_eq!(valid.len(), 1);
-    assert_eq!(valid[0].value, PolicyValue::UnsafeObligations);
+    let valid = jet::Package::parse_policy_document(
+        "policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }\n",
+    )
+    .unwrap();
+    assert_eq!(valid.len(), 3);
+    assert_eq!(valid[0].value, PolicyValue::Obligations);
+    assert_eq!(valid[1].key, PolicyKey::Impure);
+    assert_eq!(valid[2].key, PolicyKey::Nondeterministic);
     assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations").is_err());
     assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations }\npackage: .{}").is_err());
 }
@@ -102,4 +107,80 @@ fn package_policy_document_accepts_explicit_units() {
     assert_eq!(declarations.len(), 1);
     assert_eq!(declarations[0].key, PolicyKey::ExplicitUnits);
     assert_eq!(declarations[0].value, PolicyValue::Enabled);
+}
+
+#[test]
+fn audited_gates_share_the_five_scope_tightening_ladder() {
+    for key in Policy::AUDITED_GATE_KEYS {
+        let rule = Policy::rule(*key);
+        assert_eq!(rule.scopes.len(), 5, "{} must expose every policy scope", key.name());
+        assert_eq!(rule.combine, Policy::PolicyCombine::Tighten);
+        assert_eq!(PolicyKey::parse(key.name()), Some(*key));
+        assert!(Policy::parse_value(*key, ".Forbid").is_ok());
+        assert_eq!(Policy::GateSet::parse(&format!("{}=allow", key.name())), Ok(*key));
+    }
+}
+
+#[test]
+fn audited_gate_invocations_cannot_widen_an_organization_forbid() {
+    for key in Policy::AUDITED_GATE_KEYS {
+        let declaration = Policy::PolicyDeclaration {
+            key: *key,
+            value: PolicyValue::Forbid,
+            scope: Policy::PolicyScope::Organization,
+            span: jet::Diagnostics::Span::new(0, 0),
+            target: None,
+            source: "org-policy.jet".to_string(),
+        };
+        let result = Policy::resolve_with_gates(*key, [declaration], &Policy::GateSet::allow(*key));
+        assert!(matches!(result, Err(Policy::PolicyError::Widening { .. })), "{}", key.name());
+    }
+}
+
+#[test]
+fn audited_gate_invocations_are_allowed_under_tightening_modes() {
+    for key in Policy::AUDITED_GATE_KEYS {
+        let declaration = Policy::PolicyDeclaration {
+            key: *key,
+            value: PolicyValue::Obligations,
+            scope: Policy::PolicyScope::Organization,
+            span: jet::Diagnostics::Span::new(0, 0),
+            target: None,
+            source: "org-policy.jet".to_string(),
+        };
+        assert!(Policy::resolve_with_gates(*key, [declaration], &Policy::GateSet::allow(*key)).is_ok(), "{}", key.name());
+    }
+}
+
+#[test]
+fn audited_gate_ladder_example_allows_and_refuses_each_marker() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/effects/audited_gate_ladder.jet");
+    for key in Policy::AUDITED_GATE_KEYS {
+        let mut allowed = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+        let mut all = Policy::GateSet::default();
+        for allowed_key in Policy::AUDITED_GATE_KEYS {
+            all.insert(*allowed_key);
+        }
+        let diagnostics = jet::Sema::check_bundle_gates(&mut allowed, jet::Sema::CompileMode::Run, all);
+        assert!(diagnostics.is_empty(), "allowed {} gate: {diagnostics:#?}", key.name());
+
+        let mut refused = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+        for module in &mut refused.modules {
+            module.policy_declarations.push(Policy::PolicyDeclaration {
+                key: *key,
+                value: PolicyValue::Forbid,
+                scope: Policy::PolicyScope::Organization,
+                span: jet::Diagnostics::Span::new(0, 0),
+                target: None,
+                source: "org-policy.jet".to_string(),
+            });
+        }
+        let diagnostics = jet::Sema::check_bundle_gates(
+            &mut refused,
+            jet::Sema::CompileMode::Run,
+            Policy::GateSet::allow(*key),
+        );
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3415"), "refused {} gate: {diagnostics:#?}", key.name());
+    }
 }

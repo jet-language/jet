@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
                 self.ct_base_dir,
                 &globals,
                 self.core_imports,
-                false,
+                self.gates,
                 0,
             )
             .ok()

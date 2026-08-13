@@ -884,40 +884,8 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
         if !seen.insert(key) {
             return Err(bad_mem(format!("package policy `{name}` is declared more than once")));
         }
-        let value = match key {
-            crate::Policy::PolicyKey::NoAlloc
-            | crate::Policy::PolicyKey::ZeroRc
-            | crate::Policy::PolicyKey::ScopedGc
-            | crate::Policy::PolicyKey::ExplicitUnits
-                if raw.trim() == "true" =>
-            {
-                crate::Policy::PolicyValue::Enabled
-            }
-            crate::Policy::PolicyKey::ArenaBounded => {
-                let n = raw
-                    .trim()
-                    .parse::<u64>()
-                    .map_err(|_| bad_mem(format!("`{name}` needs a positive byte limit")))?;
-                if n == 0 {
-                    return Err(bad_mem(format!("`{name}` needs a positive byte limit")));
-                }
-                crate::Policy::PolicyValue::Limit(n)
-            }
-            crate::Policy::PolicyKey::Unsafe => match raw.trim() {
-                ".Forbid" => crate::Policy::PolicyValue::UnsafeForbid,
-                ".Default" => crate::Policy::PolicyValue::UnsafeDefault,
-                ".GateOnly" => crate::Policy::PolicyValue::UnsafeGateOnly,
-                ".Obligations" => crate::Policy::PolicyValue::UnsafeObligations,
-                ".Relaxed" => crate::Policy::PolicyValue::UnsafeRelaxed,
-                ".PerSite" => crate::Policy::PolicyValue::UnsafePerSite,
-                _ => {
-                    return Err(bad_mem(
-                        "`unsafe` must be `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, or `.Forbid`",
-                    ))
-                }
-            },
-            _ => return Err(bad_mem(format!("package policy `{name}` may only tighten its inherited value"))),
-        };
+        let value = crate::Policy::parse_value(key, &raw)
+            .map_err(|detail| bad_mem(detail))?;
         out.push(crate::Policy::PolicyDeclaration {
             key,
             value,
@@ -927,14 +895,7 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
             source: "package.jet".to_string(),
         });
     }
-    for key in [
-        crate::Policy::PolicyKey::NoAlloc,
-        crate::Policy::PolicyKey::ZeroRc,
-        crate::Policy::PolicyKey::ArenaBounded,
-        crate::Policy::PolicyKey::Unsafe,
-        crate::Policy::PolicyKey::ScopedGc,
-        crate::Policy::PolicyKey::ExplicitUnits,
-    ] {
+    for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
         crate::Policy::resolve(key, out.clone())
             .map_err(|error| bad_mem(format!("conflicting `{}` declarations: {error:?}", key.name())))?;
     }

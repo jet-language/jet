@@ -361,7 +361,7 @@ pub fn run_build_entry(
     program: &ProgramInfo,
     program_value: CtValue,
     package: &str,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
 ) -> Result<ProgramBuildEvaluation, Diagnostic> {
     run_build_entry_with_policy(
         build,
@@ -370,7 +370,7 @@ pub fn run_build_entry(
         program,
         program_value,
         package,
-        allow_impure,
+        gates,
         Build::BuildPolicy::local_default(),
     )
 }
@@ -385,7 +385,7 @@ pub fn run_build_entry_with_policy(
     program: &ProgramInfo,
     program_value: CtValue,
     package: &str,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     policy: Build::BuildPolicy,
 ) -> Result<ProgramBuildEvaluation, Diagnostic> {
     let context = Build::begin_program_build_with_policy_at(
@@ -404,7 +404,7 @@ pub fn run_build_entry_with_policy(
         depth: 0,
         cur_func: "build".to_string(),
         impure_depth: 0,
-        allow_impure,
+        gates,
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -703,14 +703,14 @@ pub fn evaluate_with_imports(
         base_dir,
         globals,
         core_imports,
-        false,
+        jet_foundation::Policy::GateSet::default(),
         0,
     )
 }
 
-/// Like `evaluate_with_imports` but with `allow_impure` and `initial_impure_depth`
+/// Like `evaluate_with_imports` but with the invocation gate set and `initial_impure_depth`
 /// for D-CTEFFECT1. When called from inside a sema `#Impure` block, pass
-/// `initial_impure_depth: 1` (and `allow_impure: true`) so the interpreter
+/// `initial_impure_depth: 1` (and `impure` allowed in the gate set) so the interpreter
 /// starts with the gate already open for Tier-2 calls.
 pub fn evaluate_with_imports_opts(
     init: &crate::AST::Expr,
@@ -719,7 +719,7 @@ pub fn evaluate_with_imports_opts(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
     // Only run the purity check when there is no active #Impure gate (i.e.
@@ -738,7 +738,7 @@ pub fn evaluate_with_imports_opts(
         base_dir,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         initial_impure_depth,
         structs: &HashMap::new(),
         computed_fields: empty_computed(),
@@ -765,7 +765,7 @@ pub fn evaluate_with_imports_opts_collecting(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
@@ -776,7 +776,7 @@ pub fn evaluate_with_imports_opts_collecting(
         base_dir,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         initial_impure_depth,
         empty_structs(),
         mutated,
@@ -792,7 +792,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
     mutated: Option<&mut HashMap<String, CtValue>>,
@@ -809,7 +809,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         base_dir,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         initial_impure_depth,
         structs,
         computed_fields: empty_computed(),
@@ -891,7 +891,7 @@ pub fn run_main(
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 0,
-        allow_impure: true,
+        gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -939,7 +939,7 @@ pub fn run_main_debug(
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 0,
-        allow_impure: false,
+        gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -995,7 +995,7 @@ pub fn run_main_value(
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 0,
-        allow_impure: false,
+        gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -1040,7 +1040,7 @@ pub fn run_main_with_fuel(
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 0,
-        allow_impure: false,
+        gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -1083,7 +1083,7 @@ pub fn run_repl_main_with_fuel(
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 1,
-        allow_impure: true,
+        gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -1219,7 +1219,7 @@ fn run_repl_step_inner(
         cur_func: "main".to_string(),
         // D-REPLCOREEFFECT1=A: only a lexical `#Grant` opens this depth.
         impure_depth: 0,
-        allow_impure: true,
+        gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,
         repl_grants: Vec::new(),
         repl_authorizer: Some(authorizer),
@@ -1306,7 +1306,7 @@ pub fn run_block_with_imports(
         repl_mode: false,
         repl_grants: &[],
         repl_authorizer: None,
-        allow_impure: false,
+        gates: jet_foundation::Policy::GateSet::default(),
         impure_depth: 0,
         emitted_fragments: None,
         embed_inputs: None,
@@ -1352,12 +1352,12 @@ pub fn evaluate_owned_with_imports(
         base_dir,
         globals,
         core_imports,
-        false,
+        jet_foundation::Policy::GateSet::default(),
         0,
     )
 }
 
-/// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `allow_impure` flag
+/// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `gates` flag
 /// and `initial_impure_depth`. Pass `initial_impure_depth: 1` when evaluating a
 /// comptime binding inside a `#Impure` block so the interpreter starts with the
 /// gate already open for Tier-2 calls.
@@ -1368,7 +1368,7 @@ pub fn evaluate_owned_with_imports_opts(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
     let reachable = Purity::reachable_owned_funcs(init, funcs);
@@ -1381,7 +1381,7 @@ pub fn evaluate_owned_with_imports_opts(
         base_dir,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         initial_impure_depth,
     )
 }
@@ -1395,7 +1395,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
@@ -1409,7 +1409,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
         base_dir,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         initial_impure_depth,
         mutated,
     )
@@ -1435,7 +1435,7 @@ pub fn evaluate_derive_body(
         depth: 0,
         cur_func: "derive".to_string(),
         impure_depth: 0,
-        allow_impure: false,
+        gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,

@@ -116,7 +116,7 @@ pub fn compile_bundle_path_opts(
     file: &str,
     mode: crate::Sema::CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
@@ -124,7 +124,7 @@ pub fn compile_bundle_path_opts(
         file,
         mode,
         freestanding,
-        allow_impure,
+        gates,
         web_target,
         false,
         false,
@@ -158,7 +158,7 @@ pub fn compile_bundle_path_with_target_machine(
         file,
         mode,
         machine.no_os,
-        false,
+        crate::Policy::GateSet::default(),
         false,
         false,
         false,
@@ -463,7 +463,16 @@ pub fn compile_bundle_path_opts_plugin(
     mode: crate::Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, false, cross_target, None)
+    compile_bundle_path_opts_plugin_with_gates(file, mode, crate::Policy::GateSet::default(), cross_target)
+}
+
+pub fn compile_bundle_path_opts_plugin_with_gates(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    cross_target: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None)
 }
 
 /// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
@@ -475,11 +484,20 @@ pub fn compile_bundle_path_opts_library(
     mode: crate::Sema::CompileMode,
     explicit_output: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_library_with_gates(file, mode, crate::Policy::GateSet::default(), explicit_output)
+}
+
+pub fn compile_bundle_path_opts_library_with_gates(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    explicit_output: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         mode,
         false,
-        false,
+        gates,
         false,
         false,
         true,
@@ -498,7 +516,7 @@ pub fn compile_bundle_path_opts_dbg(
     file: &str,
     mode: crate::Sema::CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     web_target: bool,
     debug_linemap: bool,
     cross_target: Option<&str>,
@@ -507,7 +525,7 @@ pub fn compile_bundle_path_opts_dbg(
         file,
         mode,
         freestanding,
-        allow_impure,
+        gates,
         web_target,
         false,
         false,
@@ -523,14 +541,22 @@ pub fn compile_bundle_path_output(
     file: &str,
     output: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_output_opts(file, output, false, false, false, false, None)
+    compile_bundle_path_output_opts(
+        file,
+        output,
+        false,
+        crate::Policy::GateSet::default(),
+        false,
+        false,
+        None,
+    )
 }
 
 pub fn compile_bundle_path_output_opts(
     file: &str,
     output: &str,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
     cross_target: Option<&str>,
@@ -539,7 +565,7 @@ pub fn compile_bundle_path_output_opts(
         file,
         crate::Sema::CompileMode::Run,
         freestanding,
-        allow_impure,
+        gates,
         web_target,
         plugin_target,
         false,
@@ -914,7 +940,7 @@ pub struct BuildRunOptions {
     /// enable a legacy wrapper or a plugin.
     pub policy: crate::Comptime::Build::BuildPolicy,
     pub execute: bool,
-    pub allow_impure: bool,
+    pub gates: crate::Policy::GateSet,
     /// Validate and expose declared graph authority without granting ambient
     /// comptime authority. Used only by read-only CLI/LSP inspection.
     pub inspect_only: bool,
@@ -938,7 +964,7 @@ impl Default for BuildRunOptions {
             grants: std::collections::BTreeSet::new(),
             policy: crate::Comptime::Build::BuildPolicy::local_default(),
             execute: true,
-            allow_impure: false,
+            gates: crate::Policy::GateSet::default(),
             inspect_only: false,
             emit_generated: false,
             locked: false,
@@ -1167,7 +1193,7 @@ fn build_query_options() -> BuildRunOptions {
         // Graph inspection may describe effectful actions, but it has no
         // authority to perform ambient comptime I/O. A user-written #Impure
         // gate therefore still reaches E3411 instead of touching the host.
-        allow_impure: false,
+        gates: crate::Policy::GateSet::default(),
         inspect_only: true,
         emit_generated: false,
         locked: false,
@@ -1664,7 +1690,7 @@ fn compile_bundle_path_build_inner(
                 &info,
                 program_value,
                 &package,
-                options.allow_impure,
+                options.gates,
                 options.policy.clone(),
             ),
         )
@@ -1872,14 +1898,19 @@ fn compile_bundle_path_build_inner(
     // program, not syntax checked in isolation. Re-run the complete front end
     // before any runtime codegen.
     if build_run.is_some() && options.execute {
-        let (planned_diags, planned_facts) = if options.freestanding {
+        let (planned_diags, planned_facts) = if options.freestanding && !options.gates.is_empty() {
+            (
+                crate::Sema::check_bundle_freestanding_with_gates(&mut bundle, compile_mode, options.gates),
+                None,
+            )
+        } else if options.freestanding {
             (
                 crate::Sema::check_bundle_freestanding(&mut bundle, compile_mode),
                 None,
             )
-        } else if options.allow_impure {
+        } else if !options.gates.is_empty() {
             (
-                crate::Sema::check_bundle_allow_impure(&mut bundle, compile_mode),
+                crate::Sema::check_bundle_gates(&mut bundle, compile_mode, options.gates),
                 None,
             )
         } else {
@@ -2582,7 +2613,7 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        if !options.inspect_only && (!options.allow_impure || !effective_grants(options, plan).contains(&effect)) {
+        if !options.inspect_only && (!options.gates.allows(crate::Policy::PolicyKey::Impure) || !effective_grants(options, plan).contains(&effect)) {
             if let Some(dependency_name) = dependency_name.as_deref() {
                 return Err(vec![Diagnostic::error(
                     "E3504",
@@ -3204,7 +3235,7 @@ fn compile_bundle_path_opts_full(
     file: &str,
     mode: crate::Sema::CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
     library_target: bool,
@@ -3235,12 +3266,12 @@ fn compile_bundle_path_opts_full(
             mode,
             output,
             freestanding,
-            allow_impure,
+            gates,
         )
     } else if freestanding {
         crate::Sema::check_bundle_freestanding(&mut bundle, mode)
-    } else if allow_impure {
-        crate::Sema::check_bundle_allow_impure(&mut bundle, mode)
+    } else if !gates.is_empty() {
+        crate::Sema::check_bundle_gates(&mut bundle, mode, gates)
     } else {
         crate::Sema::check_bundle(&mut bundle, mode)
     };

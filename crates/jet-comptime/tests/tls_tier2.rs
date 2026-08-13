@@ -8,7 +8,10 @@ use jet_comptime::Comptime::{
 };
 use jet_comptime::Diagnostics::{Diagnostic, Span};
 
-fn tls_call_diag(impure_depth: usize, allow_impure: bool) -> Diagnostic {
+fn tls_call_diag(
+    impure_depth: usize,
+    gates: jet_foundation::Policy::GateSet,
+) -> Diagnostic {
     let expr = Expr::MethodCall {
         receiver: Box::new(Expr::Ident("tls".to_string(), Span::new(0, 3))),
         method: "client".to_string(),
@@ -33,7 +36,7 @@ fn tls_call_diag(impure_depth: usize, allow_impure: bool) -> Diagnostic {
         Path::new("."),
         &globals,
         &core_imports,
-        allow_impure,
+        gates,
         impure_depth,
     )
     .expect_err("core.tls.client must not execute at comptime")
@@ -41,15 +44,20 @@ fn tls_call_diag(impure_depth: usize, allow_impure: bool) -> Diagnostic {
 
 #[test]
 fn core_tls_follows_the_whole_tier2_comptime_gate() {
-    let pure = tls_call_diag(0, false);
+    let pure = tls_call_diag(0, jet_foundation::Policy::GateSet::default());
     assert_eq!(pure.code, "E3410");
     assert_ne!(pure.code, "E0956");
 
-    let gated = tls_call_diag(1, false);
+    let gated = tls_call_diag(1, jet_foundation::Policy::GateSet::default());
     assert_eq!(gated.code, "E3411");
     assert_ne!(gated.code, "E0956");
 
-    let allowed = tls_call_diag(1, true);
+    let allowed = tls_call_diag(
+        1,
+        jet_foundation::Policy::GateSet::allow(
+            jet_foundation::Policy::PolicyKey::Impure,
+        ),
+    );
     assert_eq!(allowed.code, "E3412");
     assert_ne!(allowed.code, "E0956");
     assert_eq!(

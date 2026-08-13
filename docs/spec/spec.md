@@ -1623,7 +1623,8 @@ each low-level operation, using the closed facts `valid_ptr`, `aligned`, and
 gate to add `obligations: .Track` or `.Skip`; an organization `.Obligations`
 floor rejects `.Skip`. CI/admins provide that floor explicitly through
 `JET_ORG_UNSAFE_POLICY=<path>`; the file uses the package-policy shape
-`policy: .{ unsafe: .Obligations }`, its path is retained as provenance, and a
+`policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`,
+its path is retained as provenance, and a
 configured unreadable or malformed file fails closed. `jet inspect unsafe FILE`
 reports every gate, operation, discharge state, and effective-policy provenance
 in stable human or `--json` form. Human rows use the source file's

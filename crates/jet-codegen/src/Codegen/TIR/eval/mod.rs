@@ -923,7 +923,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) core_imports: &'a HashMap<String, String>,
     pub(super) globals: HashMap<String, CtValue>,
     #[allow(dead_code)]
-    pub(super) allow_impure: bool,
+    pub(super) gates: jet_foundation::Policy::GateSet,
     #[allow(dead_code)]
     pub(super) impure_depth: usize,
     /// True only for an actual dev/JIT runtime execution. Comptime may permit
@@ -1266,7 +1266,7 @@ struct EvalTaskConfig<'a> {
     sink: Option<Arc<Mutex<DevSink>>>,
     core_imports: &'a HashMap<String, String>,
     globals: HashMap<String, CtValue>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     impure_depth: usize,
     runtime_execution: bool,
     prefer_tir_calls: bool,
@@ -1446,7 +1446,7 @@ impl<'a> EvalCtx<'a> {
             sink: self.sink.clone(),
             core_imports: self.core_imports,
             globals: self.globals.clone(),
-            allow_impure: self.allow_impure,
+            gates: self.gates,
             impure_depth: self.impure_depth,
             runtime_execution: self.runtime_execution,
             prefer_tir_calls: self.prefer_tir_calls,
@@ -1512,7 +1512,7 @@ impl<'a> EvalCtx<'a> {
             sink: config.sink,
             core_imports: config.core_imports,
             globals: config.globals,
-            allow_impure: config.allow_impure,
+            gates: config.gates,
             impure_depth: config.impure_depth,
             runtime_execution: config.runtime_execution,
             prefer_tir_calls: config.prefer_tir_calls,
@@ -3072,7 +3072,7 @@ pub fn run_program(
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
     run_program_with_structs(
         program,
@@ -3080,7 +3080,7 @@ pub fn run_program(
         sink,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         HashMap::new(),
         HashMap::new(),
     )
@@ -3110,7 +3110,7 @@ pub fn run_program_with_structs(
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
@@ -3120,7 +3120,7 @@ pub fn run_program_with_structs(
         sink,
         globals,
         core_imports,
-        allow_impure,
+        gates,
         struct_fields,
         struct_field_types,
         Comptime::PurityStage::RunTime,
@@ -3133,7 +3133,7 @@ pub fn run_program_with_structs_at_stage(
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
@@ -3155,7 +3155,7 @@ pub fn run_program_with_structs_at_stage(
                         sink,
                         globals,
                         core_imports,
-                        allow_impure,
+                        gates,
                         struct_fields,
                         struct_field_types,
                         stage,
@@ -3173,7 +3173,7 @@ fn run_program_with_structs_on_stack(
     sink: &mut DevSink,
     globals: HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
@@ -3204,10 +3204,10 @@ fn run_program_with_structs_on_stack(
         sink: Some(shared_sink.clone()),
         core_imports,
         globals,
-        allow_impure,
+        gates,
         // Whole-program runtime/deopt carries RunTime explicitly.  Comptime
         // purity still uses eval_expr/eval_block with build-time defaults.
-        impure_depth: if matches!(stage, Comptime::PurityStage::RunTime) && allow_impure {
+        impure_depth: if matches!(stage, Comptime::PurityStage::RunTime) && gates.allows(jet_foundation::Policy::PolicyKey::Impure) {
             1
         } else {
             0
@@ -3284,7 +3284,7 @@ pub fn run_named_func(
         sink: Some(shared_sink.clone()),
         core_imports: &core_imports,
         globals: HashMap::new(),
-        allow_impure: true,
+        gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         // Runtime deopt is not comptime: open Tier-2 ambient I/O so `jet run`
         // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
         // parity: guard tests/dev.rs::dev_default_matches_compiled_binary
@@ -3349,15 +3349,15 @@ pub fn install_comptime_bridge() {
 fn run_bundle(
     bundle: &ProgramBundle,
     sink: &mut DevSink,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
-    run_bundle_at_stage(bundle, sink, allow_impure, Comptime::PurityStage::RunTime)
+    run_bundle_at_stage(bundle, sink, gates, Comptime::PurityStage::RunTime)
 }
 
 fn run_bundle_at_stage(
     bundle: &ProgramBundle,
     sink: &mut DevSink,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
     let program = lower_interp_program(bundle).ok_or_else(|| {
@@ -3429,7 +3429,7 @@ fn run_bundle_at_stage(
         sink,
         globals,
         &core_imports,
-        allow_impure,
+        gates,
         collect_struct_fields(bundle),
         collect_struct_field_types(bundle),
         stage,
@@ -3491,7 +3491,7 @@ fn eval_expr_hook(
     let fuel = req.fuel;
     let core_imports = req.core_imports;
     let globals = req.globals.clone();
-    let allow_impure = req.allow_impure;
+    let gates = req.gates;
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
     let repl_grants = req.repl_grants.to_vec();
@@ -3511,7 +3511,7 @@ fn eval_expr_hook(
         sink,
         core_imports,
         globals: globals.clone(),
-        allow_impure,
+        gates,
         impure_depth,
         runtime_execution: false,
         prefer_tir_calls: false,
@@ -3610,7 +3610,7 @@ fn eval_block_hook(
     let fuel = req.fuel;
     let core_imports = req.core_imports;
     let globals = req.globals.clone();
-    let allow_impure = req.allow_impure;
+    let gates = req.gates;
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
     let repl_grants = req.repl_grants.to_vec();
@@ -3633,7 +3633,7 @@ fn eval_block_hook(
         sink,
         core_imports,
         globals: globals.clone(),
-        allow_impure,
+        gates,
         impure_depth,
         runtime_execution: false,
         prefer_tir_calls: false,

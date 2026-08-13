@@ -516,7 +516,7 @@ renumbered, and no new `W` code may be allocated.
 | E3106 | sema  | `.PerSite` gate selection is missing or `.Skip` is used without `.PerSite` (D-UNSAFE-OBLIG1) |
 | E3107 | sema  | a low-level operation is missing one or more required typed obligations (D-UNSAFE-OBLIG1) |
 | E3108 | parse/sema | unknown unsafe option/obligation, or an obligation assertion outside `#Unsafe` (D-UNSAFE-OBLIG1) |
-| E3109 | load  | configured organization unsafe-policy input is unreadable or malformed; compilation fails closed |
+| E3109 | load  | configured organization gate-policy input is unreadable or malformed; compilation fails closed |
 | E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
 | E3111 | sema  | overlapping write swizzle repeats a lane (D-SWIZZLE1) |
 | E3112 | parse/sema | `#Unsafe` block/function missing its required reason argument (D-UNSAFE2, D-UNSAFE-REASON1=A) |
@@ -545,7 +545,8 @@ renumbered, and no new `W` code may be allocated.
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
 | E3410 | sema  | Tier-2 comptime effect (`core.files`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
-| E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--allow-impure` not passed (D-CTEFFECT1) |
+| E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--gate impure=allow` not passed (D-CTEFFECT1 / D-ONCE-GATE1=A) |
+| E3415 | sema  | audited gate denied by effective organization or package policy (D-ONCE-GATE1=A) |
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
@@ -808,6 +809,7 @@ renumbered, and no new `W` code may be allocated.
 | E1299 | jetpack | Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1) |
 | E1300 | jetpack | the retired `--profile` spelling selected an environment composition; presets own that word now (D-CONF-WORD1) |
 | E1342 | jetpack | the retired `--env-profile` spelling selected an environment module; `--env` owns that axis now (D-ENVFLAG1) |
+| E1343 | jet | the retired audited-effect boolean changed gate policy semantics (D-ONCE-GATE1=A) |
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
@@ -1418,7 +1420,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3106 | This unsafe gate must choose a permitted obligation mode. | `.PerSite` requires `.Track`/`.Skip`, and `.Skip` has no ambient meaning outside `.PerSite`. | Add `obligations: .Track`, or use `.Skip` only under a package `.PerSite` policy. |
 | E3107 | `{operation}` is missing unsafe obligations: `{obligations}`. | Effective `.Obligations` policy requires a typed proof immediately after each low-level operation. | Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset. |
 | E3108 | Invalid unsafe option or obligation assertion. | Unsafe proof vocabulary is closed and site-bound. | Use only `obligations: .Track`/`.Skip` and `valid_ptr`, `aligned`, `no_alias` inside `#Unsafe`. |
-| E3109 | Configured organization unsafe policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: .{ unsafe: .Obligations }` file, or remove the variable. |
+| E3109 | Configured organization gate policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` file, or remove the variable. |
 | E3112 | This `#Unsafe` block/function has no reason. | Every gated region/function must record why it cannot break memory safety; the audit sentence is mandatory. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
 | L3101 | Retired by D-UNSAFE-REASON1=A. | A missing unsafe reason is now hard error E3112. | Follow E3112. |
 | L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
@@ -1427,12 +1429,13 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 Tier-0 (pure) calls have an empty shared effect set — always safe, no gate
 needed. Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
-Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
+Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--gate impure=allow`.
 
 | code | what | why | fix |
 |------|------|-----|-----|
 | E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.files`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
-| E3411 | `#Impure` gate present but `--allow-impure` was not passed. | The `#Impure` block opts in to ambient I/O, but the build flag is also required so CI can audit builds that touch the host. | Add `--allow-impure` to your `jet build` / `jet run` invocation. |
+| E3411 | `#Impure` gate present but `--gate impure=allow` was not passed. | The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host. | Add `--gate impure=allow` to your `jet build` / `jet run` invocation. |
+| E3415 | The `{gate}` gate is denied by effective policy. | The shared policy ladder is the authority for audited escapes; an invocation gate cannot widen a `.Forbid` floor. | Remove the gate or change the owning policy to allow it. |
 | E3412 | `core.net.{method}()` is not available at comptime. | Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. | Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads. |
 | E3413 | fetch: sha256 mismatch for `{url}`. | The downloaded content does not hash to the expected `sha256:` value. The pin ensures every machine gets byte-identical content; a mismatch means the URL content changed or the pin is wrong. | Update the `sha256:` argument to match the actual content hash shown in the Why line, or verify the URL points to the correct file. |
 | E3414 | fetch failed / bad argument / non-UTF-8 content (message varies). | Common causes: unsupported URL scheme (only `file://`, `http://`, `https://`), unreachable host, missing `sha256:` argument, or binary content (use `embed_bytes` for that). HTTPS TLS failures use E4201–E4203. | Check the URL and arguments; use `file://` for local test paths. |
@@ -1833,7 +1836,7 @@ front-end `.jet` diagnostics).
 | E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
-| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
+| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `package.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `package.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` cannot use remote OCI reference `<ref>`. `` | D-JPK-IMAGE1: local OCI layouts are copied only after digest validation; remote registry transport is a separate trust boundary and is never faked. | Use `--push file:///path/to/layout`, or configure a verified registry transport. |

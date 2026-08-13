@@ -203,7 +203,7 @@ pub(crate) fn run_compile_cmd(
     emit_generated: bool,
     small: bool,
     freestanding: bool,
-    allow_impure: bool,
+    gates: jet::Policy::GateSet,
     build_grants: &[String],
     remote_builder: Option<&str>,
     locked: bool,
@@ -308,7 +308,6 @@ pub(crate) fn run_compile_cmd(
             || emit_generated
             || small
             || freestanding
-            || allow_impure
             || !build_grants.is_empty()
             || capabilities_json
             || sbom
@@ -329,7 +328,7 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_interpreter_once_with_args(file, &args);
+        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates(file, &args, gates);
         match outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
@@ -356,7 +355,6 @@ pub(crate) fn run_compile_cmd(
         && !emit_rust
         && !small
         && !freestanding
-        && !allow_impure
         && build_grants.is_empty()
         && !capabilities_json
         && !sbom
@@ -367,8 +365,12 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome =
-            jet::Interpreter::run_jit_once_with_args_opts(file, &args, mode.json);
+        let outcome = jet::Interpreter::run_jit_once_with_args_opts_and_gates(
+            file,
+            &args,
+            mode.json,
+            gates,
+        );
         match outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
@@ -388,14 +390,14 @@ pub(crate) fn run_compile_cmd(
 
     // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
     // program's canonical *pre-sema* AST, up front. `mode_tag` keeps the three
-    // native codegen shapes (plain, `--freestanding`, `--allow-impure`) in
+    // native codegen shapes (plain, `--freestanding`, and audited gates) in
     // separate key spaces. `None` for web/cross builds (they never cache) or an
     // `embed_file` build (external bytes not in the AST) or a parse failure.
     let profile_tag = profile.cache_tag();
     let mode_tag = if freestanding {
         "freestanding"
-    } else if allow_impure {
-        "impure"
+    } else if !gates.is_empty() {
+        "gated"
     } else {
         "run"
     };
@@ -471,13 +473,13 @@ pub(crate) fn run_compile_cmd(
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
     let compile_result = if is_library {
-        jet::compile_library(file, library_output.as_deref())
+        jet::compile_library_with_gates(file, library_output.as_deref(), gates)
     } else if let Some(output) = output_name {
         jet::compile_output_with_options(
             file,
             output,
             freestanding,
-            allow_impure,
+            gates,
             is_web,
             is_plugin,
             cross_target,
@@ -487,7 +489,7 @@ pub(crate) fn run_compile_cmd(
             file,
             build_grants,
             freestanding,
-            allow_impure || !build_grants.is_empty(),
+            gates,
             locked,
             is_web,
             is_plugin,
@@ -499,7 +501,7 @@ pub(crate) fn run_compile_cmd(
             file,
             build_grants,
             freestanding,
-            allow_impure || !build_grants.is_empty(),
+            gates,
             locked,
             is_web,
             is_plugin,
@@ -507,18 +509,18 @@ pub(crate) fn run_compile_cmd(
             remote_builder,
         )
     } else if is_web {
-        jet::compile_web(file)
+        jet::compile_web_with_gates(file, gates)
     } else if is_plugin {
-        jet::compile_plugin(file)
+        jet::compile_plugin_with_gates(file, gates)
     } else if freestanding {
-        jet::compile_freestanding(file)
-    } else if allow_impure {
-        jet::compile_allow_impure(file)
+        jet::compile_freestanding_with_gates(file, gates)
+    } else if !gates.is_empty() {
+        jet::compile_with_gates(file, gates)
     } else {
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
         // codegen only emits/links `#Target(OS.*)`-gated impls for the OS
         // that triple builds for (host OS when the flag is absent).
-        jet::compile_with_target(&src, file, cross_target)
+        jet::compile_with_target_and_gates(&src, file, gates, cross_target)
     };
     let (
         rust_code,

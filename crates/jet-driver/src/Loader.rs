@@ -397,7 +397,7 @@ fn load_entry_with_overlays_mode_with_sink(
     // deps found in the manifest-less branch below, merged into
     // `parse_teaching` once that's declared.
     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
-    let organization_policy = match load_organization_unsafe_policy() {
+    let organization_policy = match load_organization_policy() {
         Ok(policy) => policy,
         Err(error) => return Err(record_loader_error(&mut sink, error)),
     };
@@ -1102,7 +1102,7 @@ fn load_entry_with_overlays_mode_with_sink(
 
 /// D-UNSAFE-OBLIG1=A: optional admin/CI organization floor. The configured
 /// path is an explicit build input; unreadable or malformed input fails closed.
-fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, LoaderError> {
+fn load_organization_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, LoaderError> {
     let Ok(configured) = std::env::var(Syntax::ENV_ORG_UNSAFE_POLICY) else { return Ok(Vec::new()) };
     let path = PathBuf::from(&configured);
     let source = match fs::read_to_string(&path) {
@@ -1113,7 +1113,7 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
                 "",
                 vec![Diagnostic::error(
                     "E3109",
-                    "cannot read the configured organization unsafe policy".to_string(),
+                    "cannot read the configured organization gate policy".to_string(),
                     format!("{} names `{}`, but it could not be read: {error}", Syntax::ENV_ORG_UNSAFE_POLICY, path.display()),
                     "fix the policy path or remove the environment variable".to_string(),
                     None,
@@ -1129,26 +1129,23 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
                 &source,
                 vec![Diagnostic::error(
                     "E3109",
-                    "the configured organization unsafe policy is malformed".to_string(),
-                    format!("`{}` must contain a manifest-shaped `policy: .{{ unsafe: .Obligations }}` block: {error:?}", path.display()),
+                    "the configured organization gate policy is malformed".to_string(),
+                    format!("`{}` must contain a manifest-shaped `policy: .{{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block: {error:?}", path.display()),
                     "fix the organization policy; configured policy never fails open".to_string(),
                     None,
                 )],
             ));
         }
     };
-    if declarations.len() != 1
-        || declarations[0].key != crate::Policy::PolicyKey::Unsafe
-        || declarations[0].value != crate::Policy::PolicyValue::UnsafeObligations
-    {
+    if declarations.is_empty() || declarations.iter().any(|declaration| !declaration.key.is_audited_gate()) {
         return Err(LoaderError::at(
             &path.display().to_string(),
             &source,
             vec![Diagnostic::error(
                 "E3109",
-                "the organization unsafe policy has the wrong shape".to_string(),
-                "this admin input is exactly one mandatory unsafe-obligations floor".to_string(),
-                "use exactly `policy: .{ unsafe: .Obligations }`".to_string(),
+                "the organization gate policy has the wrong shape".to_string(),
+                "this admin input contains only the shared audited-gate fields".to_string(),
+                "use `policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` (with any subset of those fields)".to_string(),
                 None,
             )],
         ));
@@ -1646,7 +1643,7 @@ fn load_file(
     for declaration in &mut prog.policy_declarations { declaration.source = display.to_string(); }
     let mut effective_declarations = package_policy.to_vec();
     effective_declarations.extend(prog.policy_declarations.clone());
-    for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc] {
+    for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
         let module_chain = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Organization | crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module)).cloned().collect::<Vec<_>>();
         if let Err(error) = crate::Policy::resolve(key, module_chain) { return Err(LoaderError::at(display, &source, vec![policy_ladder_diagnostic(key, error)])); }
         let targets = effective_declarations.iter().filter(|d| matches!(d.scope, crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block) && d.key == key).filter_map(|d| d.target).collect::<Vec<_>>();

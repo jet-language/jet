@@ -161,8 +161,17 @@ pub fn compile_with_target(
     file: &str,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_with_target_and_gates(src, file, Policy::GateSet::default(), cross_target)
+}
+
+pub fn compile_with_target_and_gates(
+    src: &str,
+    file: &str,
+    gates: Policy::GateSet,
+    cross_target: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     let _ = src;
-    compile_bundle_path(file, Sema::CompileMode::Run, cross_target)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, cross_target)
 }
 
 /// Front-end check for a file on disk (and its imports). Library modules
@@ -223,19 +232,22 @@ fn compile_bundle_path(
     mode: Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, mode, false, false, false, cross_target)
+    compile_bundle_path_opts(file, mode, false, Policy::GateSet::default(), false, cross_target)
 }
 
 /// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
 /// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
 pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false, false, None)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, Policy::GateSet::default(), false, None)
 }
 
-/// Like `compile_with_path` but with `--allow-impure` (D-CTEFFECT1).
-/// Enables Tier-2 ambient comptime effects inside `#Impure` gates.
-pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false, None)
+pub fn compile_freestanding_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, gates, false, None)
+}
+
+/// Compile with the selected audited-gate invocation permissions.
+pub fn compile_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, None)
 }
 
 /// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
@@ -244,14 +256,23 @@ pub fn compile_programmable_build(
     file: &str,
     grants: &[String],
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_programmable_build_opts(file, grants, false, true, false, false, false, None)
+    compile_programmable_build_opts(
+        file,
+        grants,
+        false,
+        Policy::GateSet::allow(Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
 }
 
 pub fn compile_programmable_build_opts(
     file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -261,7 +282,7 @@ pub fn compile_programmable_build_opts(
         file,
         grants,
         freestanding,
-        allow_impure,
+        gates,
         locked,
         web_target,
         plugin_target,
@@ -274,7 +295,7 @@ pub fn compile_programmable_build_opts_with_builder(
     file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -285,7 +306,7 @@ pub fn compile_programmable_build_opts_with_builder(
         file,
         grants,
         freestanding,
-        allow_impure,
+        gates,
         locked,
         web_target,
         plugin_target,
@@ -303,7 +324,7 @@ pub fn compile_programmable_build_emit_generated_opts(
     file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -313,7 +334,7 @@ pub fn compile_programmable_build_emit_generated_opts(
         file,
         grants,
         freestanding,
-        allow_impure,
+        gates,
         locked,
         web_target,
         plugin_target,
@@ -326,7 +347,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
     file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -337,7 +358,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
         file,
         grants,
         freestanding,
-        allow_impure,
+        gates,
         locked,
         web_target,
         plugin_target,
@@ -351,7 +372,7 @@ fn compile_programmable_build_opts_inner(
     file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -377,7 +398,7 @@ fn compile_programmable_build_opts_inner(
                 file,
                 grants,
                 freestanding,
-                allow_impure,
+                gates,
                 locked,
                 web_target,
                 plugin_target,
@@ -398,7 +419,7 @@ fn compile_programmable_build_opts_inner(
                 grants,
                 policy: production_build_policy(),
                 execute: true,
-                allow_impure,
+                gates,
                 inspect_only: false,
                 emit_generated,
                 locked,
@@ -424,7 +445,7 @@ fn compile_workspace_build_opts(
     _file: &str,
     grants: &[String],
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
     plugin_target: bool,
@@ -498,7 +519,7 @@ fn compile_workspace_build_opts(
                 grants: member_grants,
                 policy: production_build_policy(),
                 execute: true,
-                allow_impure,
+                gates,
                 inspect_only: false,
                 emit_generated: false,
                 locked,
@@ -533,7 +554,7 @@ fn compile_workspace_build_opts(
             grants: workspace_grants,
             policy: production_build_policy(),
             execute: true,
-            allow_impure,
+            gates,
             inspect_only: false,
             emit_generated: false,
             locked,
@@ -1190,7 +1211,7 @@ fn compile_bundle_path_opts(
     file: &str,
     mode: Sema::CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
@@ -1199,7 +1220,7 @@ fn compile_bundle_path_opts(
             file,
             mode,
             freestanding,
-            allow_impure,
+            gates,
             web_target,
             cross_target,
         )
@@ -1208,7 +1229,17 @@ fn compile_bundle_path_opts(
 
 /// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
 pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true, None)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, Policy::GateSet::default(), true, None)
+}
+
+pub fn compile_web_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, true, None)
+}
+
+pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_plugin_with_gates(file, Sema::CompileMode::Check, gates, Some(Syntax::TARGET_PLUGIN))
+    })
 }
 
 /// Like `compile_with_path` but for `jet build --target=plugin` (D-PLUGIN1=B /
@@ -1238,6 +1269,12 @@ pub fn compile_library(
     })
 }
 
+pub fn compile_library_with_gates(file: &str, output: Option<&str>, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_library_with_gates(file, Sema::CompileMode::Check, gates, output)
+    })
+}
+
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
@@ -1247,7 +1284,7 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
             file,
             Sema::CompileMode::Run,
             false,
-            false,
+            Policy::GateSet::default(),
             false,
             true,
             None,
@@ -1272,7 +1309,7 @@ pub fn compile_output_with_options(
     file: &str,
     output: &str,
     freestanding: bool,
-    allow_impure: bool,
+    gates: Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
     cross_target: Option<&str>,
@@ -1282,7 +1319,7 @@ pub fn compile_output_with_options(
             file,
             output,
             freestanding,
-            allow_impure,
+            gates,
             web_target,
             plugin_target,
             cross_target,

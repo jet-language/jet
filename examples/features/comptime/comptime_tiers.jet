@@ -8,7 +8,7 @@
 //
 // Tier 2 — ambient: reads the host filesystem, environment, etc.
 //           Requires BOTH a `#Impure("reason") { … }` gate AND
-//           `--allow-impure` on the build command.
+//           `--gate impure=allow` on the build command.
 use core.math as math
 
 // Tier 0: pure math — always evaluates at compile time.
@@ -34,9 +34,9 @@ $greeting :: "hello"
 fn run() {
     print("{$greeting}, world")
     print("pi × 10^4 ≈ {$digits_of_pi}")
-    // Tier 2 gate: the block itself is fine without --allow-impure as
+    // Tier 2 gate: the block itself is fine without --gate impure=allow as
     // long as no `comptime` binding is attempted inside it. With
-    // --allow-impure you can add: $cfg :: fs.read("config.txt")
+    // --gate impure=allow you can add: $cfg :: fs.read("config.txt")
     #Impure("demonstrating the gate syntax") {
         print("inside #Impure gate (runtime block, Tier-2 comptime disabled here)")
     }

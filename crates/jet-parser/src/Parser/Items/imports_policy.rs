@@ -66,7 +66,7 @@ impl<'a> Parser<'a> {
                         if value == 0 { return Err(Diagnostic::error("E0355", format!("`{name}` needs a positive byte ceiling"), "zero cannot bound a usable memory region".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); }
                         crate::Policy::PolicyValue::Limit(value)
                     }
-                    crate::Policy::PolicyKey::Unsafe => return Err(Diagnostic::error("E0355", "`unsafe` is not a source policy".to_string(), "package policy may forbid unsafe, but source code can authorize it only at an audited `#Unsafe` site".to_string(), "use `#Unsafe(\"reason\")` at the operation, or `policy: .{ unsafe: .Forbid }` in `package.jet`".to_string(), Some(name_span))),
+                    crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: .{{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
                 };
                 out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: marker_span, target: None, source: "<source>".to_string() });
             }
@@ -1369,7 +1369,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            for key in [crate::Policy::PolicyKey::NoAlloc, crate::Policy::PolicyKey::ZeroRc, crate::Policy::PolicyKey::ArenaBounded, crate::Policy::PolicyKey::Unsafe, crate::Policy::PolicyKey::ScopedGc, crate::Policy::PolicyKey::ExplicitUnits] {
+            for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
                 let module_chain = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
                 if let Err(error) = crate::Policy::resolve(key, module_chain) {
                     let span = match error { crate::Policy::PolicyError::ProhibitedScope { span, .. } | crate::Policy::PolicyError::Widening { span, .. } => span, crate::Policy::PolicyError::Conflict { second, .. } => second };

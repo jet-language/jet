@@ -758,7 +758,7 @@ impl<'a> Checker<'a> {
                     self.ct_base_dir,
                     &globals,
                     self.core_imports,
-                    self.allow_impure && self.ct_impure_depth > 0,
+                    self.gates,
                     self.ct_impure_depth,
                     Some(&mut mutated),
                 );
@@ -799,7 +799,7 @@ impl<'a> Checker<'a> {
                     self.ct_base_dir,
                     &globals,
                     self.core_imports,
-                    false,
+                    self.gates,
                     0,
                     Some(&mut mutated),
                 );

@@ -2,7 +2,7 @@ use super::*;
 use super::super::repl_process::run_repl_process;
 
 /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
-/// Only called when `impure_depth > 0` and `allow_impure` (comptime) or from the
+/// Only called when `impure_depth > 0` and `gates` (comptime) or from the
 /// runtime TIR evaluator used by `jet run` deopt (#778).
 pub fn apply_impure_core_call(
     module: &str,

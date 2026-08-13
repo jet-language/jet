@@ -3,7 +3,7 @@
 use crate::Diagnostics::Span;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum PolicyScope { Organization, Package, Module, Function, Block }
 
 impl PolicyScope {
@@ -11,35 +11,37 @@ impl PolicyScope {
     const fn rank(self) -> u8 { match self { Self::Organization => 0, Self::Package => 1, Self::Module => 2, Self::Function => 3, Self::Block => 4 } }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, ScopedGc, ExplicitUnits }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits }
 
 impl PolicyKey {
-    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units" } }
-    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), _ => None } }
+    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units" } }
+    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), _ => None } }
+    pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyValue {
     Enabled,
     Limit(u64),
-    UnsafeForbid,
-    UnsafeDefault,
-    UnsafeGateOnly,
-    UnsafeObligations,
-    UnsafeRelaxed,
-    UnsafePerSite,
-    UnsafeTrack,
-    UnsafeSkip,
+    Forbid,
+    Default,
+    GateOnly,
+    Obligations,
+    Relaxed,
+    PerSite,
+    Track,
+    Skip,
+    Allow,
 }
 
 impl PolicyValue {
     pub fn display(self) -> String { match self {
         Self::Enabled => "true".into(), Self::Limit(n) => n.to_string(),
-        Self::UnsafeForbid => ".Forbid".into(), Self::UnsafeDefault => ".Default".into(),
-        Self::UnsafeGateOnly => ".GateOnly".into(), Self::UnsafeObligations => ".Obligations".into(),
-        Self::UnsafeRelaxed => ".Relaxed".into(), Self::UnsafePerSite => ".PerSite".into(),
-        Self::UnsafeTrack => ".Track".into(), Self::UnsafeSkip => ".Skip".into(),
+        Self::Forbid => ".Forbid".into(), Self::Default => ".Default".into(),
+        Self::GateOnly => ".GateOnly".into(), Self::Obligations => ".Obligations".into(),
+        Self::Relaxed => ".Relaxed".into(), Self::PerSite => ".PerSite".into(),
+        Self::Track => ".Track".into(), Self::Skip => ".Skip".into(), Self::Allow => ".Allow".into(),
     } }
 }
 
@@ -53,16 +55,20 @@ pub struct PolicyRule {
     pub combine: PolicyCombine,
 }
 
-const ALL_SCOPES: &[PolicyScope] = &[PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
-const UNSAFE_SCOPES: &[PolicyScope] = &[PolicyScope::Organization, PolicyScope::Package, PolicyScope::Function, PolicyScope::Block];
+const PACKAGE_SCOPES: &[PolicyScope] = &[PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
+const ALL_SCOPES: &[PolicyScope] = &[PolicyScope::Organization, PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
 pub const POLICY_RULES: &[PolicyRule] = &[
-    PolicyRule { key: PolicyKey::NoAlloc, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ZeroRc, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ArenaBounded, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::Unsafe, scopes: UNSAFE_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ScopedGc, scopes: ALL_SCOPES, combine: PolicyCombine::Override },
-    PolicyRule { key: PolicyKey::ExplicitUnits, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::NoAlloc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::ZeroRc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::ArenaBounded, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Unsafe, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Impure, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Nondeterministic, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::ScopedGc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Override },
+    PolicyRule { key: PolicyKey::ExplicitUnits, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
 ];
+
+pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[PolicyKey::Unsafe, PolicyKey::Impure, PolicyKey::Nondeterministic];
 
 pub fn rule(key: PolicyKey) -> &'static PolicyRule { POLICY_RULES.iter().find(|r| r.key == key).expect("registered policy key") }
 
@@ -112,7 +118,7 @@ pub fn resolve(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDecl
             let widens = match (key, outer, declaration.value) {
                 (PolicyKey::ArenaBounded, PolicyValue::Limit(a), PolicyValue::Limit(b)) => b > a,
                 (PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
-                (PolicyKey::Unsafe, outer, inner) => unsafe_widens(outer, inner),
+                (PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic, outer, inner) => gate_widens(outer, inner),
                 _ => true,
             };
             if rule(key).combine == PolicyCombine::Tighten && widens {
@@ -122,7 +128,7 @@ pub fn resolve(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDecl
                 next = match (outer, declaration.value) {
                     (PolicyValue::Limit(a), PolicyValue::Limit(b)) => PolicyValue::Limit(a.min(b)),
                     (PolicyValue::Enabled, PolicyValue::Enabled) => PolicyValue::Enabled,
-                    (PolicyValue::UnsafeForbid, PolicyValue::UnsafeForbid) => PolicyValue::UnsafeForbid,
+                    (PolicyValue::Forbid, PolicyValue::Forbid) => PolicyValue::Forbid,
                     _ => return Err(PolicyError::Conflict { key, scope: declaration.scope, first: chain.last().unwrap().span, second: declaration.span }),
                 };
             }
@@ -133,20 +139,136 @@ pub fn resolve(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDecl
     Ok(effective.map(|value| EffectivePolicy { key, value, provenance: chain }))
 }
 
-fn unsafe_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
+fn gate_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
     use PolicyValue::*;
     match (outer, inner) {
-        (UnsafeForbid, UnsafeForbid) => false,
-        (UnsafeForbid, _) => true,
-        (UnsafeObligations, UnsafeObligations | UnsafeTrack) => false,
-        (UnsafeObligations, _) => true,
-        (UnsafePerSite, UnsafeTrack | UnsafeSkip) => false,
-        (UnsafePerSite, UnsafePerSite) => false,
-        (UnsafeDefault | UnsafeGateOnly | UnsafeRelaxed, UnsafeTrack | UnsafeObligations) => false,
-        (UnsafeDefault | UnsafeGateOnly | UnsafeRelaxed, UnsafeDefault | UnsafeGateOnly | UnsafeRelaxed | UnsafeSkip) => false,
-        (UnsafeTrack, UnsafeTrack) | (UnsafeSkip, UnsafeSkip) => false,
+        (Forbid, Allow) => true,
+        (_, Allow) => false,
+        (Forbid, Forbid) => false,
+        (Forbid, _) => true,
+        (Obligations, Obligations | Track) => false,
+        (Obligations, _) => true,
+        (PerSite, Track | Skip) => false,
+        (PerSite, PerSite) => false,
+        (Default | GateOnly | Relaxed, Track | Obligations) => false,
+        (Default | GateOnly | Relaxed, Default | GateOnly | Relaxed | Skip) => false,
+        (Track, Track) | (Skip, Skip) => false,
         _ => true,
     }
+}
+
+pub fn default_gate_value(key: PolicyKey) -> PolicyValue {
+    match key {
+        PolicyKey::Unsafe => PolicyValue::Default,
+        PolicyKey::Impure | PolicyKey::Nondeterministic => PolicyValue::GateOnly,
+        _ => PolicyValue::Enabled,
+    }
+}
+
+pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
+    let raw = raw.trim();
+    match key {
+        PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
+        PolicyKey::ArenaBounded => raw.parse::<u64>().ok().filter(|n| *n > 0).map(PolicyValue::Limit).ok_or_else(|| format!("`{}` needs a positive byte limit", key.name())),
+        key if key.is_audited_gate() => match raw {
+            ".Forbid" => Ok(PolicyValue::Forbid),
+            ".Default" => Ok(PolicyValue::Default),
+            ".GateOnly" => Ok(PolicyValue::GateOnly),
+            ".Obligations" => Ok(PolicyValue::Obligations),
+            ".Relaxed" => Ok(PolicyValue::Relaxed),
+            ".PerSite" => Ok(PolicyValue::PerSite),
+            ".Track" => Ok(PolicyValue::Track),
+            ".Skip" => Ok(PolicyValue::Skip),
+            _ => Err(format!("`{}` must be one of `.Forbid`, `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, `.Track`, or `.Skip`", key.name())),
+        },
+        _ => Err(format!("package policy `{}` has an unsupported value", key.name())),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GateSet { bits: u8 }
+
+impl GateSet {
+    pub fn allow(key: PolicyKey) -> Self {
+        let mut gates = Self::default();
+        gates.insert(key);
+        gates
+    }
+
+    fn bit(key: PolicyKey) -> u8 {
+        match key {
+            PolicyKey::Unsafe => 1,
+            PolicyKey::Impure => 2,
+            PolicyKey::Nondeterministic => 4,
+            _ => 0,
+        }
+    }
+
+    pub fn insert(&mut self, key: PolicyKey) { self.bits |= Self::bit(key); }
+
+    /// Resolve an invocation allowance through the same policy resolver used
+    /// by package and organization declarations. The bitset is only the
+    /// transport shape; it is not a second policy mechanism.
+    pub fn allows(self, key: PolicyKey) -> bool {
+        resolve_invocation(key, &self).unwrap_or(false)
+    }
+
+    fn contains(self, key: PolicyKey) -> bool { self.bits & Self::bit(key) != 0 }
+    pub fn is_empty(self) -> bool { self.bits == 0 }
+
+    /// Parse one CLI `name=allow` entry. The synthetic declaration goes
+    /// through the same resolver as package and organization policy.
+    pub fn parse(spec: &str) -> Result<PolicyKey, String> {
+        let (name, value) = spec.split_once('=').ok_or_else(|| "use `--gate name=allow`".to_string())?;
+        let key = PolicyKey::parse(name.trim()).ok_or_else(|| format!("`{}` is not an audited gate", name.trim()))?;
+        if !key.is_audited_gate() || value.trim() != "allow" {
+            return Err(format!("`--gate {spec}` must name an audited gate with `=allow`"));
+        }
+        resolve_invocation(key, &Self::allow(key))
+            .map_err(|error| format!("invalid gate `{spec}`: {error:?}"))?;
+        Ok(key)
+    }
+}
+
+/// Resolve one invocation gate with the canonical policy ladder. This is the
+/// only bridge from the CLI gate transport to policy semantics.
+pub fn resolve_invocation(key: PolicyKey, gates: &GateSet) -> Result<bool, PolicyError> {
+    if !gates.contains(key) {
+        return Ok(false);
+    }
+    let declaration = PolicyDeclaration {
+        key,
+        value: PolicyValue::Allow,
+        scope: PolicyScope::Block,
+        span: Span::new(0, 0),
+        target: None,
+        source: "<invocation>".to_string(),
+    };
+    resolve(key, [declaration]).map(|_| true)
+}
+
+pub fn resolve_with_gates(
+    key: PolicyKey,
+    declarations: impl IntoIterator<Item = PolicyDeclaration>,
+    gates: &GateSet,
+) -> Result<Option<EffectivePolicy>, PolicyError> {
+    let declarations = declarations.into_iter().collect::<Vec<_>>();
+    let effective = resolve(key, declarations.clone())?;
+    if gates.contains(key) {
+        let mut invocation_chain = declarations;
+        invocation_chain.push(PolicyDeclaration {
+            key,
+            value: PolicyValue::Allow,
+            scope: PolicyScope::Block,
+            span: Span::new(0, 0),
+            target: None,
+            source: "<invocation>".to_string(),
+        });
+        // The invocation allowance is checked by the same ladder, but its
+        // synthetic value is not returned as the effective package policy.
+        resolve(key, invocation_chain)?;
+    }
+    Ok(effective)
 }
 
 pub fn explain(policy: &EffectivePolicy) -> String {

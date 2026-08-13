@@ -1107,7 +1107,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 hover_text.push_str(&format!("\nrule: #Scrub({tag}) (function, site-bound)"));
             }
             let declarations = module.policy_declarations.iter().filter(|d| matches!(d.scope, jet_foundation::Policy::PolicyScope::Organization | jet_foundation::Policy::PolicyScope::Package | jet_foundation::Policy::PolicyScope::Module) || (d.scope == jet_foundation::Policy::PolicyScope::Function && d.target == Some(f.span))).cloned().collect::<Vec<_>>();
-            for key in [jet_foundation::Policy::PolicyKey::NoAlloc, jet_foundation::Policy::PolicyKey::ZeroRc, jet_foundation::Policy::PolicyKey::ArenaBounded, jet_foundation::Policy::PolicyKey::Unsafe, jet_foundation::Policy::PolicyKey::ScopedGc] {
+            for key in jet_foundation::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
                 if let Ok(Some(effective)) = jet_foundation::Policy::resolve(key, declarations.clone()) {
                     hover_text.push_str("\npolicy: ");
                     hover_text.push_str(&jet_foundation::Policy::explain(&effective));
