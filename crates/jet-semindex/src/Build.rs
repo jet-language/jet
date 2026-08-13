@@ -26,19 +26,26 @@ pub enum SymKind {
         ret: Option<AST::Type>,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
+        param_access: Vec<AST::AccessConvention>,
+        param_defaults: Vec<Option<String>>,
+        policies: Vec<String>,
     },
     Struct {
         fields: Vec<(String, AST::Type)>,
+        derives: Vec<String>,
     },
     Enum {
         variants: Vec<String>,
+        derives: Vec<String>,
     },
     Trait,
     /// D-QUAL2: a `tag` marker qualifier (no methods, erases at runtime).
     Tag,
     /// Type-like declaration without struct/enum payload (alias, distinct,
     /// unit family, state set, protocol).
-    Type,
+    Type {
+        derives: Vec<String>,
+    },
     Const,
     EnumVariant {
         parent: String,
@@ -315,9 +322,29 @@ fn fn_signature(
     effects: Option<&Vec<(String, Span)>>,
     effect_via: Option<&(String, Span)>,
     view_provenance: Option<&AST::ViewProvenanceMap>,
+    param_access: &[AST::AccessConvention],
+    param_defaults: &[Option<String>],
+    policies: &[String],
 ) -> String {
-    let params = function_parameter_parts(params, param_contract, param_variadic)
-        .join(", ");
+    let mut parameter_parts = function_parameter_parts(params, param_contract, param_variadic);
+    let mut parameter_index = 0;
+    for part in &mut parameter_parts {
+        if matches!(part.as_str(), "/" | "*") {
+            continue;
+        }
+        let access = param_access
+            .get(parameter_index)
+            .copied()
+            .unwrap_or(AST::AccessConvention::Read)
+            .sigil();
+        let default = param_defaults
+            .get(parameter_index)
+            .and_then(Option::as_ref)
+            .map_or_else(String::new, |value| format!(" = {value}"));
+        *part = format!("{access}{part}{default}");
+        parameter_index += 1;
+    }
+    let params = parameter_parts.join(", ");
     let arrow = if let Some((param, _)) = effect_via {
         format!(" =[via {param}]=>")
     } else {
@@ -336,6 +363,11 @@ fn fn_signature(
             signature.push_str(" ; view_sources = ");
             signature.push_str(&AST::canonical_view_provenance_map(map));
         }
+    }
+    if !policies.is_empty() {
+        signature.push_str(" ; policies=[");
+        signature.push_str(&policies.join(", "));
+        signature.push(']');
     }
     signature
 }
@@ -358,6 +390,38 @@ fn method_parameter_variadic(f: &AST::Func) -> Vec<bool> {
         .filter(|p| p.name != Syntax::KW_SELF)
         .map(|p| p.variadic)
         .collect()
+}
+
+fn method_parameter_access(f: &AST::Func) -> Vec<AST::AccessConvention> {
+    f.params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| p.convention)
+        .collect()
+}
+
+fn method_parameter_defaults(f: &AST::Func, source: &str) -> Vec<Option<String>> {
+    f.params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| {
+            p.default.as_ref().map(|default| {
+                source
+                    .get(default.span().start..default.span().end)
+                    .unwrap_or("…")
+                    .to_string()
+            })
+        })
+        .collect()
+}
+
+fn callable_policies(f: &AST::Func) -> Vec<String> {
+    f.markers
+        .iter()
+        .find(|marker| marker.name == Syntax::MARKER_POLICY)
+        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.args).ok())
+        .map(|chain| chain.policies.iter().map(|policy| policy.display()).collect())
+        .unwrap_or_default()
 }
 
 fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
@@ -486,8 +550,12 @@ fn method_fact(
     f: &AST::Func,
     origin: MemberOrigin,
     mp: &str,
+    source: &str,
 ) -> MemberFact {
     let params = method_params(f);
+    let param_access = method_parameter_access(f);
+    let param_defaults = method_parameter_defaults(f, source);
+    let policies = callable_policies(f);
     MemberFact {
         owner: owner.to_string(),
         name: f.name.clone(),
@@ -503,6 +571,9 @@ fn method_fact(
             f.declared_effects.as_ref(),
             f.effect_via.as_ref(),
             f.return_view_provenance.as_ref(),
+            &param_access,
+            &param_defaults,
+            &policies,
         ),
         module_path: mp.to_string(),
         span: f.name_span.into(),
@@ -815,7 +886,9 @@ fn apply_inferred_effect_rows(
             ret,
             effects,
             effect_via,
-            ..
+            param_access,
+            param_defaults,
+            policies,
         } = &mut def.kind
         else {
             continue;
@@ -853,6 +926,9 @@ fn apply_inferred_effect_rows(
             effects.as_ref(),
             None,
             db.view_provenance.get(&def.identity),
+            param_access,
+            param_defaults,
+            policies,
         );
         if let Some(hover) = db.hover.iter_mut().find(|hover| {
             hover.module_path == def.module_path && hover.span == def.def_span
@@ -1095,6 +1171,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     ret: f.return_type.clone(),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
+                    param_access: method_parameter_access(f),
+                    param_defaults: method_parameter_defaults(f, &module.source),
+                    policies: callable_policies(f),
                 },
             };
             let mut hover_text = hover_for_fn(f);
@@ -1200,6 +1279,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 kind: SymKind::Struct {
                     fields: fields.clone(),
+                    derives: s.derives.iter().map(|(name, _)| name.clone()).collect(),
                 },
             });
             ctx.db.hover.push(HoverEntry {
@@ -1245,6 +1325,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     meth,
                     MemberOrigin::TypeBody,
                     mp,
+                    &module.source,
                 ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
@@ -1263,6 +1344,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
+                        param_access: method_parameter_access(meth),
+                        param_defaults: method_parameter_defaults(meth, &module.source),
+                        policies: callable_policies(meth),
                     },
                 });
                 ctx.db.hover.push(HoverEntry {
@@ -1309,6 +1393,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             trait_name: tb.trait_name.clone(),
                         },
                         mp,
+                        &module.source,
                     ));
                     ctx.db.defs.push(SymDef {
                         identity: method_identity.clone(),
@@ -1322,6 +1407,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
+                            param_access: method_parameter_access(meth),
+                            param_defaults: method_parameter_defaults(meth, &module.source),
+                            policies: callable_policies(meth),
                         },
                     });
                     with_caller(
@@ -1360,6 +1448,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 kind: SymKind::Enum {
                     variants: variants.clone(),
+                    derives: e.derives.iter().map(|(name, _)| name.clone()).collect(),
                 },
             });
             ctx.db.hover.push(HoverEntry {
@@ -1404,6 +1493,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     meth,
                     MemberOrigin::TypeBody,
                     mp,
+                    &module.source,
                 ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
@@ -1422,6 +1512,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
+                        param_access: method_parameter_access(meth),
+                        param_defaults: method_parameter_defaults(meth, &module.source),
+                        policies: callable_policies(meth),
                     },
                 });
                 with_caller(
@@ -1449,6 +1542,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             trait_name: tb.trait_name.clone(),
                         },
                         mp,
+                        &module.source,
                     ));
                     ctx.db.defs.push(SymDef {
                         identity: method_identity.clone(),
@@ -1462,6 +1556,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             ret: meth.return_type.clone(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
+                            param_access: method_parameter_access(meth),
+                            param_defaults: method_parameter_defaults(meth, &module.source),
+                            policies: callable_policies(meth),
                         },
                     });
                     with_caller(
@@ -1510,6 +1607,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
+                        param_access: sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).map(|p| p.convention).collect(),
+                        param_defaults: sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).map(|p| p.default.as_ref().map(|default| module.source.get(default.span().start..default.span().end).unwrap_or("…").to_string())).collect(),
+                        policies: Vec::new(),
                     },
                 });
                 ctx.db.members.push(MemberFact {
@@ -1529,6 +1629,27 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         sig.declared_effects.as_ref(),
                         None,
                         None,
+                        &sig
+                            .params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| p.convention)
+                            .collect::<Vec<_>>(),
+                        &sig
+                            .params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| {
+                                p.default.as_ref().map(|default| {
+                                    module
+                                        .source
+                                        .get(default.span().start..default.span().end)
+                                        .unwrap_or("…")
+                                        .to_string()
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                        &[],
                     ),
                     module_path: mp.to_string(),
                     span: sig.name_span.into(),
@@ -1566,6 +1687,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     meth,
                     origin,
                     mp,
+                    &module.source,
                 ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
@@ -1584,6 +1706,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         ret: meth.return_type.clone(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
+                        param_access: method_parameter_access(meth),
+                        param_defaults: method_parameter_defaults(meth, &module.source),
+                        policies: callable_policies(meth),
                     },
                 });
                 for p in &meth.params {
@@ -1667,7 +1792,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type {
+                    derives: value.derives.iter().map(|(name, _)| name.clone()).collect(),
+                },
             });
             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, value.base_span); });
         }
@@ -1677,7 +1804,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
             structural_slot(ctx, "target", StructuralSlotKind::Scalar, |ctx| {
                 record_node(ctx, "type", "type", mp, value.target_span);
@@ -1689,7 +1816,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.family.clone(),
                 def_span: value.family_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
             for def in value.distinct_defs() {
                 ctx.db.defs.push(SymDef {
@@ -1697,7 +1824,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: def.name,
                     def_span: def.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Type,
+                    kind: SymKind::Type {
+                        derives: def.derives.iter().map(|(name, _)| name.clone()).collect(),
+                    },
                 });
             }
             for member in &value.members {
@@ -1720,7 +1849,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.type_name.clone(),
                 def_span: value.type_name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
             for (name, span) in &value.states {
                 ctx.db.defs.push(SymDef {
@@ -1738,7 +1867,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type,
+                kind: SymKind::Type { derives: Vec::new() },
             });
             for message in &value.messages {
                 ctx.db.defs.push(SymDef {
@@ -1805,7 +1934,11 @@ fn hover_for_fn(f: &AST::Func) -> String {
             None => "",
         };
         let rest = if p.variadic { "..." } else { "" };
-        params.push(format!("{head}: {rest}{}{default}", p.ty.name()));
+        params.push(format!(
+            "{}{head}: {rest}{}{default}",
+            p.convention.sigil(),
+            p.ty.name()
+        ));
         let last_positional_only = p.zone == AST::ParamZone::PositionalOnly
             && callable
                 .get(index + 1)
@@ -1823,7 +1956,22 @@ fn hover_for_fn(f: &AST::Func) -> String {
         )
     };
     let ret = f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default();
-    format!("fn {}({}){}{}", f.name, params.join(", "), arrow, ret)
+    let policies = f
+        .markers
+        .iter()
+        .find(|marker| marker.name == Syntax::MARKER_POLICY)
+        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.args).ok())
+        .map(|chain| chain.display())
+        .filter(|chain| !chain.is_empty())
+        .map_or_else(String::new, |chain| format!(" ; policies=[{chain}]"));
+    format!(
+        "fn {}({}){}{}{}",
+        f.name,
+        params.join(", "),
+        arrow,
+        ret,
+        policies
+    )
 }
 
 fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {

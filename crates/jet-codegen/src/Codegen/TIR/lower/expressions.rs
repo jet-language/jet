@@ -1078,6 +1078,25 @@ fn inline_loop_body(expr: &Expr) -> Option<&[Stmt]> {
 fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChild<'a>> {
     match expr {
         Expr::Call(call) => {
+            // D-CALLPOLICY1=E: policy arguments are typed compile-time values.
+            // The checked final callable is the only runtime child; lowering
+            // policy calls here would invent a second engine policy path.
+            if call.name == "apply"
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+                && call.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
+            {
+                return call
+                    .args
+                    .last()
+                    .map(|arg| {
+                        vec![ExprWorkChild::Arg(ExprWorkArg {
+                            arg,
+                            mode: ExprArgMode::Plain,
+                        })]
+                    })
+                    .unwrap_or_default();
+            }
             let conventions = direct_call_conventions(call, cx, env);
             source_arg_indices(&call.args)
                 .into_iter()
@@ -2434,6 +2453,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Call(call) => {
+            // D-CALLPOLICY1=E: `apply` is a typed value transformation. Sema
+            // records the replacement on its final callable argument; lowering
+            // forwards that value through the one shared function-value seam.
+            if call.name == "apply"
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+                && call.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
+            {
+                return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
+            }
             // An `approx(value)` not consumed immediately by an integer-to-float
             // crossing grants nothing later. Erase its unspellable marker now.
             if call.widen_approx && call.args.len() == 1 {

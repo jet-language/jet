@@ -80,6 +80,20 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             operands.iter().all(|e| expr_in_subset(e, cx, locals))
         }
         Expr::Call(c) => {
+            // D-CALLPOLICY1=E: `apply` replaces a callable's policy metadata;
+            // policy expressions are compile-time typed values and have no
+            // runtime TIR child. The final callable must still be covered.
+            if c.name == "apply"
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
+            {
+                return c.args.last().is_some_and(|arg| {
+                    arg.label.is_none()
+                        && !arg.spread
+                        && expr_in_subset(&arg.expr, cx, locals)
+                });
+            }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
             // (`emit_call`, env-contains-name branch) emits `(place)(args)` with args

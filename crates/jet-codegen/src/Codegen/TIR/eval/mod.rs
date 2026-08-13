@@ -2825,6 +2825,7 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                         .iter()
                         .map(|parameter| parameter.convention)
                         .collect(),
+                    policies: crate::AST::CallablePolicyChain::default(),
                 }),
             },
         );

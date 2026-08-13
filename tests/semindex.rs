@@ -395,7 +395,7 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":12"));
+    assert!(json.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
     assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"instances\""));
@@ -1076,7 +1076,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":12"));
+    assert!(text.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
 }
 
 #[test]

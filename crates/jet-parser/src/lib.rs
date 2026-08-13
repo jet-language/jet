@@ -12,7 +12,7 @@ pub mod Parser;
 
 #[cfg(test)]
 mod generic_module_tests {
-    use super::{AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser};
+    use super::{AST, AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser};
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
@@ -64,6 +64,40 @@ mod generic_module_tests {
         assert!(formatted.contains("print(\"first\")"), "{formatted}");
         assert!(formatted.contains("print(\"last\")"), "{formatted}");
         assert!(!formatted.contains("fn run"), "formatter must keep script syntax: {formatted}");
+    }
+
+    #[test]
+    fn callable_policy_marker_keeps_one_typed_wrapper_chain() {
+        let source = "#Policy(retry(3), trace(\"users.load\"))\nfn load_user(id: Int) => Int { return id }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("callable policy marker should parse");
+        let Item::Func(function) = &program.items[0] else { panic!("function") };
+        let marker = function
+            .markers
+            .iter()
+            .find(|marker| marker.name == "Policy")
+            .expect("policy marker");
+        assert!(matches!(&marker.args[0], AST::Expr::Call(call) if call.name == "retry"));
+        assert!(matches!(&marker.args[1], AST::Expr::Call(call) if call.name == "trace"));
+    }
+
+    #[test]
+    fn retired_scoped_policy_shape_is_not_a_callable_policy_alias() {
+        let source = "#Policy(no_alloc)\nfn run() {}\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("legacy scoped policy is separate during migration");
+        assert_eq!(program.policy_declarations.len(), 1);
+    }
+
+    #[test]
+    fn duplicate_callable_policy_markers_are_rejected() {
+        let source = "#Policy(trace(\"one\"))\n#Policy(trace(\"two\"))\nfn run() {}\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("duplicate policy marker");
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0355"));
     }
 }
 

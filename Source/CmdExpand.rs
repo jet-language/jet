@@ -14,7 +14,7 @@ use std::process::exit;
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
 use jet::AST::{Item, ProgramBundle};
-use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue};
+use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
 /// listings and the bare-form group header, and the renderer that turns a
@@ -25,8 +25,8 @@ use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue};
 struct Lens {
     name: &'static str,
     summary: &'static str,
-    render: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<String>,
-    render_json: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<ExpandValue>,
+    render: fn(&ProgramBundle, &SemIndexEffectFacts, &SemIndex) -> Vec<String>,
+    render_json: fn(&ProgramBundle, &SemIndexEffectFacts, &SemIndex) -> Vec<ExpandValue>,
 }
 
 const LENSES: &[Lens] = &[
@@ -60,6 +60,18 @@ const LENSES: &[Lens] = &[
         render: render_layout,
         render_json: render_layout_json,
     },
+    Lens {
+        name: "derive",
+        summary: "derived capabilities already attached to types (D-ONCE-DERIVE1)",
+        render: render_derive,
+        render_json: render_derive_json,
+    },
+    Lens {
+        name: "callable-signature",
+        summary: "complete checked callable signatures and policy chains (D-CALLPOLICY1)",
+        render: render_callable_signature,
+        render_json: render_callable_signature_json,
+    },
 ];
 
 pub(crate) fn run_expand(args: &[String], json: bool) {
@@ -78,7 +90,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                             "E2104",
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
-                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, or `--facts layout`",
+                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts derive`, or `--facts callable-signature`",
                         );
                     }
                     if !json {
@@ -117,7 +129,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                         "E2941",
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
-                        "use `inline`, `memory`, `web`, `effects`, or `layout`",
+                        "use `inline`, `memory`, `web`, `effects`, `layout`, `derive`, or `callable-signature`",
                     );
                 }
                 if !json {
@@ -150,18 +162,19 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
         exit(ExitCodes::USER_ERROR);
     };
 
+    let index = jet_semindex::from_checked(&bundle, &facts);
+
     // JSON is the canonical semantic-index document with one additive
     // `expand` projection. The checked bundle and effect facts above are the
     // only inputs: this path never re-checks or asks rustc for an answer.
     if json {
-        let index = jet_semindex::from_checked(&bundle, &facts);
         let selection = lens_name.as_deref().unwrap_or("all");
         let lenses = selected
             .iter()
             .map(|lens| ExpandLens {
                 name: lens.name.to_string(),
                 summary: lens.summary.to_string(),
-                facts: (lens.render_json)(&bundle, &facts),
+                facts: (lens.render_json)(&bundle, &facts, &index),
             })
             .collect();
         let expand = ExpandProjection {
@@ -178,7 +191,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     let bare = lens_name.is_none();
     let mut printed_any = false;
     for lens in &selected {
-        let lines = (lens.render)(&bundle, &facts);
+        let lines = (lens.render)(&bundle, &facts, &index);
         if bare && lines.is_empty() {
             continue;
         }
@@ -222,12 +235,6 @@ fn print_available_lenses() {
     for l in LENSES {
         eprintln!("   {:<8} {}", l.name, l.summary);
     }
-}
-
-/// Quote CLI usage text with the same std-only JSON escaping used by the
-/// semantic-index serializer.
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
 }
 
 fn expand_string(value: impl Into<String>) -> ExpandValue {
@@ -275,7 +282,7 @@ fn source_location(
         .map(|module| jet::Diagnostics::span_line_col(&module.source, offset))
 }
 
-fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
+fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
     let mut lines = facts
         .memory_declarations
         .iter()
@@ -308,7 +315,7 @@ fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<St
     lines
 }
 
-fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
     let mut rows = Vec::new();
     for declaration in &facts.memory_declarations {
         for root in &declaration.roots {
@@ -352,7 +359,7 @@ fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Ve
     rows
 }
 
-fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
+fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
     let Some(graph) = facts.web_app.as_ref() else {
         return Vec::new();
     };
@@ -367,7 +374,7 @@ fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<Strin
     graph.explain_lines()
 }
 
-fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
     let Some(graph) = facts.web_app.as_ref() else {
         return Vec::new();
     };
@@ -468,8 +475,7 @@ fn effect_row_text(effect: &jet_semindex::EffectFact) -> String {
     format!("{}: resolved={}{}", effect.function, resolved, maximal)
 }
 
-fn render_effects(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
-    let index = jet_semindex::from_checked(bundle, facts);
+fn render_effects(_bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, index: &SemIndex) -> Vec<String> {
     index.effects().iter().map(effect_row_text).collect()
 }
 
@@ -492,8 +498,7 @@ fn effect_provenance_json(provenance: &jet_semindex::EffectProvenance) -> Expand
     ])
 }
 
-fn render_effects_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
-    let index = jet_semindex::from_checked(bundle, facts);
+fn render_effects_json(_bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, index: &SemIndex) -> Vec<ExpandValue> {
     index
         .effects()
         .iter()
@@ -522,7 +527,7 @@ fn render_effects_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> V
 /// D-METHODMACRO1=A: every `#Inline`/`#Inline(Always)` fn or method in the
 /// bundle, and the Rust attribute codegen emits for it. Functions with
 /// neither marker produce no line (the ballot: don't dump everything).
-fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<String> {
+fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
     let mut out = Vec::new();
     for module in &bundle.modules {
         let mut in_module = collect_inline_facts(&module.items, None);
@@ -702,7 +707,7 @@ fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
     rows
 }
 
-fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<String> {
+fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
     collect_layout_rows(bundle)
         .into_iter()
         .map(|row| {
@@ -719,7 +724,7 @@ fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<St
         .collect()
 }
 
-fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
     collect_layout_rows(bundle)
         .into_iter()
         .map(|row| {
@@ -735,7 +740,7 @@ fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> V
         .collect()
 }
 
-fn render_inline_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<ExpandValue> {
+fn render_inline_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
     let mut rows = Vec::new();
     for module in &bundle.modules {
         for (qualified, span, contract, attr) in collect_inline_facts(&module.items, None) {
@@ -823,6 +828,263 @@ fn collect_inline_facts(items: &[Item], owner_type: Option<&str>) -> Vec<InlineR
         }
     }
     out
+}
+
+fn ordered_definitions(index: &SemIndex) -> Vec<&jet_semindex::SymbolDef> {
+    let mut definitions = index.definitions().iter().collect::<Vec<_>>();
+    definitions.sort_by(|left, right| {
+        left.module_path
+            .cmp(&right.module_path)
+            .then(left.def_span.start.cmp(&right.def_span.start))
+            .then(left.identity.cmp(&right.identity))
+    });
+    definitions
+}
+
+fn render_derive(
+    _bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<String> {
+    ordered_definitions(index)
+        .into_iter()
+        .filter(|definition| !definition.derives.is_empty())
+        .map(|definition| {
+            format!(
+                "{}: {} [{}]",
+                definition.name,
+                definition.derives.join(", "),
+                definition.identity
+            )
+        })
+        .collect()
+}
+
+fn render_derive_json(
+    _bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<ExpandValue> {
+    ordered_definitions(index)
+        .into_iter()
+        .filter(|definition| !definition.derives.is_empty())
+        .map(|definition| {
+            expand_object(vec![
+                ("name", expand_string(&definition.name)),
+                ("identity", expand_string(&definition.identity)),
+                ("source", expand_string(&definition.module_path)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(
+                            definition.def_span.start,
+                            definition.def_span.end,
+                        ),
+                        source_location(
+                            _bundle,
+                            &definition.module_path,
+                            definition.def_span.start,
+                        ),
+                    ),
+                ),
+                ("derives", expand_string_list(&definition.derives)),
+            ])
+        })
+        .collect()
+}
+
+fn callable_parameter_text(parameter: &jet_semindex::CallableParameterFact) -> String {
+    let access = match parameter.access.as_str() {
+        "read" => "".to_string(),
+        other => format!("{other} "),
+    };
+    let label = if parameter.label.is_empty() {
+        parameter.name.clone()
+    } else {
+        format!("{}: {}", parameter.label, parameter.name)
+    };
+    let default = parameter
+        .default
+        .as_ref()
+        .map_or_else(String::new, |value| format!(" = {value}"));
+    let variadic = if parameter.variadic { "..." } else { "" };
+    format!(
+        "{access}{variadic}{label}{default}: {} [{}]",
+        parameter.ty, parameter.zone
+    )
+}
+
+fn callable_signature_text(
+    definition: &jet_semindex::SymbolDef,
+    signature: &jet_semindex::CallableSignatureFact,
+) -> String {
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(callable_parameter_text)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let effects = if signature.effects.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", signature.effects.join(", "))
+    };
+    let errors = if signature.errors.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", signature.errors.join(", "))
+    };
+    let views = signature
+        .returned_views
+        .iter()
+        .map(jet_semindex::ViewProvenanceFact::canonical)
+        .collect::<Vec<_>>();
+    format!(
+        "{} [{}] ({parameters}) effects={effects} errors={errors} views=[{}] policies=[{}]",
+        definition.name,
+        definition.identity,
+        views.join(" | "),
+        signature.policies.join(", ")
+    )
+}
+
+fn callable_parameter_json(parameter: &jet_semindex::CallableParameterFact) -> ExpandValue {
+    expand_object(vec![
+        ("name", expand_string(&parameter.name)),
+        ("label", expand_string(&parameter.label)),
+        (
+            "default",
+            parameter
+                .default
+                .as_ref()
+                .map_or(ExpandValue::Null, |value| expand_string(value)),
+        ),
+        ("access", expand_string(&parameter.access)),
+        ("zone", expand_string(&parameter.zone)),
+        ("type", expand_string(&parameter.ty)),
+        ("variadic", ExpandValue::Bool(parameter.variadic)),
+    ])
+}
+
+fn callable_view_json(view: &jet_semindex::ViewProvenanceFact) -> ExpandValue {
+    expand_object(vec![
+        (
+            "output_path",
+            expand_string_list(&view.output_path),
+        ),
+        (
+            "sources",
+            ExpandValue::Array(
+                view.sources
+                    .iter()
+                    .map(|source| {
+                        let source_kind = match &source.source {
+                            jet_semindex::ViewSourceFact::Receiver => "receiver".to_string(),
+                            jet_semindex::ViewSourceFact::Parameter(index) => {
+                                format!("parameter:{index}")
+                            }
+                            jet_semindex::ViewSourceFact::Static { module_path, name } => {
+                                format!("static:{module_path}::{name}")
+                            }
+                        };
+                        expand_object(vec![
+                            ("source", expand_string(&source_kind)),
+                            (
+                                "projections",
+                                ExpandValue::Array(
+                                    source
+                                        .projections
+                                        .iter()
+                                        .map(|projection| {
+                                            expand_string(&match projection {
+                                                jet_semindex::ViewProjectionFact::Field(name) => {
+                                                    format!("field:{name}")
+                                                }
+                                                jet_semindex::ViewProjectionFact::Index => {
+                                                    "index".to_string()
+                                                }
+                                                jet_semindex::ViewProjectionFact::Range => {
+                                                    "range".to_string()
+                                                }
+                                            })
+                                        })
+                                        .collect(),
+                                ),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        ("mutable", ExpandValue::Bool(view.mutable)),
+    ])
+}
+
+fn render_callable_signature(
+    _bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<String> {
+    ordered_definitions(index)
+        .into_iter()
+        .filter_map(|definition| {
+            definition
+                .callable_signature
+                .as_ref()
+                .map(|signature| callable_signature_text(definition, signature))
+        })
+        .collect()
+}
+
+fn render_callable_signature_json(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<ExpandValue> {
+    ordered_definitions(index)
+        .into_iter()
+        .filter_map(|definition| {
+            let signature = definition.callable_signature.as_ref()?;
+            Some(expand_object(vec![
+                ("name", expand_string(&definition.name)),
+                ("identity", expand_string(&definition.identity)),
+                ("source", expand_string(&definition.module_path)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(
+                            definition.def_span.start,
+                            definition.def_span.end,
+                        ),
+                        source_location(bundle, &definition.module_path, definition.def_span.start),
+                    ),
+                ),
+                (
+                    "parameters",
+                    ExpandValue::Array(
+                        signature
+                            .parameters
+                            .iter()
+                            .map(callable_parameter_json)
+                            .collect(),
+                    ),
+                ),
+                ("effects", expand_string_list(&signature.effects)),
+                ("errors", expand_string_list(&signature.errors)),
+                (
+                    "returned_views",
+                    ExpandValue::Array(
+                        signature
+                            .returned_views
+                            .iter()
+                            .map(callable_view_json)
+                            .collect(),
+                    ),
+                ),
+                ("policies", expand_string_list(&signature.policies)),
+            ]))
+        })
+        .collect()
 }
 
 fn absolutize(path: &str) -> PathBuf {

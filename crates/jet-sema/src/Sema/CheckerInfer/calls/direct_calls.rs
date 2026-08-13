@@ -1,7 +1,7 @@
-use crate::AST::{AccessConvention, BinOp, Call, Expr, StrPart, Type};
+use crate::AST::{AccessConvention, BinOp, Call, CallablePolicyChain, Expr, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0904, e0905};
-use crate::Sema::Bundle::fn_types_compatible;
+use crate::Sema::Bundle::{fn_types_compatible, func_sig_to_fn_type};
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
     io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
@@ -18,6 +18,93 @@ use crate::Syntax;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+        /// D-CALLPOLICY1=E: `apply(p1, …, fn)` replaces the callable's policy
+        /// chain exactly. The last argument is the callable value; policy
+        /// expressions are checked as typed values and are not ordinary calls.
+        fn check_callable_policy_apply(&mut self, call: &mut Call) -> Option<Type> {
+            let Some((callee, policy_args)) = call.args.split_last_mut() else {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    "`apply` needs a callable value".to_string(),
+                    "a callable policy is applied to one function value; an empty chain is written `apply(fn)`"
+                        .to_string(),
+                    "write `apply(load_user)` or `apply(retry(3), load_user)`".to_string(),
+                    Some(call.name_span),
+                ));
+                return None;
+            };
+            let policy_exprs: Vec<Expr> = policy_args.iter().map(|arg| arg.expr.clone()).collect();
+            let chain = match CallablePolicyChain::parse(&policy_exprs) {
+                Ok(chain) => chain,
+                Err(reason) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0355",
+                        format!("`apply` received an invalid callable policy: {reason}"),
+                        "policy values are checked before application and cannot change a callable's signature"
+                            .to_string(),
+                        "use `cache(…)`, `retry(…)`, `trace(…)`, `registration(…)`, or `route(…)`"
+                            .to_string(),
+                        Some(call.name_span),
+                    ));
+                    return None;
+                }
+            };
+            for argument in policy_args {
+                if let Expr::Call(policy_call) = &mut argument.expr {
+                    for value in &mut policy_call.args {
+                        self.infer(&mut value.expr);
+                    }
+                }
+            }
+            if callee.label.is_some() || callee.spread {
+                self.diags.push(Diagnostic::error(
+                    "E0764",
+                    "the callable value in `apply` cannot have a label or spread".to_string(),
+                    "the final argument is the value being wrapped; policy values come before it"
+                        .to_string(),
+                    "write `apply(policy(…), function)`".to_string(),
+                    Some(callee.span),
+                ));
+                return None;
+            }
+            let callee_ty = match &callee.expr {
+                Expr::Ident(name, span) => self.funcs.get(name).cloned().map(|sig| {
+                    self.record_current_function_reference(name, *span);
+                    func_sig_to_fn_type(&sig)
+                }),
+                _ => self.infer(&mut callee.expr),
+            }?;
+            let Some(replaced) = callee_ty.replace_callable_policies(chain.clone()) else {
+                self.diags.push(Diagnostic::error(
+                    "E0803",
+                    format!("`apply` can wrap only a function value, not {}", callee_ty.show()),
+                    "a callable policy is a function-to-function value with the same checked signature"
+                        .to_string(),
+                    "pass a function or function-typed binding as the final argument".to_string(),
+                    Some(callee.span),
+                ));
+                return None;
+            };
+            if !fn_types_compatible(&callee_ty, &replaced)
+                || !Type::obligations_satisfy(&callee_ty, &replaced)
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0803",
+                    "callable policy replacement changed the checked function signature"
+                        .to_string(),
+                    "a policy is a function-to-function value with the same labels, access, effects, errors, variadics, and view provenance"
+                        .to_string(),
+                    "apply only a typed callable policy chain".to_string(),
+                    Some(callee.span),
+                ));
+                return None;
+            }
+            // This fact is consumed by the shared lowerer. It lives on the
+            // callable argument so no engine invents a second policy path.
+            callee.flags.callable_policy = Some(chain);
+            Some(replaced)
+        }
+
         /// Check a call. Returns:
         ///   None             — problem already reported
         ///   Some(None)       — fine, no value handed back
@@ -90,6 +177,12 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+            if call.name == "apply"
+                && self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+            {
+                return self.check_callable_policy_apply(call).map(Some);
+            }
             // D-SHAPE-RESOURCE2=A: `close(^value)` is ambient syntax sugar for
             // the sole nominal `Close.close(^self)` protocol. It is not a
             // name-based/free-function cleanup hook.

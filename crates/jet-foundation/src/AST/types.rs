@@ -175,10 +175,118 @@ pub struct FunctionObligations {
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
+/// One typed wrapper policy on a callable value. Policy names are a closed
+/// value vocabulary; arguments are retained as their checked source shape so
+/// inspection can report the exact chain without making the backend interpret
+/// policy syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallablePolicy {
+    pub name: String,
+    pub arguments: Vec<String>,
+}
+
+/// The declaration default or call-site replacement for a callable policy.
+/// An empty chain is meaningful: it is the explicit bare-function form.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CallablePolicyChain {
+    pub policies: Vec<CallablePolicy>,
+}
+
+impl CallablePolicyChain {
+    pub const NAMES: &'static [&'static str] = &[
+        "cache",
+        "retry",
+        "trace",
+        "registration",
+        "route",
+    ];
+
+    /// Parse the one typed policy value used by both declaration markers and
+    /// `apply(...)`. A policy is a call expression, never one of the retired
+    /// bare scoped-policy identifiers.
+    pub fn parse(expressions: &[Expr]) -> Result<Self, String> {
+        expressions
+            .iter()
+            .map(CallablePolicy::parse)
+            .collect::<Result<Vec<_>, _>>()
+            .map(|policies| Self { policies })
+    }
+
+    pub fn replace(&self) -> Self {
+        self.clone()
+    }
+
+    pub fn display(&self) -> String {
+        self.policies
+            .iter()
+            .map(CallablePolicy::display)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+impl CallablePolicy {
+    fn parse(expr: &Expr) -> Result<Self, String> {
+        let Expr::Call(call) = expr else {
+            return Err("a callable policy is a call such as `retry(3)`".to_string());
+        };
+        if !CallablePolicyChain::NAMES.contains(&call.name.as_str()) {
+            return Err(format!(
+                "`{}` is not a callable policy; use one of {}",
+                call.name,
+                CallablePolicyChain::NAMES.join(", ")
+            ));
+        }
+        if call.args.iter().any(|arg| arg.label.is_some() || arg.spread) {
+            return Err(format!(
+                "`{}` policies take ordinary positional values",
+                call.name
+            ));
+        }
+        Ok(Self {
+            name: call.name.clone(),
+            arguments: call
+                .args
+                .iter()
+                .map(|arg| policy_argument_text(&arg.expr))
+                .collect(),
+        })
+    }
+
+    pub fn display(&self) -> String {
+        format!("{}({})", self.name, self.arguments.join(", "))
+    }
+}
+
+fn policy_argument_text(expr: &Expr) -> String {
+    match expr {
+        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            super::StrPart::Lit(value) => format!("{value:?}"),
+            _ => "<string>".to_string(),
+        },
+        Expr::Int(value, _, _, source) => source.clone().unwrap_or_else(|| value.to_string()),
+        Expr::Float(value, _, _) => value.to_string(),
+        Expr::Bool(value, _) => value.to_string(),
+        Expr::Char(value, _) => format!("'{value}'"),
+        Expr::Ident(name, _) => name.clone(),
+        Expr::Field(base, field, _) => format!("{}.{}", policy_argument_text(base), field),
+        Expr::Call(call) => format!(
+            "{}({})",
+            call.name,
+            call.args
+                .iter()
+                .map(|arg| policy_argument_text(&arg.expr))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        _ => "<expression>".to_string(),
+    }
+}
+
 /// Declaration-side call slots carried by a function value. Public labels and
 /// zones remain callable obligations; this row carries the defaults,
 /// conventions, and rest slots needed to bind a value call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FunctionCallMetadata {
     /// Declaration-local names used only to resolve default bodies. They are
     /// not public callable labels or semantic-index identity.
@@ -186,6 +294,8 @@ pub struct FunctionCallMetadata {
     pub defaults: Vec<Option<Expr>>,
     pub variadic: Vec<bool>,
     pub conventions: Vec<AccessConvention>,
+    /// Exact declaration default or call-site replacement chain.
+    pub policies: CallablePolicyChain,
 }
 
 impl FunctionObligations {
@@ -866,6 +976,40 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
 }
 
 impl Type {
+    /// Replace only the callable policy chain. Every other `Type::Fn` field is
+    /// cloned unchanged, so labels, defaults, access, effects, variadics, and
+    /// returned-view provenance cannot be laundered by `apply`.
+    pub fn replace_callable_policies(&self, policies: CallablePolicyChain) -> Option<Type> {
+        let Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        } = self
+        else {
+            return None;
+        };
+        let mut metadata = call_metadata.clone().unwrap_or_default();
+        metadata.policies = policies;
+        Some(Type::Fn {
+            params: params.clone(),
+            ret: ret.clone(),
+            effect_bound: effect_bound.clone(),
+            param_contract: param_contract.clone(),
+            call_metadata: Some(metadata),
+            return_view_provenance: return_view_provenance.clone(),
+        })
+    }
+
+    pub fn callable_policies(&self) -> Option<&CallablePolicyChain> {
+        match self {
+            Type::Fn { call_metadata, .. } => call_metadata.as_ref().map(|metadata| &metadata.policies),
+            _ => None,
+        }
+    }
+
     /// D-QUAL4=A: remove only user value-fact tags while preserving compiler
     /// tags that carry nominal identity or access policy.
     pub fn without_user_tags(&self) -> &Type {
@@ -1826,9 +1970,11 @@ impl Type {
 #[cfg(test)]
 mod tests {
     use super::{
-        numeric_type_from_name, Dimension, InternalTag, KnowledgeFact, Measure, TagMarker, Type,
+        numeric_type_from_name, AccessConvention, CallablePolicy, CallablePolicyChain, Dimension,
+        FunctionCallMetadata, InternalTag, KnowledgeFact, Measure, TagMarker, Type,
     };
-    use crate::AST::ParamZone;
+    use crate::AST::{Expr, ParamZone, StrPart};
+    use crate::Diagnostics::Span;
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -1897,6 +2043,84 @@ mod tests {
             .leaf_name(),
             "Box<other.Item>"
         );
+    }
+
+    #[test]
+    fn callable_policy_replacement_preserves_the_complete_function_contract() {
+        let original_return_view_provenance = Some(
+            [(
+                Vec::new(),
+                crate::AST::ViewProvenance {
+                    sources: [crate::AST::ViewSourcePath {
+                        source: crate::AST::ViewSource::Parameter(0),
+                        projections: Vec::new(),
+                    }]
+                    .into_iter()
+                    .collect(),
+                    mutable: true,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let original = Type::Fn {
+            params: vec![Type::List(Box::new(Type::String))],
+            ret: Some(Box::new(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("NetError".to_string())),
+            })),
+            effect_bound: Some(vec![("Net".to_string(), Span::new(1, 2))]),
+            param_contract: Some(vec![("users".to_string(), ParamZone::LabelOnly)]),
+            call_metadata: Some(FunctionCallMetadata {
+                names: vec!["path".to_string()],
+                defaults: vec![Some(Expr::Str(
+                    vec![StrPart::Lit("/me".to_string())],
+                    Span::new(3, 7),
+                ))],
+                variadic: vec![true],
+                conventions: vec![AccessConvention::Write],
+                policies: CallablePolicyChain {
+                    policies: vec![CallablePolicy {
+                        name: "trace".to_string(),
+                        arguments: vec!["\"old\"".to_string()],
+                    }],
+                },
+            }),
+            return_view_provenance: original_return_view_provenance.clone(),
+        };
+        let replacement = CallablePolicyChain {
+            policies: vec![CallablePolicy {
+                name: "retry".to_string(),
+                arguments: vec!["3".to_string()],
+            }],
+        };
+        let wrapped = original
+            .replace_callable_policies(replacement.clone())
+            .expect("function value");
+        let Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            call_metadata: Some(metadata),
+            return_view_provenance,
+        } = wrapped
+        else {
+            panic!("function value")
+        };
+        assert_eq!(params, vec![Type::List(Box::new(Type::String))]);
+        assert_eq!(ret.unwrap().as_ref(), &Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named("NetError".to_string())),
+        });
+        assert_eq!(effect_bound.as_ref().map(|row| row[0].0.as_str()), Some("Net"));
+        assert_eq!(param_contract, Some(vec![("users".to_string(), ParamZone::LabelOnly)]));
+        assert_eq!(metadata.names, vec!["path"]);
+        assert!(metadata.defaults[0].is_some());
+        assert_eq!(metadata.variadic, vec![true]);
+        assert_eq!(metadata.conventions, vec![AccessConvention::Write]);
+        assert_eq!(metadata.policies, replacement);
+        assert_eq!(return_view_provenance, original_return_view_provenance);
     }
 
     #[test]

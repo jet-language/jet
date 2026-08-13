@@ -251,6 +251,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or_else(|| vec![false; params.len()]),
                     variadic_bounds: None,
                     param_view_from_names: Vec::new(),
+                    callable_policies: crate::AST::CallablePolicyChain::default(),
                 };
                 let mut packed = crate::AST::Call {
                     name: callee_name.clone(),

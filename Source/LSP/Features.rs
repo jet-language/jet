@@ -57,7 +57,16 @@ pub(crate) fn compute_hover(
         ));
     }
     if let Some(symbol) = db.symbols.at(path, offset) {
-        return Some(semantic_hover(symbol, path));
+        let mut hover = semantic_hover(symbol, path);
+        if matches!(symbol.kind, jet_semindex::SemanticSymbolKind::Function) {
+            if let Some(span) = symbol.span {
+                if let Some(checked_signature) = db.hover_at(path, span.start) {
+                    hover.push_str("\n\n");
+                    hover.push_str(checked_signature);
+                }
+            }
+        }
+        return Some(hover);
     }
     if let Some(reference) = db.refs.iter().find(|reference| {
         reference.module_path == path
@@ -335,7 +344,7 @@ pub(crate) fn compute_rename(
     }
     let indexed_case = db.defs.iter().find(|d| d.name == name).map(|def| {
         match &def.kind {
-            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag | SymKind::Type
+            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag | SymKind::Type { .. }
             | SymKind::EnumVariant { .. } => ("type-like name", Syntax::NameCase::Pascal),
             SymKind::Module | SymKind::Function { .. } | SymKind::Const | SymKind::Field { .. }
             | SymKind::Local { .. } | SymKind::Param { .. } =>

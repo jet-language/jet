@@ -1,0 +1,19 @@
+// D-CALLPOLICY1=E: declaration defaults and apply(...) replacements keep the
+// same checked callable signature.
+#Policy(trace("users.load"))
+fn load_user(id: Int, label: String = "user") => String {
+    return "{label}:{id}"
+}
+
+fn run() {
+    selected :: apply(retry(3), load_user)
+    bare :: apply(load_user)
+    print(load_user(6))
+    print(selected(7))
+    print(bare(8))
+}
+
+// --- expected output --------------------------------------------------
+// user:6
+// user:7
+// user:8

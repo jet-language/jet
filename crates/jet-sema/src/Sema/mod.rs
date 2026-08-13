@@ -10,7 +10,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, Expr, ExternFn, Func, KnowledgeVector, QuantityKind, Stmt, Type,
+    AccessConvention, CallablePolicyChain, Expr, ExternFn, Func, KnowledgeVector, QuantityKind, Stmt, Type,
     VariantPayload,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -543,6 +543,12 @@ fn func_to_sig(f: &Func) -> FuncSig {
     if let Some(provenance) = &f.return_view_provenance {
         let _ = return_view_provenance.set(provenance.clone());
     }
+    let callable_policies = f
+        .markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+        .and_then(|marker| CallablePolicyChain::parse(&marker.args).ok())
+        .unwrap_or_default();
     FuncSig {
         params: f
             .params
@@ -594,6 +600,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .iter()
             .map(|p| p.declared_view_from_names.clone())
             .collect(),
+        callable_policies,
     }
 }
 
@@ -643,6 +650,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         is_sanitizer: false, // extern functions can't be sanitizers
         is_must_use: false,
         param_view_from_names: ef.params.iter().map(|_| None).collect(),
+        callable_policies: CallablePolicyChain::default(),
     }
 }
 

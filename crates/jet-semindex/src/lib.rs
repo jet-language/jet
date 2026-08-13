@@ -16,7 +16,7 @@ pub use Build::{
     HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, EffectProvenance,
+    CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact, EffectFact, EffectProvenance,
     ExpandLens, ExpandProjection, ExpandValue, InstanceApplicationFact, InstanceFact, MemberFact,
     MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
     StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
@@ -337,7 +337,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":12"));
+        assert!(json.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
         assert!(json.contains("\"outputs\""));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));

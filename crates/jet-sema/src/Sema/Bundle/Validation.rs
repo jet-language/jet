@@ -1937,6 +1937,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
             defaults: sig.defaults.clone(),
             variadic: sig.param_variadic.clone(),
             conventions: sig.params.iter().map(|(convention, _)| *convention).collect(),
+            policies: sig.callable_policies.clone(),
         }),
         return_view_provenance: sig.return_view_provenance.get(),
     }

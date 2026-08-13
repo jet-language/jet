@@ -839,6 +839,7 @@ impl<'a> Checker<'a> {
             param_variadic: sig.param_variadic.clone(),
             variadic_bounds: None,
             param_view_from_names: Vec::new(),
+            callable_policies: crate::AST::CallablePolicyChain::default(),
         };
         self.normalize_variadic_call(&mut packed, &fake_sig);
         *args = packed.args;
@@ -1055,6 +1056,7 @@ impl<'a> Checker<'a> {
                 param_variadic: params.iter().map(|param| param.variadic).collect(),
                 variadic_bounds: None,
                 param_view_from_names: Vec::new(),
+                callable_policies: crate::AST::CallablePolicyChain::default(),
             };
             let mut packed = crate::AST::Call {
                 name: method.to_string(),

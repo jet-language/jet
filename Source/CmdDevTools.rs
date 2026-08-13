@@ -2520,6 +2520,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .iter()
                             .map(|p| p.declared_view_from_names.clone())
                             .collect(),
+                        callable_policies: Default::default(),
                     },
                 );
                 ast_funcs.insert(f.name.clone(), f);

@@ -62,6 +62,28 @@ pub struct ViewProvenanceFact {
     pub mutable: bool,
 }
 
+/// One checked parameter row for the callable-signature inspection lens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableParameterFact {
+    pub name: String,
+    pub label: String,
+    pub default: Option<String>,
+    pub access: String,
+    pub zone: String,
+    pub ty: String,
+    pub variadic: bool,
+}
+
+/// The complete semindex projection of a checked callable contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableSignatureFact {
+    pub parameters: Vec<CallableParameterFact>,
+    pub effects: Vec<String>,
+    pub errors: Vec<String>,
+    pub returned_views: Vec<ViewProvenanceFact>,
+    pub policies: Vec<String>,
+}
+
 impl ViewProvenanceFact {
     pub fn canonical(&self) -> String {
         let access = if self.mutable { "write" } else { "read" };
@@ -276,6 +298,12 @@ pub struct SymbolDef {
     /// Sema-proved owner source for a returned view, when this definition is a
     /// function. Kept beside `kind` to preserve the established enum shape.
     pub view_provenance: Vec<ViewProvenanceFact>,
+    /// D-EXPANDCLI1: checked callable facts used by the derive/signature
+    /// lenses. Kept on the canonical definition so both projections share
+    /// one semindex document.
+    pub callable_signature: Option<CallableSignatureFact>,
+    /// D-ONCE-DERIVE1: capabilities already attached to this type.
+    pub derives: Vec<String>,
 }
 
 /// Compiler-owned definition facts for conservative structural tools.
