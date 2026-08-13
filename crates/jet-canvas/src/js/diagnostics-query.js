@@ -270,7 +270,7 @@
     if (t === "IntN" || /^U?\d+$/.test(t) || /^I\d+$/.test(t)) return TYPE_COLOR_MAP.Int;
     if (t.startsWith("[")) return colorForType(t.slice(1, -1).trim() || "unknown");
     if (t.endsWith("?")) return colorForType(t.slice(0, -1).trim() || "unknown");
-    if (/Result|Error|Fallible/.test(t)) return TYPE_COLOR_MAP.Result;
+    if (/Result|Error/.test(t)) return TYPE_COLOR_MAP.Result;
     if (/Map|Dict/.test(t)) return TYPE_COLOR_MAP.Map;
     if (/Enum|Variant/.test(t)) return TYPE_COLOR_MAP.Enum;
     if (/Fn|fn\(|=>/.test(t)) return TYPE_COLOR_MAP.Fn;

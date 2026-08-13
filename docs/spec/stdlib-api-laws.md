@@ -19,7 +19,7 @@ existing drift found during review.
   positional removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or
   `remove_at` spellings.
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
-- Fallible variants add no suffix; the `?` return type signals fallibility.
+- Failure-returning variants add no suffix; the `?` return type signals failure.
 - Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's
   components; `Type.new(…)` for fresh stateful containers; `Type.over(x)` for non-owning
   views over existing data; `Type.from_*(x)` for conversions. `Type.{ }` stays the
@@ -33,7 +33,7 @@ existing drift found during review.
 - Panics are reserved for programmer error (index out of bounds on a known-size slice).
 - The error type must carry enough context to write a helpful error message without
   inspecting source code (no opaque integer codes).
-- Use the most specific error type available; `Err` (the Fallible default) is a
+- Use the most specific error type available; `Err` (the default error) is a
   last resort for heterogeneous error paths.
 
 ## Law 3 — Ownership / allocation

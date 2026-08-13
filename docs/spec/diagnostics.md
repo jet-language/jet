@@ -1113,18 +1113,18 @@ named cell.
 
 ## Library authoring diagnostics (E2-M6)
 
-S61 (argument labels/defaults), S62 (trait delegation), D-LIB3 (Fallible `?`
+S61 (argument labels/defaults), S62 (trait delegation), D-ERR-CONV (`?`
 conversion), and S77 (field punning) introduce these codes. E24xx is the
 block reserved for M6.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
-| E2402 | `?` can't convert `{err}` into `Err` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Err` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Err`. | Add `impl {err}: Fallible { fn to_error(self) => Err { Err(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
+| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} => Err`. | Add `impl {err} => Err { … }` before this function, or change the return type to `T ? {err}`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source => Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} => {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} => {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … => …` blocks. |
-| E2406 | Can't declare `impl {Source} => {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
+| E2406 | Can't declare `impl {Source} => {Target}` — neither type is defined in this program. | Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source. | Define one of these types locally, or convert the foreign source into `Err`. |
 | E2407 | `#Rename(...)` needs a string literal. | The wire key a `#Codable` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#Rename("wire_name")`. |
 | E2408 | `#Flatten` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#Codable` struct — not a primitive, list, or map. | Give `{field}` a `#Codable` struct type, or drop `#Flatten`. |
 | E2409 | `#RenameAll({style})` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |

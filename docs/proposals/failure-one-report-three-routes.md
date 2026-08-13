@@ -12,7 +12,8 @@ The research swept the spec, sema, codegen, Prelude, examples, tests, the
 decision record, prior audits, and the four sibling rethinks. The finding is
 sharp. Jet has one good rail (`T ? E` with `?` and `??`) standing on a hollow
 floor. The default `Error` type is a plain string at codegen. The ratified
-structured form (message, code, source) was never built. The `Fallible` trait
+structured form (message, code, source) was never built. The retired
+default-conversion trait
 cannot be implemented by any program; the diagnostic that teaches it (E2402)
 gives a fix that is itself a hard error. Contract markers `#Pre`/`#Post` run
 only in AOT builds; `jet run` skips them silently, against their own ratified
@@ -60,7 +61,7 @@ keep every dial: typed families, declared conversions, pinned entry types,
 proof-erased contracts, and audited boundaries.
 
 What the owner gets on the page: a real default error built with
-`Err("msg")`; one conversion rail instead of two (the dead `Fallible` trait
+`Err("msg")`; one conversion rail instead of two (the dead default-conversion trait
 is deleted); the same stop report with a source arrow on every tier, web
 included; contracts that actually run under `jet run` and erase when the
 type system proves them; an exit-code law that separates reported errors
@@ -137,9 +138,9 @@ own defect.
 | # | Mechanism | Home | Defect |
 |---|---|---|---|
 | 1 | `T ? E` + default `Error` | `crates/jet-codegen/src/Codegen/Context.rs:1325` | `Error` lowers to plain `String`; no fields, no matching, no chain |
-| 2 | `Fallible` trait / `to_error` | `crates/jet-foundation/src/Syntax/effects_surface.rs:337` | not a builtin, not synthetic, zero implementations possible; E2402's fix text is itself a hard error (E0321) |
+| 2 | retired default-conversion trait / helper | `crates/jet-foundation/src/Syntax/effects_surface.rs:337` | not a builtin, not synthetic, zero implementations possible; E2402's fix text is itself a hard error (E0321) |
 | 3 | Declared conversion `impl S => T` | `crates/jet-foundation/src/Traits.rs:1250-1300` | works; one of two rails for one job |
-| 4 | `.context("msg")` | `crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2035-2057` | only when the error type is `Error`; lowers through a `"__Fallible__"` string sentinel; chain is string concat |
+| 4 | `.context("msg")` | `crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2035-2057` | only when the error type is `Error`; lowers through an internal context sentinel; chain is string concat |
 | 5 | `#Pre` / `#Post` | `crates/jet-codegen/src/Codegen/Items.rs:2277-2344` | AOT-only; `jet run` silently skips them; arrow points at the marker, not the call |
 | 6 | `require` / `panic` | `crates/jet-codegen/src/Prelude/Core.rs:1432` (`jet_panic`), `:1568` (`jet_panic_rich`) | separate renderer from contracts (`jet_contract_fail`, `:1463`) |
 | 7 | Arithmetic and bounds traps | `crates/jet-codegen/src/Prelude/Core.rs:1500-1562` | wording differs AOT vs JIT; JIT drops the `--> file:line`; `?? panic("msg")` prints `panic: panic` under JIT |
@@ -222,7 +223,7 @@ The "ohhh" connections:
 2. A trap is a breach of a built-in contract. Overflow, divide-by-zero, and
    out-of-bounds are `#Pre` conditions Jet wrote for you on `+`, `/`, and
    `[]`. One family, one renderer, one exit.
-3. The `Fallible` trait is a shadow copy of declared conversion — and it
+3. The retired default-conversion trait is a shadow copy of declared conversion — and it
    never worked. `impl MyErr => Error` on the one rail replaces it exactly.
 4. A boundary turns a stop into a value. A task join returns
    `.Err(.Panicked)`. A test's `.expect_fail` consumes a stop. The process
@@ -338,7 +339,7 @@ nobody wrote a word. This is the automatic-context propagation the owner
 asked for: Zig's error return traces made a product, plus human notes where
 they help. The `.context` method is deleted. Ballot: D-FAIL-CTX1.
 
-### 3. One conversion rail — amended (deletes D-ERR2's `Fallible` clause)
+### 3. One conversion rail — amended (deletes D-ERR2's default-conversion clause)
 
 Before — the diagnostic teaches a dead end:
 
@@ -348,13 +349,13 @@ enum StoreErr { Missing, Locked }
 fn get_user() => User ? Error {
     return read_store()?
     // Error [E2402]: `StoreErr` has no path to `Error`
-    //  Fix: add `impl StoreErr: Fallible { fn to_error(self) => Error { … } }`
+    //  Fix: add the retired default-conversion trait implementation
     //  — that spelling is E0321, the trait does not exist, and no
     //    expression produces an `Error`. There is no way out.
 }
 ```
 
-After — proposed: the `Fallible` trait and `to_error` are deleted. Error
+After — proposed: the retired default-conversion trait and helper are deleted. Error
 conversion has exactly one mechanism, the already-ratified declared
 conversion (D-ERR-CONV), now usable with the default error as the target:
 
@@ -375,16 +376,16 @@ is the source value; the body returns the target. If that reading still
 grates, D-FAIL-CONV1 offers a respelled form (`impl StoreErr as Err`) as a
 genuine option.
 
-E2402's text is rewritten to teach this. The `TryConvert::Fallible` sema arm
+E2402's text is rewritten to teach this. The retired conversion sema arm
 and the trait constants are removed. One mechanism (I8), and it is the one
 that already works.
 
 One rule bends to make this whole: the orphan rule (E2406) keeps its meaning
-for typed targets, but a conversion into core `Error` may name a foreign
+for typed targets, but a conversion into core `Err` may name a foreign
 source type. Today E2406's registered fix text sends people who own neither
-type to the dead trait; with the trait gone, the `Error`-target carve-out is
+type to the dead trait; with the trait gone, the `Err`-target carve-out is
 the working escape. E2402, E2406, D-LIB3's `?`-conversion registration, and
-the `Fallible` block in `docs/reference/syntax-surface.jet` are all amended
+the old conversion block in `docs/reference/syntax-surface.jet` are all amended
 in the same change.
 
 ### 4. Every stop is a report — new (implements I4 at run time)
@@ -562,7 +563,7 @@ D-FAIL-EDGE1.
 
 ### 9. Deletions
 
-- The `Fallible` trait, `to_error`, and the `TryConvert::Fallible` arm.
+- The retired default-conversion trait, helper, and compiler arm.
 - The `.context` method — its job moves to the `?` note, one operator
   instead of an operator plus a method.
 - Three of the four runtime renderers and the `CmdProve` reconstructor; one
@@ -707,7 +708,7 @@ fn run() {
 | D-FAIL-CARRIER1 | One carrier under `T?` and `T ? E`, with notes and partial results? | one carrier |
 | D-FAIL-ERROR1 | The default error is a real value — name and constructor? | one word: `Err` |
 | D-FAIL-CTX1 | Where context is written for a passing failure? | a note on the `?` |
-| D-FAIL-CONV1 | Delete the `Fallible` trait; one conversion rail? | delete it |
+| D-FAIL-CONV1 | Delete the default-conversion trait; one conversion rail? | delete it |
 | D-FAIL-BREACH1 | Every stop is a registered report on every tier? | yes, one renderer |
 | D-FAIL-TIER1 | Contracts on every tier, erased under proof, blame at the right site? | yes |
 | D-FAIL-EXIT1 | Entry fallible by default; report+1 for errors, 70 for stops, 101 compiler-only? | yes |

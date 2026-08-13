@@ -346,7 +346,7 @@ Ratified law above is the target contract. Shipped behavior in this repository i
 
 | Surface | Edition 2026 (compatibility) | Edition 2027+ (strict / migrated) |
 |---|---|---|
-| `json.canonical` | Infallible prototype bytes (legacy) | Fallible RFC 8785 JCS (`?` required) |
+| `json.canonical` | Infallible prototype bytes (legacy) | Failure-aware RFC 8785 JCS (`?` required) |
 | `cbor.encode` / DataTree `cbor.decode` | Live names and `String` errors | Deprecated `cbor.encode` emits **L2001**; use `cbor.to_bytes` / `cbor.parse` |
 | `cbor.encode` | Still callable in 2027 with lint | Removed in edition 2028 (**E2002**) |
 | `base64` / `base32` decode | 2026 compatibility union (whitespace, padding, case) | Strict RFC 4648 default; named `allow_*` flags only |

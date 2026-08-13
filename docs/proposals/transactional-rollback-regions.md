@@ -5,7 +5,7 @@
 
 ## Glossary
 
-- **Fallible function:** a function that can fail. In Jet it returns `T ? E`.
+- **Failure-returning function:** a function that can fail. In Jet it returns `T ? E`.
 - **Rollback:** to undo the state changes a piece of code made.
 - **Transaction region:** a marked block of code that either finishes fully or undoes all its own changes.
 - **Compensation:** a paired "undo" action for a step that cannot roll back on its own (for example, a step that sent a network request).

@@ -666,6 +666,9 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Err(inner) => {
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::Try { inner, .. } => {
+            web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::Absent => true,
         TIR::TExprKind::DistinctConvert {
             arg, op, fallible, ..
@@ -2251,6 +2254,15 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut cx, bundle, module_index);
+        // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
+        // bodies as native emission. The web expression emitter only marshals
+        // the call at the `?` site; it does not recreate the conversion body.
+        for item in &module.items {
+            if let Item::ErrorConv(conversion) = item {
+                let tir = TIR::lower_error_conv(conversion, &cx);
+                TIR::emit_tir_func(&tir, &cx, &mut out);
+            }
+        }
         for item in &module.items {
             if let Item::Impl(implementation) = item {
                 if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
@@ -2459,6 +2471,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
 fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
+        Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Int | Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
@@ -2491,6 +2504,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
 fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
+        Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
@@ -3567,6 +3581,25 @@ fn wasm_emit_expr(
             "Err({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
+        // D-FAIL-CONV1: sema/TIR has already selected the one conversion rail.
+        // Web only marshals that fact through the same Result operation as the
+        // native emitter; conversion policy stays in the declared Prelude body.
+        TIR::TExprKind::Try { inner, convert, .. } => {
+            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            match convert {
+                TIR::TTryConvert::DefaultErr => {
+                    format!("({value}).map_err(jet_err_from_message)?")
+                }
+                TIR::TTryConvert::Typed(conv_fn) => {
+                    format!("({value}).map_err({conv_fn})?")
+                }
+                TIR::TTryConvert::WidenUnion { enum_name, tag } => format!(
+                    "({value}).map_err(|e| {}::{tag}(e))?",
+                    mangle_path(enum_name)
+                ),
+                TIR::TTryConvert::None => format!("({value})?"),
+            }
+        }
         TIR::TExprKind::DistinctConvert {
             name,
             arg,

@@ -3,8 +3,8 @@ Error [E2406]: can't declare `impl Int => String` — neither type is defined in
     |
   2 | impl Int => String {
     |      ^^^
- Why: error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined
- Fix: define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type
+ Why: typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source
+ Fix: define one of these types locally, or convert the foreign source into `Err`
 
 Error [E0119]: there's no type called `String`
   --> tests/ui/e2406_orphan_error_conv.jet:2:13

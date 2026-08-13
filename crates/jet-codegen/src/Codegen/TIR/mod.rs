@@ -3571,7 +3571,7 @@ pub enum TExprKind {
     Err(Box<TExpr>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
-    /// bare propagate, a `Fallible` calls `.to_error()`, a `Typed(fn)` calls the
+    /// bare propagate or a declared `Typed(fn)` conversion calls the
     /// declared conversion. The frame-trace location (`file`, `line`, `fn_name`) is
     /// resolved at lowering so the emitted `jet_trace_err(…)?` matches the AST path
     /// byte-for-byte (the emitter never reads `cx.current_fn`/`cx.src`).
@@ -4062,8 +4062,6 @@ pub enum TTryConvert {
     None,
     /// D-FAIL-ERROR1=A: construct the default `Err` value from a message.
     DefaultErr,
-    /// Source error implements `Fallible` — `.map_err(|e| e.to_error())` (D-ERR2).
-    Fallible,
     /// Declared `impl Source => Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
     /// holds the mangled Rust conversion-function name.
     Typed(String),

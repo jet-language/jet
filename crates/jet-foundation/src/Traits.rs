@@ -1368,7 +1368,7 @@ impl TraitRegistry {
 
     /// D-ERR-CONV: register a typed error conversion (Source → Target).
     /// Returns `Err(prev_span)` if a conversion for this pair already exists (E2405).
-    /// Checks the orphan rule: at least one of `from_ty`/`to_ty` must be local.
+    /// Checks the typed-target orphan rule; `Err` is the explicit foreign-source exception.
     pub fn register_error_conv(
         &mut self,
         from_ty: &str,
@@ -1379,20 +1379,19 @@ impl TraitRegistry {
         // Orphan rule (S28 analogue): at least one side must be defined in this program.
         let from_local = self.local_types.contains(from_ty);
         let to_local = self.local_types.contains(to_ty);
-        if !from_local && !to_local {
+        // D-FAIL-CONV1=A: the default error is the one explicit foreign-source
+        // exception. Typed targets keep the ordinary orphan rule.
+        if to_ty != crate::Syntax::TYPE_ERR && !from_local && !to_local {
             diags.push(Diagnostic::error(
                 "E2406",
                 format!(
                     "can't declare `impl {} => {}` — neither type is defined in this program",
                     from_ty, to_ty
                 ),
-                "error conversions obey the same orphan rule as trait impls (S28): \
-                 at least one of `Source` or `Target` must be a type you defined"
+                "typed-target error conversions obey the same orphan rule as trait impls (S28); \
+                 only the default `Err` target may name a foreign source"
                     .to_string(),
-                format!(
-                    "define one of these types locally, or use `{}` (D-ERR2) if you don't own either type",
-                    crate::Syntax::TRAIT_FALLIBLE
-                ),
+                "define one of these types locally, or convert the foreign source into `Err`".to_string(),
                 Some(span),
             ));
             return;

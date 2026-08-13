@@ -4920,6 +4920,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "errors/panic",
         "errors/rollback_trait",
         "errors/transact",
+        "errors/default_error_conversion",
         "errors/typed_error_families",
     ];
     let mut failures = Vec::new();

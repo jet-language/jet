@@ -116,7 +116,7 @@ not their items, so importing an item this way is **E1001** — keep qualified
 access through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
-Fallible core functions return `T ? E` and must be handled with `?`, `??`, or
+Failure-returning core functions return `T ? E` and must be handled with `?`, `??`, or
 a pattern test like any other Jet result. `core.files` has both whole-file
 helpers (`read`/`write`/…) and streaming handles (`open`/`create`); paths are
 plain `String`; binary APIs use `U8` and `[U8]`.
@@ -125,7 +125,7 @@ plain `String`; binary APIs use `U8` and `[U8]`.
 
 ## Errors and results
 
-Fallible Core functions return `T ? E`. Handle them like any other Jet
+Failure-returning Core functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet

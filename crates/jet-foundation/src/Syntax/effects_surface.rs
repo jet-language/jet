@@ -411,12 +411,6 @@ pub const MARKER_LIST_CLOSE: &str = "]";
 /// D-VERDICT-732-1: rejected old `@` applied-rule spelling (teaching error).
 pub const FOREIGN_AT_ATTR: &str = "@";
 
-/// S80 (ratified 2026-06-16): cross-type `?` conversion trait (D-ERR2).
-pub const TRAIT_FALLIBLE: &str = "Fallible";
-
-/// D-FAIL-ERROR1=A: `Fallible` method returning default `Err`.
-pub const FN_TO_ERROR: &str = "to_error";
-
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the
 // manifest reshape chunk (U1/U2): the manifest is now `PAYLOAD_FILE`
 // (`pkg.jet`, D-JPK-FILES — prior filename iterations retired) and

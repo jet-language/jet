@@ -1497,7 +1497,7 @@ fn lower_method_call_impl(
     // if the error actually propagates): wrap the message in a zero-arg closure
     // and let the Outcome Prelude's `jet_err_context` call it only on the
     // `Err` branch.
-    if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
+    if method == "context" && recv_type.as_deref() == Some("__ErrorContext__") {
         let recv = lower_expr(receiver, cx, env);
         let msg = lower_expr(&args[0].expr, cx, env);
         return TExpr {
