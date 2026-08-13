@@ -1,5 +1,5 @@
 use super::{
-    AccessConvention, BinMatchPart, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
+    AccessConvention, BinMatchPart, CallablePolicyChain, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
     Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
@@ -56,6 +56,10 @@ pub struct CallArgFlags {
     pub binder_refs: Vec<(String, usize, Type)>,
     /// Stable call-site identity used to name declaration-slot temporaries.
     pub binder_site: Option<u32>,
+    /// D-CALLPOLICY1=E: sema attaches the exact replacement chain to the
+    /// callable argument of `apply`; lowering unwraps the value through the
+    /// shared callable seam and never rebuilds its signature.
+    pub callable_policy: Option<CallablePolicyChain>,
 }
 
 #[derive(Debug, Clone)]

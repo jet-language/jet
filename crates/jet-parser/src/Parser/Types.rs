@@ -995,6 +995,7 @@ impl<'a> Parser<'a> {
                 .collect(),
             variadic: from_params.iter().map(|param| param.variadic).collect(),
             conventions: from_params.iter().map(|param| param.convention).collect(),
+            policies: crate::AST::CallablePolicyChain::default(),
         });
         Ok(Type::Fn {
             params,

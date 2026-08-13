@@ -181,6 +181,9 @@ pub struct FuncSig {
     /// D-MEMPROVENANCE3=A: parallel to `params` — optional `from` source names
     /// on each parameter (call-boundary requirement).
     pub param_view_from_names: Vec<Option<Vec<String>>>,
+    /// D-CALLPOLICY1=E: declaration default policy chain. `apply` replaces
+    /// this value exactly, including the empty bare-function chain.
+    pub callable_policies: crate::AST::CallablePolicyChain,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

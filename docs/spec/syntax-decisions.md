@@ -6795,3 +6795,15 @@ finite-source finding form above. This section records the other outcomes.
   named thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, parameter defaults, field defaults, and enum discriminants
   keep `=`.
+
+**2026-08-13 — D-CALLPOLICY1=E and D-CALLPOLICY2=C** *(card #1396)*.
+`#Policy(retry(3), trace("users.load"))` is the one typed callable-wrapper
+marker. Its chain is the declaration default. `apply(retry(3), fn)` replaces
+that default with exactly the named chain; `apply(fn)` selects the bare
+function.
+The replacement copies only policy metadata and preserves the complete
+checked `fn` contract: labels, defaults, access, zones, effects, errors,
+variadics, and returned-view provenance. The old scoped `PolicyKey` entries
+move to their ratified homes: memory keys are rights-tree denials, unsafe is
+an authority-manifest permission, and `explicit_units` is a typed fact-plane
+setting. They are not aliases or fallback spellings.

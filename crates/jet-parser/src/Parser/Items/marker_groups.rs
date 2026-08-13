@@ -255,6 +255,18 @@ impl<'a> Parser<'a> {
             if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
                 return Ok(());
             }
+            if marker.name == Syntax::MARKER_POLICY
+                && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+            {
+                if !parenthesized {
+                    return Err(crate::Policy::marker_argument_shape_error(
+                        &marker.name,
+                        marker.span,
+                    ));
+                }
+                self.callable_policy_chain_from_marker(marker).map(|_| ())?;
+                return Ok(());
+            }
             // D-MARK-FORM1=A, one placement law: the signature alone decides
             // whether parentheses may and must appear. There is no written-form
             // column and no per-marker grammar category.
@@ -282,6 +294,11 @@ impl<'a> Parser<'a> {
                 || marker.name == Syntax::KW_UNSAFE && marker.args.is_empty()
             {
                 return Ok(());
+            }
+            if marker.name == Syntax::MARKER_POLICY
+                && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+            {
+                return self.callable_policy_chain_from_marker(marker).map(|_| ());
             }
             if marker.name == Syntax::CTX_BLOCK {
                 if let Some((field_name, field_span)) =
@@ -742,7 +759,9 @@ impl<'a> Parser<'a> {
                         || name == Syntax::MARKER_TESTED
                         || name == Syntax::MARKER_HARDENED)
                 || matches!(self.marker_name_at(self.pos), Some(name)
-                    if name == Syntax::MARKER_POLICY && self.policy_is_file_decl())
+                    if name == Syntax::MARKER_POLICY
+                        && self.policy_is_file_decl()
+                        && !self.callable_policy_marker_shape())
             {
                 return false;
             }
@@ -901,6 +920,7 @@ impl<'a> Parser<'a> {
         ) -> Result<crate::AST::Func, Diagnostic> {
             let ordered_markers = markers.clone();
             let mut policy = Vec::new();
+            let mut callable_policy_seen = false;
             for marker in markers {
                 if crate::Policy::applied_rule(&marker.name).is_some()
                     && !crate::Policy::rule_allows_with_companions(
@@ -974,14 +994,43 @@ impl<'a> Parser<'a> {
                     self.apply_unsafe_function_marker(&mut function, &marker)?;
                     unreachable!("a missing Unsafe reason always returns E3112");
                 }
-                self.validate_registered_rule_arguments(&marker)?;
-                let arguments = self.bound_registered_rule_arguments(&marker)?;
+                let callable_policy = marker.name == Syntax::MARKER_POLICY
+                    && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok();
+                if !callable_policy {
+                    self.validate_registered_rule_arguments(&marker)?;
+                } else if callable_policy_seen {
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        "a function can have only one `#Policy` callable chain".to_string(),
+                        "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements"
+                            .to_string(),
+                        "merge the policies into one `#Policy(...)` marker".to_string(),
+                        Some(marker.span),
+                    ));
+                } else {
+                    callable_policy_seen = true;
+                }
+                let arguments = if callable_policy {
+                    BoundRuleArguments {
+                        marker: &marker,
+                        bindings: Vec::new(),
+                    }
+                } else {
+                    self.bound_registered_rule_arguments(&marker)?
+                };
                 match marker.name.as_str() {
                     Syntax::MARKER_POLICY => {
-                        policy.extend(self.policy_declarations_from_marker(
-                            marker.clone(),
-                            crate::Policy::PolicyScope::Function,
-                        )?);
+                        if callable_policy {
+                            // D-CALLPOLICY2=C: the new callable form has one
+                            // typed chain. The old scoped form remains until
+                            // the concurrent retirement lane migrates it.
+                            self.callable_policy_chain_from_marker(&marker)?;
+                        } else {
+                            policy.extend(self.policy_declarations_from_marker(
+                                marker.clone(),
+                                crate::Policy::PolicyScope::Function,
+                            )?);
+                        }
                     }
                     Syntax::MARKER_META => {
                         if function.meta.is_some() {

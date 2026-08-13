@@ -5,6 +5,32 @@ use super::TargetMarker;
 use super::helpers::format_version_segment;
 
 impl<'a> Parser<'a> {
+        /// D-CALLPOLICY1=E: the function-level `#Policy` marker is the typed
+        /// callable wrapper chain. The retired scoped-policy identifiers do
+        /// not enter this parser path.
+        pub(in crate::Parser) fn callable_policy_chain_from_marker(
+            &self,
+            marker: &crate::AST::Marker,
+        ) -> Result<crate::AST::CallablePolicyChain, Diagnostic> {
+            crate::AST::CallablePolicyChain::parse(&marker.args).map_err(|reason| {
+                Diagnostic::error(
+                    "E0355",
+                    format!("`#Policy` needs callable policy values: {reason}"),
+                    "callable policies are typed values and preserve the complete function signature"
+                        .to_string(),
+                    format!(
+                        "write `#Policy({})`",
+                        crate::AST::CallablePolicyChain::NAMES
+                            .iter()
+                            .map(|name| format!("{name}(…)"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    Some(marker.span),
+                )
+            })
+        }
+
         pub(in crate::Parser) fn policy_is_file_decl(&self) -> bool {
             let mut i = self.pos + 2;
             let mut depth = 0usize;
@@ -18,6 +44,24 @@ impl<'a> Parser<'a> {
             }
             true
         }
+
+        /// D-CALLPOLICY2=C: a callable policy starts with a policy call
+        /// expression (`retry(…)`, `trace(…)`, …). This shape check runs before
+        /// the old file-declaration lookahead so the two grammar positions do
+        /// not silently select the retired scoped-policy parser.
+        pub(in crate::Parser) fn callable_policy_marker_shape(&self) -> bool {
+            matches!(
+                (
+                    self.toks.get(self.pos + 3).and_then(|token| match &token.kind {
+                        TokKind::Ident(name) if crate::AST::CallablePolicyChain::NAMES.contains(&name.as_str()) => Some(&token.kind),
+                        _ => None,
+                    }),
+                    self.toks.get(self.pos + 4).map(|token| &token.kind),
+                ),
+                (Some(TokKind::Ident(_)), Some(TokKind::LParen))
+            )
+        }
+
         /// D-MARK-SCOPE1: parse one source `#Policy(...)` declaration list.
         pub(in crate::Parser) fn policy_decl(&mut self, scope: crate::Policy::PolicyScope) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
             let marker = self.parse_rule_marker()?;

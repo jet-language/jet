@@ -772,6 +772,7 @@ impl<'a> Checker<'a> {
                         .copied()
                         .chain(metadata.conventions.iter().copied())
                         .collect(),
+                    policies: metadata.policies.clone(),
                 }
             });
             let transform_return = match name {

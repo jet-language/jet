@@ -3760,6 +3760,14 @@ pub(crate) fn build_cx_items(
                                 .collect(),
                             variadic: f.params.iter().map(|p| p.variadic).collect(),
                             conventions: f.params.iter().map(|p| p.convention).collect(),
+                            policies: f
+                                .markers
+                                .iter()
+                                .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                                .and_then(|marker| {
+                                    crate::AST::CallablePolicyChain::parse(&marker.args).ok()
+                                })
+                                .unwrap_or_default(),
                         }),
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
@@ -3916,6 +3924,7 @@ pub(crate) fn build_cx_items(
                                 defaults: ef.params.iter().map(|_| None).collect(),
                                 variadic: ef.params.iter().map(|p| p.variadic).collect(),
                                 conventions: ef.params.iter().map(|p| p.convention).collect(),
+                                policies: crate::AST::CallablePolicyChain::default(),
                             }),
                         },
                     );
@@ -3966,6 +3975,7 @@ pub(crate) fn build_cx_items(
                                 defaults: ef.params.iter().map(|_| None).collect(),
                                 variadic: ef.params.iter().map(|p| p.variadic).collect(),
                                 conventions: ef.params.iter().map(|p| p.convention).collect(),
+                                policies: crate::AST::CallablePolicyChain::default(),
                             }),
                         },
                     );
@@ -4160,6 +4170,7 @@ pub(crate) fn build_cx_items(
                                             .collect(),
                                         variadic: f.params.iter().map(|p| p.variadic).collect(),
                                         conventions: f.params.iter().map(|p| p.convention).collect(),
+                                        policies: crate::AST::CallablePolicyChain::default(),
                                     }),
                                 },
                             );

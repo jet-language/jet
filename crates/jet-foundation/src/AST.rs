@@ -4,8 +4,8 @@
 #[path = "AST/types.rs"]
 mod types;
 pub use types::{
-    AccessConvention, CompositeTypePairError, Dimension, FunctionCallMetadata,
-    FunctionObligations, InternalTag,
+    AccessConvention, CallablePolicy, CallablePolicyChain, CompositeTypePairError, Dimension,
+    FunctionCallMetadata, FunctionObligations, InternalTag,
     KnowledgeEntry,
     KnowledgeFact, KnowledgeVector, Measure, TagMarker, Type, TypeIdentity, int_spelling,
     numeric_type_from_name, int_range, canonicalize_tuple_fields, canonicalize_union,
