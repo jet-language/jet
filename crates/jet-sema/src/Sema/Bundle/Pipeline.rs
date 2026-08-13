@@ -777,7 +777,11 @@ fn check_bundle_opts_for_output_inner(
         // D-MARK-VOCAB1 (card #518): a marker name outside the registered
         // `@`/`#` plane vocabulary is E0927, instead of silently doing
         // nothing (the parser accepts any PascalCase name structurally).
-        diags.extend(check_marker_vocabulary(&module.items, &marker_vocabulary));
+        diags.extend(check_marker_vocabulary(
+            &module.items,
+            &module.rule_facts,
+            &marker_vocabulary,
+        ));
         // D-CLIFLAG1: validate `#[CLI]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
         // `CLI` is visible on `s.derives`).

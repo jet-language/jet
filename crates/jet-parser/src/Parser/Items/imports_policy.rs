@@ -20,7 +20,14 @@ impl<'a> Parser<'a> {
         }
         /// D-MARK-SCOPE1: parse one source `#Policy(...)` declaration list.
         pub(in crate::Parser) fn policy_decl(&mut self, scope: crate::Policy::PolicyScope) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
+            let site = match scope {
+                crate::Policy::PolicyScope::Package => crate::Policy::RuleSite::Package,
+                crate::Policy::PolicyScope::Module => crate::Policy::RuleSite::Module,
+                crate::Policy::PolicyScope::Function => crate::Policy::RuleSite::Function,
+                crate::Policy::PolicyScope::Block => crate::Policy::RuleSite::Block,
+                crate::Policy::PolicyScope::Organization => crate::Policy::RuleSite::Package,
+            };
+            let marker = self.parse_registered_marker_at_site(site)?;
             self.policy_declarations_from_marker(marker, scope)
         }
 
@@ -633,13 +640,25 @@ impl<'a> Parser<'a> {
                                             }
                                         },
                                         _ => {
-                                            self.diags.push(Diagnostic::error(
-                                                "E0355",
-                                                format!("`#{}` cannot attach in this file marker list", marker.name),
-                                                "the compiler-owned registry gives each marker exact attachment sites".to_string(),
-                                                "remove it or move it to a registered site".to_string(),
-                                                Some(marker.span),
-                                            ));
+                                            let diagnostic = match crate::Policy::applied_rule(
+                                                &marker.name,
+                                            ) {
+                                                Some(row)
+                                                    if matches!(
+                                                        row.status,
+                                                        crate::Policy::RuleStatus::Active
+                                                    ) => crate::Policy::marker_wrong_site_error(
+                                                    &marker.name,
+                                                    crate::Policy::RuleSite::File,
+                                                    marker.span,
+                                                ),
+                                                _ => crate::Policy::marker_unknown_error(
+                                                    &marker.name,
+                                                    &crate::Policy::active_rule_names(),
+                                                    marker.name_span,
+                                                ),
+                                            };
+                                            self.diags.push(diagnostic);
                                             failed = true;
                                         }
                                     }
@@ -1124,22 +1143,12 @@ impl<'a> Parser<'a> {
                                 if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
                         ) =>
                     {
-                        let hash = self.bump().span;
-                        let name_tok = self.bump();
-                        let name = match &name_tok.kind {
-                            TokKind::Ident(n) => n.clone(),
-                            _ => String::new(),
-                        };
-                        self.diags.push(Diagnostic::error(
-                            "E0342",
-                            format!("`#{}` belongs before a statement", name),
-                            "statement switch attributes control code inside a function body, not top-level declarations".to_string(),
-                            format!(
-                                "move it inside a function, e.g. `#{} print(\"debug\")`, or remove it from the declaration",
-                                name
-                            ),
-                            Some(Span::new(hash.start, name_tok.span.end)),
-                        ));
+                        if let Err(diagnostic) = self.parse_registered_marker_at_site(
+                            crate::Policy::RuleSite::File,
+                        ) {
+                            self.diags.push(diagnostic);
+                            self.sync_top();
+                        }
                         continue;
                     }
                     // D-MARK-META1=B: maturity words are closed `#Meta` values,
@@ -1151,21 +1160,12 @@ impl<'a> Parser<'a> {
                                 || n == Syntax::MARKER_TESTED
                                 || n == Syntax::MARKER_HARDENED) =>
                     {
-                        let sigil = self.bump();
-                        let name_tok = self.bump(); // guard proves Ident
-                        let name = match &name_tok.kind {
-                            TokKind::Ident(name) => name.clone(),
-                            _ => unreachable!(),
-                        };
-                        let name_span = name_tok.span;
-                        self.diags.push(Diagnostic::error(
-                            "E0003",
-                            format!("`{}{}` isn't a known marker", if matches!(sigil.kind, TokKind::Hash) { "#" } else { "@" }, name),
-                            "maturity is tooling metadata, not a standalone marker".to_string(),
-                            "remove this marker".to_string(),
-                            Some(Span::new(sigil.span.start, name_span.end)),
-                        ));
-                        self.sync_top();
+                        if let Err(diagnostic) = self.parse_registered_marker_at_site(
+                            crate::Policy::RuleSite::File,
+                        ) {
+                            self.diags.push(diagnostic);
+                            self.sync_top();
+                        }
                         continue;
                     }
                     TokKind::KwConst => self.retired_const_def().map(Item::Const),
@@ -1202,16 +1202,12 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     TokKind::Hash => {
-                        let t = self.bump();
-                        self.diags.push(Diagnostic::error(
-                            "E0990",
-                            "unknown applied rule".to_string(),
-                            "`#` applies a registered typed rule; this name is not valid in this position"
-                                .to_string(),
-                            "check the rule spelling and its legal targets"
-                                .to_string(),
-                            Some(t.span),
-                        ));
+                        if let Err(diagnostic) = self.parse_registered_marker_at_site(
+                            crate::Policy::RuleSite::File,
+                        ) {
+                            self.diags.push(diagnostic);
+                            self.sync_top();
+                        }
                         self.sync_top();
                         continue;
                     }

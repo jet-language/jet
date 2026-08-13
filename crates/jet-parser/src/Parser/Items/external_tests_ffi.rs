@@ -49,12 +49,7 @@ impl<'a> Parser<'a> {
         /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
         /// `test` path enters via `test_def_after_kw` after emitting E0052.
         pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
-            self.bind_rule_fact(
-                marker.name_span,
-                None,
-                crate::Policy::RuleSite::Test,
-            );
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Test)?;
             if matches!(self.peek().kind, TokKind::KwFn) {
                 if !marker.args.is_empty() {
                     return Err(crate::Policy::marker_argument_shape_error(
@@ -62,7 +57,13 @@ impl<'a> Parser<'a> {
                         marker.span,
                     ));
                 }
-                return self.test_def_after_kw();
+                let test = self.test_def_after_kw()?;
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(test.span),
+                    crate::Policy::RuleSite::Test,
+                );
+                return Ok(test);
             }
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(name_argument) = arguments.parameter(0) else {
@@ -81,7 +82,7 @@ impl<'a> Parser<'a> {
             let item_start = marker.span.start;
             self.expect(TokKind::LBrace, "to open the test body")?;
             let body = self.block_stmts();
-            return Ok(crate::AST::TestDef {
+            let test = crate::AST::TestDef {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_expr: Some(name_argument.clone()),
@@ -90,7 +91,13 @@ impl<'a> Parser<'a> {
                 params: Vec::new(),
                 fn_keyword_span: None,
                 body,
-            });
+            };
+            self.bind_rule_fact(
+                marker.name_span,
+                Some(test.span),
+                crate::Policy::RuleSite::Test,
+            );
+            Ok(test)
         }
     
         pub(super) fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
@@ -144,12 +151,7 @@ impl<'a> Parser<'a> {
         /// `test_def`; there is no retired lowercase spelling for benches.
         pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
-            let marker = self.parse_rule_marker()?;
-            self.bind_rule_fact(
-                marker.name_span,
-                None,
-                crate::Policy::RuleSite::Bench,
-            );
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Bench)?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(name_argument) = arguments.parameter(0) else {
                 return Err(crate::Policy::marker_argument_shape_error(
@@ -166,14 +168,20 @@ impl<'a> Parser<'a> {
             };
             self.expect(TokKind::LBrace, "to open the benchmark body")?;
             let body = self.block_stmts();
-            Ok(crate::AST::BenchDef {
+            let bench = crate::AST::BenchDef {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_expr: name_argument.clone(),
                 name_prefix: None,
                 name_span,
                 body,
-            })
+            };
+            self.bind_rule_fact(
+                marker.name_span,
+                Some(bench.span),
+                crate::Policy::RuleSite::Bench,
+            );
+            Ok(bench)
         }
     
         /// S14: a bare lowercase `test` introduces a test block only when followed by

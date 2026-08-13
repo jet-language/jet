@@ -55,6 +55,34 @@ impl<'a> Parser<'a> {
                 {
                     let head = self.read_marker_head()?;
                     let start = head.span.start;
+                    if let Some(rule) = crate::Policy::applied_rule(&head.name) {
+                        if matches!(rule.status, crate::Policy::RuleStatus::Active)
+                            && !crate::Policy::rule_allows(
+                                &head.name,
+                                crate::Policy::RuleSite::Expression,
+                            )
+                        {
+                            return Err(crate::Policy::marker_wrong_site_error(
+                                &head.name,
+                                crate::Policy::RuleSite::Expression,
+                                head.span,
+                            ));
+                        }
+                    } else if matches!(
+                        self.peek().kind,
+                        TokKind::Semi
+                            | TokKind::RBrace
+                            | TokKind::RParen
+                            | TokKind::RBracket
+                            | TokKind::Comma
+                            | TokKind::Eof
+                    ) {
+                        return Err(crate::Policy::marker_unknown_error(
+                            &head.name,
+                            &crate::Policy::active_rule_names(),
+                            head.name_span,
+                        ));
+                    }
                     return match head.name.as_str() {
                         Syntax::MARKER_META => {
                             Err(self.meta_attr_wrong_place_diag(head.span, "binding or function"))

@@ -12,6 +12,7 @@ mod common;
 use jet_foundation::Policy::{
     self, AppliedRule, RuleArgType, RuleSite, RuleStatus,
 };
+use jet_foundation::Registry;
 
 /// Sites that describe a position with no source spelling of its own.
 /// `Package` is `package.jet` manifest scope, `Impl` and `Operation` are
@@ -83,7 +84,9 @@ fn program_at(marker: &str, site: RuleSite) -> Option<String> {
         }
         RuleSite::Block => format!("fn run() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n"),
         RuleSite::Statement => format!("fn run() {{\n    {marker} print(\"ok\")\n}}\n"),
-        RuleSite::Declaration => format!("{marker} value :: 1\n\nfn run() {{\n}}\n"),
+        RuleSite::Declaration => format!(
+            "fn run() {{\n    {marker} value :: 1\n}}\n"
+        ),
         RuleSite::Constant => format!("{marker} comptime value :: 1\n\nfn run() {{\n}}\n"),
         RuleSite::Parameter => {
             format!("fn helper({marker} a: Int) {{\n}}\n\nfn run() {{\n}}\n")
@@ -123,7 +126,8 @@ fn rejected_the_marker(source: &str) -> Vec<String> {
 #[test]
 fn every_active_row_is_reachable_at_a_declared_site() {
     let mut ghosts = Vec::new();
-    for row in Policy::APPLIED_RULES.iter() {
+    for registered in Registry::marker_rows() {
+        let row = registered.rule.expect("marker rows carry their applied rule");
         if !matches!(row.status, RuleStatus::Active) {
             continue;
         }
@@ -173,7 +177,8 @@ fn every_active_row_is_reachable_at_a_declared_site() {
 /// nothing, so every retired row must name a non-empty replacement.
 #[test]
 fn every_retired_row_teaches_a_replacement() {
-    for row in Policy::APPLIED_RULES.iter() {
+    for registered in Registry::marker_rows() {
+        let row = registered.rule.expect("marker rows carry their applied rule");
         if let RuleStatus::Retired { replacement } = row.status {
             assert!(
                 !replacement.trim().is_empty(),
@@ -188,8 +193,8 @@ fn every_retired_row_teaches_a_replacement() {
 /// decided, and it stays a deliberate minority.
 #[test]
 fn repeatable_rows_are_declared_not_assumed() {
-    let repeatable: Vec<&str> = Policy::APPLIED_RULES
-        .iter()
+    let repeatable: Vec<&str> = Registry::marker_rows()
+        .filter_map(|registered| registered.rule)
         .filter(|row| row.repeatable)
         .map(|row| row.name)
         .collect();
@@ -225,7 +230,8 @@ fn the_one_table_holds_every_kind() {
 
     // A marker row is exactly a row whose target is written code, and it is the
     // same row the marker registry holds.
-    for row in Policy::APPLIED_RULES.iter() {
+    for registered in Registry::marker_rows() {
+        let row = registered.rule.expect("marker rows carry their applied rule");
         let registered = Registry::row(row.name)
             .unwrap_or_else(|| panic!("`#{}` is not in the one table", row.name));
         assert_eq!(registered.target, RowTarget::Code(row.sites));

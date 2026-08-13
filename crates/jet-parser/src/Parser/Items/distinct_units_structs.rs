@@ -13,20 +13,6 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
         }
     
-        /// D-CAPBUNDLE1: is `name` one of the four capability-bundle marker names
-        /// (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`) that may
-        /// stack before a `distinct` type declaration?
-        fn is_capability_bundle_marker(name: &str) -> bool {
-            name == Syntax::MARKER_NUMERIC
-                || name == Syntax::MARKER_BUNDLE_COMPARABLE
-                || name == Syntax::MARKER_BUNDLE_PRINTABLE
-                || name == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE
-        }
-    
-        fn is_distinct_prefix_marker(name: &str) -> bool {
-            Self::is_capability_bundle_marker(name) || name == Syntax::MARKER_INVARIANT
-        }
-    
         /// D-DIST3 / D-CAPBUNDLE1 / D-VERDICT-732-1 (formerly D-MARKERMOVE1) (ratified 2026-06-20 /
         /// 2026-07-01): true when a stack of one or more capability-bundle
         /// markers (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`,
@@ -41,31 +27,13 @@ impl<'a> Parser<'a> {
                 match self.toks.get(i).map(|t| &t.kind) {
                     Some(TokKind::Hash) => {
                         match self.toks.get(i + 1).map(|t| &t.kind) {
-                            Some(TokKind::Ident(n)) if Self::is_distinct_prefix_marker(n) => {
+                            Some(TokKind::Ident(_)) => {
                                 saw_marker = true;
                                 i += 2;
-                                if matches!(
-                                    self.toks.get(i - 1).map(|t| &t.kind),
-                                    Some(TokKind::Ident(n)) if n == Syntax::MARKER_INVARIANT
-                                ) && matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen))
-                                {
-                                    let mut depth = 0i32;
-                                    while let Some(tok) = self.toks.get(i) {
-                                        match tok.kind {
-                                            TokKind::LParen => depth += 1,
-                                            TokKind::RParen => {
-                                                depth -= 1;
-                                                i += 1;
-                                                if depth == 0 {
-                                                    break;
-                                                }
-                                                continue;
-                                            }
-                                            _ => {}
-                                        }
-                                        i += 1;
-                                    }
-                                }
+                                i = match Self::skip_balanced_parens(&self.toks, i) {
+                                    Some(next) => next,
+                                    None => break,
+                                };
                                 while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
                                     i += 1;
                                 }
@@ -111,46 +79,29 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 if !(matches!(&self.peek().kind, TokKind::Hash)
-                    && matches!(&self.peek2().kind, TokKind::Ident(n) if Self::is_distinct_prefix_marker(n)))
+                    && matches!(&self.peek2().kind, TokKind::Ident(_)))
                 {
                     break;
                 }
-                let sigil_span = self.bump().span;
-                let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
                 marker_count += 1;
-                if attr == Syntax::MARKER_INVARIANT {
-                    let mut marker = self.finish_rule_marker(attr, attr_span)?;
-                    marker.span.start = sigil_span.start;
-                    self.bind_rule_fact(
-                        marker.name_span,
-                        None,
-                        crate::Policy::RuleSite::Type,
-                    );
+                let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Type)?;
+                if marker.name == Syntax::MARKER_INVARIANT {
                     let (bounds, span, text) = self.parse_invariant_range(marker.clone())?;
                     invariant_range = bounds.map(|(lo, hi)| (lo, hi, span));
                     invariant = text.map(|text| (text, span));
                     type_markers.push(marker);
                     continue;
                 }
-                type_markers.push(crate::AST::Marker {
-                    name: attr.clone(),
-                    negated: false,
-                    name_span: attr_span,
-                    args: Vec::new(),
-                    arg_labels: Vec::new(),
-                    span: Span::new(sigil_span.start, attr_span.end),
-                    ct: None,
-                });
-                if attr == Syntax::MARKER_NUMERIC {
-                    derives.push((attr.clone(), attr_span));
-                } else if attr == Syntax::MARKER_BUNDLE_COMPARABLE {
-                    derives.push((attr.clone(), attr_span));
-                } else if attr == Syntax::MARKER_BUNDLE_PRINTABLE {
-                    derives.push((attr.clone(), attr_span));
-                } else if attr == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE {
-                    derives.push((crate::Generics::ENCODE.to_string(), attr_span));
-                    derives.push((crate::Generics::DECODE.to_string(), attr_span));
+                if marker.name == Syntax::MARKER_NUMERIC
+                    || marker.name == Syntax::MARKER_BUNDLE_COMPARABLE
+                    || marker.name == Syntax::MARKER_BUNDLE_PRINTABLE
+                {
+                    derives.push((marker.name.clone(), marker.name_span));
+                } else if marker.name == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE {
+                    derives.push((crate::Generics::ENCODE.to_string(), marker.name_span));
+                    derives.push((crate::Generics::DECODE.to_string(), marker.name_span));
                 }
+                type_markers.push(marker);
             }
             if marker_count > 1 {
                 let span = Span::new(
@@ -292,6 +243,14 @@ impl<'a> Parser<'a> {
             };
             self.expect(TokKind::Semi, "after a distinct type declaration")?;
             let end = self.toks[self.pos - 1].span.end;
+            let span = Span::new(start.start, end);
+            for marker in &type_markers {
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(span),
+                    crate::Policy::RuleSite::Type,
+                );
+            }
             Ok(crate::AST::DistinctDef {
                 is_pub,
                 is_package_pub,
@@ -304,7 +263,7 @@ impl<'a> Parser<'a> {
                 base_span,
                 range,
                 invariant,
-                span: Span::new(start.start, end),
+                span,
             })
         }
     
@@ -415,7 +374,7 @@ impl<'a> Parser<'a> {
             is_pub: bool,
             is_package_pub: bool,
         ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Type)?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(crate::AST::Expr::Ident(family, family_span)) = arguments.parameter(0) else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_UNIT_FAMILY, marker.span));
@@ -577,6 +536,11 @@ impl<'a> Parser<'a> {
             }
             // The closing `}` ends the item; the lexer inserts a synthetic `;`.
             let end = self.toks[self.pos - 1].span.end;
+            self.bind_rule_fact(
+                marker.name_span,
+                Some(Span::new(marker.span.start, end)),
+                crate::Policy::RuleSite::Type,
+            );
             Ok(crate::AST::UnitFamilyDef {
                 is_pub,
                 is_package_pub,
@@ -781,7 +745,7 @@ impl<'a> Parser<'a> {
             &mut self,
             outer_is_pub: bool,
         ) -> Result<crate::AST::Item, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Type)?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(crate::AST::Expr::Ident(variant, variant_span)) = arguments.parameter(0) else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_LAYOUT, marker.span));
@@ -836,8 +800,19 @@ impl<'a> Parser<'a> {
                         "Use `#Layout(c)` on this enum.".to_string(), Some(variant_span)));
                 }
                 let mut def = self.enum_def_after_pub(is_pub, false)?;
+                let marker_name_span = marker.name_span;
                 def.type_markers.push(marker);
-                Ok(crate::AST::Item::Enum(def))
+                let item = crate::AST::Item::Enum(def);
+                let target = match &item {
+                    crate::AST::Item::Enum(def) => def.span,
+                    _ => unreachable!(),
+                };
+                self.bind_rule_fact(
+                    marker_name_span,
+                    Some(target),
+                    crate::Policy::RuleSite::Type,
+                );
+                Ok(item)
             } else {
                 if tag_width.is_some() {
                     return Err(Diagnostic::error("E1105", "A tag width applies only to enums.".to_string(),
@@ -847,8 +822,19 @@ impl<'a> Parser<'a> {
                 let mut def = self.struct_def_after_pub(is_pub)?;
                 def.layout = layout;
                 def.layout_span = Some(attr_span);
+                let marker_name_span = marker.name_span;
                 def.type_markers.push(marker);
-                Ok(crate::AST::Item::Struct(def))
+                let item = crate::AST::Item::Struct(def);
+                let target = match &item {
+                    crate::AST::Item::Struct(def) => def.span,
+                    _ => unreachable!(),
+                };
+                self.bind_rule_fact(
+                    marker_name_span,
+                    Some(target),
+                    crate::Policy::RuleSite::Type,
+                );
+                Ok(item)
             }
         }
     

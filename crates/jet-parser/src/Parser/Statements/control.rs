@@ -348,7 +348,7 @@ impl<'a> Parser<'a> {
         if !Syntax::is_stdlib_dsl_block_marker(name) {
             return false;
         }
-        matches!(self.peek3().kind, TokKind::LBrace)
+        self.marker_head_is_followed_by(TokKind::LBrace)
             || (name == Syntax::DSL_BLOCK_SQL
                 && matches!(self.peek3().kind, TokKind::Lt)
                 && matches!(self.peek4().kind, TokKind::Ident(_))
@@ -358,33 +358,42 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn at_stdlib_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        let head = self.read_marker_head()?;
-        let (name, name_span) = (head.name, head.name_span);
-        let mut args = Vec::new();
-        let mut args_span = None;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
+        let name = marker.name.clone();
+        let name_span = marker.name_span;
+        let mut args = marker.args.clone();
+        let args_span = (!args.is_empty()).then_some(marker.span);
         if matches!(self.peek().kind, TokKind::Lt) {
             let type_start = self.bump().span;
             let type_token = self.bump();
-            let (type_name, type_span) = match type_token.kind {
-                TokKind::Ident(name) => (name, type_token.span),
-                _ => {
-                    return Err(Diagnostic::error(
-                        "E0617",
-                        format!("`#{name}` needs one type name between `<` and `>`"),
-                        "the SQL DSL's optional row type is a single compile-time type name".to_string(),
-                        "write `#SQL<Row> { … }`".to_string(),
-                        Some(type_token.span),
-                    ))
-                }
+            let type_name = match type_token.kind {
+                TokKind::Ident(name) => name,
+                _ => String::new(),
             };
             let end = self.peek().span;
             self.expect(TokKind::Gt, "after the DSL type name")?;
-            args_span = Some(Span::new(type_start.start, end.end));
-            args.push(Expr::Ident(type_name, type_span));
+            let old_span = Span::new(type_start.start, end.end);
+            if !type_name.is_empty() {
+                args.push(Expr::Ident(type_name, type_token.span));
+            }
+            self.expect(TokKind::LBrace, "after a stdlib DSL marker")?;
+            let _ = self.block_stmts();
+            return Err(Diagnostic::error(
+                "E0927",
+                format!("`#{name}<…>` is retired"),
+                "marker arguments use the ordinary call form from the registry".to_string(),
+                format!("write `#{name}(Row) {{ … }}`"),
+                Some(Span::new(marker.span.start, old_span.end)),
+            ));
         }
         self.expect(TokKind::LBrace, "after a stdlib DSL marker")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(start.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::ScopeMember {
             name,
             name_span,
@@ -631,8 +640,11 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
-        let marker = self.parse_rule_marker()?;
+    pub(in super::super) fn parse_meta_attr_at_site(
+        &mut self,
+        site: crate::Policy::RuleSite,
+    ) -> Result<MetaAttr, Diagnostic> {
+        let marker = self.parse_registered_marker_at_site(site)?;
         self.meta_attr_from_marker(marker)
     }
 
@@ -738,7 +750,10 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn at_statement_switch_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let switch = self.parse_rule_marker()?;
+        // Both switch markers are legal on a block and on its first statement;
+        // parse through the registry's block row, then record the actual
+        // target site after the body shape is known.
+        let switch = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let attr_span = switch.span;
         let marker = switch.name.as_str();
 
@@ -770,7 +785,8 @@ impl<'a> Parser<'a> {
             ));
         }
 
-        let (body, end) = if matches!(self.peek().kind, TokKind::LBrace) {
+        let body_is_block = matches!(self.peek().kind, TokKind::LBrace);
+        let (body, end) = if body_is_block {
             self.bump();
             let body = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
@@ -781,6 +797,12 @@ impl<'a> Parser<'a> {
             (vec![stmt], end)
         };
         let span = Span::new(attr_span.start, end);
+        let site = if body_is_block {
+            crate::Policy::RuleSite::Block
+        } else {
+            crate::Policy::RuleSite::Statement
+        };
+        self.bind_rule_fact(switch.name_span, Some(span), site);
         Ok(Stmt::Switched {
             marker: switch,
             body,
@@ -847,7 +869,7 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         if marker.args.is_empty() {
             return Err(Diagnostic::error(
                 "E3112",
@@ -891,6 +913,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
+        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         if let Some(value) = obligation_mode {
             self.policy_declarations.push(crate::Policy::PolicyDeclaration {
                 key: crate::Policy::PolicyKey::Unsafe,
@@ -913,7 +936,7 @@ impl<'a> Parser<'a> {
     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let reason_expr = arguments.parameter(0).cloned();
         let reason = reason_expr.as_ref().and_then(|argument| match argument {
@@ -926,6 +949,11 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(marker.span.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::Impure {
             reason,
             reason_expr,
@@ -937,13 +965,15 @@ impl<'a> Parser<'a> {
     /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
     /// statement position. Lowers to a reactive effect scope at codegen.
     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.read_marker_head()?.span;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         self.expect(TokKind::LBrace, "after `#Reactive`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        let span = Span::new(marker.span.start, end);
+        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         Ok(Stmt::Reactive {
             body,
-            span: Span::new(start.start, end),
+            span,
         })
     }
 
@@ -951,9 +981,8 @@ impl<'a> Parser<'a> {
     /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let head = self.read_marker_head()?;
-        let start = head.span;
-        if matches!(self.peek().kind, TokKind::LParen) {
+        if matches!(self.peek3().kind, TokKind::LParen) {
+            let head = self.read_marker_head()?;
             let lparen = self.peek().span;
             return Err(Diagnostic::error(
                 "E0430",
@@ -964,18 +993,21 @@ impl<'a> Parser<'a> {
                 Some(Span::new(head.name_span.start, lparen.end)),
             ));
         }
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         self.expect(TokKind::LBrace, "after `#Shield`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        let span = Span::new(marker.span.start, end);
+        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         Ok(Stmt::Shield {
             body,
-            span: Span::new(start.start, end),
+            span,
         })
     }
 
     /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let Some(Expr::Ident(name, name_span)) = arguments.parameter(0) else {
             return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_REGION, marker.span));
@@ -983,22 +1015,28 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(marker.span.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::Region { name: name.clone(), name_span: *name_span, body, span: Span::new(marker.span.start, end) })
     }
 
     /// D-BLOCKPLANE1=A: `#Live { … }`.
     pub(super) fn at_live_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span; // `#`
-        self.bump(); // `Live`
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         self.expect(TokKind::LBrace, "after `#Live`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
-        Ok(Stmt::Live { body, span: Span::new(start.start, end) })
+        let span = Span::new(marker.span.start, end);
+        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+        Ok(Stmt::Live { body, span })
     }
 
     /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let reason_expr = arguments.parameter(0).cloned().expect("bound reason argument");
         let reason = match &reason_expr {
@@ -1013,6 +1051,11 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(marker.span.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::AssumeDet {
             reason,
             reason_expr,
@@ -1035,7 +1078,7 @@ impl<'a> Parser<'a> {
                 Some(self.peek5().span),
             ));
         }
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let marker_span = marker.span;
         if let Some((field_name, field_name_span)) = marker
             .arg_labels
@@ -1108,6 +1151,11 @@ impl<'a> Parser<'a> {
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(marker.span.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::ContextBlock {
             fields,
             body,
@@ -1119,7 +1167,7 @@ impl<'a> Parser<'a> {
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
@@ -1131,6 +1179,11 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        self.bind_rule_fact(
+            marker.name_span,
+            Some(Span::new(marker.span.start, end)),
+            crate::Policy::RuleSite::Block,
+        );
         Ok(Stmt::Caps {
             caps,
             caps_span: Span::new(marker.name_span.end, marker.span.end),
@@ -1151,15 +1204,19 @@ impl<'a> Parser<'a> {
             && matches!(self.peek5().kind, TokKind::Colon)
         {
             let start = self.bump().span; // `#`
+            let marker_name_span = self.peek().span;
             self.expect_ident(&format!("`#{}`", Syntax::KW_GRANT))?;
             self.expect(TokKind::LParen, "after `#Grant`")?;
             let (binding, binding_span) =
                 self.expect_ident("as the scoped capability handle")?;
             self.expect(TokKind::Colon, "after the scoped capability handle")?;
             let mut caps = Vec::new();
+            let mut marker_args = Vec::new();
             loop {
                 let (name, span) = self.expect_effect_path_name("as a granted effect")?;
-                caps.push((Self::strip_marker_enum_prefix(name, "Capability"), span));
+                let name = Self::strip_marker_enum_prefix(name, "Capability");
+                marker_args.push(crate::AST::Expr::Ident(name.clone(), span));
+                caps.push((name, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -1168,9 +1225,27 @@ impl<'a> Parser<'a> {
             let caps_start = caps.first().map_or(binding_span.end, |(_, span)| span.start);
             self.expect(TokKind::RParen, "to close `#Grant`")?;
             let caps_end = self.toks[self.pos - 1].span.end;
+            self.record_rule_fact(
+                crate::AST::Marker {
+                    name: Syntax::KW_GRANT.to_string(),
+                    negated: false,
+                    name_span: marker_name_span,
+                    args: marker_args,
+                    arg_labels: vec![None; caps.len()],
+                    span: Span::new(start.start, caps_end),
+                    ct: None,
+                },
+                None,
+                crate::Policy::RuleSite::Block,
+            );
             self.expect(TokKind::LBrace, "after `#Grant(caps: Effects)`")?;
             let body = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
+            self.bind_rule_fact(
+                marker_name_span,
+                Some(Span::new(start.start, end)),
+                crate::Policy::RuleSite::Block,
+            );
             return Ok(Stmt::Grant {
                 caps,
                 caps_span: Span::new(caps_start, caps_end),
@@ -1229,6 +1304,7 @@ impl<'a> Parser<'a> {
     /// transaction handle (any ident, mirroring `region r { … }`).
     pub(super) fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
+        let marker_name_span = self.peek2().span;
         self.bump(); // `#`
         self.bump(); // `Transact`
                      // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
@@ -1244,12 +1320,34 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
+        if let (Some(name), Some(name_span)) = (&name, name_span) {
+            self.record_rule_fact(
+                crate::AST::Marker {
+                    name: Syntax::KW_TRANSACT.to_string(),
+                    negated: false,
+                    name_span: marker_name_span,
+                    args: vec![crate::AST::Expr::Ident(name.clone(), name_span)],
+                    arg_labels: vec![None],
+                    span: Span::new(start.start, self.toks[self.pos - 1].span.end),
+                    ct: None,
+                },
+                None,
+                crate::Policy::RuleSite::Block,
+            );
+        }
         self.expect(
             TokKind::LBrace,
             &format!("after `#{}`", Syntax::KW_TRANSACT),
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
+        if name.is_some() {
+            self.bind_rule_fact(
+                marker_name_span,
+                Some(Span::new(start.start, end)),
+                crate::Policy::RuleSite::Block,
+            );
+        }
         Ok(Stmt::Transact {
             name,
             name_span,
@@ -1955,7 +2053,7 @@ impl<'a> Parser<'a> {
                 self.loop_stmt(Some((label, lspan)))
             }
             TokKind::Hash if self.at_meta_attr() => {
-                let meta = self.parse_meta_attr()?;
+                let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Declaration)?;
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
@@ -1973,8 +2071,15 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
                     Syntax::MARKER_TRACK | Syntax::MARKER_LOCAL | Syntax::MARKER_SHARED)) =>
             {
-                let marker = self.parse_rule_marker()?;
+                let marker = self.parse_registered_marker_at_site(
+                    crate::Policy::RuleSite::Declaration,
+                )?;
                 let mut binding = self.sigil_binding()?;
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(binding.name_span),
+                    crate::Policy::RuleSite::Declaration,
+                );
                 binding.markers.push(marker);
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
@@ -2050,8 +2155,15 @@ impl<'a> Parser<'a> {
                     || matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE) =>
             {
                 if let TokKind::Ident(name) = &self.peek2().kind {
-                    if crate::Policy::applied_rule(name).is_some() && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {
-                        return Err(Diagnostic::error("E0355", format!("`#{name}` cannot attach to a block"), "the compiler-owned rule registry gives every applied rule exact attachment sites".to_string(), "move the rule to one of its registered sites".to_string(), Some(self.peek2().span)));
+                    if crate::Policy::applied_rule(name).is_some_and(|rule| {
+                        matches!(rule.status, crate::Policy::RuleStatus::Active)
+                    }) && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block)
+                    {
+                        return Err(crate::Policy::marker_wrong_site_error(
+                            name,
+                            crate::Policy::RuleSite::Block,
+                            self.peek2().span,
+                        ));
                     }
                 }
                 // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
@@ -2107,6 +2219,33 @@ impl<'a> Parser<'a> {
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
             }
+            // Unknown and wrong-site marker-shaped blocks still enter the
+            // shared registry gate. The dedicated block projections above own
+            // the active block rows; this arm exists only for the remaining
+            // vocabulary/site cases so they cannot fall into E0003 recovery.
+            TokKind::Hash
+                if self.at_marker_head() && self.marker_head_is_followed_by(TokKind::LBrace) =>
+            {
+                let marker = self.parse_registered_marker_at_site(
+                    crate::Policy::RuleSite::Block,
+                )?;
+                self.expect(TokKind::LBrace, "after a marker block")?;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos.saturating_sub(1)].span.end;
+                let span = Span::new(marker.span.start, end);
+                self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+                let args = marker.args;
+                let args_span = (!args.is_empty()).then_some(marker.span);
+                Ok(Stmt::ScopeMember {
+                    name: marker.name,
+                    name_span: marker.name_span,
+                    args,
+                    args_span,
+                    body,
+                    dot_span: marker.span,
+                    span,
+                })
+            }
             // D-PERSIST1 (E0145): `#Persist` on a local binding — persistence
             // is keyed by module + name, and a local has no stable identity
             // across a reload. Takes priority over the loop-label-typo arm
@@ -2121,6 +2260,21 @@ impl<'a> Parser<'a> {
                     "move it to module level, or drop `#Persist`".to_string(),
                     Some(head.span),
                 ))
+            }
+            // D-VERDICT-1455-1: every remaining marker-shaped statement goes
+            // through the registry before it can become an ordinary
+            // expression statement. This covers unknown markers and active
+            // rows whose site is not Statement with the shared E0927/E0355
+            // families; `#allow` is the current generic statement marker.
+            TokKind::Hash if self.at_marker_head() => {
+                let marker = self.parse_registered_marker_at_site(
+                    crate::Policy::RuleSite::Statement,
+                )?;
+                let expression = self.expr()?;
+                let target = expression.span();
+                self.bind_rule_fact(marker.name_span, Some(target), crate::Policy::RuleSite::Statement);
+                self.finish_stmt()?;
+                Ok(Stmt::Expr(expression))
             }
             TokKind::At => {
                 // D-LOOPLABEL3: recover retired `@name loop`.

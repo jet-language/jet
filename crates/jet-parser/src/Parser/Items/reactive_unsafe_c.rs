@@ -226,6 +226,25 @@ impl<'a> Parser<'a> {
         /// declarations share the `extern_fn` shape (`fn name(args) => T = "Sym";`).
         pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
+            if matches!(
+                &self.peek2().kind,
+                TokKind::Ident(name)
+                    if name == Syntax::MARKER_EXTERN_MODULE || name == Syntax::MARKER_BINDGEN
+            ) {
+                let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Module)?;
+                let kind = if marker.name == Syntax::MARKER_EXTERN_MODULE {
+                    CModuleKind::Extern
+                } else {
+                    CModuleKind::Bindgen
+                };
+                let module = self.c_module_after_kind(marker.span, kind)?;
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(module.span),
+                    crate::Policy::RuleSite::Module,
+                );
+                return Ok(module);
+            }
             let start = self.bump().span; // `#`
             let kind = match &self.peek().kind {
                 TokKind::KwExtern => {

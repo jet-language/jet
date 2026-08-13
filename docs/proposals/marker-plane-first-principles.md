@@ -1,8 +1,9 @@
 # Marker plane — first-principles rebuild
 
 2026-08-05. Full audit of marker shape, syntax, and implementation, rebuilt from
-the ground up. Status: awaiting owner review. Ballot rows at the end; nothing
-here is implemented yet.
+the ground up. This file is the historical ballot record. The outcomes for
+cards #1457 and #1461 are ratified in `docs/spec/syntax-decisions.md` and
+override the alternatives below.
 
 ## Executive summary
 
@@ -14,7 +15,7 @@ hand-parsed tokens with zero validation; a typo'd marker gets five different
 errors depending on position; the formatter rebuilds markers from 16 booleans;
 two retired markers still apply their effects; `#Authority` is registered but
 unparseable; tree-sitter still uses the retired `@` sigil. Two spellings are
-typeable but unratified: `#SQL<Row>` and the double-duty `#HTML`.
+typeable but unratified: the generic-angle SQL form and the double-duty `#HTML`.
 
 **Owner law (2026-08-05).** Every marker MUST be a registry row. No marker may
 be parsed, checked, formatted, highlighted, or reflected outside the registry.
@@ -30,11 +31,11 @@ implementation.
    written. Zero spelling changes. (Ballot 1)
 2. **Duplicate markers become an error**; rows that legitimately repeat
    (`#Pre`, `#Post`) are marked repeatable. (Ballot 2)
-3. **`#Impure` requires a reason**, same as `#Unsafe`/`#Nondeterministic`.
-   (Ballot 3)
+3. **`#Impure` keeps an optional reason**, with `reason: String = none` in the
+   registry (D-IMPURE-REASON1=B).
 4. **The two stray DSL spellings get registered**: `#SQL(Row)` through the
-   normal call grammar, and the `#HTML` file-pairing form takes its own name.
-   (Ballot 4 — the only user-visible rename in this proposal)
+   normal call grammar, and `#HTML` keeps a site-dependent signature.
+   (D-SQL-ARG1=B, D-HTML-NAME1=B)
 5. **A 6-card migration** moves the compiler onto the registry for real: blind
    parse keeping marker nodes, one validation pipeline at every site, consumers
    read markers not flags, dead rows resolved, drift guards lock it down.
@@ -119,8 +120,8 @@ One law covers all five. That is Ballot 1.
 
 Two unratified spellings are typeable today (I7 violations):
 
-- `#SQL<Row> { … }` — the only marker in the language with a generic type
-  argument; the registry row declares zero parameters.
+- The generic-angle SQL form — the only marker in the language with a generic
+  type argument; the registry row declares zero parameters.
 - `#HTML` names two unrelated mechanisms: a File-site pairing marker
   `#HTML("path")` and an inline DSL block `#HTML { … }`.
 
@@ -332,9 +333,9 @@ D-BLOCKPLANE1); scope members as the only scope vocabulary (D-DOTSCOPE1); the
 (D-ACRO-CASE1/LEX1); prelude enums for argument menus (D-RULEARG-TYPES1=A);
 name-collision law (D-MARKER-NAME-HYGIENE1=A).
 
-**Changed (needs a ballot):** the five-form split (Ballot 1), the duplicate
-law (Ballot 2), `#Impure`'s optional reason (Ballot 3), the two unratified DSL
-spellings (Ballot 4).
+**Historical ballot subjects:** the five-form split (Ballot 1), the duplicate
+law (Ballot 2), `#Impure`'s reason (Ballot 3), and the two DSL spellings
+(Ballot 4). Their ratified outcomes are now the current law.
 
 **Ruled by the owner in chat (2026-08-05, to be recorded as a verdict when the
 slate is minted):** mandatory registration — every marker is a registry row,
@@ -410,7 +411,7 @@ for authority is easier to teach and audit.
 
 ### Ballot 4 — Register the two stray DSL spellings
 
-Today `#SQL<Row> { … }` parses with a generic argument no registry row
+Today the generic-angle SQL form parses with an argument no registry row
 declares, and `#HTML` names both a File pairing marker and an inline DSL
 block. Both are typeable but unratified (I7).
 

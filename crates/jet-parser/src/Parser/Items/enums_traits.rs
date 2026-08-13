@@ -545,7 +545,6 @@ impl<'a> Parser<'a> {
                     | Syntax::KW_TRANSITION
                     | Syntax::MARKER_PUB_FILE
                     | Syntax::MARKER_UNIT_FAMILY
-                    | Syntax::MARKER_NUMERIC
                     | Syntax::MARKER_LAYOUT
                     | Syntax::MARKER_PUBLISHED_SCHEMA
                     | Syntax::MARKER_SINGLE_USE
@@ -609,7 +608,7 @@ impl<'a> Parser<'a> {
         /// If `toks[i]` is `(`, returns the index just past its matching `)`;
         /// otherwise returns `i` unchanged. `None` on an unbalanced/unterminated
         /// paren group.
-        fn skip_balanced_parens(toks: &[Token], mut i: usize) -> Option<usize> {
+        pub(in crate::Parser) fn skip_balanced_parens(toks: &[Token], mut i: usize) -> Option<usize> {
             if i >= toks.len() || !matches!(toks[i].kind, TokKind::LParen) {
                 return Some(i);
             }

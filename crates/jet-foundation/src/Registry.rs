@@ -1155,6 +1155,12 @@ pub fn rows() -> &'static [RegistryRow] {
     &REGISTRY
 }
 
+/// Marker rows from the one registration table. Consumers that need marker
+/// vocabulary or reachability must read this projection, not a second list.
+pub fn marker_rows() -> impl Iterator<Item = &'static RegistryRow> {
+    rows().iter().filter(|row| row.kind() == RowKind::Marker)
+}
+
 /// One lookup for every kind. Row names are unique across the table
 /// (`law_violations` proves it), so a name is enough.
 pub fn row(name: &str) -> Option<&'static RegistryRow> {

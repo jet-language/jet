@@ -40,7 +40,9 @@ fn marker_declarations() -> Vec<MarkerDecl> {
 #[test]
 fn every_registry_row_is_one_written_declaration() {
     let written = marker_declarations();
-    let registry = Policy::applied_rule_registry();
+    let registry: Vec<_> = Registry::marker_rows()
+        .map(|row| row.rule.expect("marker rows carry their applied rule"))
+        .collect();
     assert_eq!(
         written.len(),
         registry.len(),
@@ -55,7 +57,9 @@ fn every_registry_row_is_one_written_declaration() {
 #[test]
 fn the_parser_and_the_registry_read_the_same_rows() {
     for declaration in marker_declarations() {
-        let row = Policy::applied_rule(&declaration.name)
+        let row = Registry::marker_rows()
+            .find(|registered| registered.name == declaration.name)
+            .and_then(|registered| registered.rule)
             .unwrap_or_else(|| panic!("`{}` is written but not registered", declaration.name));
 
         let facts: Vec<&str> = declaration
