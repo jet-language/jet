@@ -755,6 +755,45 @@ impl PackageFacts {
         Ok(None)
     }
 
+    /// Resolve the package's optional `fn build` from the same checked source
+    /// tree used by Output entry discovery. The package has one build
+    /// authority: an unimported source file or the manifest, never an
+    /// imported module's hidden hook.
+    pub fn resolve_build_entry(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        let resolver = AuthorityResolver::open(root)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        self.resolve_build_entry_checked(&resolver)
+            .map(|file| file.map(|file| file.path))
+    }
+
+    /// Resolve the package build entry from one authority snapshot. This is
+    /// deliberately the only package-wide build selection seam; the Driver
+    /// receives the checked winner and does not scan the directory again.
+    pub fn resolve_build_entry_checked(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<Option<CheckedFile>, String> {
+        self.validate_defaults()
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let entries = self
+            .discover_function_entries_checked(resolver, "build", true, true)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        if entries.len() > 1 {
+            let locations = entries
+                .iter()
+                .map(|(file, line)| format!("{}:{line}", file.path.display()))
+                .collect::<Vec<_>>()
+                .join(" and ");
+            return Err(format!(
+                "two build entries for the package: {locations}"
+            ));
+        }
+        Ok(entries.into_iter().next().map(|(file, _)| file))
+    }
+
     /// Resolve a runnable Output's checked-reference spelling to a source
     /// file for legacy command entry points. The compiler still performs the
     /// callable/type check when it loads that file; this helper only chooses a
@@ -812,10 +851,17 @@ impl PackageFacts {
         }
         let files = self.source_files_checked(resolver)?;
         let result = if parts.len() == 1 {
-            let matches = files
-                .iter()
+            let matches = self
+                .discover_function_entries_from_files(
+                    resolver,
+                    &files,
+                    parts[0],
+                    false,
+                    false,
+                )?
+                .into_iter()
+                .map(|(file, _)| file)
                 .filter(|file| file.relative.components().count() == 1)
-                .filter(|file| file_has_top_level_function(file, parts[0]))
                 .map(|file| file.path.clone())
                 .collect::<Vec<_>>();
             (matches.len() == 1)
@@ -867,12 +913,116 @@ impl PackageFacts {
             .map_err(|error| format!("{}: {error}", self.origin))
     }
 
+    fn discover_function_entries_checked(
+        &self,
+        resolver: &AuthorityResolver,
+        wanted: &str,
+        exclude_imported: bool,
+        include_manifest: bool,
+    ) -> Result<Vec<(CheckedFile, usize)>, AuthorityError> {
+        let files = self.source_files_checked(resolver)?;
+        self.discover_function_entries_from_files(
+            resolver,
+            &files,
+            wanted,
+            exclude_imported,
+            include_manifest,
+        )
+    }
+
+    /// Discover top-level functions from one already checked source listing.
+    /// Output references and `fn build` therefore share the same file set,
+    /// scanner, and revalidation boundary.
+    fn discover_function_entries_from_files(
+        &self,
+        resolver: &AuthorityResolver,
+        source_files: &[CheckedFile],
+        wanted: &str,
+        exclude_imported: bool,
+        include_manifest: bool,
+    ) -> Result<Vec<(CheckedFile, usize)>, AuthorityError> {
+        let mut files = source_files.to_vec();
+        if include_manifest {
+            match resolver.checked_manifest(Path::new(".")) {
+                Ok(manifest) => files.push(manifest.file),
+                Err(error) if error.is_missing() => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let imported = if exclude_imported {
+            let source_files = files
+                .iter()
+                .filter(|file| {
+                    file.relative.file_name().and_then(|name| name.to_str())
+                        != Some(crate::Syntax::PACKAGE_FILE)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            parse_sources(&source_files)
+                .map(|sources| {
+                    sources
+                        .iter()
+                        .flat_map(|source| {
+                            imported_source_paths(resolver.root(), source, &sources)
+                        })
+                        .map(|path| normalize_discovery_path(&path))
+                        .collect::<std::collections::BTreeSet<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        let mut entries = Vec::new();
+        for file in &files {
+            let is_manifest = file.relative.file_name().and_then(|name| name.to_str())
+                == Some(crate::Syntax::PACKAGE_FILE);
+            if exclude_imported
+                && !is_manifest
+                && imported.contains(&normalize_discovery_path(&file.path))
+            {
+                continue;
+            }
+            let source = file.text()?;
+            let source = if is_manifest {
+                crate::Package::build_entry_source(&source).unwrap_or_default()
+            } else {
+                source
+            };
+            entries.extend(
+                top_level_function_lines(&source, wanted)
+                    .into_iter()
+                    .map(|line| (file.clone(), line)),
+            );
+        }
+        for file in &files {
+            resolver.revalidate_file(file)?;
+        }
+        resolver.revalidate_root()?;
+        Ok(entries)
+    }
+
     fn source_files_checked(
         &self,
         resolver: &AuthorityResolver,
     ) -> Result<Vec<CheckedFile>, AuthorityError> {
         let mut files = resolver.discover_source_files()?;
+        let nested_packages = files
+            .iter()
+            .filter(|file| {
+                file.relative.file_name().and_then(|name| name.to_str())
+                    == Some(crate::Syntax::PACKAGE_FILE)
+            })
+            .filter_map(|file| file.relative.parent())
+            .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("."))
+            .cloned()
+            .collect::<Vec<_>>();
         files.retain(|file| {
+            if nested_packages
+                .iter()
+                .any(|package| file.relative.starts_with(package))
+            {
+                return false;
+            }
             let reserved = file
                 .relative
                 .file_name()
@@ -2825,6 +2975,41 @@ fn imported_module_targets(
     targets
 }
 
+fn imported_source_paths(
+    root: &std::path::Path,
+    source: &ParsedSource,
+    sources: &[ParsedSource],
+) -> Vec<std::path::PathBuf> {
+    source
+        .program
+        .imports
+        .iter()
+        .flat_map(|import| import_target_paths(root, &source.path, &import.kind))
+        .map(|path| normalize_discovery_path(&path))
+        .filter(|path| {
+            sources
+                .iter()
+                .any(|source| normalize_discovery_path(&source.path) == *path)
+        })
+        .collect()
+}
+
+fn normalize_discovery_path(path: &std::path::Path) -> std::path::PathBuf {
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
 fn import_target_paths(
     root: &std::path::Path,
     importer: &std::path::Path,
@@ -2854,20 +3039,23 @@ fn import_target_paths(
     paths
 }
 
-fn file_has_top_level_function(file: &CheckedFile, wanted: &str) -> bool {
-    let Ok(source) = file.text() else { return false };
+fn top_level_function_lines(source: &str, wanted: &str) -> Vec<usize> {
     let mut depth = 0i32;
     let mut token = String::new();
+    let mut token_line = 1usize;
     let mut saw_fn = false;
     let mut in_string = false;
     let mut escaped = false;
     let mut line_comment = false;
     let mut block_comment = false;
     let mut previous = String::new();
+    let mut line = 1usize;
+    let mut matches = Vec::new();
     for ch in source.chars().chain(std::iter::once(' ')) {
         if line_comment {
             if ch == '\n' {
                 line_comment = false;
+                line += 1;
             }
             continue;
         }
@@ -2880,6 +3068,9 @@ fn file_has_top_level_function(file: &CheckedFile, wanted: &str) -> bool {
             } else {
                 previous = ch.to_string();
             }
+            if ch == '\n' {
+                line += 1;
+            }
             continue;
         }
         if in_string {
@@ -2889,6 +3080,9 @@ fn file_has_top_level_function(file: &CheckedFile, wanted: &str) -> bool {
                 escaped = true;
             } else if ch == '"' {
                 in_string = false;
+            }
+            if ch == '\n' {
+                line += 1;
             }
             continue;
         }
@@ -2914,19 +3108,25 @@ fn file_has_top_level_function(file: &CheckedFile, wanted: &str) -> bool {
             depth -= 1;
         }
         if ch.is_ascii_alphanumeric() || ch == '_' {
+            if token.is_empty() {
+                token_line = line;
+            }
             token.push(ch);
             continue;
         }
         if !token.is_empty() {
             if depth == 0 && saw_fn && token == wanted {
-                return true;
+                matches.push(token_line);
             }
             saw_fn = depth == 0 && token == "fn";
             token.clear();
         }
         previous = ch.to_string();
+        if ch == '\n' {
+            line += 1;
+        }
     }
-    false
+    matches
 }
 
 /// Whether a top-level manifest entry is the package's `fn build` decl

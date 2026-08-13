@@ -3901,14 +3901,16 @@ shape) — see docs/spec/diagnostics.md.
 
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
-`jet build` checks the root program, then runs one optional unit-local
+`jet build` checks the root program, then runs one optional package-local
 `fn build(b: BuildContext) => BuildPlan ?` through the same interpreter used by
-comptime. The entry may live in the source file, in a managed package's
-`package.jet`, or in `workspace.jet`. For a workspace entry, member entries run in
-deterministic dependency order with separate read-only plans; the workspace
-entry runs last with a fresh `BuildContext` and can add only workspace-owned
-targets. Imported dependency entries are checked but never run. With no
-unit-local entry, the existing zero-configuration pipeline is unchanged.
+comptime. The compiler discovers it in any source file in the package, or in
+the package's `package.jet`; two candidates name both sites and fail. An
+Output-level `entry:` remains an explicit override for rare layouts. For a
+workspace entry, member entries run in deterministic dependency order with
+separate read-only plans; the workspace entry runs last with a fresh
+`BuildContext` and can add only workspace-owned targets. Imported dependency
+entries are checked but never run. With no package-local entry, the existing
+zero-configuration batteries pipeline is unchanged.
 
 Build code registers ordinary typed values. Targets are declared once with
 `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,

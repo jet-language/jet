@@ -560,7 +560,7 @@ renumbered, and no new `W` code may be allocated.
 | E3503 | build | root build authority is undeclared, ungated, or denied by effective policy (D-BUILDPOLICY1) |
 | E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
 | E3505 | build | typed probe or sandboxed action execution failed (D-BUILDACTION1/D-BUILDPROBE1) |
-| E3520 | build | one unit declares both a file-local and package/workspace `fn build` (D-BUILDSCOPE1) |
+| E3520 | build | one package declares multiple `fn build` entries (D-CONF-ENTRY1) |
 | E3510 | build | generated module would shadow a hand-written module (D-BUILDGEN1) |
 | E3511 | build | generated source rounds form a cycle or claim one path twice (D-BUILDGEN1) |
 | E3512 | build | `--locked` generated input or output hash drifted (D-BUILDGEN1) |
@@ -1902,7 +1902,7 @@ front-end `.jet` diagnostics).
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
 | E3504 | Build action `{action}` asks for ungranted `{capability}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
 | E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, capabilities, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |
-| E3520 | Two build entries for one unit: a file-local entry and a package/workspace entry. | One unit has one build authority, so policy and provenance have one auditable home. | Keep the `fn build` in the chosen unit file and remove the other entry. |
+| E3520 | Two build entries for one package: both source sites are shown. | One package has one build authority, so policy and provenance have one auditable home. | Keep one `fn build` and remove every other entry. |
 | E3510 | `b.generate("{name}")` would shadow the module at `{path}`. | Generation is additive: what you wrote is always what compiles. | Rename the generated module, or delete the hand-written one. |
 | E3511 | Generation rounds form a cycle: `{chain}`. | Generated source must reach a bounded deterministic order, not loop until quiescent. | Break the dependency between the named generators or paths. |
 | E3512 | Locked generated input `{path}` drifted. | `--locked` requires generated input and output hashes to match the unified lock exactly before materialization. | Rerun without `--locked` to review and record the new generated provenance. |

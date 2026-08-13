@@ -496,9 +496,19 @@ fn compile_workspace_build_opts(
             .map_err(|error| vec![error.diagnostic()])?;
         let source_file = entry.source_file();
         let entry_path = source_file.path.to_string_lossy().into_owned();
-        let entry_source = source_file
+        let raw_entry_source = source_file
             .text()
             .map_err(|error| vec![error.diagnostic()])?;
+        let entry_source = if source_file
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some(Syntax::PACKAGE_FILE)
+        {
+            Package::build_entry_source(&raw_entry_source).unwrap_or(raw_entry_source)
+        } else {
+            raw_entry_source
+        };
         // A dependency/member is its own authority boundary. The workspace
         // CLI grant names the workspace root; it is not inherited by every
         // member. Package-local and explicitly subject-matched workspace
@@ -530,9 +540,6 @@ fn compile_workspace_build_opts(
                 remote: remote.clone(),
             },
         )?;
-        entry
-            .revalidate(&workspace_resolver)
-            .map_err(|error| vec![error.diagnostic()])?;
         if emit_generated {
             export_generated_sources(&entry_path, &output)?;
         }
@@ -543,6 +550,39 @@ fn compile_workspace_build_opts(
         .iter()
         .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
         .collect();
+    // Member builds may create their own `.jet` trees below the workspace.
+    // Refresh the workspace authority after that intentional child mutation,
+    // while requiring the selected workspace source bytes and path to remain
+    // exactly the snapshot used to order members.
+    let workspace_root = workspace_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let original_workspace_source = workspace_source.source.clone();
+    let workspace_resolver = jet_driver::Authority::AuthorityResolver::open(workspace_root)
+        .map_err(|error| vec![error.diagnostic()])?;
+    let workspace_source = workspace_resolver
+        .resolve_workspace_source()
+        .map_err(|error| vec![error.workspace_diagnostic()])?
+        .ok_or_else(|| {
+            vec![Diagnostic::error(
+                "E1334",
+                "workspace source disappeared during member builds".to_string(),
+                "workspace orchestration requires the same declared source through the root build".to_string(),
+                "restore workspace.jet and retry the build".to_string(),
+                None,
+            )]
+        })?;
+    if workspace_source.path != workspace_path
+        || workspace_source.source.as_bytes() != original_workspace_source.as_bytes()
+    {
+        return Err(vec![Diagnostic::error(
+            "E1334",
+            "workspace source changed during member builds".to_string(),
+            "member builds cannot replace the workspace declaration selected for orchestration".to_string(),
+            "restore workspace.jet and retry the build".to_string(),
+            None,
+        )]);
+    }
     workspace_resolver
         .revalidate_source(&workspace_source)
         .map_err(|error| vec![error.diagnostic()])?;
@@ -565,9 +605,6 @@ fn compile_workspace_build_opts(
             remote,
         },
     )?;
-    workspace_resolver
-        .revalidate_source(&workspace_source)
-        .map_err(|error| vec![error.diagnostic()])?;
     if emit_generated {
         export_generated_sources(&workspace_path.to_string_lossy(), &output)?;
     }
@@ -759,7 +796,7 @@ fn workspace_build_authority(
     let checked_entry = resolver
         .checked_file(std::path::Path::new(entry_name))
         .map_err(|error| vec![error.diagnostic()])?;
-    if checked_entry.path != source.path || !jetpack::WorkspaceFile::has_build_entry(&source.source) {
+    if checked_entry.path != source.path {
         return Ok(None);
     }
     resolver
@@ -874,16 +911,28 @@ fn workspace_member_entry(
         Err(error) if error.is_missing() => {}
         Err(error) => return Err(error.diagnostic()),
     }
-    let package_source = checked_package
-        .member
-        .manifest
-        .file
-        .text()
-        .map_err(|error| error.diagnostic())?;
-    if Package::build_entry_source(&package_source).is_some() {
+    if let Some(entry) = checked_package
+        .facts
+        .resolve_build_entry_checked(&member_resolver)
+        .map_err(|error| {
+            let code = if error.contains("two build entries for the package:") {
+                "E3520"
+            } else {
+                "E3501"
+            };
+            Diagnostic::error(
+                code,
+                error,
+                "a package has one checked build authority".to_string(),
+                "keep one `fn build` in the member package".to_string(),
+                None,
+            )
+        })?
+    {
+        let file = (entry.path != checked_package.member.manifest.file.path).then_some(entry);
         return Ok(Some(CheckedBuildEntry {
             package: checked_package,
-            file: None,
+            file,
         }));
     }
     Ok(None)

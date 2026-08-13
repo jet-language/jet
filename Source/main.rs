@@ -2305,7 +2305,20 @@ fn main() {
     // D-CLI-BARE1=A: `-p <member>` picks a workspace member for the bare-entry
     // resolver below; declared here so its borrow outlives `target`.
     let bare_member_flag = flag_value(&raw, "-p");
+    let named_build_entry = match args.get(1) {
+        Some(f) if cmd == "build" && checked_explicit_file(Path::new(f.as_str())).is_none() => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            match resolve_named_build_member(&cwd, f) {
+                Ok(entry) => entry.map(|entry| entry.to_string_lossy().into_owned()),
+                Err(error) => report_build_resolution_error(error),
+            }
+        }
+        _ => None,
+    };
     let target = match args.get(1) {
+        Some(f) if cmd == "build" => {
+            named_build_entry.as_deref().unwrap_or(f.as_str())
+        }
         Some(f) => f.as_str(),
         None => {
             // No target: try project-root mode for run/build/test/bench.
@@ -2896,6 +2909,59 @@ fn report_entry_authority_error(error: jet::Authority::AuthorityError) -> ! {
     exit(ExitCodes::USER_ERROR)
 }
 
+fn report_build_resolution_error(error: String) -> ! {
+    if error.contains("two build entries for the package:") {
+        crate::cli_error!(@full "E3520", error, "one package has exactly one build entry so policy and provenance have one auditable home", "keep one `fn build` and remove every other entry");
+    } else {
+        crate::cli_error!(@fix "E1334", error, "repair the package source and try the build again");
+    }
+    exit(ExitCodes::USER_ERROR)
+}
+
+/// Resolve positional `jet build <member>` against only declared depth-one
+/// workspace members. This chooses the member; the normal PackageFacts/Driver
+/// path still chooses and executes its one build entry.
+fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<PathBuf>, String> {
+    let Ok(resolver) = jet::Authority::AuthorityResolver::open(cwd) else {
+        return Ok(None);
+    };
+    let Some(source) = resolver.resolve_workspace_source().ok().flatten() else {
+        return Ok(None);
+    };
+    if source.role != jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+        return Ok(None);
+    }
+    let Ok(plan) = jetpack::WorkspaceFile::evaluate_checked_source(&source, &resolver) else {
+        return Ok(None);
+    };
+    let Some(member) = plan.members.iter().find(|member| member.name == wanted) else {
+        return Ok(None);
+    };
+    resolve_member_build_entry(&cwd.join(&member.path))
+}
+
+fn resolve_member_build_entry(root: &Path) -> Result<Option<PathBuf>, String> {
+    let member_resolver = jet::Authority::AuthorityResolver::open(&root)
+        .map_err(|error| error.to_string())?;
+    let checked = member_resolver
+        .checked_manifest(Path::new("."))
+        .map_err(|error| error.to_string())?;
+    if let Ok(Some(entry)) = checked
+        .facts
+        .resolve_run_entry_checked(&member_resolver)
+    {
+        return Ok(Some(entry.path));
+    }
+    if let Some(entry) = checked
+        .facts
+        .resolve_build_entry_checked(&member_resolver)
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(Some(entry.path));
+    }
+    Ok(None)
+}
+
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/
 /// `check`/`build` inside a package — the one rule all six share instead of
 /// each hand-rolling its own "no file given" fallback.
@@ -2966,13 +3032,12 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             exit(ExitCodes::USER_ERROR);
         }
     }
-    // D-BUILDSCOPE1: an explicit workspace build entry is the workspace
-    // authority. Member selection (`-p`) remains an explicit escape to one
-    // package and therefore bypasses this root orchestration path.
+    // D-BUILDSCOPE1: the workspace source is the build authority even when it
+    // has no `fn build`; the ordinary batteries still build the root after
+    // members. Member selection (`-p`) remains an explicit escape.
     if cmd == "build" && member_flag.is_none() {
         if let Some(Ok(Some(source))) = workspace_source.as_ref() {
             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
-                && jetpack::WorkspaceFile::has_build_entry(&source.source)
             {
                 return Some(source.path.clone());
             }
@@ -3033,8 +3098,16 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             .members
             .iter()
             .filter_map(|m| {
-                let entry = find_project_entry(&cwd.join(&m.path));
-                checked_explicit_file(&entry).map(|_| (m.name.clone(), entry))
+                let entry = if cmd == "build" {
+                    match resolve_member_build_entry(&cwd.join(&m.path)) {
+                        Ok(entry) => entry,
+                        Err(error) => report_build_resolution_error(error),
+                    }
+                } else {
+                    let entry = find_project_entry(&cwd.join(&m.path));
+                    checked_explicit_file(&entry)
+                }?;
+                Some((m.name.clone(), entry))
             })
             .collect();
         if let Some(want) = member_flag {

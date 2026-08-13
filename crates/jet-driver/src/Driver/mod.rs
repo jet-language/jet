@@ -1330,21 +1330,16 @@ fn compile_bundle_path_build_inner(
         (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
     };
     let mut runtime_bundle_for_package = None;
-    // D-BUILDSCOPE1: a package owns one optional build entry in `package.jet`.
-    // Load that source through the same loader/sema/interpreter path as a
-    // file-local entry, while retaining the ordinary runtime bundle for the
-    // post-build compile.  Imported build functions remain inert: only this
-    // package's own manifest source can become the selected build root.
+    // D-BUILDSCOPE1: resolve one package build entry through PackageFacts. The
+    // checked resolver owns package-wide discovery; this Driver only loads the
+    // checked winner and keeps the ordinary runtime bundle for post-build
+    // compilation. Imported build functions remain inert.
     let runtime_source_paths = bundle
         .modules
         .iter()
         .map(|module| module.path.clone())
         .collect::<Vec<_>>();
-    let package_entry = package_build_entry_source(file, &bundle.project_root)?;
-    // `package_manifest_build_overlay` already retained the manifest bytes
-    // when the selected entry itself is `package.jet`; for every other entry,
-    // `package_build_entry_source` is the retained manifest-backed build
-    // source. Do not probe the manifest a second time by path.
+    let package_entry = package_build_entry_source(&bundle.project_root)?;
     let package_manifest_entry = direct_package_overlay.is_some();
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
@@ -1412,43 +1407,50 @@ fn compile_bundle_path_build_inner(
         })
         .collect::<Vec<_>>();
     if local_build_indices.len() > 1 {
-        return Err(vec![Diagnostic::error(
-            "E3501",
-            "the entry unit contains more than one `fn build`".to_string(),
-            "one unit has one build authority, so dependency and policy order stay auditable".to_string(),
-            "keep the selected `fn build` and rename or remove the other entry".to_string(),
-            local_build_indices
-                .get(1)
+        return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
+    }
+    let entry_module_path = bundle.modules[bundle.entry].path.clone();
+    if let Some((package_path, package_source)) = package_entry.as_ref() {
+        if !local_build_indices.is_empty()
+            && normalize_project_path(&bundle.project_root, package_path)
+                != normalize_project_path(&bundle.project_root, &entry_module_path)
+        {
+            let source_span = local_build_indices
+                .first()
                 .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
                     crate::AST::Item::Func(func) => Some(func.name_span),
                     _ => None,
-                }),
-        )]);
-    }
-    if package_entry.is_some() && !local_build_indices.is_empty() {
-        let source_span = local_build_indices
-            .first()
-            .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
-                crate::AST::Item::Func(func) => Some(func.name_span),
-                _ => None,
-            });
-        return Err(vec![build_entry_conflict(
-            "the package",
-            "the selected source file",
-            "`package.jet`",
-            source_span,
-        )]);
+                });
+            let local_location = local_build_indices
+                .first()
+                .map(|index| build_function_location(&bundle.modules[bundle.entry], *index))
+                .unwrap_or_else(|| entry_module_path.display().to_string());
+            let package_location = build_source_location(package_path, package_source);
+            return Err(vec![build_entry_conflict(
+                "the package",
+                &local_location,
+                &package_location,
+                source_span,
+            )]);
+        }
     }
     if let Some((package_path, package_source)) = package_entry {
-        runtime_bundle_for_package = Some(bundle);
-        let package_path_string = package_path.to_string_lossy().into_owned();
-        bundle = crate::Loader::load_entry_with_overlay(
-            &package_path_string,
-            Some((&package_path, &package_source)),
-            false,
-        )?;
-        bundle.active_os = active_os;
-        bundle.web_partition_enforced = options.web_target;
+        if normalize_project_path(&bundle.project_root, &package_path)
+            == normalize_project_path(&bundle.project_root, &entry_module_path)
+        {
+            // The selected runtime file already is the checked package build
+            // entry. Keep its loader snapshot and continue through one path.
+        } else {
+            runtime_bundle_for_package = Some(bundle);
+            let package_path_string = package_path.to_string_lossy().into_owned();
+            bundle = crate::Loader::load_entry_with_overlay(
+                &package_path_string,
+                Some((&package_path, &package_source)),
+                false,
+            )?;
+            bundle.active_os = active_os;
+            bundle.web_partition_enforced = options.web_target;
+        }
     }
     let local_build_indices = bundle.modules[bundle.entry]
         .items
@@ -1460,18 +1462,7 @@ fn compile_bundle_path_build_inner(
         })
         .collect::<Vec<_>>();
     if local_build_indices.len() > 1 {
-        return Err(vec![Diagnostic::error(
-            "E3501",
-            "the entry unit contains more than one `fn build`".to_string(),
-            "one unit has one build authority, so dependency and policy order stay auditable".to_string(),
-            "keep the selected `fn build` and rename or remove the other entry".to_string(),
-            local_build_indices
-                .get(1)
-                .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
-                    crate::AST::Item::Func(func) => Some(func.name_span),
-                    _ => None,
-                }),
-        )]);
+        return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
     }
     let build_index = local_build_indices.into_iter().next();
     let build_span = build_index.and_then(|index| {
@@ -2666,7 +2657,6 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 fn package_build_entry_source(
-    file: &str,
     project_root: &std::path::Path,
 ) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
     let resolver = AuthorityResolver::open(project_root)
@@ -2676,36 +2666,50 @@ fn package_build_entry_source(
         Err(error) if error.is_missing() => return Ok(None),
         Err(error) => return Err(vec![error.diagnostic()]),
     };
-    let package_path = checked.file.path.clone();
-    let entry_path = std::path::Path::new(file);
-    let entry_path = if entry_path.is_absolute() {
-        entry_path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join(entry_path)
-    };
-    if normalize_project_path(project_root, &entry_path)
-        == normalize_project_path(project_root, &package_path)
-    {
-        resolver
-            .revalidate_file(&checked.file)
-            .map_err(|error| vec![error.diagnostic()])?;
+    let entry = checked
+        .facts
+        .resolve_build_entry_checked(&resolver)
+        .map_err(|error| vec![build_entry_resolution_diagnostic(&error)])?;
+    let Some(entry) = entry else {
         return Ok(None);
-    }
-    let source = checked
-        .file
+    };
+    let raw_source = entry
         .text()
         .map_err(|error| vec![error.diagnostic()])?;
+    let source = if entry.path.file_name().and_then(|name| name.to_str())
+        == Some(crate::Syntax::PACKAGE_FILE)
+    {
+        crate::Package::build_entry_source(&raw_source).unwrap_or(raw_source)
+    } else {
+        raw_source
+    };
     resolver
-        .revalidate_file(&checked.file)
+        .revalidate_file(&entry)
         .map_err(|error| vec![error.diagnostic()])?;
-    let result = crate::Package::build_entry_source(&source)
-        .map(|source| (package_path, source));
     resolver
-        .revalidate_file(&checked.file)
+        .revalidate_root()
         .map_err(|error| vec![error.diagnostic()])?;
-    Ok(result)
+    Ok(Some((entry.path, source)))
+}
+
+fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
+    let code = if error.contains("two build entries for the package:") {
+        "E3520"
+    } else {
+        "E1334"
+    };
+    let (why, fix) = if code == "E3520" {
+        (
+            "one package has exactly one build entry so policy and provenance have one auditable home",
+            "keep one `fn build` and remove the other entry",
+        )
+    } else {
+        (
+            "package entry discovery uses the checked package authority",
+            "repair the package source and try the build again",
+        )
+    };
+    Diagnostic::error(code, error.to_string(), why.to_string(), fix.to_string(), None)
 }
 
 fn package_manifest_build_overlay(
@@ -2972,6 +2976,41 @@ fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
     )
 }
 
+fn build_function_location(module: &crate::AST::LoadedModule, index: usize) -> String {
+    let line = match module.items.get(index) {
+        Some(crate::AST::Item::Func(function)) => source_line_at(&module.source, function.name_span.start),
+        _ => 1,
+    };
+    format!("{}:{line}", module.path.display())
+}
+
+fn duplicate_build_entries(
+    bundle: &crate::AST::ProgramBundle,
+    indices: &[usize],
+) -> Diagnostic {
+    let module = &bundle.modules[bundle.entry];
+    let first = build_function_location(module, indices[0]);
+    let second = build_function_location(module, indices[1]);
+    let span = match module.items.get(indices[1]) {
+        Some(crate::AST::Item::Func(function)) => Some(function.name_span),
+        _ => None,
+    };
+    build_entry_conflict("the entry unit", &first, &second, span)
+}
+
+fn build_source_location(path: &std::path::Path, source: &str) -> String {
+    let offset = source.find("fn build").unwrap_or(0);
+    format!("{}:{}", path.display(), source_line_at(source, offset))
+}
+
+fn source_line_at(source: &str, offset: usize) -> usize {
+    source.as_bytes()[..offset.min(source.len())]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        + 1
+}
+
 fn build_entry_conflict(
     unit: &str,
     first_location: &str,
@@ -2983,7 +3022,7 @@ fn build_entry_conflict(
         format!(
             "two build entries for {unit}: {first_location} and {second_location}"
         ),
-        "one unit has exactly one build entry so policy and provenance have one auditable home"
+        "one package has exactly one build entry so policy and provenance have one auditable home"
             .to_string(),
         format!("keep the `fn build` in {first_location} and remove the entry in {second_location}"),
         span,

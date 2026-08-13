@@ -376,6 +376,161 @@ fn package_and_file_build_entries_are_rejected_as_one_unit() {
 }
 
 #[test]
+fn package_build_entry_is_discovered_from_one_unimported_source_file() {
+    let root = project("package-source-entry");
+    write(
+        &root.join("package.jet"),
+        "name: \"package-source-entry\"\nversion: \"0.1.0\"\n",
+    );
+    write(&root.join("run.jet"), "fn run() {}\n");
+    fs::create_dir_all(root.join("tools")).unwrap();
+    write(
+        &root.join("tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { target :: b.add_library(\"discovered\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+    );
+
+    let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
+        .expect("an unimported package source may own fn build");
+    assert_eq!(output.build.unwrap().plan.targets()[0].name, "discovered");
+}
+
+#[test]
+fn imported_build_function_is_not_a_package_entry() {
+    let root = project("imported-build-entry");
+    write(
+        &root.join("package.jet"),
+        "name: \"imported-build-entry\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &root.join("run.jet"),
+        "use \"./tools/build\" as build_tool\nfn run() {}\n",
+    );
+    fs::create_dir_all(root.join("tools")).unwrap();
+    write(
+        &root.join("tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+    );
+
+    let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
+        .expect("an imported fn build is not a package build authority");
+    assert!(output.build.is_none());
+}
+
+#[test]
+fn package_build_entry_duplicates_name_both_source_locations() {
+    let root = project("package-source-conflict");
+    write(
+        &root.join("package.jet"),
+        "name: \"package-source-conflict\"\nversion: \"0.1.0\"\n",
+    );
+    write(&root.join("run.jet"), "fn run() {}\n");
+    write(
+        &root.join("a.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+    );
+    write(
+        &root.join("b.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+    );
+
+    let errors = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
+        .expect_err("two package build entries must be rejected");
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E3520")
+        .expect("duplicate build entries use the registered conflict diagnostic");
+    assert!(diagnostic.what.contains("a.jet:1"), "{}", diagnostic.what);
+    assert!(diagnostic.what.contains("b.jet:1"), "{}", diagnostic.what);
+}
+
+#[test]
+fn package_build_discovery_stops_at_nested_package_boundary() {
+    let root = project("package-boundary");
+    write(
+        &root.join("package.jet"),
+        "name: \"package-boundary\"\nversion: \"0.1.0\"\n",
+    );
+    write(&root.join("run.jet"), "fn run() {}\n");
+    fs::create_dir_all(root.join("tools")).unwrap();
+    write(
+        &root.join("tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { target :: b.add_library(\"root\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+    );
+    fs::create_dir_all(root.join("packages/nested/tools")).unwrap();
+    write(
+        &root.join("packages/nested/package.jet"),
+        "name: \"nested\"\nversion: \"0.1.0\"\n",
+    );
+    write(&root.join("packages/nested/run.jet"), "fn run() {}\n");
+    write(
+        &root.join("packages/nested/tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { target :: b.add_library(\"nested\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+    );
+
+    let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
+        .expect("nested package build entries are not part of the root package");
+    assert_eq!(output.build.unwrap().plan.targets()[0].name, "root");
+}
+
+#[test]
+fn file_local_duplicate_build_entries_name_both_sites() {
+    let root = project("file-entry-conflict");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        "fn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n\nfn build(b: BuildContext) => BuildPlan ? { return b.plan() }\nfn run() {}\n",
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E3520")
+        .expect("duplicate file-local build entries use the conflict diagnostic");
+    assert!(diagnostic.what.contains("main.jet:1"), "{}", diagnostic.what);
+    assert!(diagnostic.what.contains("main.jet:3"), "{}", diagnostic.what);
+}
+
+#[test]
+fn workspace_build_uses_batteries_for_missing_member_and_root_entries() {
+    let root = project("workspace-entry-fallback");
+    let packages = root.join("packages");
+    fs::create_dir_all(packages.join("a/tools")).unwrap();
+    fs::create_dir_all(packages.join("b")).unwrap();
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { members: [\"./packages/a\", \"./packages/b\"] }\nfn run() { print(\"workspace\") }\n",
+    );
+    write(
+        &packages.join("a/package.jet"),
+        "name: \"a\"\nversion: \"0.1.0\"\n",
+    );
+    write(&packages.join("a/run.jet"), "fn run() {}\n");
+    write(
+        &packages.join("a/tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { b.generate(\"a_generated\", \"fn a_generated() => String {{ return \\\"a\\\" }}\")?; target :: b.add_library(\"a\", [\"run.jet\", \".jet/generated/a/a_generated.jet\"], [])?; return b.plan(target) }\n",
+    );
+    write(
+        &packages.join("b/package.jet"),
+        "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\n",
+    );
+    write(&packages.join("b/run.jet"), "fn run() {}\n");
+
+    let output = jet::compile_programmable_build_opts(
+        root.join("workspace.jet").to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .expect("workspace build should fall back to batteries for missing fn build");
+    assert!(packages.join("a/.jet/generated/a/a_generated.jet").is_file());
+    assert!(output.rust.contains("workspace"));
+}
+
+#[test]
 fn production_build_bridge_imports_only_the_canonical_legacy_project_file() {
     let root = project("legacy-import");
     let entry = root.join("main.jet");
@@ -898,6 +1053,40 @@ fn run() { print("ok") }
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(fs::read_to_string(root.join("stamp.txt")).unwrap(), "cli-built");
+}
+
+#[test]
+fn jet_build_positional_name_resolves_one_workspace_member() {
+    let root = project("workspace-member-cli");
+    let member = root.join("packages/one");
+    fs::create_dir_all(&member).unwrap();
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { members: [\"./packages/one\"] }\n",
+    );
+    write(
+        &member.join("package.jet"),
+        "name: \"one\"\nversion: \"0.1.0\"\n",
+    );
+    write(&member.join("run.jet"), "fn run() { print(\"one\") }\n");
+    fs::create_dir_all(member.join("tools")).unwrap();
+    write(
+        &member.join("tools/build.jet"),
+        "fn build(b: BuildContext) => BuildPlan ? { b.generate(\"member_generated\", \"fn member_generated() => String {{ return \\\"one\\\" }}\")?; app :: b.add_executable(\"one\", [\"run.jet\", \".jet/generated/one/member_generated.jet\"], [])?; return b.plan(app) }\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&root)
+        .args(["build", "one"])
+        .output()
+        .expect("jet build <member>");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(member.join(".jet/generated/one/member_generated.jet").is_file());
 }
 
 #[test]

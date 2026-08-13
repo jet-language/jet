@@ -11,7 +11,7 @@
 //!        front-end soundness bug, reported loudly
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -312,7 +312,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     }
 
     let _ffi_lock = uses_ffi_bridge.then(FfiBridgeLock::acquire);
-    let compiled_result = if src.contains("fn build(") {
+    let compiled_result = if has_package_build_entry(&entry.path, &src) {
         jet::compile_programmable_build(
             entry.path.to_str().expect("example path is utf8"),
             &[],
@@ -574,6 +574,32 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             }
         }
     }
+}
+
+/// Use the production package resolver to decide whether an example needs the
+/// programmable-build path. The source-text check remains for the retired
+/// `main.jet` convention, which is intentionally excluded from package-wide
+/// source discovery as the legacy entry filename.
+fn has_package_build_entry(path: &Path, source: &str) -> bool {
+    if source.contains("fn build(") {
+        return true;
+    }
+    let Some(root) = path.parent() else {
+        return false;
+    };
+    let Ok(resolver) = jet::Authority::AuthorityResolver::open(root) else {
+        return false;
+    };
+    let facts = match resolver.checked_manifest(Path::new(".")) {
+        Ok(manifest) => manifest.facts,
+        Err(error) if error.is_missing() => jet::Package::PackageFacts::default(),
+        Err(_) => return false,
+    };
+    facts
+        .resolve_build_entry_checked(&resolver)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 /// I5 for card #502: each managed-runtime example binds its checked foreign
