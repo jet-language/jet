@@ -65,6 +65,7 @@ pub use EventLite::{
     core_event_policy_sync, core_event_scope, core_event_with_policy,
     eval_method as eval_event_method, reset as reset_event_lite,
 };
+pub use Reflect::fact_read_value;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -251,11 +252,13 @@ pub use Purity::{
     walk_stmt_expr_nodes_for_validation, PurityStage,
 };
 pub use Reflect::{
-    build_attribution_info, build_distinct_type_info, build_distinct_type_info_with_path,
-    build_enum_layout_info, build_function_type_info, build_maturity_info, build_movedness_info,
-    build_program_info, build_registered_fact_info, build_registered_fact_infos,
-    build_sendability_info, build_struct_layout_info, build_struct_type_info,
-    build_struct_type_info_with_path, build_struct_type_info_with_path_and_vocabulary,
+    build_attribution_info, build_dimension_info, build_distinct_type_info,
+    build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
+    build_function_type_info, build_maturity_info, build_movedness_info, build_program_info,
+    build_range_info, build_registered_fact_info, build_registered_fact_infos,
+    build_sendability_info, build_state_infos, build_state_ref, build_state_refs,
+    build_struct_layout_info, build_struct_type_info, build_struct_type_info_with_path,
+    build_struct_type_info_with_path_and_vocabulary,
     build_struct_type_info_with_states, build_track_origin_info,
     build_unit_scale_provenance_info, build_view_provenance_info, ProgramSemanticFacts,
 };

@@ -35,6 +35,7 @@ pub const MARKER_PERSIST: &str = "Persist"; // D-PERSIST1
 /// codegen). Never rejected by sema; the compiler is free to ignore it.
 /// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
 pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
+pub const MARKER_STATIC: &str = "Static"; // D-META-STAGE1
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations
 /// while keeping nominal identity. Stackable. The `numeric` bundle merged

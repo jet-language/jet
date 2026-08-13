@@ -1,0 +1,25 @@
+// D-FACT-READ1=A: every compiler-held plane uses one typed `@` read.
+#Numeric Severity :: distinct Int(0..10)
+#UnitFamily(Length, dimension) { meter }
+
+state Order { Draft, Confirmed }
+
+struct Order {
+    id: Int
+}
+
+fn send_report() =[IO]=> {}
+
+@range :: Severity.@range
+@effects :: send_report.@effects
+@states :: Order.@states
+@dimension :: Meter.@dimension
+@profile :: @build.profile
+
+fn run() {
+    print(@range.start)
+    print(@effects.values.len())
+    print(@states[0].name)
+    print(@dimension.axes.len())
+    print(@profile)
+}

@@ -474,7 +474,10 @@ pub(crate) fn resolve_static_rule_products(
         let needs_baked_default = item.derives.iter().any(|(t, _)| {
             matches!(
                 t.as_str(),
-                "Codable" | "Decode" | "Encode" | Syntax::MARKER_CLI
+                Syntax::MARKER_CODABLE
+                | Syntax::MARKER_DECODE
+                | Syntax::MARKER_ENCODE
+                | Syntax::MARKER_CLI
             )
         });
         for field in &mut item.fields {

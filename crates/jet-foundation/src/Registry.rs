@@ -556,6 +556,42 @@ pub struct FactDeclaration {
     pub identity_bearing: bool,
 }
 
+/// D-FACT-READ1=A: the one member-position reader. The spelling lives in
+/// `Syntax`; this enum is the registry's semantic projection, so parser, sema,
+/// comptime, and codegen do not grow separate fact-name tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactRead {
+    Layout,
+    Name,
+    Fields,
+    Range,
+    Dimension,
+    States,
+    Effects,
+    BuildProfile,
+}
+
+/// Resolve a marked member through the registered fact planes.
+pub fn fact_read(member: &str) -> Option<FactRead> {
+    let (row_name, read) = match member {
+        crate::Syntax::COMPILER_FACT_LAYOUT => ("Type.Layout", FactRead::Layout),
+        crate::Syntax::COMPILER_FACT_NAME => ("Type.Nominal", FactRead::Name),
+        crate::Syntax::COMPILER_FACT_FIELDS => ("Type.Layout", FactRead::Fields),
+        crate::Syntax::COMPILER_FACT_RANGE => ("Type.Interval", FactRead::Range),
+        crate::Syntax::COMPILER_FACT_DIMENSION => ("Type.Dimension", FactRead::Dimension),
+        crate::Syntax::COMPILER_FACT_STATES => ("States", FactRead::States),
+        crate::Syntax::COMPILER_FACT_EFFECTS => ("Effects", FactRead::Effects),
+        crate::Syntax::COMPILER_BUILD_FACT_PROFILE => ("BuildSettings", FactRead::BuildProfile),
+        _ => return None,
+    };
+
+    if fact_declarations().iter().any(|declaration| declaration.name == row_name) {
+        Some(read)
+    } else {
+        None
+    }
+}
+
 /// The one authority for the non-code registration rows.
 pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
 

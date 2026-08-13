@@ -1213,9 +1213,32 @@ impl CtValue {
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
                     .iter()
-                    .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
+                    .map(|(n, v)| {
+                        let field = match type_name.as_str() {
+                            "Range" | "DimensionInfo" | "DimensionAxis" | "StateRef"
+                            | "StateInfo" | "EffectInfo" => n.clone(),
+                            _ => ct_mangle(n),
+                        };
+                        format!("{field}: {}", v.serialize())
+                    })
                     .collect();
-                format!("{} {{ {} }}", mangle_path(type_name), parts.join(", "))
+                let rust_type = match type_name.as_str() {
+                    "Range" => "JetRange".to_string(),
+                    "DimensionInfo" => "JetDimensionInfo".to_string(),
+                    "DimensionAxis" => "JetDimensionAxis".to_string(),
+                    "StateRef" => "JetStateRef".to_string(),
+                    "StateInfo" => "JetStateInfo".to_string(),
+                    "EffectInfo" => "JetEffectInfo".to_string(),
+                    _ => mangle_path(type_name),
+                };
+                if type_name == "Range" {
+                    format!(
+                        "{rust_type} {{ {}, exclusive: false }}",
+                        parts.join(", ")
+                    )
+                } else {
+                    format!("{rust_type} {{ {} }}", parts.join(", "))
+                }
             }
             CtValue::Enum {
                 type_name,

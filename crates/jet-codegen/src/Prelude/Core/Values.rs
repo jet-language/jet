@@ -95,6 +95,76 @@ impl __jet_Equatable for JetRange {
     }
 }
 
+// D-FACT-READ1=A: registered plane reads are typed compile-time values. These
+// small carriers keep a baked fact usable by ordinary field/index operations
+// after sema has folded the read; they carry no runtime policy or dispatch.
+#[derive(Clone, Debug, PartialEq)]
+struct JetDimensionAxis {
+    name: String,
+    exponent: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetDimensionInfo {
+    axes: Vec<JetDimensionAxis>,
+    identity: String,
+    display: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetStateRef {
+    owner: String,
+    name: String,
+    path: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetStateInfo {
+    name: String,
+    path: JetStateRef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetEffectInfo {
+    values: Vec<String>,
+}
+
+macro_rules! impl_fact_value_traits {
+    ($ty:ty) => {
+        impl JetShow for $ty {
+            fn jet_show(&self) -> String {
+                format!("{:?}", self)
+            }
+        }
+        impl __jet_Display for $ty {
+            fn display(&self) -> String {
+                format!("{:?}", self)
+            }
+        }
+        impl JetDisplay for $ty {
+            fn jet_display(&self) -> String {
+                <Self as __jet_Display>::display(self)
+            }
+        }
+        impl JetDebug for $ty {
+            fn jet_debug(&self) -> String {
+                format!("{:?}", self)
+            }
+        }
+        impl __jet_Equatable for $ty {
+            fn equal(&self, rhs: &Self) -> bool {
+                self == rhs
+            }
+        }
+    };
+}
+
+impl_fact_value_traits!(JetDimensionAxis);
+impl_fact_value_traits!(JetDimensionInfo);
+impl_fact_value_traits!(JetStateRef);
+impl_fact_value_traits!(JetStateInfo);
+impl_fact_value_traits!(JetEffectInfo);
+
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.
 struct JetDeferredClose<F: FnOnce()> {

@@ -26,6 +26,139 @@ fn field_path(expr: &Expr) -> Option<String> {
 }
 
 impl<'a> Checker<'a> {
+    /// D-FACT-READ1=A: resolve one marked member through the shared registry,
+    /// then replace the read with its typed compile-time value. Codegen never
+    /// receives a fact read, so facts cannot become runtime dispatch.
+    fn fold_fact_read(&mut self, expr: &mut Expr) -> Option<Option<Type>> {
+        let Expr::Field(inner, member, span) = expr else {
+            return None;
+        };
+        let is_build_subject =
+            matches!(&**inner, Expr::ComptimeName { name, .. } if name == "@build");
+        let read = if member == Syntax::BUILD_INFO_PROFILE {
+            if !is_build_subject {
+                self.diags.push(Diagnostic::error(
+                    "E0302",
+                    format!("`{member}` belongs to the `@build` subject"),
+                    "build facts describe the selected build, not an ordinary value".to_string(),
+                    "write `@build.profile`".to_string(),
+                    Some(*span),
+                ));
+                return Some(None);
+            }
+            jet_foundation::Registry::fact_read(Syntax::COMPILER_BUILD_FACT_PROFILE)
+        } else {
+            Syntax::fact_read_kind(member)
+        }?;
+
+        if !self.in_comptime {
+            self.diags.push(Diagnostic::error(
+                "E0302",
+                format!("fact read `{member}` is compile-time only"),
+                "a fact is a value known before code generation; it never selects runtime behavior"
+                    .to_string(),
+                "move the read into an `@` binding or a compile-time block".to_string(),
+                Some(*span),
+            ));
+            return Some(None);
+        }
+
+        // The existing TypeInfo projection is the reader for the three
+        // original reflection facts. Keep it as the same path in comptime;
+        // only the newly typed plane values need a folded literal here.
+        if matches!(
+            read,
+            jet_foundation::Registry::FactRead::Layout
+                | jet_foundation::Registry::FactRead::Name
+                | jet_foundation::Registry::FactRead::Fields
+        ) {
+            return None;
+        }
+
+        let value_and_type = match read {
+            jet_foundation::Registry::FactRead::Range => match &**inner {
+                Expr::Ident(type_name, _) => self
+                    .registry
+                    .distinct_range(type_name)
+                    .map(|(start, end)| {
+                        (
+                            Type::Named(Syntax::TYPE_RANGE.to_string()),
+                            crate::Comptime::build_range_info(start, end),
+                        )
+                    }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Dimension => match &**inner {
+                Expr::Ident(type_name, _) => self
+                    .registry
+                    .unit_dimension(type_name)
+                    .map(|dimension| {
+                        (
+                            Type::Named("DimensionInfo".to_string()),
+                            crate::Comptime::build_dimension_info(&dimension),
+                        )
+                    }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::States => match &**inner {
+                Expr::Ident(type_name, _) => self
+                    .struct_owner_module(type_name, None)
+                    .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                    .and_then(|module| module.declared_states.get(type_name))
+                    .map(|states| {
+                        (
+                            Type::List(Box::new(Type::Named("StateInfo".to_string()))),
+                            crate::Comptime::build_state_infos(type_name, states),
+                        )
+                    }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Effects => match &**inner {
+                Expr::Ident(function_name, _) => self.ct_funcs.get(function_name).map(|function| {
+                    let effects = function
+                        .declared_effects
+                        .as_ref()
+                        .map(|effects| {
+                            effects
+                                .iter()
+                                .map(|(name, _)| name.clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    (
+                        Type::Named("EffectInfo".to_string()),
+                        crate::Comptime::build_effect_info(&effects),
+                    )
+                }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::BuildProfile => Some((
+                Type::String,
+                crate::Comptime::CtValue::Str("dev".to_string()),
+            )),
+            jet_foundation::Registry::FactRead::Layout
+            | jet_foundation::Registry::FactRead::Name
+            | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
+        };
+
+        let Some((ty, value)) = value_and_type else {
+            self.diags.push(Diagnostic::error(
+                "E0302",
+                format!("`{member}` has no registered value for this subject"),
+                "fact reads answer typed values from the subject's registered plane".to_string(),
+                "read the fact on a matching type, function, or the `@build` subject".to_string(),
+                Some(*span),
+            ));
+            return Some(None);
+        };
+        *expr = Expr::ComptimeName {
+            name: format!("\0jet.fact.{}", span.start),
+            span: *span,
+            value: Some(value),
+        };
+        Some(Some(ty))
+    }
+
     pub(crate) fn default_err_value(
         &mut self,
         mut call: Call,
@@ -1941,6 +2074,9 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
+                if let Some(result) = self.fold_fact_read(e) {
+                    return result;
+                }
                 let Expr::Field(inner, member, _) = e else {
                     unreachable!("matched Field above")
                 };
@@ -2433,6 +2569,9 @@ impl<'a> Checker<'a> {
             // interpreter reads it, and outside one sema folds it here so
             // codegen only ever sees the value.
             Expr::ComptimeName { name, span, value } => {
+                if let Some(v) = value.clone() {
+                    return Some(v.jet_type());
+                }
                 if !self.in_comptime {
                     let globals = self.current_ct_globals();
                     if let Some(v) = globals.get(name).cloned() {

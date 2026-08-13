@@ -1861,6 +1861,21 @@ impl Cx {
             {
                 format!("{}JetRange", self.root_prefix)
             }
+            Type::Named(name) if name == "DimensionAxis" && !self.type_names.contains(name) => {
+                format!("{}JetDimensionAxis", self.root_prefix)
+            }
+            Type::Named(name) if name == "DimensionInfo" && !self.type_names.contains(name) => {
+                format!("{}JetDimensionInfo", self.root_prefix)
+            }
+            Type::Named(name) if name == "StateRef" && !self.type_names.contains(name) => {
+                format!("{}JetStateRef", self.root_prefix)
+            }
+            Type::Named(name) if name == "StateInfo" && !self.type_names.contains(name) => {
+                format!("{}JetStateInfo", self.root_prefix)
+            }
+            Type::Named(name) if name == "EffectInfo" && !self.type_names.contains(name) => {
+                format!("{}JetEffectInfo", self.root_prefix)
+            }
             Type::Named(name)
                 if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
             {

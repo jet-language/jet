@@ -425,6 +425,11 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "TerminalSize" => matches!(member, "cols" | "rows"),
         "TerminalPolicy" => matches!(member, "size" | "mode"),
         "Range" => matches!(member, "start" | "end" | "exclusive"),
+        "DimensionAxis" => matches!(member, "name" | "exponent"),
+        "DimensionInfo" => matches!(member, "axes" | "identity" | "display"),
+        "StateRef" => matches!(member, "owner" | "name" | "path"),
+        "StateInfo" => matches!(member, "name" | "path"),
+        "EffectInfo" => member == "values",
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }
@@ -719,6 +724,35 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "path" | "reason" => Some(Type::String),
             _ => None,
         };
+    }
+    if name == "DimensionAxis" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "name" => Some(Type::String),
+            "exponent" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if name == "DimensionInfo" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "axes" => Some(Type::List(Box::new(Type::Named(
+                "DimensionAxis".to_string(),
+            )))),
+            "identity" | "display" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if name == "StateRef" && !cx.struct_fields.contains_key(name) {
+        return matches!(field, "owner" | "name" | "path").then_some(Type::String);
+    }
+    if name == "StateInfo" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "name" => Some(Type::String),
+            "path" => Some(Type::Named("StateRef".to_string())),
+            _ => None,
+        };
+    }
+    if name == "EffectInfo" && !cx.struct_fields.contains_key(name) {
+        return (field == "values").then_some(Type::List(Box::new(Type::String)));
     }
     if name == "XMLLimits" && !cx.struct_fields.contains_key(name) {
         return matches!(field, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes").then_some(Type::Int);

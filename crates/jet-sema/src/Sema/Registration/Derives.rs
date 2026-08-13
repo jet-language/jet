@@ -451,7 +451,7 @@ mod tests {
             Item::Struct(s)
                 if s.trait_impls
                     .iter()
-                    .any(|implementation| implementation.trait_name == "Comparable")
+                    .any(|implementation| implementation.trait_name == Syntax::MARKER_COMPARABLE)
         )));
         assert!(matches!(user.unwrap().as_slice(), [Item::Impl(_)]));
     }

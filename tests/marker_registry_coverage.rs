@@ -45,6 +45,9 @@ fn placeholder(ty: RuleArgType, source_type: &str) -> String {
 
 /// D-MARK-FORM1=A: write parentheses exactly when the signature needs them.
 fn spelling(row: &AppliedRule) -> String {
+    if row.name == "Test" {
+        return "#Test(\"coverage\")".to_string();
+    }
     if !row.signature.arguments_required() {
         return format!("#{}", row.name);
     }
@@ -62,31 +65,100 @@ fn spelling(row: &AppliedRule) -> String {
             args.push(placeholder(ty, source_type));
         }
     }
+    if row.name == "Grant" && row.signature.variadic.is_some() {
+        args[0] = format!("caps: {}", args[0]);
+    }
+    if row.name == "Scrub" {
+        args[0] = "X".to_string();
+    }
+    if row.name == "Undo" {
+        args[0] = "inverse".to_string();
+    }
+    if row.name == "Short" {
+        args[0] = "\"p\"".to_string();
+    }
+    if row.name == "Env" {
+        args[0] = "\"PORT\"".to_string();
+    }
+    if row.name == "Caps" {
+        args[0] = "IO".to_string();
+    }
+    if row.name == "Target" {
+        args[0] = "Web".to_string();
+    }
+    if row.name == "UnitFamily" {
+        return "#UnitFamily(Length, dimension)".to_string();
+    }
+    if row.name == "Invariant" {
+        return "#Invariant(\"value >= 0 && value < 4\")".to_string();
+    }
+    if matches!(row.name, "Pre" | "Post") {
+        args[0] = "true".to_string();
+    }
+    if row.name == "Every" {
+        return format!("#[Job, Every({})]", args.join(", "));
+    }
     format!("#{}({})", row.name, args.join(", "))
 }
 
 /// The smallest whole program that puts `marker` at `site`.
 fn program_at(marker: &str, site: RuleSite) -> Option<String> {
     Some(match site {
+        RuleSite::File if marker.starts_with("#NoPrelude") => format!(
+            "#NoPrelude\nuse core.io as io\nfn run() {{\n    io.print(\"ok\")\n}}\n"
+        ),
         RuleSite::File => format!("{marker}\nfn run() {{\n    print(\"ok\")\n}}\n"),
         // A module rule attaches to a `module` declaration, not to the file.
+        RuleSite::Module if marker.starts_with("#Bindgen") => {
+            format!("{marker} module c.coverage.__bindgen__ {{\n}}\n")
+        }
         RuleSite::Module => {
             format!("{marker} module c.lib {{\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n")
         }
+        RuleSite::Function if marker.starts_with("#Scrub") => format!(
+            "tag X {{ deny: [IO] }}\n{marker} fn helper(raw: #X String) => String {{ return ~raw }}\n\nfn run() {{\n}}\n"
+        ),
+        RuleSite::Function if marker.starts_with("#Undo") => format!(
+            "fn inverse() {{}}\n#[Unsafe(\"coverage\"), FFI(c), Undo(inverse)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
+        ),
+        RuleSite::Function if marker.starts_with("#ABI") => format!(
+            "#Extern module c.demo {{\n    {marker} fn helper(value: I32) => I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n"
+        ),
+        RuleSite::Function if marker.starts_with("#FFI") => format!(
+            "#[Unsafe(\"coverage\"), FFI(c)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
+        ),
         RuleSite::Function => format!("{marker}\nfn helper() {{\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Method => format!(
             "W :: struct {{\n    a: Int\n\n    {marker}\n    fn helper(self) {{\n    }}\n}}\n\nfn run() {{\n}}\n"
         ),
+        RuleSite::Type if marker.starts_with("#UnitFamily") => {
+            format!("{marker} {{ meter }}\n\nfn run() {{\n}}\n")
+        }
+        RuleSite::Type if marker.starts_with("#Invariant") => {
+            format!("{marker} Index4 :: distinct Int\n\nfn run() {{\n}}\n")
+        }
         RuleSite::Type => format!("{marker}\nstruct W {{\n    a: Int\n}}\n\nfn run() {{\n}}\n"),
+        RuleSite::Field if marker.starts_with("#Short") || marker.starts_with("#Env") || marker.starts_with("#Flag") => format!(
+            "#CLI\nstruct W {{\n    {marker} a: String\n}}\n\nfn run() {{\n}}\n"
+        ),
         RuleSite::Field => format!("struct W {{\n    {marker} a: Int\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Variant => {
             format!("enum E {{\n    {marker} A\n    B\n}}\n\nfn run() {{\n}}\n")
         }
+        RuleSite::Block if marker.starts_with("#Grant") => {
+            format!("fn run() {{\n    {marker} {{\n    }}\n}}\n")
+        }
         RuleSite::Block => format!("fn run() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n"),
         RuleSite::Statement => format!("fn run() {{\n    {marker} print(\"ok\")\n}}\n"),
+        RuleSite::Declaration if marker.starts_with("#Persist") => format!(
+            "{marker} value := 1\n\nfn run() {{\n}}\n"
+        ),
         RuleSite::Declaration => format!(
             "fn run() {{\n    {marker} value :: 1\n}}\n"
         ),
+        RuleSite::Constant if marker.starts_with("#Static") => {
+            format!("{marker} @value :: 1\n\nfn run() {{\n}}\n")
+        }
         RuleSite::Constant => format!("{marker} comptime value :: 1\n\nfn run() {{\n}}\n"),
         RuleSite::Parameter => {
             format!("fn helper({marker} a: Int) {{\n}}\n\nfn run() {{\n}}\n")
@@ -98,11 +170,30 @@ fn program_at(marker: &str, site: RuleSite) -> Option<String> {
     })
 }
 
+fn sema_diagnostics(source: &str, path: &std::path::Path) -> Vec<jet::Diagnostics::Diagnostic> {
+    if source.contains("#Bindgen") {
+        return jet::Driver::compile_generated_src(
+            source,
+            ".jet/bindings/c/coverage.jet",
+            jet::Sema::CompileMode::Check,
+        )
+        .err()
+        .unwrap_or_default();
+    }
+    std::fs::write(path, source).expect("write marker coverage source");
+    let mut bundle = jet::Loader::load_entry(path.to_str().expect("coverage path")).expect("load marker coverage source");
+    jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+}
+
 /// Diagnostics that mean "this marker did not reach its rule": the closed
 /// vocabulary rejected the name, or the site table rejected the position.
 /// Any other diagnostic is the row's own business and is not this guard's.
 fn rejected_the_marker(source: &str) -> Vec<String> {
-    let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
+    let (tokens, lex_diagnostics) = if source.contains("#Bindgen") {
+        jet::Lexer::lex_generated(source)
+    } else {
+        jet::Lexer::lex(source)
+    };
     if !lex_diagnostics.is_empty() {
         return lex_diagnostics
             .into_iter()
@@ -118,6 +209,22 @@ fn rejected_the_marker(source: &str) -> Vec<String> {
         .filter(|diagnostic| matches!(diagnostic.code.as_str(), "E0927" | "E0355"))
         .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
         .collect()
+}
+
+fn format_for_coverage(source: &str) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
+    if source.contains("#Bindgen") {
+        let (tokens, diagnostics) = jet::Lexer::lex_generated(source);
+        if !diagnostics.is_empty() {
+            return Err(diagnostics);
+        }
+        let program = jet::Parser::parse_for_fmt(&tokens)?;
+        return Ok(jet::Formatter::format_program(
+            &program,
+            source,
+            &jet::Lexer::comments(&tokens),
+        ));
+    }
+    jet::format_source(source)
 }
 
 /// Law zero, the reachable half: every active row can be written at one of its
@@ -171,6 +278,93 @@ fn every_active_row_is_reachable_at_a_declared_site() {
         ghosts.len(),
         ghosts.join("\n")
     );
+}
+
+/// D-MARK-FORM1/A and D-HL1: every registered row is exercised through the
+/// user-facing consumers. The reachability test above owns special parser
+/// forms; this pass keeps formatter, highlight, and reflection coverage on the
+/// same row iteration without duplicating those special grammars here.
+#[test]
+fn every_active_row_walks_parse_validate_format_highlight_reflect() {
+    let highlighted = jet::Syntax::highlighted_tokens_sorted();
+    let scratch = common::Scratch::new("marker-registry-coverage");
+    let validation_path = scratch.join("main.jet");
+    for registered in Registry::marker_rows() {
+        let row = registered.rule.expect("marker rows carry their applied rule");
+        if !matches!(row.status, RuleStatus::Active) {
+            continue;
+        }
+        let marker = spelling(row);
+        let source = row
+            .sites
+            .iter()
+            .copied()
+            .filter(|site| site_is_source_renderable(*site))
+            .find_map(|site| {
+                let source = program_at(&marker, site)?;
+                let (_, lex_diagnostics) = if source.contains("#Bindgen") {
+                    jet::Lexer::lex_generated(&source)
+                } else {
+                    jet::Lexer::lex(&source)
+                };
+                if !lex_diagnostics.is_empty() {
+                    return None;
+                }
+                let (tokens, _) = if source.contains("#Bindgen") {
+                    jet::Lexer::lex_generated(&source)
+                } else {
+                    jet::Lexer::lex(&source)
+                };
+                let Ok((_, parse_diagnostics)) = jet::Parser::parse_for_check(&tokens) else {
+                    return None;
+                };
+                let marker_rejected = parse_diagnostics
+                    .iter()
+                    .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0927" | "E0355"));
+                (!marker_rejected).then_some(source)
+            })
+            .unwrap_or_else(|| panic!("`{marker}` has no parseable declared site"));
+
+        let (tokens, lex_diagnostics) = if source.contains("#Bindgen") {
+            jet::Lexer::lex_generated(&source)
+        } else {
+            jet::Lexer::lex(&source)
+        };
+        assert!(lex_diagnostics.is_empty(), "`{marker}` lex: {lex_diagnostics:?}");
+        let (_, parse_diagnostics) = jet::Parser::parse_for_check(&tokens)
+            .unwrap_or_else(|diagnostics| panic!("`{marker}` parse: {diagnostics:?}"));
+        assert!(
+            parse_diagnostics
+                .iter()
+                .all(|diagnostic| !matches!(diagnostic.code.as_str(), "E0927" | "E0355")),
+            "`{marker}` was rejected during validation: {parse_diagnostics:?}"
+        );
+        let validation_diagnostics = sema_diagnostics(&source, &validation_path);
+        assert!(
+            validation_diagnostics
+                .iter()
+                .all(|diagnostic| {
+                    !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
+                        || (source.contains("#Bindgen") && diagnostic.code == "E3201")
+                }),
+            "`{marker}` failed semantic validation: {validation_diagnostics:?}"
+        );
+
+        let once = format_for_coverage(&source)
+            .unwrap_or_else(|error| panic!("`{marker}` format: {error:?}"));
+        assert_eq!(
+            once,
+            format_for_coverage(&once).expect("formatted row must round-trip")
+        );
+        assert!(
+            highlighted.iter().any(|token| token.text == row.name),
+            "`{marker}` is missing from the highlight registry"
+        );
+
+        let reflected = Registry::marker_row_and_args(row.name, false, Vec::new())
+            .unwrap_or_else(|| panic!("`{marker}` is missing from reflection"));
+        assert_eq!(reflected.row.name, row.name);
+    }
 }
 
 /// Law zero, the other half: a retired row teaches its replacement and applies
@@ -391,4 +585,90 @@ fn orphan_fact_rows_have_one_home() {
             "`{engine_fact}` is prover state, not a registered user fact plane"
         );
     }
+}
+
+/// D-VERDICT-1455-1: a parser or checker may ask the registry about a marker,
+/// but it may not grow a second string vocabulary. The scan is deliberately
+/// narrow: it follows the names used by code that matches marker names, while
+/// leaving ordinary type, protocol, and diagnostic words alone.
+fn marker_name_literal_offenders(
+    sources: impl IntoIterator<Item = (String, String)>,
+    marker_names: &[&str],
+) -> Vec<String> {
+    let mut offenders = Vec::new();
+    for (path, source) in sources {
+        for (line_number, line) in source.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or(line);
+            let names_marker = [
+                "marker_name",
+                "marker.name",
+                "attr_name",
+                "rule_name",
+                "marker_head",
+            ]
+            .iter()
+            .any(|needle| code.contains(needle));
+            if !names_marker {
+                continue;
+            }
+            for name in marker_names {
+                if code.contains(&format!("\"{name}\"")) {
+                    offenders.push(format!(
+                        "{path}:{} contains marker name `{name}`",
+                        line_number + 1
+                    ));
+                }
+            }
+        }
+    }
+    offenders
+}
+
+fn collect_source_files(directory: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_source_files(&path, found);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+#[test]
+fn marker_name_literals_stay_in_the_registry() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = Vec::new();
+    for directory in [
+        "crates/jet-lexer/src",
+        "crates/jet-parser/src",
+        "crates/jet-sema/src",
+    ] {
+        collect_source_files(&root.join(directory), &mut paths);
+    }
+    let marker_names: Vec<&str> = Registry::marker_rows()
+        .filter_map(|registered| registered.rule)
+        .filter(|row| matches!(row.status, RuleStatus::Active))
+        .map(|row| row.name)
+        .collect();
+    let sources = paths.into_iter().map(|path| {
+        let display = path.display().to_string();
+        let source = std::fs::read_to_string(path).expect("read compiler source");
+        (display, source)
+    });
+    let offenders = marker_name_literal_offenders(sources, &marker_names);
+    assert!(
+        offenders.is_empty(),
+        "marker-name literals escaped the registry:\n{}",
+        offenders.join("\n")
+    );
+
+    let seeded = marker_name_literal_offenders(
+        [("synthetic.rs".to_string(), "if marker_name == \"Inline\" {}".to_string())],
+        &["Inline"],
+    );
+    assert_eq!(seeded.len(), 1, "the seeded drift case must fail this guard");
 }

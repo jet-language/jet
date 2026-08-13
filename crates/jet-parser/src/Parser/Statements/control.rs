@@ -497,7 +497,11 @@ impl<'a> Parser<'a> {
                 Some(TokKind::Ident(n))
                     if matches!(
                         n.as_str(),
-                        "Known" | "Static" | "Inline" | "static" | "inline"
+                        Syntax::RETIRED_MARKER_KNOWN
+                            | Syntax::MARKER_STATIC
+                            | Syntax::MARKER_INLINE
+                            | "static"
+                            | "inline"
                     )
             )
     }
