@@ -580,6 +580,23 @@ fn explain_golden() {
 }
 
 #[test]
+fn explain_golden_e0003() {
+    let out = Command::new(jet())
+        .arg("explain")
+        .arg("E0003")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "jet explain E0003 should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("What this means:"), "{stdout}");
+    assert!(stdout.contains("Why Jet enforces it:"), "{stdout}");
+    assert!(stdout.contains("How to fix it:"), "{stdout}");
+    assert!(stdout.contains("Example:"), "{stdout}");
+    assert!(!stdout.contains("longer explanation will land"), "{stdout}");
+    check_snapshot("explain_E0003.txt", &stdout);
+}
+
+#[test]
 fn explain_e2211_golden() {
     let out = Command::new(jet())
         .arg("explain")

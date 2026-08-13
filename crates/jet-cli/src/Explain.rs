@@ -22,6 +22,8 @@ pub struct Explanation {
     pub why: Option<String>,
     /// A concrete next step, from a detailed row (when present).
     pub fix: Option<String>,
+    /// A short worked example for rows that need more than prose.
+    pub example: Option<String>,
     /// True when the registry marks the code as retired (kept for history).
     pub retired: bool,
 }
@@ -39,6 +41,7 @@ pub fn index() -> BTreeMap<String, Explanation> {
                 what: row.detail.then(|| row.what.to_string()),
                 why: row.detail.then(|| row.why.to_string()),
                 fix: row.detail.then(|| row.fix.to_string()),
+                example: detailed_example(row.code),
                 retired: row.status == jet_foundation::Registry::DiagnosticStatus::Retired,
             },
         );
@@ -110,6 +113,7 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 what: Some(format!("`{}` participates in the package → module → function → block policy ladder.", key.name())),
                 why: Some("one registry owns applicability, inheritance, conflicts, and provenance".to_string()),
                 fix: Some("inspect the semantic index at the target site for the effective value and full declaration chain".to_string()),
+                example: None,
                 retired: false,
             })
         })
@@ -152,6 +156,7 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                     || "move the rule to one of its registered sites".to_string(),
                     |replacement| format!("replace it with `{replacement}`"),
                 )),
+                example: None,
                 retired,
             })
         })
@@ -192,6 +197,7 @@ fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation 
             fix: Some(format!(
                 "change the meaning in {home}; a second copy anywhere else fails the guard"
             )),
+            example: None,
             retired: false,
         };
     }
@@ -225,6 +231,7 @@ fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation 
         } else {
             format!("to loosen it, write one of: {}", row.gates.join(", "))
         }),
+        example: None,
         retired: false,
     }
 }
@@ -263,6 +270,7 @@ pub fn lookup_policy(key: jet_foundation::Policy::PolicyKey, declarations: impl 
         what: Some(jet_foundation::Policy::explain(&effective)),
         why: Some("the nearest applicable declaration wins subject to the registry's tightening and conflict rules".to_string()),
         fix: Some("change the nearest declaration, or remove it to inherit the next outer value".to_string()),
+        example: None,
         retired: false,
     })
 }
@@ -292,6 +300,15 @@ pub fn render(ex: &Explanation, color: bool) -> String {
     if let Some(fix) = &ex.fix {
         out.push_str(&format!("{}\n  {}\n\n", theme.bold("How to fix it:"), fix));
     }
+    if let Some(example) = &ex.example {
+        out.push_str(&format!("{}\n", theme.bold("Example:")));
+        for line in example.lines() {
+            out.push_str("  ");
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
     if ex.what.is_none() {
         // No detailed block yet: show stage so the entry is still useful.
         if !ex.stage.is_empty() {
@@ -306,6 +323,12 @@ pub fn render(ex: &Explanation, color: bool) -> String {
         crate::Syntax::BINARY_NAME
     ));
     out
+}
+
+fn detailed_example(code: &str) -> Option<String> {
+    (code == "E0003").then(|| {
+        "fn save(path: String) ? IOError {\n    print(path)\n}".to_string()
+    })
 }
 
 /// The teaching pointer appended after a rendered error (one dim line).
