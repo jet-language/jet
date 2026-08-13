@@ -8,8 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
-use jet_codegen::AST::{as_bytes, CtFloat, CtKey, CtValue, Type};
+use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
 use jet_codegen::Diagnostics::{Diagnostic, Span};
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 use crate::Crypto;
 use crate::DB;

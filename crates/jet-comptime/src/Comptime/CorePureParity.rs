@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use super::mime_kernel;
-use crate::AST::{as_bytes, CtFloat, CtReport, CtValue, Type};
+use crate::AST::{CtFloat, CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use crate::Comptime::Builtins::{as_bool, as_int};
@@ -15,6 +15,7 @@ use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
 use jet_foundation::Syntax::CoreCallPureRoute;
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 type EvalResult = Result<CtValue, Diagnostic>;
 

@@ -22,7 +22,8 @@ use super::super::Builtins::{
 use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
-use crate::AST::{as_bytes, CtValue};
+use crate::AST::CtValue;
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 use jet_foundation::Names::{mangle, mangle_path};
 use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call,
