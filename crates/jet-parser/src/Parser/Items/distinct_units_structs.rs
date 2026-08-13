@@ -332,7 +332,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-TYPEALIAS1: `alias Name<T, E> = T ? E;`
+        /// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ? E;`
         pub(super) fn type_alias_def(
             &mut self,
             is_pub: bool,
@@ -341,7 +341,20 @@ impl<'a> Parser<'a> {
             let start = self.bump().span; // `alias`
             let (name, name_span) = self.expect_ident("after `alias`")?;
             let type_params = self.parse_opt_type_params()?;
-            self.expect(TokKind::Eq, "in a type alias declaration")?;
+            match self.peek().kind {
+                TokKind::ColonColon => {
+                    self.bump();
+                }
+                TokKind::Eq => {
+                    let equals = self.bump();
+                    self.diags.push(Diagnostic::from_row(
+                        "E0378",
+                        &[],
+                        Some(equals.span),
+                    ));
+                }
+                _ => self.expect(TokKind::ColonColon, "in a type alias declaration")?,
+            }
             let (target, target_span) = self.type_()?;
             self.expect(TokKind::Semi, "after a type alias declaration")?;
             let end = self.toks[self.pos - 1].span.end;

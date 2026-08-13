@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn rename_preserves_case_for_all_declaration_families() {
         let src = r#"UserId :: distinct Int
-alias Count = Int
+alias Count :: Int
 #UnitFamily(Length) { meter }
 state Door { Open }
 protocol Wire { client: Send(value: Int) }

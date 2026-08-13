@@ -689,7 +689,7 @@ pub fn e0324(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0324",
         format!(
-            "a type alias needs type parameters — write `{} Name<T> = …`",
+            "a type alias needs type parameters — write `{} Name<T> :: …`",
             Syntax::KW_ALIAS
         ),
         format!(

@@ -299,7 +299,7 @@ pub const KW_STRUCT: &str = "struct";
 /// S30 (ratified M3): sum-type definition keyword.
 pub const KW_ENUM: &str = "enum";
 
-/// D-TYPEALIAS1 (ratified 2026-06-28): transparent type alias — `alias Name<T> = …`
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B (ratified 2026-06-28): transparent type alias — `alias Name<T> :: …`
 /// for generic type shortcuts only (not primitive newtypes).
 pub const KW_ALIAS: &str = "alias";
 

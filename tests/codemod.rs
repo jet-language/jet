@@ -548,7 +548,7 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
-        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> = Int ? Int\nfn convert(value: Int) => Int { return value }\nfn run() {}\n",
+        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> :: Int ? Int\nfn convert(value: Int) => Int { return value }\nfn run() {}\n",
     )
     .unwrap();
     let object = project.join("types.codemod.json");

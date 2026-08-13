@@ -31,6 +31,16 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 }
 
 #[test]
+fn type_alias_binding_sigils_are_canonical_and_idempotent() {
+    let old = "alias Result<T> = T ? Int\nfn run() {}\n";
+    let once = jet::format_source(old).expect("retired alias spelling should format");
+    assert!(once.contains("alias Result<T> :: T ? Int"), "{once}");
+    assert!(!once.contains("alias Result<T> ="), "{once}");
+    let twice = jet::format_source(&once).expect("canonical alias spelling should reformat");
+    assert_eq!(once, twice, "alias formatting must be idempotent");
+}
+
+#[test]
 fn fmt_preserves_script_and_declaration_source_order() {
     let source = "message :: \"script entry\"\nprint(message)\n\nfn helper() => Int {\n    return 42\n}\n";
     let once = jet::format_source(source).expect("mixed script source should format");

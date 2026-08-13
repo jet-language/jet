@@ -72,6 +72,7 @@
   "Bench"
   "Test"
   "add"
+  "alias"
   "as"
   "change"
   "derive"

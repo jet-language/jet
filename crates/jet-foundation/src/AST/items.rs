@@ -13,7 +13,7 @@ pub enum Item {
     /// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — a distinct type
     /// declaration. `distinct`-over-`distinct` base is rejected in sema.
     Distinct(DistinctDef),
-    /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — a transparent
+    /// D-TYPEALIAS1 / D-ALIAS-OP1=B (ratified 2026-06-28): `alias Name<T> :: …` — a transparent
     /// type alias for generic shortcuts. Erases at codegen (I3).
     TypeAlias(TypeAliasDef),
     /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
@@ -1571,7 +1571,7 @@ pub struct StructDef {
     pub validate_span: Option<Span>,
 }
 
-/// D-TYPEALIAS1: `alias Name<T, E> = T ? E` — transparent generic type shortcut.
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ? E` — transparent generic type shortcut.
 #[derive(Debug, Clone)]
 pub struct TypeAliasDef {
     pub is_pub: bool,

@@ -3403,6 +3403,45 @@ fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
 }
 
 #[test]
+fn type_alias_example_matches_golden_on_all_execution_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let file = "examples/features/types/type_alias.jet";
+    let expected = ProgramOutput::ran(golden_stdout("types/type_alias"), String::new(), 0);
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("type_alias example must execute in interpreter tier: {diags:?}")
+        }
+    };
+
+    let source = fs::read_to_string(file).unwrap();
+    let resident = run_cranelift_resident(&source, "type_alias_golden");
+    let default = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("default dev failed type_alias example: {diags:?}"),
+    };
+
+    let dir = std::env::temp_dir().join(format!("jet_type_alias_golden_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "type_alias_golden", 0, "types/type_alias", file);
+
+    assert_eq!(interpreted, expected, "type_alias interpreter output drifted");
+    assert_eq!(resident, expected, "type_alias resident JIT output drifted");
+    assert_eq!(default, expected, "type_alias default dev output drifted");
+    assert_eq!(aot, expected, "type_alias AOT output drifted");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

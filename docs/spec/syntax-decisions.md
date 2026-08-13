@@ -923,7 +923,7 @@ length + inner_diameter
 // fix: Millimeter.from_meter(length)?
 ```
 
-**D-TYPEALIAS1 — Aliases**: `alias X = Y` transparent aliases, scoped to
+**D-TYPEALIAS1 — Aliases**: `alias X :: Y` transparent aliases, scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
@@ -932,6 +932,9 @@ bracket forms; shipped today: `Set<T>`, `SortedSet<T>`, `Deque<T>`,
 `PriorityQueue<T>`, `Cache<K,V>`, `Bag<T>`, `BitSet`, and `ByteBuffer`.
 `HashMap<K,V>` and `BTreeMap<K,V>` are reserved names for specialized map
 implementations.
+
+**D-ALIAS-OP1=B** *(ratified 2026-08-06, card #1513; amends D-TYPEALIAS1)*:
+Alias declarations bind with `::`; the retired `=` spelling emits E0378.
 
 **D-BIGINT1** *(home moved to `core.math` by D-CORE-NUMERIC1=A, 2026-07-12)*: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision

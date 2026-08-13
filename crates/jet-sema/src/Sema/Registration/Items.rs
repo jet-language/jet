@@ -133,7 +133,7 @@ pub(crate) fn register_distinct(
     );
 }
 
-/// D-TYPEALIAS1: register `alias Name<T> = …` — generic shortcuts only.
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
 pub(crate) fn register_type_alias(
     a: &crate::AST::TypeAliasDef,
     registry: &mut TypeRegistry,

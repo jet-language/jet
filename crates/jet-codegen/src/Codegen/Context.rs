@@ -1469,7 +1469,7 @@ impl Cx {
         None
     }
 
-    /// D-TYPEALIAS1: expand `alias Name<T> = …` applications to their target type.
+    /// D-TYPEALIAS1 / D-ALIAS-OP1=B: expand `alias Name<T> :: …` applications to their target type.
     pub(crate) fn expand_type_aliases(&self, ty: &Type) -> Type {
         match ty {
             Type::Apply { name, args } if self.type_aliases.contains_key(name) => {
@@ -4973,7 +4973,7 @@ mod tests {
 
     #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {
-        let source = "alias Callback<T> = fn(*, force: T) => Int;\nfn run() {}\n";
+        let source = "alias Callback<T> :: fn(*, force: T) => Int;\nfn run() {}\n";
         let (tokens, lex_diags) = crate::Lexer::lex(source);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let program = crate::Parser::parse(&tokens).expect("parse failed");

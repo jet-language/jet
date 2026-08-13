@@ -122,7 +122,7 @@ fn run() {
         ),
         (
             "enum payload",
-            r#"alias Boxed<T> = T
+            r#"alias Boxed<T> :: T
 enum CallbackPayload { Callback(Boxed<fn(Int) => Int>) }
 fn bump(n: Int) => Int { return n + 1 }
 fn run() {

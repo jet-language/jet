@@ -1172,7 +1172,7 @@ impl<'a> Parser<'a> {
                     TokKind::Ident(n) if n == Syntax::KW_FACT && self.at_fact_decl() => {
                         self.fact_decl().map(Item::FactDecl)
                     }
-                    // D-TYPEALIAS1: `alias Name<T> = …`
+                    // D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T> :: …`
                     TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
                         self.type_alias_def(is_pub, is_package_pub)

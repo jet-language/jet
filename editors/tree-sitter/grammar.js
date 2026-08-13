@@ -116,6 +116,7 @@ module.exports = grammar({
         $.trait_def,
         $.tag_def,
         $.distinct_def,
+        $.alias_def,
         $.comptime_stmt,
         $.use_stmt,
         $.module_def,
@@ -460,6 +461,17 @@ module.exports = grammar({
         "::",
         "distinct",
         field("base", $._type),
+      ),
+
+    // D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T> :: Target`.
+    alias_def: ($) =>
+      seq(
+        optional(choice("pub", seq("pub", "(", "package", ")"))),
+        "alias",
+        field("name", $.type_identifier),
+        optional($.type_params),
+        "::",
+        field("target", $._type),
       ),
 
     // ── Test / Bench blocks (S43, D-BENCH1, D-CASING1) ─────────────────────

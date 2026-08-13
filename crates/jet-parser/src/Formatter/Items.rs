@@ -180,12 +180,8 @@ impl<'a> Fmt<'a> {
                 self.skip_verbatim_comments(cm.span.end);
             }
             Item::Distinct(d) => self.fmt_distinct(d),
-            // D-TYPEALIAS1: type alias declarations are emitted verbatim.
-            Item::TypeAlias(a) => {
-                let text = self.src[a.span.start..a.span.end].to_string();
-                self.write(&text);
-                self.skip_verbatim_comments(a.span.end);
-            }
+            // D-TYPEALIAS1 / D-ALIAS-OP1=B: aliases use the binding sigil.
+            Item::TypeAlias(a) => self.fmt_type_alias(a),
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {
@@ -462,6 +458,15 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
         }
+    }
+
+    fn fmt_type_alias(&mut self, a: &crate::AST::TypeAliasDef) {
+        self.fmt_pub_qualifier(a.is_pub, a.is_package_pub);
+        self.write("alias ");
+        self.write(&a.name);
+        self.fmt_type_params(&a.type_params);
+        self.write(" :: ");
+        self.fmt_type(&a.target);
     }
 
     fn fmt_type_params(&mut self, params: &[TypeParam]) {

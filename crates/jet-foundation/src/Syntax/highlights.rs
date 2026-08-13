@@ -1060,6 +1060,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "U64"
             | "U8"
             | "add"
+            | "alias"
             | "as"
             | "break"
             | "change"

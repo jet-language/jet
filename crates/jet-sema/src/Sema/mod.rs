@@ -161,7 +161,7 @@ pub(crate) enum TypeDef {
         /// vector. The interval plane is projected here for existing checks.
         knowledge: KnowledgeVector,
     },
-    /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — transparent
+    /// D-TYPEALIAS1 / D-ALIAS-OP1=B (ratified 2026-06-28): `alias Name<T> :: …` — transparent
     /// generic shortcut; expands in sema, erases at codegen.
     Alias {
         params: Vec<crate::AST::TypeParam>,
