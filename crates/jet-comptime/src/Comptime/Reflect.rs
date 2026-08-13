@@ -1059,6 +1059,9 @@ pub fn fact_read_value(
         if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
             return build_fact_value(build_facts, read);
         }
+        if let Some(name) = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
+            return build_setting_value(build_facts, name);
+        }
     }
     let is_build_subject = matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
     let read = if member == crate::Syntax::BUILD_INFO_PROFILE {
