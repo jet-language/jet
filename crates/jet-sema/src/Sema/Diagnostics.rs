@@ -1259,7 +1259,7 @@ pub(crate) fn is_equatable(
         Type::Result { ok, err } => {
             is_equatable(ok, registry, trait_reg) && is_equatable(err, registry, trait_reg)
         }
-        Type::Named(name) if name == "U8" => true,
+        Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
         Type::Named(name)
             if matches!(
                 name.as_str(),
@@ -1321,7 +1321,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
             types_comparable(ok, registry) && types_comparable(err, registry)
         }
         Type::List(inner) => types_comparable(inner, registry),
-        Type::Named(name) if name == "U8" => true,
+        Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
         // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
         Type::Named(name)
             if matches!(

@@ -402,6 +402,7 @@ impl<'a> Parser<'a> {
                 | TokKind::Lt
                 | TokKind::Le
                 | TokKind::Ge
+                | TokKind::Compare
                 | TokKind::TildePipe
                 | TokKind::Amp
                 | TokKind::Shl

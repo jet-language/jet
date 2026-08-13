@@ -1,0 +1,28 @@
+// D-CMP3WAY1=B: primitive `<=>`, Ordering combinators, and a user comparator.
+struct Player {
+    name: String
+    points: Int
+}
+
+impl Player.Comparable {
+    fn compare(self, other: Player) => Ordering {
+        return (self.points <=> other.points).then(self.name <=> other.name)
+    }
+}
+
+fn run() {
+    int_order :: 1 <=> 2
+    text_order :: "alpha" <=> "beta"
+    print("int less: {int_order == Ordering.Less}")
+    print("string less: {text_order == Ordering.Less}")
+
+    leaderboard := [
+        Player.{ name: "Bea", points: 30 },
+        Player.{ name: "Ada", points: 10 },
+        Player.{ name: "Cal", points: 20 }
+    ]
+    leaderboard.sort_by((left: Player, right: Player) => left.compare(right))
+    print("{leaderboard[0].name}:{leaderboard[0].points}")
+    print("{leaderboard[1].name}:{leaderboard[1].points}")
+    print("{leaderboard[2].name}:{leaderboard[2].points}")
+}

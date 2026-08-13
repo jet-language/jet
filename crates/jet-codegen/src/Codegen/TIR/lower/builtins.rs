@@ -155,6 +155,13 @@ pub(crate) fn resolve_builtin_op(
     cx: &Cx,
 ) -> Option<TBuiltinOp> {
     let rty = tir_recv_jet_ty(receiver, env);
+    if matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_ORDERING) {
+        return match (method, args.len()) {
+            ("then", 1) => Some(TBuiltinOp::OrderingThen),
+            ("reverse", 0) => Some(TBuiltinOp::OrderingReverse),
+            _ => None,
+        };
+    }
     let is_byte_buffer =
         matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
     // ByteBuffer.position() is a 0-arg cursor read — must win before the
@@ -900,6 +907,9 @@ pub(crate) fn resolve_closure_op(
         "any" => TClosureOp::Any,
         "all" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAll,
         "all" => TClosureOp::All,
+        "sort_by" if matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 2) => {
+            TClosureOp::SortByCompare
+        }
         "sort_by" => TClosureOp::SortBy,
         "reduce" => TClosureOp::Reduce,
         // D-ITER1: new closure adapters.
@@ -968,7 +978,7 @@ pub(crate) fn resolve_closure_op(
         // The gate (`is_closure_method`) admits only the names above.
         _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
     };
-    if matches!(op, TClosureOp::SortBy) {
+    if matches!(op, TClosureOp::SortBy | TClosureOp::SortByCompare) {
         debug_assert_eq!(
             crate::Collections::builtin_receiver_borrow(recv_ty, method),
             crate::Collections::BuiltinReceiverBorrow::EagerWrite

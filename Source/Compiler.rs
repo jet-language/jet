@@ -1529,6 +1529,7 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::Gt => "operator.greater",
         TokKind::Le => "operator.less_equal",
         TokKind::Ge => "operator.greater_equal",
+        TokKind::Compare => "operator.compare",
         TokKind::PlusEq => "operator.add_assign",
         TokKind::PlusPlus => "operator.increment",
         TokKind::MinusEq => "operator.subtract_assign",

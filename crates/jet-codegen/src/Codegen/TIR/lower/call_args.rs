@@ -487,6 +487,10 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     }
 
     match e {
+        Expr::Paren(inner, _) => tir_recv_jet_ty(inner, env),
+        Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => Some(Type::Named(
+            crate::Syntax::TYPE_ORDERING.to_string(),
+        )),
         Expr::Ident(name, _) => env.ty_of(name).map(dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),

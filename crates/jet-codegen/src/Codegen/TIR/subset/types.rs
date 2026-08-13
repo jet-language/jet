@@ -39,6 +39,11 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
         return true;
     }
+    // D-CMP3WAY1=B: Ordering is a compiler-owned core enum with a fixed,
+    // scalar representation. Keep it on the TIR path like the other core enums.
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_ORDERING) {
+        return true;
+    }
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_TASKGROUP) {
         return true;
     }

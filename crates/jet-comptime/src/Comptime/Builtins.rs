@@ -182,6 +182,16 @@ pub fn eval_binop(
         (BinOp::Gt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Greater)),
         (BinOp::Le, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Greater)),
         (BinOp::Ge, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Less)),
+        (BinOp::Compare, a, b) => cmp(a, b, span).map(|o| CtValue::Enum {
+            type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+            variant: match o {
+                std::cmp::Ordering::Less => "Less",
+                std::cmp::Ordering::Equal => "Equal",
+                std::cmp::Ordering::Greater => "Greater",
+            }
+            .to_string(),
+            args: Vec::new(),
+        }),
         (BinOp::And, Bool(a), Bool(b)) => Ok(Bool(a && b)),
         (BinOp::Or, Bool(a), Bool(b)) => Ok(Bool(a || b)),
         (_op, _left, _right) => Err(unsupported("this operation", span)),
@@ -191,6 +201,14 @@ pub fn eval_binop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ordering(variant: &str) -> CtValue {
+        CtValue::Enum {
+            type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+            variant: variant.to_string(),
+            args: Vec::new(),
+        }
+    }
 
     #[test]
     fn byte_storage_and_u8_list_compare_by_value() {
@@ -238,6 +256,42 @@ mod tests {
             eval_binop(BinOp::Ne, bytes, different, Span::new(0, 0)).unwrap(),
             CtValue::Bool(true)
         );
+    }
+
+    #[test]
+    fn ordering_then_keeps_the_first_non_equal_result() {
+        let span = Span::new(0, 0);
+        assert_eq!(
+            apply_method(
+                &ordering("Equal"),
+                "then",
+                vec![ordering("Greater")],
+                span,
+            )
+            .unwrap(),
+            ordering("Greater")
+        );
+        assert_eq!(
+            apply_method(
+                &ordering("Less"),
+                "then",
+                vec![ordering("Greater")],
+                span,
+            )
+            .unwrap(),
+            ordering("Less")
+        );
+    }
+
+    #[test]
+    fn ordering_reverse_swaps_less_and_greater() {
+        let span = Span::new(0, 0);
+        for (input, expected) in [("Less", "Greater"), ("Equal", "Equal"), ("Greater", "Less")] {
+            assert_eq!(
+                apply_method(&ordering(input), "reverse", Vec::new(), span).unwrap(),
+                ordering(expected)
+            );
+        }
     }
 }
 
@@ -735,6 +789,52 @@ pub fn apply_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let CtValue::Enum {
+        type_name,
+        variant,
+        args: enum_args,
+    } = recv
+    {
+        if type_name == crate::Syntax::TYPE_ORDERING && enum_args.is_empty() {
+            match method {
+                "reverse" if args.is_empty() => {
+                    return Ok(CtValue::Enum {
+                        type_name: type_name.clone(),
+                        variant: match variant.as_str() {
+                            "Less" => "Greater",
+                            "Greater" => "Less",
+                            _ => "Equal",
+                        }
+                        .to_string(),
+                        args: Vec::new(),
+                    });
+                }
+                "then" if args.len() == 1 => {
+                    let Some(CtValue::Enum {
+                        type_name: other_type,
+                        variant: other_variant,
+                        args: other_args,
+                    }) = args.into_iter().next()
+                    else {
+                        return Err(unsupported("Ordering.then needs an Ordering", span));
+                    };
+                    if other_type != crate::Syntax::TYPE_ORDERING || !other_args.is_empty() {
+                        return Err(unsupported("Ordering.then needs an Ordering", span));
+                    }
+                    return Ok(CtValue::Enum {
+                        type_name: type_name.clone(),
+                        variant: if variant == "Equal" {
+                            other_variant
+                        } else {
+                            variant.clone()
+                        },
+                        args: Vec::new(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
     if let Some(result) = super::MathLayout::apply_method(recv, method, &args, span) {
         return result;
     }

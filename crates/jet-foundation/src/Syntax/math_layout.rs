@@ -344,6 +344,8 @@ pub const OP_LT: &str = "<";
 pub const OP_GT: &str = ">";
 pub const OP_LE: &str = "<=";
 pub const OP_GE: &str = ">=";
+/// D-CMP3WAY1=B (ratified 2026-08-13): three-way comparison over `Ordering`.
+pub const OP_COMPARE: &str = "<=>";
 
 /// S17 (ratified): compound assignment operators (M1).
 pub const OP_PLUS_EQ: &str = "+=";

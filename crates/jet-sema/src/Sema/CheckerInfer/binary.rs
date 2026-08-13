@@ -422,23 +422,38 @@ impl<'a> Checker<'a> {
         if !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
             return false;
         }
+        let ty = self.operator_expr_type(expr);
         let trait_name = match op {
             BinOp::Add => crate::Syntax::TRAIT_ADD,
             BinOp::Sub => crate::Syntax::TRAIT_SUB,
             BinOp::Mul => crate::Syntax::TRAIT_MUL,
             BinOp::Div => crate::Syntax::TRAIT_DIV,
-            BinOp::Eq | BinOp::Ne => crate::Syntax::TRAIT_EQUATABLE,
-            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => crate::Syntax::TRAIT_COMPARABLE,
+            BinOp::Eq | BinOp::Ne => {
+                let has_comparable = ty.as_ref().is_some_and(|ty| match ty {
+                    Type::Named(name) => {
+                        self.type_implements_trait_for_name(name, crate::Syntax::TRAIT_COMPARABLE)
+                            || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE)
+                    }
+                    _ => false,
+                });
+                if has_comparable {
+                    crate::Syntax::TRAIT_COMPARABLE
+                } else {
+                    crate::Syntax::TRAIT_EQUATABLE
+                }
+            }
+            BinOp::Compare | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                crate::Syntax::TRAIT_COMPARABLE
+            }
             _ => return false,
         };
-        self.operator_expr_type(expr)
-            .is_some_and(|ty| match &ty {
-                Type::Named(name) => {
-                    self.type_implements_trait_for_name(name, trait_name)
-                        || self.type_param_has_bound(&ty, trait_name)
-                }
-                _ => false,
-            })
+        ty.is_some_and(|ty| match &ty {
+            Type::Named(name) => {
+                self.type_implements_trait_for_name(name, trait_name)
+                    || self.type_param_has_bound(&ty, trait_name)
+            }
+            _ => false,
+        })
     }
 
     /// Binary operators and type checking.
@@ -521,6 +536,7 @@ impl<'a> Checker<'a> {
                 | BinOp::Div
                 | BinOp::Eq
                 | BinOp::Ne
+                | BinOp::Compare
                 | BinOp::Lt
                 | BinOp::Le
                 | BinOp::Gt
@@ -587,6 +603,7 @@ impl<'a> Checker<'a> {
                 | BinOp::Pow
                 | BinOp::Eq
                 | BinOp::Ne
+                | BinOp::Compare
                 | BinOp::Lt
                 | BinOp::Le
                 | BinOp::Gt
@@ -617,15 +634,23 @@ impl<'a> Checker<'a> {
             || self.unit_fact_for_type(&rt).is_some();
         if lt == rt && !dimensional_multiplicative && !unit_operator {
             if let Type::Named(type_name) = &lt {
+                let comparable_hook = self
+                    .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_COMPARABLE)
+                    || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE);
                 let hook = match op {
                     BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),
                     BinOp::Sub => Some((crate::Syntax::TRAIT_SUB, "sub", lt.clone())),
                     BinOp::Mul => Some((crate::Syntax::TRAIT_MUL, "mul", lt.clone())),
                     BinOp::Div => Some((crate::Syntax::TRAIT_DIV, "div", lt.clone())),
+                    BinOp::Eq | BinOp::Ne if comparable_hook => Some((
+                        crate::Syntax::TRAIT_COMPARABLE,
+                        "compare",
+                        Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
+                    )),
                     BinOp::Eq | BinOp::Ne => {
                         Some((crate::Syntax::TRAIT_EQUATABLE, "equal", Type::Bool))
                     }
-                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Some((
+                    BinOp::Compare | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Some((
                         crate::Syntax::TRAIT_COMPARABLE,
                         "compare",
                         Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
@@ -683,6 +708,18 @@ impl<'a> Checker<'a> {
                             checked_widen: false,
                         };
                         *replacement = Some(match op {
+                            BinOp::Eq | BinOp::Ne if comparable_hook => Expr::Binary(
+                                if op == BinOp::Eq { BinOp::Eq } else { BinOp::Ne },
+                                Box::new(call),
+                                Box::new(Expr::EnumLit {
+                                    type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+                                    variant: "Equal".to_string(),
+                                    args: Vec::new(),
+                                    leading_dot: false,
+                                    span,
+                                }),
+                                span,
+                            ),
                             BinOp::Ne => Expr::Unary(crate::AST::UnOp::Not, Box::new(call), span),
                             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                                 let (cmp, variant) = match op {
@@ -705,9 +742,12 @@ impl<'a> Checker<'a> {
                                     span,
                                 )
                             }
+                            BinOp::Compare => call,
                             _ => call,
                         });
-                        return Some(if op.is_comparison() {
+                        return Some(if op == BinOp::Compare {
+                            Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+                        } else if op.is_comparison() {
                             Type::Bool
                         } else {
                             lt
@@ -867,7 +907,7 @@ impl<'a> Checker<'a> {
                             ));
                             return None;
                         }
-                        (BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge, left_kind, right_kind)
+                        (BinOp::Eq | BinOp::Ne | BinOp::Compare | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge, left_kind, right_kind)
                             if left_kind == right_kind =>
                         {
                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
@@ -880,7 +920,11 @@ impl<'a> Checker<'a> {
                                 source_expr,
                                 span,
                             ) {
-                                return Some(Type::Bool);
+                                return Some(if op == BinOp::Compare {
+                                    Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+                                } else {
+                                    Type::Bool
+                                });
                             }
                             self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
                             self.convert_unit_operand(rhs, rname, rfact, dest_name, dest_fact, span);
@@ -1365,6 +1409,17 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     Some(Type::Bool)
+                } else {
+                    self.op_mismatch(op, &lt, &rt, span);
+                    None
+                }
+            }
+            BinOp::Compare => {
+                if lt == rt
+                    && (self.types_comparable_type(&lt)
+                        || self.type_param_has_bound(&lt, COMPARABLE))
+                {
+                    Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
                 } else {
                     self.op_mismatch(op, &lt, &rt, span);
                     None

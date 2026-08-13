@@ -19,6 +19,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
     Syntax::TYPE_REMOVE_BY,
+    Syntax::TYPE_ORDERING,
     Syntax::TYPE_RANGE,
     Syntax::TYPE_SHARED_GUARD,
     Syntax::TYPE_SHARED_WEAK,
@@ -94,6 +95,23 @@ pub fn is_closure_method(method: &str) -> bool {
         | "para_map" | "para_filter" | "para_partition" | "para_fold"
         | "edit_disjoint"
     )
+}
+
+/// The callback shape for the two `sort_by` forms. A unary callback extracts
+/// an orderable key; a binary callback is the direct `Ordering` comparator.
+pub fn sort_by_callback_type(inner: &Type, comparator: bool) -> Type {
+    Type::Fn {
+        params: if comparator {
+            vec![inner.clone(), inner.clone()]
+        } else {
+            vec![inner.clone()]
+        },
+        ret: comparator.then(|| Box::new(Type::Named(Syntax::TYPE_ORDERING.to_string()))),
+        effect_bound: None,
+        param_contract: None,
+        call_metadata: None,
+        return_view_provenance: None,
+    }
 }
 
 /// D-ITERTOOLS1=A: adapters that return a lazy `Iter<T>` view.
@@ -209,6 +227,12 @@ pub fn builtin_method_return(
         }
         Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
+        Type::Named(n) if n == Syntax::TYPE_ORDERING => match (method, arg_count) {
+            ("then", 1) | ("reverse", 0) => Some(Some(Type::Named(
+                Syntax::TYPE_ORDERING.to_string(),
+            ))),
+            _ => None,
+        },
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         Type::Named(n) if n == Syntax::TYPE_RANGE => match (method, arg_count) {
             ("contains", 1) => Some(Some(Type::Bool)),
@@ -2075,6 +2099,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
     }
     match recv_ty {
+        Type::Named(n) if n == Syntax::TYPE_ORDERING => match method {
+            "then" => Some(vec![Type::Named(Syntax::TYPE_ORDERING.to_string())]),
+            "reverse" => Some(vec![]),
+            _ => None,
+        },
         Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => {
             Some(vec![Type::Int])
         }
@@ -2218,7 +2247,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 call_metadata: None,
             }]),
             // D-ITER1: key-extracting closure methods.
-            "sort_by" | "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
+            "sort_by" => Some(vec![sort_by_callback_type(inner, false)]),
+            "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines key type
                 effect_bound: None, return_view_provenance: None,

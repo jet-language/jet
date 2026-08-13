@@ -342,6 +342,10 @@ impl<'a> Lexer<'a> {
                 '|' => toks.push(simple(self, TokKind::Pipe, 1)),
                 '<' if next == '<' && next2 == '=' => toks.push(simple(self, TokKind::ShlEq, 3)),
                 '<' if next == '<' => toks.push(simple(self, TokKind::Shl, 2)),
+                // D-CMP3WAY1=B: `<=>` must win over `<=` (longest match).
+                '<' if next == '=' && next2 == '>' => {
+                    toks.push(simple(self, TokKind::Compare, 3))
+                }
                 '<' if next == '=' => toks.push(simple(self, TokKind::Le, 2)),
                 '<' => toks.push(simple(self, TokKind::Lt, 1)),
                 '>' if next == '>' && next2 == '=' => toks.push(simple(self, TokKind::ShrEq, 3)),

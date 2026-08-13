@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
 
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
 #[test]
@@ -82,6 +82,55 @@ fn run() {
     assert_eq!(
         stdout,
         "marked 1\nmarked 2\nmarked 3\n4,6 4,6 4,6 true true true true true true true 7 7\n"
+    );
+}
+
+/// D-CMP3WAY1=B: `<=>` is the primitive Ordering result, and a Comparable
+/// hook derives all six Boolean comparison operators from that same result.
+#[test]
+fn spaceship_and_ordering_route_through_tir() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Score { points: Int }
+
+impl Score.Comparable {
+    fn compare(self, rhs: Score) => Ordering {
+        if self.points < rhs.points { return Ordering.Less }
+        if self.points > rhs.points { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+fn run() {
+    low :: Score.{ points: 10 }
+    high :: Score.{ points: 20 }
+    int_cmp :: 1 <=> 2
+    text_cmp :: "alpha" <=> "beta"
+    chained :: (low <=> high).then(high <=> high)
+    then_greater :: (low <=> low).then(high <=> low)
+    reverse_greater :: (high <=> low).reverse()
+    reverse_equal :: (low <=> low).reverse()
+    numbers := [3, 1, 2]
+    numbers.sort_by((left: Int, right: Int) => left <=> right)
+    scores := [Score.{ points: 30 }, Score.{ points: 10 }, Score.{ points: 20 }]
+    scores.sort_by((left: Score, right: Score) => left.compare(right))
+    print("{(low < high)} {(low <= high)} {(high > low)} {(high >= low)} {(low == low)} {(low != high)}")
+    print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
+    print("{numbers[0]} {numbers[1]} {numbers[2]}")
+    print("{scores[0].points} {scores[1].points} {scores[2].points}")
+}
+"#;
+    assert_tiers_agree(
+        "tir_spaceship_ordering",
+        src,
+        "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\n"
+    );
+    let rust = compile("tir_spaceship_compare_desugar", src);
+    assert!(
+        rust.contains("Comparable::compare"),
+        "`<=>` must lower through Comparable::compare:\n{rust}"
     );
 }
 

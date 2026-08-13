@@ -394,7 +394,13 @@ impl Prec {
         match op {
             BinOp::Or => Prec::Or,
             BinOp::And => Prec::And,
-            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => Prec::Cmp,
+            BinOp::Eq
+            | BinOp::Ne
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::Le
+            | BinOp::Ge
+            | BinOp::Compare => Prec::Cmp,
             BinOp::BitOr => Prec::BitOr,
             BinOp::BitXor => Prec::BitXor,
             BinOp::BitAnd => Prec::BitAnd,

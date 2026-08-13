@@ -654,6 +654,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
+            // D-CMP3WAY1=B: Ordering is the compiler-owned three-way comparison
+            // result. Its variants are unit values and need no user-enum registry.
+            if type_name == crate::Syntax::TYPE_ORDERING {
+                return args.is_empty() && matches!(variant.as_str(), "Less" | "Equal" | "Greater");
+            }
             // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum, always
             // covered — all three variants are unit (no payload args to check).
             if type_name == "ProcessStreamMode" {

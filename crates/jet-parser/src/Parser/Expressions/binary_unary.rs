@@ -298,6 +298,7 @@ impl<'a> Parser<'a> {
                 TokKind::Gt if self.module_arg_expr_depth != Some(self.depth) => Some(BinOp::Gt),
                 TokKind::Le => Some(BinOp::Le),
                 TokKind::Ge => Some(BinOp::Ge),
+                TokKind::Compare => Some(BinOp::Compare),
                 _ => None,
             };
             let Some(op) = op else { return Ok(lhs) };
@@ -313,6 +314,18 @@ impl<'a> Parser<'a> {
                 }
             }
             let rhs = self.expr_bitxor(allow_struct_lit)?;
+
+            // D-CMP3WAY1=B: spaceship comparison is one binary operation, not
+            // a relational chain. User-defined values are rewritten by sema
+            // to their `compare` hook; built-ins retain this node for lowering.
+            if op == BinOp::Compare {
+                let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+                let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
+                if let Some(second) = self.peek_cmp_span() {
+                    return Err(self.chained_eq_error(second));
+                }
+                return Ok(cmp);
+            }
     
             // `==`/`!=` never chain — D-CHAINCMP1 excludes them. Reproduce the
             // pre-existing behavior exactly: any further relational/equality
@@ -385,7 +398,8 @@ impl<'a> Parser<'a> {
                 | TokKind::Lt
                 | TokKind::Gt
                 | TokKind::Le
-                | TokKind::Ge => Some(self.peek().span),
+                | TokKind::Ge
+                | TokKind::Compare => Some(self.peek().span),
                 _ => None,
             }
         }

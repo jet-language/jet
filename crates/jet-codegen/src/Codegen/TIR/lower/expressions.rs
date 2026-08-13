@@ -2357,7 +2357,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
             // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
             // it from the same sema table so the node's `ty` stays honest.
-            let ty = if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
+            let ty = if *op == BinOp::Compare {
+                Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+            } else if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
                 Type::Bool
             } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
                 let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);

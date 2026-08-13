@@ -139,6 +139,7 @@ fn suppresses_terminator(kind: &TokKind) -> bool {
             | TokKind::Gt
             | TokKind::Le
             | TokKind::Ge
+            | TokKind::Compare
             | TokKind::Amp
             | TokKind::Pipe
             | TokKind::Caret

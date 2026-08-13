@@ -4010,6 +4010,8 @@ pub enum TClosureOp {
     All,
     /// `sort_by` — `{ jet_list_sort_by(&mut recv, f); }`.
     SortBy,
+    /// `sort_by` with a binary `T -> T -> Ordering` comparator.
+    SortByCompare,
     /// `reduce` — `jet_list_reduce((recv).clone(), seed, f)`.
     Reduce,
     // D-ITER1: lazy adapter closure methods.
@@ -4247,6 +4249,10 @@ pub enum TBuiltinOp {
     Reverse,
     /// `sort()` (no comparator) → `(recv).sort()`.
     Sort,
+    /// `Ordering.then(other)` keeps the first non-equal result.
+    OrderingThen,
+    /// `Ordering.reverse()` swaps Less and Greater.
+    OrderingReverse,
     /// `join(sep)` → `(recv).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join((a0).as_str())`.
     JoinSep,
     Sum { float: bool },

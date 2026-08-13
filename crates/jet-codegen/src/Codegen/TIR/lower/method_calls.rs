@@ -4380,6 +4380,16 @@ fn lower_method_call_impl(
                     _ => None,
                 })
             });
+        if method == "sort_by"
+            && matches!(
+                args.first().map(|arg| &arg.expr),
+                Some(Expr::Lambda(lambda)) if lambda.params.len() == 2
+            )
+        {
+            if let Type::List(inner) | Type::FixedList { elem: inner, .. } = &callback_recv_ty {
+                callback_params = Some(vec![(**inner).clone(), (**inner).clone()]);
+            }
+        }
         if matches!(method, "reduce" | "fold" | "scan") {
             if let Some(seed_ty) = args.first().map(|arg| lower_expr(&arg.expr, cx, env).ty) {
                 if let Some(first) = callback_params

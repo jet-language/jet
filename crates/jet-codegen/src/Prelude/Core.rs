@@ -1501,6 +1501,16 @@ where
 {
     xs.sort_by_key(f);
 }
+fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
+where
+    F: FnMut(&T, &T) -> __jet_Ordering,
+{
+    xs.sort_by(|left, right| match f(left, right) {
+        __jet_Ordering::__jet_Less => std::cmp::Ordering::Less,
+        __jet_Ordering::__jet_Equal => std::cmp::Ordering::Equal,
+        __jet_Ordering::__jet_Greater => std::cmp::Ordering::Greater,
+    });
+}
 fn jet_list_reduce<T, U, F, I>(xs: I, init: U, mut f: F) -> U
 where
     I: IntoIterator<Item = T>,
@@ -1572,4 +1582,18 @@ fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) ->
 }
 fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
     jet_map_pop_first_kernel(m)
+}
+fn jet_ordering_then(first: &__jet_Ordering, second: &__jet_Ordering) -> __jet_Ordering {
+    match first {
+        __jet_Ordering::__jet_Equal => *second,
+        _ => *first,
+    }
+}
+
+fn jet_ordering_reverse(value: &__jet_Ordering) -> __jet_Ordering {
+    match value {
+        __jet_Ordering::__jet_Less => __jet_Ordering::__jet_Greater,
+        __jet_Ordering::__jet_Greater => __jet_Ordering::__jet_Less,
+        __jet_Ordering::__jet_Equal => __jet_Ordering::__jet_Equal,
+    }
 }

@@ -5778,6 +5778,14 @@ symbols, precedence, overload sets, or side-effect meanings. `+=` reuses `Add`.
 Beginner `#Numeric`/`#Comparable` and auto equality remain front doors to the
 same capabilities; built-in numeric, lane, and linalg behavior is unchanged.
 
+**D-CMP3WAY1=B — Three-way comparison** *(ratified 2026-08-13)*: ship the
+spaceship operator `<=>` as sugar over `Comparable.compare`, returning the core
+`Ordering` type with `Less`, `Equal`, and `Greater` variants. `Ordering.then`
+keeps the first non-`Equal` result; `Ordering.reverse` swaps `Less` and
+`Greater`. A user type that defines `compare(self, other)` derives `<`, `<=`,
+`==`, `!=`, `>=`, and `>`. The lexer chooses `<=>` before `<=` by longest
+match.
+
 **2026-07-17 — D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOP-CONTINUE2=A, D-LOOP-CONTROLWORD1=B**: loop-only `in`, loop-only `step`,
 and source `continue` retired. Semicolon clauses now name every multi-part loop
