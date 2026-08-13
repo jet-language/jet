@@ -878,19 +878,6 @@ impl<'a> Interp<'a> {
                 span,
             );
         }
-        // D-METADERIVE1=A: `emit(source_string)` — push a re-entry fragment.
-        if name == "emit" {
-            let val = match args.first() {
-                Some(a) => self.eval(&a.expr, scope)?,
-                None => return Err(unsupported("`emit` requires one argument", span)),
-            };
-            if let CtValue::Str(s) = val {
-                let fragment = apply_at_splices(&s, scope);
-                self.emitted_fragments.push(fragment);
-                return Ok(CtValue::Unit);
-            }
-            return Err(unsupported("`emit` argument must be a string", span));
-        }
         // D-BIGINT1: `BigInt(100)` / `BigInt("999…")` — explicit construction
         // only, same arg shape sema already validated (E0103/E0128). Checked
         // ahead of the user-function/closure lookups, same as the distinct-
