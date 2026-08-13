@@ -2105,6 +2105,32 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
+            // Unit-family arithmetic is a synthetic trait operation. Keep the
+            // operands borrowed exactly as the generated `__jet_*` trait
+            // requires; emitting Rust's value operator here moves a repeated
+            // non-Copy operand and bypasses the checked operator hook.
+            if matches!(
+                (&lhs.ty, &rhs.ty),
+                (Type::Named(left), Type::Named(right))
+                    if left == right && cx.unit_facts.contains_key(left)
+            ) && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+            {
+                let (trait_name, method) = match op {
+                    BinOp::Add => ("Add", "add"),
+                    BinOp::Sub => ("Sub", "sub"),
+                    BinOp::Mul => ("Mul", "mul"),
+                    BinOp::Div => ("Div", "div"),
+                    _ => unreachable!(),
+                };
+                return jet_name_format!(
+                    "{}::{name_prefix}{method}_at(&({}), &({}), {:?}, {})",
+                    crate::Codegen::mangle(trait_name),
+                    ls,
+                    rs,
+                    cx.file,
+                    line,
+                );
+            }
             if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
                 // D-EXPSEM1 / D-FLOORDIV1: Rust spells neither operator, so `^`
                 // and `/%` always call the one Prelude helper. Whole numbers
@@ -2379,6 +2405,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             {
                 return format!("({}).grads_or_panic()", emit_tir_expr(recv, cx));
+            }
+            if field == "pull"
+                && matches!(
+                    &recv.ty,
+                    Type::Apply { name, args }
+                        if name == "VjpRun" && args.len() == 1
+                )
+            {
+                return format!("({}).pull.clone()", emit_tir_expr(recv, cx));
             }
             if matches!(recv.ty.erased_carrier(), Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
                 let helper = match field.as_str() {

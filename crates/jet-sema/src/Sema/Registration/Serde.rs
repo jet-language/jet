@@ -282,7 +282,11 @@ fn expand_builtin_enum_serde(
             };
             source.push_str(&format!("{pattern} -> {{ return {value} }}\n"));
         }
-        source.push_str("else -> {}\n}\n}\n}\n");
+        // The enum patterns cover every variant. Omitting the final else lets
+        // the parser create its internal exhaustive-dispatch terminator,
+        // which lowers to a diverging unreachable arm and keeps the generated
+        // encoder's value-return proof honest.
+        source.push_str("}\n}\n}\n");
     }
     if dec {
         source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n", e.name));

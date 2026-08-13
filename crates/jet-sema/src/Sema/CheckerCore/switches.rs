@@ -677,13 +677,14 @@ impl<'a> Checker<'a> {
             let subj_ty = self.infer(subject);
             let subj_name = match &*subject {
                 Expr::Ident(n, _) => Some(n.clone()),
-                // The parser gives every pattern arm on a non-identifier
-                // subject the private `it` subject. Keep that name in scope
-                // for the checker regardless of whether the subject happens
-                // to be fallible; otherwise `call() == { .Case -> ... }`
-                // reports the compiler-private pattern subject as a user
-                // unknown name.
-                _ if !subjectless_guard => Some(Syntax::KW_IT.to_string()),
+                _ if !subjectless_guard
+                    && !matches!(&*subject, Expr::PatternTest { .. }) =>
+                {
+                    Some(Syntax::KW_IT.to_string())
+                }
+                _ if subj_ty.as_ref().is_some_and(|t| t.is_fallible()) => {
+                    Some(Syntax::KW_IT.to_string())
+                }
                 _ => None,
             };
             let it_scope = subj_name.as_deref() == Some(Syntax::KW_IT);

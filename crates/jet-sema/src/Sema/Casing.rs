@@ -67,7 +67,12 @@ fn snake(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) {
 }
 
 fn func_names(f: &Func, category: &str, out: &mut Vec<Diagnostic>) {
-    snake(&f.name, f.name_span, category, out);
+    // Result constructors are contextual spellings, not reserved words. A
+    // user function may own either name; the call/variant checker decides
+    // which meaning applies at each use site.
+    if !matches!(f.name.as_str(), Syntax::LIT_OK | Syntax::LIT_ERR) {
+        snake(&f.name, f.name_span, category, out);
+    }
     for p in &f.type_params { pascal(&p.name, p.name_span, "type parameter", out); }
     for p in &f.params {
         if p.name != Syntax::KW_SELF { snake(&p.name, p.name_span, "parameter", out); }

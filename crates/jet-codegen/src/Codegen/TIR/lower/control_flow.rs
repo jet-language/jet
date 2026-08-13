@@ -792,6 +792,11 @@ fn lower_if_cond_atom(
             );
         }
     }
+    // A pattern test that reaches this fallback is outside the fragment's
+    // resolved pattern subset. Pattern-test scheduling intentionally queues
+    // only its subject for the specialized branches above, so do not ask the
+    // condition worklist for a value that was never scheduled.
+    let cached = cached && !matches!(cond, Expr::PatternTest { .. });
     (
         TIfCond::Plain(lower_if_expr(cond, cx, env, cached)),
         None,

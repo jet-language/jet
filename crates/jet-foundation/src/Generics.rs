@@ -169,25 +169,43 @@ fn unify_composite_pair(
     subst: &mut HashMap<String, Type>,
     type_params: &HashSet<String>,
 ) -> bool {
-    let mut unified = true;
-    let shape = Type::for_each_composite_pair(expected, found, &mut |expected, found| {
-        if unified {
-            match (expected, found) {
-                (Type::List(_), Type::List(_))
-                | (Type::Option(_), Type::Option(_))
-                | (Type::Result { .. }, Type::Result { .. }) => {}
-                (
-                    Type::Apply {
-                        name: expected_name,
-                        ..
-                    },
-                    Type::Apply { name: found_name, .. },
-                ) => unified = expected_name == found_name,
-                _ => unified = unify_types(expected, found, subst, type_params),
-            }
+    match (expected, found) {
+        (
+            Type::Apply {
+                name: expected_name,
+                args: expected_args,
+            },
+            Type::Apply {
+                name: found_name,
+                args: found_args,
+            },
+        ) => {
+            expected_name == found_name
+                && expected_args.len() == found_args.len()
+                && expected_args
+                    .iter()
+                    .zip(found_args)
+                    .all(|(expected, found)| unify_types(expected, found, subst, type_params))
         }
-    });
-    shape.is_ok() && unified
+        (Type::List(expected), Type::List(found))
+        | (Type::Option(expected), Type::Option(found)) => {
+            unify_types(expected, found, subst, type_params)
+        }
+        (
+            Type::Result {
+                ok: expected_ok,
+                err: expected_err,
+            },
+            Type::Result {
+                ok: found_ok,
+                err: found_err,
+            },
+        ) => {
+            unify_types(expected_ok, found_ok, subst, type_params)
+                && unify_types(expected_err, found_err, subst, type_params)
+        }
+        _ => unify_types(expected, found, subst, type_params),
+    }
 }
 
 /// Unify two types; extend `subst` with inferred type-parameter bindings.

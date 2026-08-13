@@ -759,8 +759,20 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "ServiceError" {
         return format!("{}JetServiceError::{}", cx.root_prefix, variant);
     }
-    let type_prefix = match cx.foreign_types.get(type_name) {
-        Some(rust_mod) => format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(type_name)),
+    let foreign_identity = if cx.foreign_types.contains_key(type_name) {
+        Some(type_name.to_string())
+    } else {
+        cx.foreign_type_identity("", type_name)
+    };
+    let type_prefix = match foreign_identity {
+        Some(identity) => {
+            let rust_mod = cx
+                .foreign_types
+                .get(&identity)
+                .expect("foreign identity must have a Rust module");
+            let leaf = identity.rsplit("::").next().unwrap_or(&identity);
+            format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(leaf))
+        }
         None => mangle_path(type_name),
     };
     format!("{}::{}", type_prefix, mangle_path(variant))

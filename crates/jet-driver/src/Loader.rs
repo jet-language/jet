@@ -2342,7 +2342,7 @@ fn e0982_executable_use(name: &str, span: Span) -> Diagnostic {
             .to_string(),
         format!(
             "remove `{} {};` and run the `{}` binary instead, or change `{}` to `library` in `{}` if you meant to import its code",
-            Syntax::KW_USE, name, name, name, Syntax::PAYLOAD_FILE
+            Syntax::KW_USE, name, name, name, Syntax::PACKAGE_FILE
         ),
         Some(span),
     )
