@@ -42,21 +42,13 @@ pub fn apply_impure_core_call_with_type(
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
     let args = super::normalize_path_args(module, method, args, span)?;
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-        if !row.accepts_arity(args.len()) {
-            return Err(unsupported(
-                &format!(
-                    "{}.{}(): expected {}..{} argument(s), got {}",
-                    module,
-                    method,
-                    row.arity(),
-                    row.signature.max_arity,
-                    args.len()
-                ),
-                span,
-            ));
-        }
-    }
+    super::validate_core_call_projection(
+        module,
+        method,
+        args.len(),
+        jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
+        span,
+    )?;
     // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
     // must still resolve under ambient impure depth — same as apply_core_call.
     if let Some(row) = jet_foundation::Syntax::core_call(module, method)

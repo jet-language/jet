@@ -516,6 +516,9 @@ fn emit_plain_core_call(
     helper: &dyn Fn(&str) -> String,
 ) -> Option<String> {
     let row = crate::Syntax::core_call(module, method)?;
+    if !row.coverage.contains(crate::Syntax::CoreCallCoverage::AOT) {
+        return None;
+    }
     if !row.aot_direct {
         return None;
     }

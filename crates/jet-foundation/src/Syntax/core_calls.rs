@@ -7,8 +7,286 @@
 //! foundation crate cannot depend back on sema; the row records that
 //! authority explicitly instead of copying sema's `Type` construction.
 
-use crate::Effects::{core_effect, Effect};
-use crate::Syntax::sinks::{sink_row, SinkClass};
+use crate::Effects::Effect;
+use crate::Syntax::sinks::SinkClass;
+
+const fn same_text(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const fn one_of(method: &str, names: &[&str]) -> bool {
+    let mut index = 0;
+    while index < names.len() {
+        if same_text(method, names[index]) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+/// Effect authority for rows in this table. Calls that are not rows still use
+/// `Effects::core_effect`'s legacy resolver; a row never consults that second
+/// key table.
+const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if (same_text(module, "core.time")
+        && one_of(
+            method,
+            &[
+                "clock",
+                "time",
+                "parse_time",
+                "period",
+                "period_days",
+                "period_months",
+                "period_years",
+                "zone",
+                "utc",
+                "zoned",
+                "zoned_local",
+            ],
+        ))
+        || (same_text(module, "core.random") && same_text(method, "rng"))
+    {
+        return None;
+    }
+    if (same_text(module, "core.time")
+        && one_of(
+            method,
+            &["now", "now_utc", "today", "instant", "sleep", "start"],
+        ))
+        || (same_text(module, "core.time.date") && same_text(method, "today"))
+        || (same_text(module, "core.time.datetime") && same_text(method, "now"))
+    {
+        return Some(Effect::Time);
+    }
+    if (same_text(module, "core.random")
+        && one_of(
+            method,
+            &[
+                "int",
+                "float",
+                "float_range",
+                "bool",
+                "normal",
+                "exponential",
+                "pick",
+                "weighted_pick",
+                "sample",
+                "shuffle",
+                "seed",
+                "split",
+                "bytes",
+            ],
+        ))
+        || (same_text(module, "core.crypto.random") && same_text(method, "bytes"))
+    {
+        return Some(Effect::Rand);
+    }
+    if (same_text(module, "core.io") && same_text(method, "style_force"))
+        || (same_text(module, "core.net")
+            && one_of(
+                method,
+                &[
+                    "ip_addr",
+                    "ip_to_string",
+                    "ip_is_ipv4",
+                    "ip",
+                    "ipv4",
+                    "ipv6",
+                    "parse_ip",
+                    "is_ipv4",
+                    "is_ipv6",
+                    "socket_addr_parse",
+                    "socket_host",
+                    "socket_port",
+                    "socket_to_string",
+                    "ready_readable",
+                    "ready_writable",
+                    "error_operation",
+                    "error_address",
+                    "error_name",
+                    "error_message",
+                    "error_os_code",
+                    "dns_srv_target",
+                    "dns_srv_port",
+                    "dns_srv_priority",
+                    "dns_srv_weight",
+                    "udp_packet_data",
+                    "udp_packet_addr",
+                    "udp_packet_bytes",
+                    "udp_packet_original_len",
+                    "udp_packet_truncated",
+                ],
+            ))
+    {
+        return None;
+    }
+    if same_text(module, "core.watcher") {
+        return if same_text(method, "files") {
+            Some(Effect::FS)
+        } else if same_text(method, "process_pid") {
+            Some(Effect::Exec)
+        } else if same_text(method, "port") {
+            Some(Effect::Net)
+        } else {
+            None
+        };
+    }
+    if same_text(module, "core.browser") {
+        return if one_of(method, &["profile", "timeout"]) {
+            None
+        } else if same_text(method, "locked") {
+            Some(Effect::FS)
+        } else {
+            Some(Effect::Net)
+        };
+    }
+    if (same_text(module, "core.encoding.json")
+        || same_text(module, "core.encoding.jsonl")
+        || same_text(module, "core.encoding.csv")
+        || same_text(module, "core.encoding.xml")
+        || same_text(module, "core.encoding.cbor"))
+        && one_of(method, &["reader", "writer"])
+    {
+        return Some(Effect::FS);
+    }
+    if same_text(module, "core.compute") && !same_text(method, "device_cpu") {
+        return Some(Effect::GPU);
+    }
+    if same_text(module, "core.files") {
+        return Some(Effect::FS);
+    }
+    if same_text(module, "core.net")
+        || same_text(module, "core.tls")
+        || same_text(module, "core.http.client")
+        || same_text(module, "core.http.server")
+        || same_text(module, "core.http.middleware")
+    {
+        return Some(Effect::Net);
+    }
+    if same_text(module, "core.raylib") {
+        return Some(Effect::GPU);
+    }
+    if same_text(module, "core.time") {
+        return Some(Effect::Time);
+    }
+    if same_text(module, "core.random") || same_text(module, "core.crypto.random") {
+        return Some(Effect::Rand);
+    }
+    if same_text(module, "core.env") {
+        return Some(Effect::Env);
+    }
+    if same_text(module, "core.process") {
+        return Some(Effect::Exec);
+    }
+    if same_text(module, "core.io") {
+        return Some(Effect::IO);
+    }
+    if same_text(module, "core.db") {
+        return Some(Effect::DB);
+    }
+    if same_text(module, "core.auth")
+        && one_of(
+            method,
+            &[
+                "register_user",
+                "password_login",
+                "session_validate",
+                "magic_link_issue",
+                "magic_link_consume",
+                "oauth_begin",
+                "oauth_finish",
+            ],
+        )
+    {
+        return Some(Effect::DB);
+    }
+    if same_text(module, "core.plugin") || same_text(module, "core.mod") {
+        return Some(Effect::Exec);
+    }
+    if same_text(module, "core.log") {
+        return Some(Effect::Log);
+    }
+    if same_text(module, "core.ui")
+        || same_text(module, "core.web")
+        || same_text(module, "core.web.storage.local")
+        || same_text(module, "core.web.storage.session")
+    {
+        return Some(Effect::Browser);
+    }
+    if same_text(module, "core.vault")
+        && one_of(
+            method,
+            &[
+                "get",
+                "current",
+                "versions",
+                "load",
+                "status",
+                "prepare_generate",
+                "prepare_store",
+                "prepare_rotate",
+                "prepare_retire",
+                "prepare_revoke",
+                "authorize_write",
+                "commit_generate",
+                "commit_store",
+                "commit_rotate",
+                "commit_retire",
+                "commit_revoke",
+                "export_to_recipients",
+                "export_to_passphrase",
+                "prepare_import_wrapped",
+                "authorize_wrapped_import",
+                "commit_import_wrapped",
+            ],
+        )
+    {
+        return Some(Effect::Secret);
+    }
+    if same_text(module, "core.vault.expert") {
+        return Some(Effect::Secret);
+    }
+    None
+}
+
+const fn sink_for(module: &str, method: &str) -> Option<SinkClass> {
+    if same_text(module, "core.log") {
+        return Some(SinkClass::Credential);
+    }
+    let encoding = (same_text(module, "core.encoding.json")
+        || same_text(module, "core.encoding.csv")
+        || same_text(module, "core.encoding.toml")
+        || same_text(module, "core.encoding.yaml")
+        || same_text(module, "core.encoding.cbor")
+        || same_text(module, "core.encoding.xml"))
+        && one_of(
+            method,
+            &[
+                "to_string",
+                "to_string_pretty",
+                "to_bytes",
+                "to_bytes_canonical",
+            ],
+        );
+    if encoding || (same_text(module, "core.encoding.jsonl") && same_text(method, "to_string")) {
+        return Some(SinkClass::Credential);
+    }
+    None
+}
 
 /// The erased calling convention needed by all plain projections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +306,53 @@ pub struct CoreCallSignature {
 pub enum CoreCallFallibility {
     /// Resolve from the canonical sema fixed/resolved signature.
     Sema,
+}
+
+/// The compiler projections declared by one Core-call row.
+///
+/// The bits describe consumers of the row, not alternate semantic
+/// implementations. A projection may still use a typed adapter; it must not
+/// invent a second key, signature, effect, or symbol record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoreCallCoverage(u8);
+
+impl CoreCallCoverage {
+    pub const SEMA: u8 = 1 << 0;
+    pub const TIR_SUBSET: u8 = 1 << 1;
+    pub const TIR_EVAL: u8 = 1 << 2;
+    pub const AOT: u8 = 1 << 3;
+    pub const INTERPRETER: u8 = 1 << 4;
+    pub const COMPTIME: u8 = 1 << 5;
+    pub const JIT: u8 = 1 << 6;
+    pub const KNOWN: u8 = Self::SEMA
+        | Self::TIR_SUBSET
+        | Self::TIR_EVAL
+        | Self::AOT
+        | Self::INTERPRETER
+        | Self::COMPTIME
+        | Self::JIT;
+    pub const ALL: Self = Self(Self::KNOWN);
+
+    pub const fn contains(self, projection: u8) -> bool {
+        self.0 & projection == projection
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn from_bits(bits: u8) -> Self {
+        Self(bits)
+    }
+}
+
+/// Why one engine could not project a row. The engine owns user-facing
+/// diagnostics; this type only reports the shared table fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreCallProjectionError {
+    Unknown,
+    Uncovered { projection: u8 },
+    Arity { expected: usize, actual: usize },
 }
 
 /// Pure comptime/REPL projection family. The row owns this routing fact so
@@ -81,8 +406,11 @@ pub struct CoreCallRecord {
     pub receiver_types: &'static [&'static str],
     pub signature: CoreCallSignature,
     pub fallibility: CoreCallFallibility,
+    pub effect: Option<Effect>,
+    pub sink_class: Option<SinkClass>,
     pub pure_route: CoreCallPureRoute,
     pub symbol: CoreCallSymbol,
+    pub coverage: CoreCallCoverage,
     /// Whether AOT can emit this row as one plain symbol call. Typed rows can
     /// still be canonical records while remaining on their typed emitter.
     pub aot_direct: bool,
@@ -112,16 +440,35 @@ impl CoreCallRecord {
                 borrow_mask,
             },
             fallibility: CoreCallFallibility::Sema,
+            effect: effect_for(module, member),
+            sink_class: sink_for(module, member),
             pure_route: CoreCallPureRoute::None,
             symbol: if prelude {
                 CoreCallSymbol::Prelude(symbol)
             } else {
                 CoreCallSymbol::Rust(symbol)
             },
+            coverage: CoreCallCoverage::ALL,
             aot_direct: true,
             jit_direct: true,
             jit_symbol: None,
         }
+    }
+
+    /// Construct a row with an explicit consumer projection set. The compact
+    /// five-argument constructor remains the normal all-tier row spelling;
+    /// this form makes a tier omission reviewable at the table edit.
+    pub const fn new_with_coverage(
+        module: &'static str,
+        member: &'static str,
+        symbol: &'static str,
+        prelude: bool,
+        borrow_mask: &'static [bool],
+        coverage: CoreCallCoverage,
+    ) -> Self {
+        let mut row = Self::new(module, member, symbol, prelude, borrow_mask);
+        row.coverage = coverage;
+        row
     }
 
     /// Add a receiver/static-method row without creating a second registry.
@@ -140,8 +487,11 @@ impl CoreCallRecord {
                 borrow_mask,
             },
             fallibility: CoreCallFallibility::Sema,
+            effect: None,
+            sink_class: None,
             pure_route: CoreCallPureRoute::None,
             symbol: CoreCallSymbol::Rust(""),
+            coverage: CoreCallCoverage::ALL,
             aot_direct: false,
             jit_direct: false,
             jit_symbol: None,
@@ -170,15 +520,12 @@ impl CoreCallRecord {
     /// Read the one effect fact. The record owns the key; `Effects` owns the
     /// value, so this projection cannot drift from sema or comptime.
     pub fn effect(self) -> Option<Effect> {
-        if self.is_receiver() {
-            return None;
-        }
-        core_effect(self.module, self.member)
+        self.effect
     }
 
     /// Read the one sink fact. `None` means this call is not a registered sink.
     pub fn sink_class(self) -> Option<SinkClass> {
-        sink_row(self.module, self.member).map(|row| row.class)
+        self.sink_class
     }
 
     /// A plain record has a direct symbol projection in every codegen path;
@@ -206,6 +553,14 @@ impl CoreCallRecord {
     pub const fn with_jit_symbol(mut self, symbol: &'static str) -> Self {
         self.jit_symbol = Some(symbol);
         self
+    }
+
+    pub const fn key(self) -> (&'static str, &'static str) {
+        (self.module, self.member)
+    }
+
+    pub const fn prelude_symbol(self) -> &'static str {
+        self.symbol.name()
     }
 
     /// Positions whose erased Core ABI takes a filesystem path. Sema accepts
@@ -288,8 +643,10 @@ impl CoreCallRecord {
 
 /// Every Core call whose form is a plain symbol call.
 pub const CORE_CALLS: &[CoreCallRecord] = &[
-    CoreCallRecord::new("core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false]),
-    CoreCallRecord::new("core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false]),
+    CoreCallRecord::new("core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false])
+        .without_direct_aot(),
+    CoreCallRecord::new("core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false])
+        .without_direct_aot(),
     CoreCallRecord::new("core.tasks", "interval", "jet_std::interval", true, &[false]),
     CoreCallRecord::new("core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[]),
     CoreCallRecord::new("core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[]),
@@ -642,8 +999,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.uuid", "v7", "jet_std_uuid_v7", true, &[true]),
     CoreCallRecord::new("core.uuid", "v5", "jet_std_uuid_v5", true, &[true, true]), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate // + normalize) — pure std, same UUID-as-String shape as v4/v7.
     CoreCallRecord::new("core.uuid", "parse", "jet_std_uuid_parse", true, &[true]),
-    CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true]),
-    CoreCallRecord::new("core.files", "create", "jet_std_files_create", true, &[true]),
+    CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true])
+        .with_jit_symbol("jet_jit_fs_open"),
+    CoreCallRecord::new("core.files", "create", "jet_std_files_create", true, &[true])
+        .with_jit_symbol("jet_jit_fs_create"),
     CoreCallRecord::new("core.files", "append", "jet_std_files_append", true, &[true]),
     CoreCallRecord::new("core.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new("core.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true]),
@@ -958,12 +1317,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.ws", "connect", "jet_ws_connect", false, &[true]), // D-WS1=B: cleartext WebSocket client/server.
     CoreCallRecord::new("core.ws", "upgrade", "jet_ws_upgrade", false, &[true]),
     CoreCallRecord::new("core.time.date", "new", "JetDate::new", false, &[false, false, false])
-        .with_pure_route(CoreCallPureRoute::Date), // D-TIMEDEPTH1=A: civil-time constructors.
+        .with_pure_route(CoreCallPureRoute::Date)
+        .without_direct_aot(), // D-TIMEDEPTH1=A: civil-time constructors.
     CoreCallRecord::new("core.time.date", "today", "JetDate::today_utc", false, &[])
-        .with_pure_route(CoreCallPureRoute::Date),
+        .with_pure_route(CoreCallPureRoute::Date)
+        .without_direct_aot(),
     CoreCallRecord::new("core.time.datetime", "from_timestamp", "JetDateTime::from_timestamp", false, &[false])
-        .with_pure_route(CoreCallPureRoute::DateTime),
-    CoreCallRecord::new("core.time.datetime", "now", "JetDateTime::now", false, &[]),
+        .with_pure_route(CoreCallPureRoute::DateTime)
+        .without_direct_aot(),
+    CoreCallRecord::new("core.time.datetime", "now", "JetDateTime::now", false, &[])
+        .without_direct_aot(),
 
     // Pure comptime evaluator rows whose AOT form is typed or otherwise
     // requires a bespoke emitter. They remain canonical records so every
@@ -1151,6 +1514,28 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "bytes",
         &[],
     ),
+    CoreCallRecord::receiver(
+        &["Url"],
+        "scheme",
+        &[],
+    ),
+    CoreCallRecord::receiver(&["Url"], "username", &[]),
+    CoreCallRecord::receiver(&["Url"], "password", &[]),
+    CoreCallRecord::receiver(&["Url"], "userinfo", &[]),
+    CoreCallRecord::receiver(&["Url"], "authority", &[]),
+    CoreCallRecord::receiver(&["Url"], "path", &[]),
+    CoreCallRecord::receiver(&["Url"], "query", &[]),
+    CoreCallRecord::receiver(&["Url"], "host", &[]),
+    CoreCallRecord::receiver(&["Url"], "port", &[]),
+    CoreCallRecord::receiver(&["Url"], "default_port", &[]),
+    CoreCallRecord::receiver(&["Url"], "fragment", &[]),
+    CoreCallRecord::receiver(&["Url"], "path_segments", &[]),
+    CoreCallRecord::receiver(&["Url"], "query_pairs", &[]),
+    CoreCallRecord::receiver(&["Url"], "normalize", &[]),
+    CoreCallRecord::receiver(&["Url"], "join", &[false]),
+    CoreCallRecord::receiver(&["Url"], "set_query", &[false, false]),
+    CoreCallRecord::receiver(&["Url"], "add_query", &[false, false]),
+    CoreCallRecord::receiver(&["Url"], "to_string", &[]),
     CoreCallRecord::receiver(&["Mime"], "media_type", &[]),
     CoreCallRecord::receiver(&["Mime"], "subtype", &[]),
     CoreCallRecord::receiver(&["Mime"], "essence", &[]),
@@ -1290,5 +1675,138 @@ pub fn core_call_in<'a>(
     member: &str,
 ) -> Option<&'a CoreCallRecord> {
     rows.iter()
-        .find(|row| row.module == module && row.member == member)
+        .find(|row| row.receiver_types.is_empty() && row.module == module && row.member == member)
+}
+
+/// Project one plain row for one engine and validate its fixed erased arity.
+/// Engines convert these errors into their own diagnostics or internal
+/// adapter errors; no engine gets a private membership check.
+pub fn core_call_projection(
+    module: &str,
+    member: &str,
+    projection: u8,
+    actual_arity: usize,
+) -> Result<&'static CoreCallRecord, CoreCallProjectionError> {
+    core_call_projection_in(CORE_CALLS, module, member, projection, actual_arity)
+}
+
+/// Project a row from any table-shaped slice. The production helper above is
+/// the fixed canonical table; this generic form lets tests prove that a new
+/// row needs no consumer match arm.
+pub fn core_call_projection_in<'a>(
+    rows: &'a [CoreCallRecord],
+    module: &str,
+    member: &str,
+    projection: u8,
+    actual_arity: usize,
+) -> Result<&'a CoreCallRecord, CoreCallProjectionError> {
+    let row = core_call_in(rows, module, member).ok_or(CoreCallProjectionError::Unknown)?;
+    if !row.coverage.contains(projection) {
+        return Err(CoreCallProjectionError::Uncovered { projection });
+    }
+    if !row.accepts_arity(actual_arity) {
+        return Err(CoreCallProjectionError::Arity {
+            expected: row.signature.arity,
+            actual: actual_arity,
+        });
+    }
+    Ok(row)
+}
+
+/// Validate the table's structural invariants and report every violation.
+pub fn core_call_table_violations(rows: &[CoreCallRecord]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if (!row.is_receiver() && row.module.is_empty()) || row.member.is_empty() {
+            violations.push(format!("row {index} has an empty Core key"));
+        }
+        if !row.is_receiver() && row.prelude_symbol().is_empty() {
+            violations.push(format!("{}.{} has no symbol", row.module, row.member));
+        }
+        if row.signature.arity != row.signature.borrow_mask.len()
+            || row.signature.arity > row.signature.max_arity
+        {
+            violations.push(format!(
+                "{}.{} signature arity/range disagrees with its borrow mask",
+                row.module, row.member
+            ));
+        }
+        if row.coverage.bits() == 0 {
+            violations.push(format!(
+                "{}.{} declares no consumer projection",
+                row.module, row.member
+            ));
+        }
+        if row.coverage.bits() & !CoreCallCoverage::KNOWN != 0 {
+            violations.push(format!(
+                "{}.{} declares unknown coverage bits 0x{:02x}",
+                row.module,
+                row.member,
+                row.coverage.bits() & !CoreCallCoverage::KNOWN
+            ));
+        }
+        for other in &rows[index + 1..] {
+            let duplicate = if row.is_receiver() || other.is_receiver() {
+                row.is_receiver()
+                    && other.is_receiver()
+                    && row.member == other.member
+                    && row.receiver_types == other.receiver_types
+            } else {
+                row.key() == other.key()
+            };
+            if duplicate {
+                violations.push(format!("{}.{} appears twice", row.module, row.member));
+            }
+        }
+    }
+    violations
+}
+
+/// Return rows that do not declare one consumer projection.
+pub fn core_call_coverage_violations(
+    rows: &[CoreCallRecord],
+    projection: u8,
+) -> Vec<String> {
+    rows.iter()
+        .filter(|row| !row.coverage.contains(projection))
+        .map(|row| {
+            format!(
+                "{}.{} missing projection 0x{:02x}",
+                row.module, row.member, projection
+            )
+        })
+        .collect()
+}
+
+/// Compare a consumer's declared plain keys with the canonical table. This
+/// guard catches both a forgotten row projection and a consumer-only arm.
+pub fn core_call_mismatch(
+    rows: &[CoreCallRecord],
+    consumer: &str,
+    consumer_keys: &[(&str, &str)],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for row in rows.iter().filter(|row| !row.is_receiver()) {
+        if !consumer_keys
+            .iter()
+            .any(|(module, member)| *module == row.module && *member == row.member)
+        {
+            violations.push(format!(
+                "{consumer} does not project {}.{}",
+                row.module, row.member
+            ));
+        }
+    }
+    for (module, member) in consumer_keys {
+        if !rows
+            .iter()
+            .any(|row| !row.is_receiver() && row.module == *module && row.member == *member)
+        {
+            violations.push(format!(
+                "{consumer} projects unknown {}.{}",
+                module, member
+            ));
+        }
+    }
+    violations
 }

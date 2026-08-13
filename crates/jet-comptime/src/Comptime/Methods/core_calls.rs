@@ -18,9 +18,50 @@ mod core_pure_parity;
 /// comptime evaluator. Unknown rows remain available for the typed/internal
 /// forms that have not entered the plain-call registry yet.
 fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) -> bool {
-    row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
+    row.coverage
+        .contains(jet_foundation::Syntax::CoreCallCoverage::COMPTIME)
+        && row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
         && !row.is_receiver()
         && row.effect().is_none()
+}
+
+fn validate_core_call_projection(
+    module: &str,
+    method: &str,
+    actual_arity: usize,
+    projection: u8,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if jet_foundation::Syntax::core_call(module, method).is_none() {
+        return Ok(());
+    }
+    match jet_foundation::Syntax::core_call_projection(
+        module,
+        method,
+        projection,
+        actual_arity,
+    ) {
+        Ok(_) => Ok(()),
+        Err(jet_foundation::Syntax::CoreCallProjectionError::Arity { expected, actual }) => {
+            Err(unsupported(
+                &format!(
+                    "{}.{}(): expected {} argument(s), got {}",
+                    module, method, expected, actual
+                ),
+                span,
+            ))
+        }
+        Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. }) => Err(
+            unsupported(
+                &format!("{}.{}(): comptime projection is not declared", module, method),
+                span,
+            ),
+        ),
+        Err(jet_foundation::Syntax::CoreCallProjectionError::Unknown) => Err(unsupported(
+            &format!("{}.{}(): unknown Core-call row", module, method),
+            span,
+        )),
+    }
 }
 
 /// Marshal typed Path values at the shared erased Core boundary. Strings stay
@@ -846,21 +887,13 @@ pub fn apply_core_call_with_type(
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
     let args = normalize_path_args(module, method, args, span)?;
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-        if !row.accepts_arity(args.len()) {
-            return Err(unsupported(
-                &format!(
-                    "{}.{}(): expected {}..{} argument(s), got {}",
-                    module,
-                    method,
-                    row.arity(),
-                    row.signature.max_arity,
-                    args.len()
-                ),
-                span,
-            ));
-        }
-    }
+    validate_core_call_projection(
+        module,
+        method,
+        args.len(),
+        jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
+        span,
+    )?;
     // The foundation row owns the effect classification for every plain
     // symbol call. Only effect-free rows may enter the pure parity evaluator;
     // this prevents a new effectful row from accidentally gaining a second

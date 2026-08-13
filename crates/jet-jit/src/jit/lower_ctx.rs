@@ -11248,13 +11248,15 @@ impl LowerCtx<'_, '_> {
                         args,
                         ..
                     } if matches!(module.as_str(), "core.crypto" | "core.crypto.expert") => {
-                        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-                            if !row.accepts_arity(args.len()) {
+                        if jet_foundation::Syntax::core_call(module, method).is_some() {
+                            if let Err(error) = jet_foundation::Syntax::core_call_projection(
+                                module,
+                                method,
+                                jet_foundation::Syntax::CoreCallCoverage::JIT,
+                                args.len(),
+                            ) {
                                 return Err(format!(
-                                    "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
-                                    row.arity(),
-                                    row.signature.max_arity,
-                                    args.len()
+                                    "jit core call projection mismatch: {module}.{method}: {error:?}"
                                 ));
                             }
                         }
@@ -12005,15 +12007,18 @@ impl LowerCtx<'_, '_> {
                 if module == "core.services" || module == "core.sync" {
                     return self.lower_service_core_call(module, method, args, &expr.ty);
                 }
-                if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-                    if !row.accepts_arity(args.len()) {
-                        return Err(format!(
-                            "jit core call arity mismatch: {module}.{method} expects {}..{}, got {}",
-                            row.arity(),
-                            row.signature.max_arity,
-                            args.len()
-                        ));
-                    }
+                if jet_foundation::Syntax::core_call(module, method).is_some() {
+                    let row = jet_foundation::Syntax::core_call_projection(
+                        module,
+                        method,
+                        jet_foundation::Syntax::CoreCallCoverage::JIT,
+                        args.len(),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "jit core call projection mismatch: {module}.{method}: {error:?}"
+                        )
+                    })?;
                     if let Some(value) = self.lower_recorded_core_call(row, args, &expr.ty)? {
                         if module == "core.compute" && expr.ty.is_compute_tensor_family() {
                             self.track_compute_tensor(value);
@@ -12793,180 +12798,6 @@ impl LowerCtx<'_, '_> {
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
                         }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
-                if module == "core.log" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "set_level" if args.len() == 1 => {
-                            (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
-                        }
-                        "setup" if args.len() == 1 => {
-                            (self.host.core.log_setup, vec![self.lower_expr(&args[0])?])
-                        }
-                        "debug" if args.len() == 1 => {
-                            (self.host.core.log_debug, vec![self.lower_expr(&args[0])?])
-                        }
-                        "info" if args.len() == 1 => {
-                            (self.host.core.log_info, vec![self.lower_expr(&args[0])?])
-                        }
-                        "warn" if args.len() == 1 => {
-                            (self.host.core.log_warn, vec![self.lower_expr(&args[0])?])
-                        }
-                        "error" if args.len() == 1 => {
-                            (self.host.core.log_error, vec![self.lower_expr(&args[0])?])
-                        }
-                        "critical" if args.len() == 1 => {
-                            (self.host.core.log_critical, vec![self.lower_expr(&args[0])?])
-                        }
-                        "fatal" if args.len() == 1 => {
-                            (self.host.core.log_fatal, vec![self.lower_expr(&args[0])?])
-                        }
-                        "disable" if args.is_empty() => (self.host.core.log_disable, vec![]),
-                        "flush" if args.is_empty() => (self.host.core.log_flush, vec![]),
-                        "enabled" if args.len() == 1 => {
-                            (self.host.core.log_enabled, vec![self.lower_expr(&args[0])?])
-                        }
-                        "set_trace_id" if args.len() == 1 => (
-                            self.host.core.log_set_trace_id,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "field" if args.len() == 2 => (
-                            self.host.core.log_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "int" if args.len() == 2 => (
-                            self.host.core.log_int_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "bool" if args.len() == 2 => (
-                            self.host.core.log_bool_field,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "counter" if args.len() == 2 => (
-                            self.host.core.log_counter,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "span" if args.len() == 1 => {
-                            (self.host.core.log_span, vec![self.lower_expr(&args[0])?])
-                        }
-                        "enter" if args.len() == 1 => {
-                            (self.host.core.log_enter, vec![self.lower_expr(&args[0])?])
-                        }
-                        "close" if args.len() == 1 => {
-                            (self.host.core.log_close, vec![self.lower_expr(&args[0])?])
-                        }
-                        "info_fields" if args.len() == 2 => (
-                            self.host.core.log_info_fields,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        _ => return Err("jit core call unsupported".to_string()),
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(clif_ty(&expr.ty)
-                        .map(|_| self.b.inst_results(call)[0])
-                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
-                }
-                if module == "core.files" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "create" if args.len() == 1 => {
-                            (self.host.stream.fs_create, vec![self.lower_expr(&args[0])?])
-                        }
-                        "open" if args.len() == 1 => {
-                            (self.host.stream.fs_open, vec![self.lower_expr(&args[0])?])
-                        }
-                        "exists" if args.len() == 1 => {
-                            (self.host.core.fs_exists, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read" if args.len() == 1 => {
-                            (self.host.core.fs_read, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read_bytes" if args.len() == 1 => (
-                            self.host.core.fs_read_bytes,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "write" if args.len() == 2 => (
-                            self.host.core.fs_write,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "create_dir" | "create_dir_all" if args.len() == 1 => {
-                            (self.host.core.fs_create_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "list_dir" if args.len() == 1 => {
-                            (self.host.core.fs_list_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "remove_all" if args.len() == 1 => {
-                            (self.host.core.fs_remove_all, vec![self.lower_expr(&args[0])?])
-                        }
-                        "remove" if args.len() == 1 => {
-                            (self.host.core.fs_remove, vec![self.lower_expr(&args[0])?])
-                        }
-                        "stat" if args.len() == 1 => {
-                            (self.host.core.fs_stat, vec![self.lower_expr(&args[0])?])
-                        }
-                        "read_at" if args.len() == 3 => (
-                            self.host.core.fs_read_at,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "write_at" if args.len() == 3 => (
-                            self.host.core.fs_write_at,
-                            vec![
-                                self.lower_expr(&args[0])?,
-                                self.lower_expr(&args[1])?,
-                                self.lower_expr(&args[2])?,
-                            ],
-                        ),
-                        "fsync" if args.len() == 1 => {
-                            (self.host.core.fs_fsync, vec![self.lower_expr(&args[0])?])
-                        }
-                        "write_atomic" if args.len() == 2 => (
-                            self.host.core.fs_write_atomic,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "walk" if args.len() == 1 => {
-                            (self.host.core.fs_walk, vec![self.lower_expr(&args[0])?])
-                        }
-                        "glob" if args.len() == 1 => {
-                            (self.host.core.fs_glob, vec![self.lower_expr(&args[0])?])
-                        }
-                        "symlink" if args.len() == 2 => (
-                            self.host.core.fs_symlink,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "read_link" if args.len() == 1 => {
-                            (self.host.core.fs_read_link, vec![self.lower_expr(&args[0])?])
-                        }
-                        "hard_link" if args.len() == 2 => (
-                            self.host.core.fs_hard_link,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "canonicalize" if args.len() == 1 => {
-                            (self.host.core.fs_canonicalize, vec![self.lower_expr(&args[0])?])
-                        }
-                        "absolute" if args.len() == 1 => {
-                            (self.host.core.fs_absolute, vec![self.lower_expr(&args[0])?])
-                        }
-                        "copy_dir" if args.len() == 2 => (
-                            self.host.core.fs_copy_dir,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "temp_dir" if args.len() == 1 => {
-                            (self.host.core.fs_temp_dir, vec![self.lower_expr(&args[0])?])
-                        }
-                        "temp_file" if args.len() == 1 => {
-                            (self.host.core.fs_temp_file, vec![self.lower_expr(&args[0])?])
-                        }
-                        "lock" if args.len() == 1 => {
-                            (self.host.core.fs_lock, vec![self.lower_expr(&args[0])?])
-                        }
-                        _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &arg_vals);

@@ -3934,17 +3934,26 @@ impl<'a> EvalCtx<'a> {
                 &known, &original,
             )));
         }
-        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-            if !row.accepts_arity(args.len()) {
+        if jet_foundation::Syntax::core_call(module, method).is_some() {
+            if let Err(error) = jet_foundation::Syntax::core_call_projection(
+                module,
+                method,
+                jet_foundation::Syntax::CoreCallCoverage::TIR_EVAL,
+                args.len(),
+            ) {
+                let detail = match error {
+                    jet_foundation::Syntax::CoreCallProjectionError::Arity { expected, actual } => {
+                        format!("expected {expected} argument(s), got {actual}")
+                    }
+                    jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. } => {
+                        "has no interpreter projection".to_string()
+                    }
+                    jet_foundation::Syntax::CoreCallProjectionError::Unknown => {
+                        "is not in the Core-call table".to_string()
+                    }
+                };
                 return Err(unsupported(
-                    &format!(
-                        "{}.{}(): expected {}..{} argument(s), got {}",
-                        module,
-                        method,
-                        row.arity(),
-                        row.signature.max_arity,
-                        args.len()
-                    ),
+                    &format!("{}.{}(): {detail}", module, method),
                     source_span,
                 ));
             }

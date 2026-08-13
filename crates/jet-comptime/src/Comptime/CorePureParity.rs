@@ -170,18 +170,19 @@ pub(super) fn evaluate_method(
     let CtValue::Struct { type_name, .. } = recv else {
         return None;
     };
-    // Url handles are selected by the TIR typed-handle table rather than the
-    // plain Core receiver registry. Keep Url on the shared marshalled value
-    // path; otherwise `to_string` would expose the Rust-shaped record value
-    // instead of the shared URL renderer.
     let normalized_type_name = type_name
         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(type_name.as_str());
-    if normalized_type_name != "Url" {
-        let row = jet_foundation::Syntax::core_receiver_method(type_name, method)?;
-        if !row.accepts_arity(args.len()) {
-            return None;
-        }
+    let row = jet_foundation::Syntax::core_receiver_method(type_name, method)
+        .or_else(|| jet_foundation::Syntax::core_receiver_method(normalized_type_name, method))?;
+    if !row
+        .coverage
+        .contains(jet_foundation::Syntax::CoreCallCoverage::COMPTIME)
+    {
+        return None;
+    }
+    if !row.accepts_arity(args.len()) {
+        return None;
     }
     let result = match (normalized_type_name, method, args.len()) {
         (
@@ -573,6 +574,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             .unwrap_or(type_name.as_str()),
         _ => "",
     };
+    let core_display = jet_foundation::Syntax::core_receiver_method(core_type, "__display");
     if core_type == "Mime" {
         return mime_string(value, Span::new(0, 0)).ok();
     }
@@ -583,28 +585,40 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         return datetime_string(value, Span::new(0, 0)).ok();
     }
     match value {
-        CtValue::Struct { type_name, .. } if type_name == "HyperLogLog" => {
+        CtValue::Struct { type_name, .. }
+            if core_display.is_some() && type_name == "HyperLogLog" =>
+        {
             let CtValue::Int(n) = hll_count(value, Span::new(0, 0)).ok()? else {
                 return None;
             };
             Some(format!("HyperLogLog(count={n})"))
         }
-        CtValue::Struct { type_name, .. } if type_name == "TDigest" => Some("TDigest".to_string()),
-        CtValue::Struct { type_name, .. } if type_name == "CountMinSketch" => {
+        CtValue::Struct { type_name, .. }
+            if core_display.is_some() && type_name == "TDigest" =>
+            Some("TDigest".to_string()),
+        CtValue::Struct { type_name, .. }
+            if core_display.is_some() && type_name == "CountMinSketch" =>
+        {
             Some("CountMinSketch".to_string())
         }
-        CtValue::Struct { type_name, .. } if type_name == "ReservoirSampler" => {
+        CtValue::Struct { type_name, .. }
+            if core_display.is_some() && type_name == "ReservoirSampler" =>
+        {
             let CtValue::Int(count) = field(value, "ReservoirSampler", "count")? else {
                 return None;
             };
             Some(format!("ReservoirSampler(n={count})"))
         }
-        CtValue::Struct { type_name, .. } if type_name == crate::Syntax::SOLVER_TYPE => {
+        CtValue::Struct { type_name, .. }
+            if core_display.is_some() && type_name == crate::Syntax::SOLVER_TYPE =>
+        {
             let failures = int_field(value, crate::Syntax::SOLVER_TYPE, "failures", Span::new(0, 0)).ok()?;
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
-        CtValue::Struct { type_name, fields } if type_name == "ServiceUpgradeReceipt" => {
+        CtValue::Struct { type_name, fields }
+            if core_display.is_some() && type_name == "ServiceUpgradeReceipt" =>
+        {
             let field = |name: &str| fields.iter().find(|(field, _)| field == name).map(|(_, value)| value);
             let CtValue::Int(from) = field("from_generation")? else { return None; };
             let CtValue::Int(to) = field("to_generation")? else { return None; };
@@ -623,7 +637,11 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         // Match AOT/JIT `DataError::display_text` / JetShow — not Rust Debug
         // of the mangled `__jet_DataError { __jet_kind: … }` shape (#1250).
         CtValue::Struct { type_name, fields }
-            if type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name.as_str()) == "DataError" =>
+            if core_display.is_some()
+                && type_name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(type_name.as_str())
+                    == "DataError" =>
         {
             let get = |name: &str| -> Option<&CtValue> {
                 fields.iter().find_map(|(n, v)| {

@@ -108,6 +108,22 @@ fn core_projection_is_complete_both_directions() {
             row.member
         );
         assert_eq!(row.fallibility, jet::Syntax::CoreCallFallibility::Sema);
+        for projection in [
+            jet::Syntax::CoreCallCoverage::SEMA,
+            jet::Syntax::CoreCallCoverage::TIR_SUBSET,
+            jet::Syntax::CoreCallCoverage::TIR_EVAL,
+            jet::Syntax::CoreCallCoverage::AOT,
+            jet::Syntax::CoreCallCoverage::INTERPRETER,
+            jet::Syntax::CoreCallCoverage::COMPTIME,
+            jet::Syntax::CoreCallCoverage::JIT,
+        ] {
+            assert!(
+                row.coverage.contains(projection),
+                "{}.{}, missing projection 0x{projection:02x}",
+                row.module,
+                row.member
+            );
+        }
         if row.is_receiver() {
             assert!(row.module.is_empty());
             assert!(!row.has_direct_symbol());
@@ -149,6 +165,10 @@ fn core_projection_is_complete_both_directions() {
         receiver_keys.len() > 90,
         "receiver Core table lost rows: {}",
         receiver_keys.len()
+    );
+    assert!(
+        jet::Syntax::core_call_table_violations(jet::Syntax::CORE_CALLS).is_empty(),
+        "canonical Core-call table is structurally invalid"
     );
 
     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
@@ -194,10 +214,25 @@ fn core_projection_is_complete_both_directions() {
         })
         .collect();
     let consumer_receivers: HashSet<(String, String)> = arm_pairs(receiver_source).into_iter().collect();
-    assert_eq!(
-        consumer_receivers, table_receivers,
-        "receiver evaluator/table mismatch"
+    assert!(
+        consumer_receivers.is_subset(&table_receivers),
+        "receiver evaluator owns calls outside the canonical table: {:?}",
+        consumer_receivers.difference(&table_receivers).collect::<Vec<_>>()
     );
+    // Receiver calls also have typed projections outside `evaluate_method`:
+    // sketch mutation, solver construction/requirement, and display. Those
+    // adapters must all consult the same lookup before their typed marshalling.
+    for marker in [
+        "core_receiver_method(type_name, \"add\")?",
+        "core_receiver_method(type_name, \"require\")?",
+        "core_receiver_method(crate::Syntax::SOLVER_TYPE, \"new\")",
+        "core_receiver_method(core_type, \"__display\")",
+    ] {
+        assert!(
+            parity.contains(marker),
+            "receiver projection lost its canonical-table guard: {marker}"
+        );
+    }
 
     let emit = read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs");
     assert!(
@@ -231,12 +266,13 @@ fn core_projection_is_complete_both_directions() {
 #[test]
 fn one_fake_record_projects_without_a_consumer_arm() {
     const FAKE: &[jet_foundation::Syntax::CoreCallRecord] =
-        &[jet_foundation::Syntax::CoreCallRecord::new(
+        &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
             "core.fake",
             "only",
             "jet_fake_only",
             true,
             &[],
+            jet_foundation::Syntax::CoreCallCoverage::ALL,
         )];
 
     let row = jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "only")
@@ -247,8 +283,52 @@ fn one_fake_record_projects_without_a_consumer_arm() {
     assert!(candidates.contains(&"jet_fake_only".to_string()));
     assert!(candidates.contains(&"jet_jit_fake_only".to_string()));
     assert_eq!(
+        jet_foundation::Syntax::core_call_projection_in(
+            FAKE,
+            "core.fake",
+            "only",
+            jet_foundation::Syntax::CoreCallCoverage::JIT,
+            0,
+        ),
+        Ok(row)
+    );
+    assert_eq!(
         jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "missing"),
         None
+    );
+}
+
+#[test]
+fn coverage_guard_rejects_a_missing_tier_projection() {
+    const SEMA_ONLY: &[jet_foundation::Syntax::CoreCallRecord] =
+        &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+            "core.fake",
+            "sema_only",
+            "jet_fake_sema_only",
+            true,
+            &[],
+            jet_foundation::Syntax::CoreCallCoverage::from_bits(
+                jet_foundation::Syntax::CoreCallCoverage::SEMA,
+            ),
+        )];
+    assert_eq!(
+        jet_foundation::Syntax::core_call_coverage_violations(
+            SEMA_ONLY,
+            jet_foundation::Syntax::CoreCallCoverage::JIT,
+        ),
+        vec!["core.fake.sema_only missing projection 0x40".to_string()]
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_call_projection_in(
+            SEMA_ONLY,
+            "core.fake",
+            "sema_only",
+            jet_foundation::Syntax::CoreCallCoverage::JIT,
+            0,
+        ),
+        Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered {
+            projection: jet_foundation::Syntax::CoreCallCoverage::JIT,
+        })
     );
 }
 
@@ -258,6 +338,11 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
     assert!(
         sema.contains("Syntax::core_call(module, name)"),
         "sema effect routing no longer reads the Core-call record"
+    );
+    assert!(
+        sema.contains("CoreCallCoverage::SEMA")
+            && sema.contains("Syntax::core_call_projection"),
+        "sema no longer uses the row projection guard"
     );
     assert!(
         sema.contains("core_fixed_sig_for_row(row)"),
@@ -274,6 +359,11 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         tir.contains("crate::Syntax::core_call(module, method)"),
         "TIR coverage no longer reads the Core-call record"
     );
+    assert!(
+        tir.contains("CoreCallCoverage::TIR_SUBSET")
+            && interpreter_source_has_projection(),
+        "TIR/interpreter projections do not use the row coverage guard"
+    );
 
     let comptime = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
     assert!(
@@ -283,6 +373,10 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
     assert!(
         comptime.contains("core_call_allows_pure_parity(row)"),
         "comptime pure parity is not gated by the Core-call record"
+    );
+    assert!(
+        comptime.contains("CoreCallCoverage::COMPTIME"),
+        "comptime no longer uses the row projection guard"
     );
     assert!(
         comptime.contains("core_pure_parity::evaluate(row"),
@@ -309,6 +403,10 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         "JIT lowering has no table-driven direct host projection"
     );
     assert!(
+        jit.contains("CoreCallCoverage::JIT"),
+        "JIT lowering no longer uses the row projection guard"
+    );
+    assert!(
         read("crates/jet-jit/src/lib.rs").contains("pub(crate) fn lookup(&self, symbol: &str)"),
         "JIT host declarations do not expose their generated symbol lookup"
     );
@@ -318,11 +416,20 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         ambient.contains("jet_foundation::Syntax::core_call(module, method)"),
         "the interpreter ambient adapter no longer reads the Core-call record"
     );
+    assert!(
+        ambient.contains("CoreCallCoverage::INTERPRETER"),
+        "the interpreter ambient adapter no longer uses the row projection guard"
+    );
     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     assert!(
         parity.contains("core_receiver_method(type_name, method)"),
         "receiver parity does not resolve through the shared Core-call table"
     );
+
+    fn interpreter_source_has_projection() -> bool {
+        read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs")
+            .contains("CoreCallCoverage::TIR_EVAL")
+    }
 }
 
 #[test]
@@ -330,6 +437,9 @@ fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
     assert!(table.contains("pub const CORE_CALLS"));
     assert!(table.contains("pub struct CoreCallSignature"));
+    assert!(table.contains("pub struct CoreCallCoverage"));
+    assert!(table.contains("pub fn core_call_projection"));
+    assert!(table.contains("pub fn core_call_mismatch"));
     assert!(table.contains("pub fallibility: CoreCallFallibility"));
     assert!(table.contains("jit_direct: bool"));
     assert!(table.contains("receiver_types: &'static [&'static str]"));
@@ -361,7 +471,7 @@ fn receiver_and_plain_consumer_sets_have_one_table_home() {
         "receiver lookup is not exported from the canonical table"
     );
     assert!(
-        parity.contains("core_receiver_method(type_name, method)?"),
+        parity.contains("core_receiver_method(type_name, method)"),
         "receiver evaluator has a hand-kept membership gate"
     );
     assert!(
@@ -369,27 +479,36 @@ fn receiver_and_plain_consumer_sets_have_one_table_home() {
             && jit.contains("jit_symbol_candidates()"),
         "JIT has no row-driven receiver/plain projection seam"
     );
+    assert!(
+        !jit.contains("if module == \"core.log\"")
+            && !jit.contains("if module == \"core.files\""),
+        "JIT retained a per-module Core-call dispatch table"
+    );
 
     // Exercise the mismatch detector itself with both directions. This keeps
     // the guard honest: a consumer-only row and a table-only row are distinct
     // failures, not one collapsed length check.
-    fn mismatch(table: &[(&str, &str)], consumer: &[(&str, &str)]) -> Vec<String> {
-        let table = table.iter().copied().collect::<HashSet<_>>();
-        let consumer = consumer.iter().copied().collect::<HashSet<_>>();
-        table
-            .difference(&consumer)
-            .chain(consumer.difference(&table))
-            .map(|(module, member)| format!("{module}.{member}"))
-            .collect()
-    }
     assert_eq!(
-        mismatch(&[("core.fake", "only")], &[]),
-        vec!["core.fake.only".to_string()]
+        jet_foundation::Syntax::core_call_mismatch(
+            &[jet_foundation::Syntax::CoreCallRecord::new(
+                "core.fake",
+                "only",
+                "jet_fake_only",
+                true,
+                &[],
+            )],
+            "fake consumer",
+            &[],
+        ),
+        vec!["fake consumer does not project core.fake.only".to_string()]
     );
-    assert_eq!(
-        mismatch(&[], &[("core.consumer", "only")]),
-        vec!["core.consumer.only".to_string()]
+    let consumer_only = jet_foundation::Syntax::core_call_mismatch(
+        &[],
+        "fake consumer",
+        &[("core.consumer", "only")],
     );
+    assert_eq!(consumer_only.len(), 1);
+    assert!(consumer_only[0].contains("projects unknown core.consumer.only"));
 }
 
 #[test]

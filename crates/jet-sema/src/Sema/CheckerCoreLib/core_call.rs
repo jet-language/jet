@@ -471,7 +471,16 @@ fn resolved_core_fixed_sig(
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     let (params, ret) = match Syntax::core_call(module, name) {
-        Some(row) => core_fixed_sig_for_row(row)?,
+        Some(row) => {
+            let row = Syntax::core_call_projection(
+                module,
+                name,
+                Syntax::CoreCallCoverage::SEMA,
+                row.arity(),
+            )
+            .ok()?;
+            core_fixed_sig_for_row(row)?
+        }
         None => core_fixed_sig(module, name)?,
     };
     if matches!(module, "core.crypto" | "core.crypto.expert") {
@@ -854,16 +863,21 @@ impl<'a> Checker<'a> {
             // Keep the richer Jet type construction below in sema, but make
             // every consumer reject a row-shaped call from the same fact.
             if let Some(row) = Syntax::core_call(module, name) {
-                if matches!(row.fallibility, Syntax::CoreCallFallibility::Sema)
-                    && !row.accepts_arity(args.len())
+                if let Err(Syntax::CoreCallProjectionError::Arity { expected, actual }) =
+                    Syntax::core_call_projection(
+                        module,
+                        name,
+                        Syntax::CoreCallCoverage::SEMA,
+                        args.len(),
+                    )
                 {
-                    self.diags
-                        .push(wrong_core_arity(name, row.arity(), args.len(), span));
+                    self.diags.push(wrong_core_arity(name, expected, actual, span));
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
                     }
                     return None;
                 }
+                debug_assert_eq!(row.arity(), row.signature.borrow_mask.len());
             }
             if let Some(e) = core_effect_for_call(module, name) {
                 // D-EFFTREE1: Core calls (this module-call path) stay tagged with

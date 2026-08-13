@@ -78,7 +78,8 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // expressions and resolved value types are checked by the callers below;
     // this lookup owns the call-key coverage decision.
     if let Some(row) = crate::Syntax::core_call(module, method) {
-        return row.has_direct_symbol();
+        return row.coverage.contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET)
+            && row.has_direct_symbol();
     }
     if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
     {
@@ -374,6 +375,16 @@ pub(super) fn core_call_args_in_subset(
                 };
                 label_ok && expr_in_subset(&arg.expr, cx, locals)
             });
+    }
+    if crate::Syntax::core_call(module, method).is_some() {
+        return crate::Syntax::core_call_projection(
+            module,
+            method,
+            crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+            args.len(),
+        )
+        .is_ok()
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     args.iter()
         .all(|a| expr_in_subset(&a.expr, cx, locals))

@@ -207,6 +207,15 @@ pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
 /// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
 /// keys are normalized through the foundation resolver before matching.
 pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
+    if let Some(row) = crate::Syntax::core_call(module, method) {
+        return row.effect;
+    }
+    core_effect_legacy(module, method)
+}
+
+/// Fallback for special calls that do not yet have a plain Core-call row.
+/// Plain rows never reach this resolver; their effect is stored on the row.
+fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // #1691 retired the jet.* internal module keys: callers always pass the
     // canonical `core.*` name, so no normalization step remains.
     // D-DET1: the deterministic capability constructors carry NO ambient effect —

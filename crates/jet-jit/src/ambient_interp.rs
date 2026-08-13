@@ -2285,17 +2285,26 @@ pub fn ambient_core_call(
     span: Span,
     resolved_ret: Option<Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-        if !row.accepts_arity(args.len()) {
+    if jet_foundation::Syntax::core_call(module, method).is_some() {
+        if let Err(error) = jet_foundation::Syntax::core_call_projection(
+            module,
+            method,
+            jet_foundation::Syntax::CoreCallCoverage::INTERPRETER,
+            args.len(),
+        ) {
+            let message = match error {
+                jet_foundation::Syntax::CoreCallProjectionError::Arity { expected, actual } => {
+                    format!("expected {expected} argument(s), got {actual}")
+                }
+                jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. } => {
+                    "has no interpreter projection".to_string()
+                }
+                jet_foundation::Syntax::CoreCallProjectionError::Unknown => {
+                    "is not in the Core-call table".to_string()
+                }
+            };
             return Some(Err(unsupported(
-                &format!(
-                    "{}.{}(): expected {}..{} argument(s), got {}",
-                    module,
-                    method,
-                    row.arity(),
-                    row.signature.max_arity,
-                    args.len()
-                ),
+                &format!("{}.{}(): {message}", module, method),
                 span,
             )));
         }
