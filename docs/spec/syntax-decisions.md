@@ -997,6 +997,16 @@ driving a consumed `Iter` twice is use-after-move (E0121).
 `indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `(idx: Int, item: T)`;
 there is no public `enumerate` adapter.
 
+**D-CORE-EAGER1=A / D-LOOPMAP1=B amends the default above for concrete
+collections**: `map` and `filter` on a real `List`, `Map`, or `Set` execute
+now and return a plain collection. Write `.lazy()` first to enter the same
+deferred `Iter<T>` vocabulary. Sources that already arrive over time, such as
+file lines, streams, channels, and `String.split`, remain deferred. The rest
+of the D-ITERTOOLS1 adapter ledger stays on `Iter`; the #1479 surface is
+covered by `examples/features/collections/iter_adapters.jet` under this
+split. Adjacent eager adapters may fuse when their intermediate is not
+observable, without changing callback order or count.
+
 **D-ZIPPAD1 (ratified on card #1400):** the zip family is one lazy iterator
 mechanism. Free calls and methods accept any number of sequence inputs and
 preserve every input type in named row fields. `zip` is strict and reports
@@ -3416,9 +3426,10 @@ index, not a substitute for that law.
   ships typed `LogField` builders, `LogSpan` enter/close, stderr/text/JSON,
   JSONL file sinks, OTLP-file export, sampling, redaction, and counter fields.
   Sink buffering is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
-- **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
-  adapters. Collections expose beginner-friendly methods returning lazy views;
-  materialization is explicit via `collect`, `to_list`, or reducers.
+- **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers the deferred
+  collection adapter plane. Concrete `List`/`Map`/`Set` `map` and `filter`
+  are eager under the later D-CORE-EAGER1 amendment; `.lazy()` enters this
+  plane, and materialization is explicit via `collect`, `to_list`, or reducers.
 - **D-TASKRUNTIME1=A** *(amended by D-CONC-SPAWN1=D,
   D-CONC-CHAN1=A, and D-CONC-CHAN2=D)*: structured task scopes remain the
   lifetime boundary. The current surface is the nested `task` family,

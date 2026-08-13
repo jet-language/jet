@@ -302,7 +302,30 @@ mod collection_semantics {
         key: String,
     ) -> Option<i64> {
         let mut map = map_from_pairs(entries);
-        jet_map_remove_kernel(&mut map, &key).ok()
+        jet_map_pop_kernel(&mut map, &key).ok()
+    }
+
+    pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
+        jet_list_pop_kernel(values).ok()
+    }
+
+    pub(super) fn set_pop_i64(
+        values: &mut std::collections::HashSet<i64>,
+        value: &i64,
+    ) -> Option<i64> {
+        jet_set_pop_kernel(values, value).ok()
+    }
+
+    pub(super) fn deque_pop_front<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
+        jet_deque_pop_front_kernel(values).ok()
+    }
+
+    pub(super) fn deque_pop_back<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
+        jet_deque_pop_back_kernel(values).ok()
+    }
+
+    pub(super) fn priority_queue_pop<T: Ord>(values: &mut std::collections::BinaryHeap<T>) -> Option<T> {
+        jet_priority_queue_pop_kernel(values).ok()
     }
 
     pub(super) fn map_pop_first_i64(
@@ -356,8 +379,8 @@ mod collection_semantics {
         jet_list_min_max(xs, |min, max| (min, max))
     }
 
-    pub(super) fn list_replace<T: Clone + PartialEq>(xs: &[T], old: &T, new: T) -> Vec<T> {
-        jet_list_replace(xs, old, new)
+    pub(super) fn list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
+        jet_list_replace(xs, index, new)
     }
 
     pub(super) fn list_starts_with<T: PartialEq>(xs: &[T], prefix: &[T]) -> bool {
@@ -1583,10 +1606,10 @@ extern "C" fn jet_jit_list_min_max(list: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_list_replace(list: i64, old: i64, new: i64) -> i64 {
+extern "C" fn jet_jit_list_replace(list: i64, index: i64, new: i64) -> i64 {
     alloc_from_ints(&collection_semantics::list_replace(
         &clone_list_ints(list),
-        &old,
+        index,
         new,
     ))
 }
@@ -1987,7 +2010,7 @@ extern "C" fn jet_jit_list_pop(list: i64) -> i64 {
         let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
             jet_foundation::ice!(None, "jit list pop: bad handle");
         };
-        match xs.pop() {
+        match collection_semantics::list_pop(xs) {
             Some(jet_rt::JetVal::Int(v)) => v.wrapping_add(1),
             Some(jet_rt::JetVal::Float(v)) => (v.to_bits() as i64).wrapping_add(1),
             Some(_) | None => 0,
@@ -2230,36 +2253,7 @@ extern "C" fn jet_jit_set_remove(set: i64, v: i64) {
     });
 }
 
-// #1478: native swap-in — always leaves `v` (or its string-canonical id) in
-// the set; returns the displaced equal element as a packed Option (Rust's
-// `HashSet::replace`), same ABI convention as `jet_jit_set_first`.
-extern "C" fn jet_jit_set_replace(set: i64, v: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let idx = (set as usize).wrapping_sub(1);
-        let Some(existing) = rt.sets.get(idx).cloned() else {
-            return option_packed(None);
-        };
-        let string_kind = set_is_string(rt, set);
-        let old = if string_kind {
-            let needle = rt.heap.clone_string(v).unwrap_or_default();
-            existing
-                .iter()
-                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
-                .copied()
-        } else {
-            existing.contains(&v).then_some(v)
-        };
-        if let Some(old) = old {
-            rt.sets[idx].remove(&old);
-        }
-        rt.sets[idx].insert(v);
-        option_packed(old)
-    })
-}
-
-// #1478: native remove-and-return-if-present (Rust's `HashSet::take`); does
-// NOT insert on a miss, unlike `replace`.
-extern "C" fn jet_jit_set_take(set: i64, v: i64) -> i64 {
+extern "C" fn jet_jit_set_pop(set: i64, v: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (set as usize).wrapping_sub(1);
         let Some(existing) = rt.sets.get(idx).cloned() else {
@@ -2275,10 +2269,7 @@ extern "C" fn jet_jit_set_take(set: i64, v: i64) -> i64 {
         } else {
             existing.contains(&v).then_some(v)
         };
-        if let Some(found) = found {
-            rt.sets[idx].remove(&found);
-        }
-        option_packed(found)
+        option_packed(found.and_then(|id| collection_semantics::set_pop_i64(&mut rt.sets[idx], &id)))
     })
 }
 
@@ -2470,7 +2461,7 @@ extern "C" fn jet_jit_deque_push_back(dq: i64, v: i64) {
 /// Packed Option: 0 = None, else value+1 (Int elems).
 extern "C" fn jet_jit_deque_pop_front(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(|d| d.pop_front()) {
+        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(collection_semantics::deque_pop_front) {
             Some(v) => v + 1,
             None => 0,
         }
@@ -2479,7 +2470,7 @@ extern "C" fn jet_jit_deque_pop_front(dq: i64) -> i64 {
 
 extern "C" fn jet_jit_deque_pop_back(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(|d| d.pop_back()) {
+        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(collection_semantics::deque_pop_back) {
             Some(v) => v + 1,
             None => 0,
         }
@@ -3020,7 +3011,7 @@ extern "C" fn jet_jit_priority_queue_pop(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let value = rt.priority_queues
             .get_mut((handle as usize).wrapping_sub(1))
-            .and_then(BinaryHeap::pop);
+            .and_then(collection_semantics::priority_queue_pop);
         option_i64(rt, value)
     })
 }
@@ -3959,8 +3950,7 @@ host_fns! {
     set_equal: "jet_jit_set_equal" => jet_jit_set_equal: sig_list_eq;
     set_capacity: "jet_jit_set_capacity" => jet_jit_set_capacity: sig_len;
     set_first: "jet_jit_set_first" => jet_jit_set_first: sig_len;
-    set_replace: "jet_jit_set_replace" => jet_jit_set_replace: sig_get_opt;
-    set_take: "jet_jit_set_take" => jet_jit_set_take: sig_get_opt;
+    set_pop: "jet_jit_set_pop" => jet_jit_set_pop: sig_get_opt;
     set_union: "jet_jit_set_union" => jet_jit_set_union: sig_get_opt;
     set_intersection: "jet_jit_set_intersection" => jet_jit_set_intersection: sig_get_opt;
     set_difference: "jet_jit_set_difference" => jet_jit_set_difference: sig_get_opt;

@@ -782,6 +782,73 @@ fn run() {
     assert_eq!(stdout, "0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n");
 }
 
+/// D-ONCE-VERB1=A: every collection's removal operation returns the removed
+/// value, and List.replace names only an indexed swap.
+#[test]
+fn collection_pop_table() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    xs := [10, 20, 30]
+    print(xs.pop() ?? -1)
+    print(xs.replace(0, 99))
+    counts := [String: Int].{ \"words\": 4 }
+    print(counts.pop(\"words\") ?? -1)
+    seen := Set.from([7, 8])
+    print(seen.pop(8) ?? -1)
+    queue := Deque.init([1, 2, 3])
+    print(queue.pop_front() ?? -1)
+    priorities := PriorityQueue.from([2, 9, 4])
+    print(priorities.pop() ?? -1)
+}
+";
+    let (code, stdout) = build_and_run("tir_collection_pop_table", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "30\n[99, 20]\n4\n8\n1\n9\n");
+}
+
+/// D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete containers evaluate map/filter
+/// once and return plain lists; `.lazy()` selects the deferred Iter plane.
+#[test]
+fn eager_container_adapters_and_lazy_opt_in() {
+    let src = "\
+fn count_and_keep(n: Int, visits: Cell<Int>) => Bool {
+    visits.edit(count => count += 1)
+    return n % 2 == 0
+}
+fn run() {
+    nums := [1, 2, 3, 4]
+    mapped := nums.map((n: Int) => n + 1)
+    print(mapped)
+    print(mapped.len())
+    visits := Cell.new(0)
+    visits_copy :: ~visits
+    even := nums.map((n: Int) => n + 1).filter((n: Int) => count_and_keep(n, visits_copy))
+    print(even)
+    print(visits.get())
+    lazy_values := nums.lazy().filter((n: Int) => n > 2).map((n: Int) => n * 10).to_list()
+    print(lazy_values)
+    parts := \"a,b,c\".split(\",\")
+    print(parts.to_list())
+}
+";
+    let rust = compile("tir_eager_container_adapters", src);
+    assert!(
+        rust.contains("jet_list_map_filter(("),
+        "adjacent eager adapters did not use the fused Prelude kernel"
+    );
+    assert!(rust.contains("jet_iter_filter("));
+    assert!(rust.contains("jet_iter_map("));
+    assert!(rust.contains("jet_iter_string_split("));
+    assert_tiers_agree(
+        "tir_eager_container_adapters",
+        src,
+        "[2, 3, 4, 5]\n4\n[2, 4]\n4\n[30, 40]\n[a, b, c]\n",
+    );
+}
+
 /// `remove` on both a list (value default and explicit slot mode) and a map
 /// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
 #[test]

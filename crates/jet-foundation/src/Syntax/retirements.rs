@@ -116,6 +116,33 @@ pub const RETIREMENTS: &[Retirement] = &[
         since: "2026-08-07",
         code: None,
     },
+    Retirement {
+        id: "set-take",
+        retired: "Set.take",
+        canonical: "Set.pop",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-VERB1",
+        since: "2026-08-07",
+        code: None,
+    },
+    Retirement {
+        id: "map-replace",
+        retired: "Map.replace",
+        canonical: "Map.add",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-VERB1",
+        since: "2026-08-07",
+        code: None,
+    },
+    Retirement {
+        id: "set-replace",
+        retired: "Set.replace",
+        canonical: "Set.add",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-VERB1",
+        since: "2026-08-07",
+        code: None,
+    },
 ];
 
 /// The known package providers, in the order a ref may not put them.

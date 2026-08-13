@@ -27,6 +27,22 @@ existing drift found during review.
 - Standard acronyms stay fully capitalized per S66 (`JSONDecoder`, `HTTPClient`,
   `IOError`, `UTF8Error`). Do not add PascalCase aliases.
 
+### Collection verb table (D-ONCE-VERB1=A)
+
+This table is the one review truth row for collection verbs. Reference docs and
+future API reviews render this row; they do not create a second verb list.
+
+| Job | List | Map | Set | Deque | PriorityQueue |
+| --- | --- | --- | --- | --- | --- |
+| remove and return | `pop()` | `pop(key)` | `pop(value)` | `pop_front()` / `pop_back()` | `pop()` |
+| swap at an index | `replace(index, value)` | — | — | — | — |
+| store or upsert | — | `add(key, value)` | `add(value)` | — | — |
+
+Conversion naming follows the same law: bare `.from(source)` is the generic
+conversion form; a source-qualified conversion names its source, such as
+`.from_keys(keys, default)` or `.from_bytes(bytes)`. Do not add a second bare
+or source-qualified spelling for the same conversion.
+
 ## Law 2 — Fallibility
 
 - A function that can legitimately fail returns `T ? E`; never panics on expected failure.

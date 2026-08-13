@@ -2912,8 +2912,7 @@ fn resident_safe_builtin_op(
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
-        // #1478: `replace`/`take` — native swap-in / remove-and-return.
-        TBuiltinOp::SetReplace | TBuiltinOp::SetTake => {
+        TBuiltinOp::SetPop => {
             matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1

@@ -17891,7 +17891,7 @@ impl LowerCtx<'_, '_> {
                 let zero = self.b.ins().iconst(types::I64, 0);
                 Ok(self.bool_from_icmp(IntCC::Equal, len, zero))
             }
-            TBuiltinOp::Pop => {
+            TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePop => {
                 if matches!(&recv_ty, Type::Apply { name, .. } if name == "PriorityQueue") {
                     Ok(self.call_host(self.host.coll.priority_queue_pop, &[recv_val]))
                 } else if jit_list_native_type(&recv_ty)
@@ -18526,11 +18526,11 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.coll.list_min_max, &[recv_val]))
             }
             TBuiltinOp::ListReplace => {
-                let old = self.lower_expr(&args[0])?;
+                let index = self.lower_expr(&args[0])?;
                 let new = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
                     self.host.coll.list_replace,
-                    &[recv_val, old, new],
+                    &[recv_val, index, new],
                 ))
             }
             TBuiltinOp::MapCopy => {
@@ -18648,15 +18648,10 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::SetCapacity => {
                 Ok(self.call_host(self.host.coll.set_capacity, &[recv_val]))
             }
-            // #1478: `Set.replace(v)` — native swap-in, packed-Option return.
-            TBuiltinOp::SetReplace => {
+            // D-ONCE-VERB1=A: `Set.pop(v)` — remove-and-return, packed-Option return.
+            TBuiltinOp::SetPop => {
                 let v = self.lower_expr(&args[0])?;
-                Ok(self.call_host(self.host.coll.set_replace, &[recv_val, v]))
-            }
-            // #1478: `Set.take(v)` — native remove-and-return, packed-Option return.
-            TBuiltinOp::SetTake => {
-                let v = self.lower_expr(&args[0])?;
-                Ok(self.call_host(self.host.coll.set_take, &[recv_val, v]))
+                Ok(self.call_host(self.host.coll.set_pop, &[recv_val, v]))
             }
             TBuiltinOp::SetFirst => {
                 Ok(self.call_host(self.host.coll.set_first, &[recv_val]))

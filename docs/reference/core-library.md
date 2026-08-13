@@ -176,24 +176,30 @@ See `examples/features/types/option_combinators.jet`.
 
 ---
 
-## Collections and iterators (D-ITERTOOLS1=A)
+## Collections and iterators (D-CORE-EAGER1=A, D-LOOPMAP1=B)
 
 Core collection spellings stay explicit: `[T]` for lists, `[K: V]` for the
-default ordered map, and named types for specialized behavior. Adapter methods
-return a lazy `Iter<T>` view; call `to_list()`, `collect()`, or a reducer
-(`sum`, `fold`, …) to materialize. String `.split` returns `Iter<String>` on
-the same model.
+default ordered map, and named types for specialized behavior. `map` and
+`filter` on a concrete list, map, or set execute immediately and return a plain
+collection. Write `.lazy()` before the chain to enter the deferred `Iter<T>`
+view; call `to_list()`, `collect()`, or a reducer (`sum`, `fold`, …) to drive
+it. File lines, streams, channels, and String `.split` are already arriving
+over time, so they return the deferred view directly.
 
 Under D-COMPREHENSION1, a finite `loop ... -> value` executes immediately and
 returns `[T]`. Build maps with ordinary map operations, build sets with
 `Set.from(...)`, and use the existing iterator adapters when work must stay
 lazy. An expected type never changes the collector or evaluation time.
 
+The collection method rows below render the one verb table in
+[`docs/spec/stdlib-api-laws.md`](../spec/stdlib-api-laws.md); future API review
+uses that truth row.
+
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace` |
-| `[K: V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`/`replace`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `replace`, `take`, `to_list`, `len`, `is_empty`, `clear` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
+| `[K: V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove` (`x, by: RemoveBy = .Val`, D-LISTREMOVE1), `len`, `is_empty`, `clear` |
@@ -203,13 +209,13 @@ lazy. An expected type never changes the collector or evaluation time.
 | `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`, `ByteBuffer.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
 
 `Set`'s closure and sequence adapters (`all`, `each`, `filter`, `fold`, `map`,
-`flat_map`, `min`, `max`) route through the same `to_list()` / `Iter`
-machinery every other container's adapters already use (I8: one mechanism,
-not a parallel set-native lazy surface); `map`/`flat_map` return a plain list
-or iter, since a Set's uniqueness does not carry through an arbitrary
-mapping — pipe the result through `.to_set()` if you want it deduplicated
-back into a Set. `values` is the lazy alias of `to_list`. `replace`/`take`
-are the native Rust `HashSet` swap-in / remove-and-return methods. `first`
+`flat_map`, `min`, `max`) use the same collection kernels as every other
+container (I8: one mechanism, not a parallel set-native surface). `map` and
+`filter` are eager; `flat_map` remains a deferred list/Iter adapter. A Set's
+uniqueness does not carry through an arbitrary mapping — pipe a plain list
+through `.to_set()` if you want it deduplicated back into a Set. `values` is
+the lazy alias of `to_list`. `pop` removes and returns the matching element.
+`first`
 is shipped with arbitrary hash-order semantics.
 
 `Set.sort()` and `Set.shuffle()` ship (`D-SET-DECLINE1`, card #1584): each
@@ -222,8 +228,9 @@ Jet requires every Set element to implement Hash and Eq (E0506), so no
 `copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
 methods for all of the above.
 
-Example: `examples/features/collections/iter_adapters.jet` covers adapters
-including the #1479 surface (`repeat`, `cycle`, `drop_last`, `shuffle`,
+Example: `examples/features/collections/iter_adapters.jet` demonstrates the
+eager default, `.lazy()`, and the #1479 surface (`repeat`, `cycle`, `drop_last`,
+`shuffle`,
 `is_sorted`/`is_sorted_by`, `dedup_by`, `last_index_of`, `average`, `compare`,
 `split`, `chunk_while`, `to_set`). `cycle(n)` produces exactly `n` items by
 looping the source — bounded by the count, unlike `repeat(n)`'s "loop n

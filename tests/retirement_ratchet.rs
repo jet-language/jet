@@ -40,6 +40,9 @@ const CEILINGS: &[(&str, usize)] = &[
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
     ("comptime-mark", 0),
+    ("set-take", 0),
+    ("map-replace", 0),
+    ("set-replace", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -220,6 +223,18 @@ fn has_retired_comptime_mark(tokens: &[jet::Lexer::Token]) -> bool {
     false
 }
 
+fn tally_collection_example(path_suffix: &str, retired_form: &str, canonical_form: &str) -> (usize, usize) {
+    content_files()
+        .into_iter()
+        .filter(|path| path.to_string_lossy().ends_with(path_suffix))
+        .filter_map(|path| read(&path))
+        .fold((0, 0), |(retired, canonical), text| {
+            (
+                retired + usize::from(text.contains(retired_form)),
+                canonical + usize::from(text.contains(canonical_form)),
+            )
+        })
+}
 /// Files on the retired form and files on the canonical form, for one row.
 fn tally(row: &Retirement) -> (usize, usize) {
     match row.id {
@@ -303,6 +318,21 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
+        "set-take" => tally_collection_example(
+            "examples/features/collections/set.jet",
+            ".take(",
+            ".pop(",
+        ),
+        "map-replace" => tally_collection_example(
+            "examples/features/collections/map_surface.jet",
+            ".replace(",
+            ".add(",
+        ),
+        "set-replace" => tally_collection_example(
+            "examples/features/collections/set.jet",
+            ".replace(",
+            ".add(",
+        ),
         other => panic!("no way to count row `{other}`; teach `tally` how to count it"),
     }
 }

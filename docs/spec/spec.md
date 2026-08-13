@@ -2037,7 +2037,9 @@ Self-recursion through the binding is rejected (**E0804**). Calling a
 non-function → **E0803**.
 
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
-`sort_by`, `reduce` on `[T]`; `each` on `[K: V]` (two parameters).
+`sort_by`, `reduce` on `[T]`; `each` on `[K: V]` (two parameters). On a
+concrete list, map/filter execute now and return a plain list; write `.lazy()`
+first for the deferred `Iter` vocabulary.
 
 **D-ITER1 — lazy iterator adapter set (c105):** `take(n)`, `skip(n)`, `step_by(n)`,
 `dedup()`, `chunks(n)`, `windows(n)`, `take_while(f)`, `skip_while(f)`, `flat_map(f)`,
@@ -2051,8 +2053,9 @@ longest input. `zip_pad` uses `None` for omitted fills, one typed `fill:` value
 for all columns, or typed `fills: (field: value, ...)` per column. Free calls
 preserve labels; methods use `a`, `b`, `c`, and so on. Zero free inputs are an
 empty `Iter<Unit>` and one input is identity. `partition(f)` returns
-`(false_: [T], true_: [T])`. All are lazy (evaluated at call site, allocation
-deferred to result use).
+`(false_: [T], true_: [T])`. These adapters are lazy on the `Iter` plane;
+concrete list/map/set `map` and `filter` are eager under D-CORE-EAGER1,
+and `.lazy()` enters the deferred plane explicitly.
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
 parse errors. Current lambda syntax is `(x) => …`. D-SHAPE-PIPE1=C assigns a
