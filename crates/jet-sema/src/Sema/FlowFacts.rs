@@ -18,8 +18,9 @@
 //! | `Typestate` | the state a value is in (D-STATE1) | `Sema::State` |
 //! | `Taint` | the fact tags a value carries (D-TAG-SURFACE1) | `Sema::Taint` |
 //!
-//! Typestate and taint declare their own planes next to their walkers; every
-//! plane uses the [`Facts`] store and the merge rules below.
+//! Every plane uses the [`Facts`] store and the merge rules below. Taint keeps
+//! its separate value-shape prover; typestate rows live in this store so the
+//! shared walker owns every branch and loop join.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -533,6 +534,7 @@ pub(crate) struct FlowFacts {
     pub(crate) moved: Facts<Moved>,
     pub(crate) uninit: Facts<Uninit>,
     pub(crate) views: Facts<View>,
+    pub(crate) states: Facts<super::State::Typestate>,
 }
 
 impl Default for FlowFacts {
@@ -546,6 +548,7 @@ impl Default for FlowFacts {
             moved: Facts::default(),
             uninit: Facts::default(),
             views: Facts::default(),
+            states: Facts::default(),
         }
     }
 }
@@ -562,12 +565,24 @@ impl FlowFacts {
         self.sendability.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
+        self.states.leave_depth(depth);
         self.depth = depth.saturating_sub(1);
     }
 
     /// The one merge point for the checker's planes. `paths` holds the store as
     /// each path through the branch left it.
     pub(crate) fn merge_paths(before: &Self, paths: &[Self]) -> Self {
+        Self::merge_paths_with_state_diagnostics(before, paths, &mut Vec::new())
+    }
+
+    /// The shared branch walker with the typestate divergence sink exposed to
+    /// its consumer. State checking and ordinary sema therefore use the same
+    /// store and the same join contract.
+    pub(crate) fn merge_paths_with_state_diagnostics(
+        before: &Self,
+        paths: &[Self],
+        state_diverged: &mut Vec<Divergence<String>>,
+    ) -> Self {
         if !before.reachable {
             return before.clone();
         }
@@ -616,11 +631,26 @@ impl FlowFacts {
                 &Self::plane(&paths, |facts| &facts.views),
                 &mut view_sink,
             ),
+            states: Facts::merge_paths(
+                &before.states,
+                &Self::plane(&paths, |facts| &facts.states),
+                state_diverged,
+            ),
         }
     }
 
     /// The one loop rule ([`Facts::after_loop`]), applied to every plane.
     pub(crate) fn after_loop(before: &Self, after_body: &Self) -> Self {
+        Self::after_loop_with_state_diagnostics(before, after_body, &mut Vec::new())
+    }
+
+    /// The shared loop walker with the typestate divergence sink exposed to
+    /// its consumer.
+    pub(crate) fn after_loop_with_state_diagnostics(
+        before: &Self,
+        after_body: &Self,
+        state_diverged: &mut Vec<Divergence<String>>,
+    ) -> Self {
         if !before.reachable || !after_body.reachable {
             return before.clone();
         }
@@ -637,6 +667,7 @@ impl FlowFacts {
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),
             uninit: Facts::after_loop(&before.uninit, &after_body.uninit, &mut Vec::new()),
             views: Facts::after_loop(&before.views, &after_body.views, &mut Vec::new()),
+            states: Facts::after_loop(&before.states, &after_body.states, state_diverged),
         }
     }
 

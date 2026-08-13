@@ -250,7 +250,6 @@ impl<'a> Checker<'a> {
                             interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
-                            task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
                             invalid: false,
@@ -306,7 +305,6 @@ impl<'a> Checker<'a> {
                         interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
-                        task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
                         invalid: false,
@@ -418,7 +416,6 @@ impl<'a> Checker<'a> {
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
-                    task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
                     invalid: false,
@@ -450,7 +447,6 @@ impl<'a> Checker<'a> {
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
         self.mark_taskgroup_spawns_owned(TaskGroupOrigin::Parameter);
-        self.lint_unjoined_tasks_in_current_scope();
         self.taskgroup_stack.truncate(taskgroup_floor);
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).

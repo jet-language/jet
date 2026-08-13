@@ -363,7 +363,6 @@ impl<'a> Checker<'a> {
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
-                    task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
                     invalid: false,
@@ -827,16 +826,16 @@ impl<'a> Checker<'a> {
                 }
             }
             if b.name == "_" {
-                if self.type_is_single_use(&final_ty) {
-                    self.diags.push(
-                        crate::Sema::CheckerOwnership::e0140_discarded_wildcard(b.name_span),
-                    );
-                } else if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
+                if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
                     self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
                         "this task",
                         "discarding it into `_` skips the join before the task finishes",
                         b.name_span,
                     ));
+                } else if self.type_is_single_use(&final_ty) {
+                    self.diags.push(
+                        crate::Sema::CheckerOwnership::e0140_discarded_wildcard(b.name_span),
+                    );
                 }
                 self.current_binding_name = prev_binding_name;
                 return;
@@ -862,11 +861,6 @@ impl<'a> Checker<'a> {
                 } else {
                     false
                 }
-            };
-            let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
-                Some(b.name_span)
-            } else {
-                None
             };
             // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
             // consume it exactly once. The duty transfers on `y :: x` (the move marks
@@ -969,7 +963,6 @@ impl<'a> Checker<'a> {
                     interrupt_sendable,
                     reactive_local: b.reactive_local(),
                     reactive_shared: b.reactive_shared(),
-                    task_lint_span,
                     single_use_span,
                     constant_value,
                     invalid: init_has_error,

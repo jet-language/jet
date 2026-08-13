@@ -12,7 +12,6 @@ impl<'a> Checker<'a> {
         }
 
         pub(crate) fn pop_scope(&mut self) {
-            self.lint_unjoined_tasks_in_current_scope();
             self.check_single_use_consumed_in_current_scope();
             self.drop_scope_no_obligation_checks();
         }
@@ -247,7 +246,6 @@ impl<'a> Checker<'a> {
                         interrupt_sendable: false,
                         reactive_local: false,
                         reactive_shared: false,
-                        task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
                         invalid: false,

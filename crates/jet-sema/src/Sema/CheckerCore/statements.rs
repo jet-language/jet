@@ -5,7 +5,7 @@ use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
-    type_fix_hint, type_holds_task_handle, undefined_loop_label,
+    type_fix_hint, type_requires_owned_iteration, undefined_loop_label,
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
@@ -1822,7 +1822,6 @@ impl<'a> Checker<'a> {
                                     interrupt_sendable: false,
                                     reactive_local: false,
                                     reactive_shared: false,
-                                    task_lint_span: None,
                                     single_use_span: None,
                                     constant_value: None,
                                     invalid: false,
@@ -1890,7 +1889,7 @@ impl<'a> Checker<'a> {
                             let task_list_consume = matches!(
                                 &coll_ty,
                                 Some(Type::List(inner) | Type::FixedList { elem: inner, .. })
-                                    if type_holds_task_handle(inner)
+                                    if type_requires_owned_iteration(inner)
                             );
                             let streaming_consume = matches!(
                                 &coll_ty,
@@ -2386,7 +2385,6 @@ impl<'a> Checker<'a> {
                             interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
-                            task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
                             invalid: false,
@@ -2428,7 +2426,6 @@ impl<'a> Checker<'a> {
                             interrupt_sendable: false,
                             reactive_local: false,
                             reactive_shared: false,
-                            task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
                             invalid: false,

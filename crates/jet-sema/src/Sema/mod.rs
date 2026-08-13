@@ -732,8 +732,6 @@ pub(crate) struct LocalInfo {
     reactive_local: bool,
     /// D-DATARACE1=C: `#Shared` pin on a reactive binding.
     reactive_shared: bool,
-    /// Binding span for a Task value that must be consumed with `.join()`.
-    task_lint_span: Option<Span>,
     /// D-LIN1 (ratified 2026-06-21): set (to the binding name's span) when this
     /// local owns a `#SingleUse` value that must be consumed exactly once. `None`
     /// for ordinary values, for parameters (the caller owns the consume duty), and
@@ -2052,8 +2050,8 @@ pub(crate) use CheckerPatchable::*;
 pub(crate) use CheckerValidate::*;
 pub(crate) use Diagnostics::*;
 /// Shared by TIR lowering: a loop consumes any collection whose element type
-/// holds a task handle (see `type_holds_task_handle`).
-pub use Diagnostics::type_holds_task_handle;
+/// requires owned iteration.
+pub use Diagnostics::type_requires_owned_iteration;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
 pub use Registration::*;

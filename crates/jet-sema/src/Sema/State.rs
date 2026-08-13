@@ -27,7 +27,7 @@
 //! rather than guessing (P1 — beginners never see a spurious error).
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::FlowFacts::{Facts, Plane};
+use crate::Sema::FlowFacts::{FlowFacts, Plane};
 use crate::Syntax::edit_distance;
 use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
@@ -35,6 +35,10 @@ use std::collections::{HashMap, HashSet};
 /// D-STATE1: the state a value is in. One plane of the checker's flow facts —
 /// this file supplies the join rule and nothing else about merging.
 pub(crate) enum Typestate {}
+
+const TASK_RUNNING: &str = "Running";
+const TASK_JOINED: &str = "Joined";
+const TASK_DETACHED: &str = "Detached";
 
 impl Plane for Typestate {
     type Fact = String;
@@ -132,10 +136,32 @@ impl StateTable {
     }
 
     pub fn with_facts(facts: jet_foundation::Facts::FactRegistry) -> Self {
-        Self {
+        let mut table = Self {
             facts,
             ..Self::default()
-        }
+        };
+        table.install_task_lifecycle();
+        table
+    }
+
+    /// D-CONC-UNIT1: task ownership states are ordinary typestate rows. The
+    /// row is compiler-owned, so the public task surface stays unchanged.
+    fn install_task_lifecycle(&mut self) {
+        self.facts.declare(
+            jet_foundation::Facts::FactKind::State,
+            format!("{}.State", crate::Syntax::TYPE_TASK),
+            [TASK_RUNNING, TASK_JOINED, TASK_DETACHED]
+                .into_iter()
+                .map(str::to_string),
+        );
+        self.transitions.insert(
+            format!("{}::{}", crate::Syntax::TYPE_TASK, crate::Syntax::TASK_JOIN),
+            (Some(TASK_RUNNING.to_string()), TASK_JOINED.to_string()),
+        );
+        self.transitions.insert(
+            format!("{}::{}", crate::Syntax::TYPE_TASK, crate::Syntax::TASK_DETACH),
+            (Some(TASK_RUNNING.to_string()), TASK_DETACHED.to_string()),
+        );
     }
 
     /// D-STATE-DECL: validate that every `#State(X)` / `#Transition(A, B)` marker
@@ -248,8 +274,8 @@ impl StateTable {
         }
     }
 
-    /// True when the program declares no typestate at all — lets the caller skip
-    /// the per-body walk and declaration validation entirely.
+    /// True when no typestate rows are registered. `with_facts` always installs
+    /// the compiler-owned task lifecycle row, so task bodies use this pass too.
     pub fn is_empty(&self) -> bool {
         self.requires.is_empty()
             && self.transitions.is_empty()
@@ -267,7 +293,7 @@ impl StateTable {
 struct StateCtx<'a> {
     tbl: &'a StateTable,
     /// The typestate plane of the one flow-fact store.
-    states: Facts<Typestate>,
+    flow: FlowFacts,
     diags: Vec<Diagnostic>,
     /// Diagnostics CheckerCore already produced before this pass runs — read
     /// only to check whether a switch was already proven exhaustive
@@ -279,7 +305,7 @@ impl<'a> StateCtx<'a> {
     fn new(tbl: &'a StateTable, existing_diags: &'a [Diagnostic]) -> Self {
         StateCtx {
             tbl,
-            states: Facts::new(),
+            flow: FlowFacts::default(),
             diags: Vec::new(),
             existing_diags,
         }
@@ -287,9 +313,9 @@ impl<'a> StateCtx<'a> {
 
     /// Join every path that meets here, and report each value the paths left in
     /// different states instead of keeping whichever path was walked last.
-    fn merge_states(&mut self, before: &Facts<Typestate>, paths: &[Facts<Typestate>], span: Span) {
+    fn merge_states(&mut self, before: &FlowFacts, paths: &[FlowFacts], span: Span) {
         let mut diverged = Vec::new();
-        self.states = Facts::merge_paths(before, paths, &mut diverged);
+        self.flow = FlowFacts::merge_paths_with_state_diagnostics(before, paths, &mut diverged);
         self.report_divergence(diverged, span);
     }
 
@@ -312,19 +338,23 @@ impl<'a> StateCtx<'a> {
     }
 
     /// Walk one path from the facts that reach it and report where it ends.
-    fn walk_path(&mut self, before: &Facts<Typestate>, body: &[Stmt]) -> Facts<Typestate> {
-        self.states = before.clone();
+    fn walk_path(&mut self, before: &FlowFacts, body: &[Stmt]) -> FlowFacts {
+        self.flow = before.clone();
         self.check_block(body);
-        self.states.clone()
+        self.flow.clone()
     }
 
-    /// The shared loop rule, stated once in `Facts::after_loop`.
+    /// The shared loop rule, stated once in `FlowFacts::after_loop`.
     fn check_loop_body(&mut self, body: &[Stmt], span: Span) {
-        let before = self.states.clone();
+        let before = self.flow.clone();
         self.check_block(body);
-        let after_body = self.states.clone();
+        let after_body = self.flow.clone();
         let mut diverged = Vec::new();
-        self.states = Facts::after_loop(&before, &after_body, &mut diverged);
+        self.flow = FlowFacts::after_loop_with_state_diagnostics(
+            &before,
+            &after_body,
+            &mut diverged,
+        );
         self.report_divergence(diverged, span);
     }
 
@@ -352,6 +382,13 @@ impl<'a> StateCtx<'a> {
     /// return the to-state the produced value starts in.
     fn entry_state_of(&self, init: &Expr) -> Option<String> {
         match init {
+            // D-CONC-UNIT1: the canonical spawn expression enters the task
+            // lifecycle in `Running`.
+            Expr::MethodCall { method, .. }
+                if method == crate::Syntax::INTERNAL_TASK_SPAWN_METHOD =>
+            {
+                Some(TASK_RUNNING.to_string())
+            }
             // `Type.ctor(…)` / `Ns.Type.ctor(…)` — static entry transition.
             Expr::MethodCall {
                 receiver, method, ..
@@ -367,6 +404,14 @@ impl<'a> StateCtx<'a> {
             },
             _ => None,
         }
+    }
+
+    fn seed_entry_state(&mut self, name: &str, init: &Expr) -> bool {
+        let Some(state) = self.entry_state_of(init) else {
+            return false;
+        };
+        self.flow.states.set(name, state);
+        true
     }
 
     fn check_block(&mut self, stmts: &[Stmt]) {
@@ -389,20 +434,18 @@ impl<'a> StateCtx<'a> {
                 // gives `r` the call's to-state. Otherwise seed from an entry ctor.
                 if !b.name.is_empty() {
                     if let Some(to) = self.result_state_of(&b.init) {
-                        self.states.set(&b.name, to);
-                    } else if let Some(to) = self.entry_state_of(&b.init) {
-                        self.states.set(&b.name, to);
-                    } else {
+                        self.flow.states.set(&b.name, to);
+                    } else if !self.seed_entry_state(&b.name, &b.init) {
                         // The binding takes on the state of the local it aliases, if
                         // any (`s := r`), else becomes untracked.
                         if let Expr::Ident(src, _) = &b.init {
-                            if let Some(st) = self.states.get(src).cloned() {
-                                self.states.set(&b.name, st);
+                            if let Some(st) = self.flow.states.get(src).cloned() {
+                                self.flow.states.set(&b.name, st);
                             } else {
-                                self.states.remove(&b.name);
+                                self.flow.states.remove(&b.name);
                             }
                         } else {
-                            self.states.remove(&b.name);
+                            self.flow.states.remove(&b.name);
                         }
                     }
                 }
@@ -413,13 +456,10 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(value);
                 if op.is_none() {
                     if let LValue::Local { name, .. } = target {
-                        if let Some(to) = self
-                            .result_state_of(value)
-                            .or_else(|| self.entry_state_of(value))
-                        {
-                            self.states.set(name, to);
-                        } else {
-                            self.states.remove(name);
+                        if let Some(to) = self.result_state_of(value) {
+                            self.flow.states.set(name, to);
+                        } else if !self.seed_entry_state(name, value) {
+                            self.flow.states.remove(name);
                         }
                     }
                 }
@@ -456,13 +496,13 @@ impl<'a> StateCtx<'a> {
                 span,
             } => {
                 self.check_expr(subject);
-                let before = self.states.clone();
+                let before = self.flow.clone();
                 let mut paths = Vec::new();
                 for a in arms {
-                    self.states = before.clone();
+                    self.flow = before.clone();
                     self.check_expr(&a.cond);
                     self.check_block(&a.body);
-                    paths.push(self.states.clone());
+                    paths.push(self.flow.clone());
                 }
                 match else_body {
                     Some(b) => paths.push(self.walk_path(&before, b)),
@@ -490,14 +530,18 @@ impl<'a> StateCtx<'a> {
             } => {
                 self.check_expr(&init.init);
                 self.check_expr(cond);
-                let before = self.states.clone();
+                let before = self.flow.clone();
                 self.check_block(body);
                 if let Some(step) = step {
                     self.check_stmt(step);
                 }
-                let after_body = self.states.clone();
+                let after_body = self.flow.clone();
                 let mut diverged = Vec::new();
-                self.states = Facts::after_loop(&before, &after_body, &mut diverged);
+                self.flow = FlowFacts::after_loop_with_state_diagnostics(
+                    &before,
+                    &after_body,
+                    &mut diverged,
+                );
                 self.report_divergence(diverged, *span);
             }
             Stmt::Loop { body, span, .. } => self.check_loop_body(body, *span),
@@ -526,7 +570,7 @@ impl<'a> StateCtx<'a> {
                 ..
             } => {
                 self.check_expr(cond);
-                let before = self.states.clone();
+                let before = self.flow.clone();
                 let then_path = self.walk_path(&before, then_body);
                 let other_path = match else_body {
                     Some(b) => self.walk_path(&before, b),
@@ -557,6 +601,11 @@ impl<'a> StateCtx<'a> {
                 ..
             } => {
                 let ty = recv_type.as_ref()?;
+                // A task transition discharges the handle; its result is not
+                // another task row.
+                if ty == crate::Syntax::TYPE_TASK {
+                    return None;
+                }
                 let key = format!("{ty}::{method}");
                 let (_, to) = self.tbl.transitions.get(&key)?;
                 // Only meaningful when the receiver is a tracked local.
@@ -596,22 +645,43 @@ impl<'a> StateCtx<'a> {
                 for a in args {
                     self.check_expr(&a.expr);
                 }
-                let Some(ty) = recv_type else { return };
                 let Expr::Ident(local, _) = receiver.as_ref() else {
                     return;
                 };
+                // Built-in Task methods intentionally leave `recv_type` empty;
+                // the task row is the type fact this pass already owns.
+                let task_key = format!(
+                    "{}::{}",
+                    crate::Syntax::TYPE_TASK,
+                    method
+                );
+                let implicit_task = recv_type.is_none()
+                    && self.flow.states.get(local).is_some_and(|state| {
+                        matches!(state.as_str(), TASK_RUNNING | TASK_JOINED | TASK_DETACHED)
+                    })
+                    && self.tbl.transitions.contains_key(&task_key);
+                let Some(ty) = recv_type.as_deref().or_else(|| {
+                    implicit_task.then_some(crate::Syntax::TYPE_TASK)
+                }) else {
+                    return;
+                };
                 let key = format!("{ty}::{method}");
-                let cur = self.states.get(local).cloned();
+                let cur = self.flow.states.get(local).cloned();
                 // A require-state guard: receiver must currently be in `req`.
-                if let Some(req) = self.tbl.requires.get(&key) {
-                    self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
-                }
-                // A transition: require `from` (unless entry), then advance to `to`.
-                if let Some((from, to)) = self.tbl.transitions.get(&key) {
-                    if let Some(req) = from {
+                if ty != crate::Syntax::TYPE_TASK {
+                    if let Some(req) = self.tbl.requires.get(&key) {
                         self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
                     }
-                    self.states.set(local, to.clone());
+                }
+                // A task's lifecycle row records the transition; its join
+                // duty owns the user-facing consumed-handle diagnostic.
+                if let Some((from, to)) = self.tbl.transitions.get(&key) {
+                    if ty != crate::Syntax::TYPE_TASK {
+                        if let Some(req) = from {
+                            self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
+                        }
+                    }
+                    self.flow.states.set(local, to.clone());
                 }
             }
             Expr::Call(Call { name, args, .. }) => {
@@ -628,7 +698,7 @@ impl<'a> StateCtx<'a> {
                     .first()
                     .map(|a| a.expr.span())
                     .unwrap_or(Span::new(0, 0));
-                let cur = self.states.get(&local).cloned();
+                let cur = self.flow.states.get(&local).cloned();
                 if let Some(req) = self.tbl.fn_requires.get(name) {
                     self.check_state(&local, cur.as_deref(), req, name, name, span);
                 }
@@ -636,7 +706,7 @@ impl<'a> StateCtx<'a> {
                     if let Some(req) = from {
                         self.check_state(&local, cur.as_deref(), req, name, name, span);
                     }
-                    self.states.set(&local, to.clone());
+                    self.flow.states.set(&local, to.clone());
                 }
             }
             Expr::Tainted(inner, _, _)
@@ -721,14 +791,14 @@ impl<'a> StateCtx<'a> {
                 span,
             } => {
                 self.check_expr(cond);
-                let before = self.states.clone();
+                let before = self.flow.clone();
                 self.check_block(then_body);
                 self.check_expr(then_value);
-                let then_path = self.states.clone();
-                self.states = before.clone();
+                let then_path = self.flow.clone();
+                self.flow = before.clone();
                 self.check_block(else_body);
                 self.check_expr(else_value);
-                let else_path = self.states.clone();
+                let else_path = self.flow.clone();
                 self.merge_states(&before, &[then_path, else_path], *span);
             }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
@@ -833,7 +903,7 @@ pub fn check_func_state(f: &Func, tbl: &StateTable, existing_diags: &[Diagnostic
             .map(|(s, _)| s.clone())
             .or_else(|| f.state_transition.as_ref().and_then(|t| t.from.clone()));
         if let Some(s) = incoming {
-            ctx.states.set(crate::Syntax::KW_SELF, s);
+            ctx.flow.states.set(crate::Syntax::KW_SELF, s);
         }
     }
     ctx.check_block(&f.body);
@@ -882,6 +952,45 @@ pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagn
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_spawn_seeds_a_running_typestate_row() {
+        let span = Span::new(0, 0);
+        let spawn = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(
+                crate::Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                span,
+            )),
+            method: crate::Syntax::INTERNAL_TASK_SPAWN_METHOD.to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: Vec::new(),
+            recv_type: Some(crate::Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string()),
+            resolved_ret: None,
+            checked_widen: false,
+        };
+        let table = StateTable::with_facts(Default::default());
+        let mut ctx = StateCtx::new(&table, &[]);
+        assert!(ctx.seed_entry_state("handle", &spawn));
+
+        assert_eq!(
+            ctx.flow.states.get("handle").map(|state| state.as_str()),
+            Some(TASK_RUNNING)
+        );
+        assert_eq!(
+            table
+                .transitions
+                .get(&format!("{}::{}", crate::Syntax::TYPE_TASK, crate::Syntax::TASK_JOIN))
+                .map(|(_, to)| to.as_str()),
+            Some(TASK_JOINED)
+        );
     }
 }
 

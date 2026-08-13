@@ -1,6 +1,6 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Diagnostics::is_cloneable;
+use crate::Sema::Diagnostics::{is_cloneable, type_requires_owned_iteration};
 use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Collections;
 use crate::Syntax;
@@ -3782,11 +3782,14 @@ impl<'a> Checker<'a> {
     // `return s.after(sep)` written directly (no intermediate binding) always
     // lowers as an ordinary owned `String` — safe, nothing to catch.
 
-    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
-    /// checking the local registry first and then any imported module that exposes
-    /// the type publicly. A `#SingleUse` value must be consumed exactly once and
-    /// may not be aliased.
+    /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value or carries
+    /// a task duty, checking the local registry first and then any imported
+    /// module that exposes the type publicly. Such a value must be consumed
+    /// exactly once and may not be aliased.
     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
+        if type_requires_owned_iteration(ty) {
+            return true;
+        }
         let Some(name) = ty.base_name() else {
             return false;
         };
@@ -4159,37 +4162,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn lint_unjoined_tasks_in_current_scope(&mut self) {
-        let pending: Vec<(String, Span)> = self
-            .flow
-            .bindings
-            .iter_at(self.scope_depth())
-            .filter_map(|(name, info)| {
-                let span = info.task_lint_span?;
-                if self.flow.moved.contains(name) {
-                    None
-                } else {
-                    Some((name.to_string(), span))
-                }
-            })
-            .collect();
-        for (name, span) in pending {
-            self.diags.push(l1101_unjoined_task(
-                &format!("`{name}`"),
-                "the program may end before this task finishes",
-                span,
-            ));
-        }
-    }
-
     /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value that owns the
     /// consume duty (`single_use_span` set) but is not in `moved` when its scope
-    /// ends was dropped without being used. Mirrors the unjoined-task check: it
-    /// looks only at the innermost (just-closing) scope. The branch-divergence
+    /// ends was dropped without being used. It looks only at the innermost
+    /// (just-closing) scope. The branch-divergence
     /// case (consumed on one path, dropped on the other) is E0141, raised in
     /// `check_if`.
     pub(crate) fn check_single_use_consumed_in_current_scope(&mut self) {
-        let pending: Vec<(String, Span)> = self
+        let pending: Vec<(String, Span, bool)> = self
             .flow
             .bindings
             .iter_at(self.scope_depth())
@@ -4198,15 +4178,23 @@ impl<'a> Checker<'a> {
                 if self.flow.moved.contains(name) {
                     None
                 } else {
-                    Some((name.to_string(), span))
+                    Some((name.to_string(), span, is_task_type(&info.ty)))
                 }
             })
             .collect();
         // Deterministic order (HashMap iteration is unordered): by span, then name.
         let mut pending = pending;
         pending.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
-        for (name, span) in pending {
-            self.diags.push(e0140_unconsumed(&name, span));
+        for (name, span, is_task) in pending {
+            if is_task {
+                self.diags.push(l1101_unjoined_task(
+                    &format!("`{name}`"),
+                    "the program may end before this task finishes",
+                    span,
+                ));
+            } else {
+                self.diags.push(e0140_unconsumed(&name, span));
+            }
         }
     }
 
@@ -5012,7 +5000,7 @@ impl<'a> Checker<'a> {
                     matches!(
                         &info.ty,
                         Type::List(inner) | Type::FixedList { elem: inner, .. }
-                            if type_holds_task_handle(inner)
+                            if type_requires_owned_iteration(inner)
                     )
                 });
                 let fix = if is_param && is_task_list {
@@ -6269,9 +6257,8 @@ pub(crate) fn e0140_discarded_wildcard(span: Span) -> Diagnostic {
 
 /// D-CONC-JOIN1 / D-FACT-WORD1=A: one duty voice for every task-owes-join
 /// site. `#SingleUse`'s duty and a task handle's duty are the same law
-/// (`lint_unjoined_tasks_in_current_scope` has always mirrored the
-/// `#SingleUse` check) — the value still owes `join`, and `.detach()` is the
-/// one written word that lets it go free.
+/// — the value still owes `join`, and `.detach()` is the one written word that
+/// lets it go free.
 pub(crate) fn l1101_unjoined_task(subject: &str, why: &str, span: Span) -> Diagnostic {
     Diagnostic::lint(
         "L1101",

@@ -2833,7 +2833,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     Some(Type::Apply { name, .. })
                         if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
                 );
-                // Only a type carrying a task handle is consumed here. codegen's
+                // Only a type requiring owned iteration is consumed here. codegen's
                 // `field_type_cloneable` answers a narrower question than sema's
                 // `is_cloneable` (it treats every core `Named` type as
                 // non-cloneable because no derive is emitted for one), so using
@@ -2844,7 +2844,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // type with no `Clone`), not just a bare `Task<T>`.
                 let elem_is_cloneable = !coll_elem_ty
                     .as_ref()
-                    .is_some_and(crate::Sema::type_holds_task_handle);
+                    .is_some_and(crate::Sema::type_requires_owned_iteration);
                 let by_value = matches!(&lowered_coll.ty,
                     Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
                 ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")

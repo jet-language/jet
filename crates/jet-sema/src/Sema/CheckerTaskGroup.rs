@@ -8,7 +8,6 @@ use std::collections::HashSet;
 pub(crate) struct PendingTaskSpawn {
     pub binding: Option<String>,
     pub span: Span,
-    pub consumed: bool,
 }
 
 /// D-TASKBORROW1=A: one borrowed place a child of this group holds. Loans open
@@ -400,19 +399,7 @@ impl<'a> Checker<'a> {
             ctx.pending.push(PendingTaskSpawn {
                 binding,
                 span,
-                consumed: false,
             });
-        }
-    }
-
-    pub(crate) fn mark_taskgroup_spawn_consumed(&mut self, name: &str) {
-        for ctx in self.taskgroup_stack.iter_mut().rev() {
-            for p in ctx.pending.iter_mut().rev() {
-                if p.binding.as_deref() == Some(name) {
-                    p.consumed = true;
-                    return;
-                }
-            }
         }
     }
 
@@ -429,10 +416,7 @@ impl<'a> Checker<'a> {
             .into_iter()
             .flat_map(|ctx| {
                 ctx.pending.iter().filter_map(|spawn| {
-                    (!spawn.consumed)
-                        .then(|| spawn.binding.clone())
-                        .flatten()
-                        .map(|name| (name, spawn.span))
+                    spawn.binding.clone().map(|name| (name, spawn.span))
                 })
             })
             .collect();
@@ -440,7 +424,6 @@ impl<'a> Checker<'a> {
             if !self.flow.moved.contains(&name) {
                 self.mark_moved(name.clone(), span);
             }
-            self.mark_taskgroup_spawn_consumed(&name);
         }
     }
 
@@ -799,7 +782,6 @@ impl<'a> Checker<'a> {
         collect_task_idents(expr, &mut names);
         for name in names {
             self.mark_moved(name.clone(), expr.span());
-            self.mark_taskgroup_spawn_consumed(&name);
         }
     }
 

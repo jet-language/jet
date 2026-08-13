@@ -1443,29 +1443,29 @@ pub(crate) fn is_task_type(ty: &Type) -> bool {
     matches!(ty, Type::Apply { name, .. } if name == "Task")
 }
 
-/// True when `ty` holds a task handle anywhere inside it.
-///
-/// A `Task<T>` owns one running child and its join slot, so no `Clone` is
-/// emitted for it. Any container carrying one is equally uncopyable: a
-/// `[[Task<Int>]]` element cannot be `.cloned()` either. Sema and TIR lowering
-/// must answer this identically — sema decides whether the loop consumes its
-/// collection, lowering decides whether to iterate by value, and a disagreement
-/// is either a rustc rejection the user sees as an ICE (I2) or a silent move
-/// that was never recorded.
-pub fn type_holds_task_handle(ty: &Type) -> bool {
+/// True when iterating a value must move its elements because the value carries
+/// a task handle. Sema and TIR lowering use the same predicate: sema records
+/// the collection move, and lowering uses the matching by-value iteration.
+pub fn type_requires_owned_iteration(ty: &Type) -> bool {
     match ty {
         // A ViewMut element is iterated through the mut-view path, not by
         // consuming the outer list — do not treat it as a task-handle payload.
         Type::Apply { name, .. } if name == "ViewMut" => false,
         Type::Apply { name, args } => {
-            name == "Task" || args.iter().any(type_holds_task_handle)
+            name == "Task" || args.iter().any(type_requires_owned_iteration)
         }
-        Type::List(inner) | Type::FixedList { elem: inner, .. } => type_holds_task_handle(inner),
-        Type::Tuple(fields) => fields.iter().any(|(_, ty)| type_holds_task_handle(ty)),
-        Type::Option(inner) | Type::Shared(inner) => type_holds_task_handle(inner),
-        Type::Result { ok, err } => type_holds_task_handle(ok) || type_holds_task_handle(err),
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+            type_requires_owned_iteration(inner)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, ty)| type_requires_owned_iteration(ty)),
+        Type::Option(inner) | Type::Shared(inner) => type_requires_owned_iteration(inner),
+        Type::Result { ok, err } => {
+            type_requires_owned_iteration(ok) || type_requires_owned_iteration(err)
+        }
         Type::Map { key, value, .. } => {
-            type_holds_task_handle(key) || type_holds_task_handle(value)
+            type_requires_owned_iteration(key) || type_requires_owned_iteration(value)
         }
         _ => false,
     }

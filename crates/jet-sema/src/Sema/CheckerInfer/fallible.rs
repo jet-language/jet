@@ -539,7 +539,6 @@ impl<'a> Checker<'a> {
                     interrupt_sendable: false,
                     reactive_local: false,
                     reactive_shared: false,
-                    task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
                     invalid: false,
