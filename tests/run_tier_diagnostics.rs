@@ -71,10 +71,16 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
             .collect::<Vec<_>>()
     };
     let expected = shape(&aot);
+    let expected_report = jet::render_all_json(&path, &src, &aot);
     assert_eq!(expected.len(), 3);
     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            jet::render_all_json(&path, &src, &diags),
+            expected_report,
+            "{tier} structured report drifted from AOT"
+        );
         assert_eq!(
             jet::render_diagnostics("tests/ui/empty_task_combinator.jet", &src, &diags),
             snapshot,
@@ -135,9 +141,15 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
             .collect::<Vec<_>>()
     };
     let expected = shape(&aot);
+    let expected_report = jet::render_all_json(&path, &src, &aot);
     assert!(expected.iter().any(|(code, ..)| code == "E0956"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            jet::render_all_json(&path, &src, &diags),
+            expected_report,
+            "{tier} structured report drifted from AOT"
+        );
         assert_eq!(
             jet::render_diagnostics("tests/ui/comptime_panic.jet", &src, &diags),
             snapshot,

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 
-use super::Check::{fixes_from_diagnostics, Fix};
+use super::Check::{collect_fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
     compute_definition, compute_generated_definition, compute_hover, compute_references,
@@ -760,7 +760,14 @@ fn publish_diagnostics(
         if i > 0 {
             items.push(',');
         }
-        items.push_str(&diagnostic_json_with_clears(d, file, src, clears[i]));
+        items.push_str(&diagnostic_json_with_clears(
+            d,
+            file,
+            src,
+            clears[i],
+            uri,
+            diags,
+        ));
     }
     format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
@@ -772,7 +779,14 @@ fn publish_diagnostics(
 
 #[cfg(test)]
 fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
-    diagnostic_json_with_clears(d, file, src, 0)
+    diagnostic_json_with_clears(
+        d,
+        file,
+        src,
+        0,
+        &path_to_uri(file),
+        std::slice::from_ref(d),
+    )
 }
 
 fn diagnostic_json_with_clears(
@@ -780,6 +794,8 @@ fn diagnostic_json_with_clears(
     file: &str,
     src: &str,
     clears: usize,
+    uri: &str,
+    diagnostics: &[Diagnostic],
 ) -> String {
     let severity = match d.severity {
         Severity::Error => 1,
@@ -789,19 +805,55 @@ fn diagnostic_json_with_clears(
         .span
         .map(|s| byte_span_to_range(src, s))
         .unwrap_or(full_document_range(src));
-    let data = d
-        .structured
-        .as_ref()
-        .map(|_| format!(r#", "data":{}"#, d.to_json_with_clears(file, src, clears)))
-        .unwrap_or_default();
+    let related = related_information_json(d, uri, src, diagnostics);
     format!(
-        r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}"{}}}"#,
+        r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}","codeDescription":{{"href":"{}"}}{},"data":{}}}"#,
         range_json(range),
         severity,
         json_escape(&d.code),
         json_escape(&d.what),
-        data,
+        json_escape(&diagnostic_explanation_uri(&d.code)),
+        related,
+        d.to_json_with_clears(file, src, clears),
     )
+}
+
+fn diagnostic_explanation_uri(code: &str) -> String {
+    format!("jet://explain/{code}")
+}
+
+fn related_information_json(
+    diagnostic: &Diagnostic,
+    uri: &str,
+    src: &str,
+    diagnostics: &[Diagnostic],
+) -> String {
+    let mut related = Vec::new();
+    for cause_code in &diagnostic.cause {
+        let Some(cause) = diagnostics
+            .iter()
+            .find(|candidate| {
+                candidate.code.as_str() == cause_code.as_str() && candidate.span.is_some()
+            })
+        else {
+            continue;
+        };
+        let Some(span) = cause.span else {
+            continue;
+        };
+        related.push(format!(
+            r#"{{"location":{{"uri":"{}","range":{}}},"message":"[{}] {}"}}"#,
+            json_escape(uri),
+            range_json(byte_span_to_range(src, span)),
+            json_escape(&cause.code),
+            json_escape(&cause.what),
+        ));
+    }
+    if related.is_empty() {
+        String::new()
+    } else {
+        format!(r#","relatedInformation":[{}]"#, related.join(","))
+    }
 }
 
 fn code_action_response(
@@ -819,7 +871,7 @@ fn code_action_response(
         lsp_pos_to_offset(&doc.text, requested.end),
     );
     let checked = server.check_with_bundle(doc);
-    let fixes = fixes_from_diagnostics(checked.diags.clone());
+    let fixes = collect_fixes_from_diagnostics(checked.diags.clone(), &doc.text);
     let mut db = checked
         .bundle
         .map(|bundle| build_symbol_db(&bundle, &checked.facts))
@@ -2891,7 +2943,8 @@ mod project_part_tests {
             concat!(
                 "{{\"range\":{},\"severity\":1,",
                 "\"code\":\"E2702\",\"source\":\"jet\",",
-                "\"message\":\"crypto API misuse\", ",
+                "\"message\":\"crypto API misuse\",",
+                "\"codeDescription\":{{\"href\":\"jet://explain/E2702\"}},",
                 "\"data\":{{\"schema\":\"jet.report/v1\",",
                 "\"moment\":\"compile\",\"severity\":\"error\",",
                 "\"code\":\"E2702\",\"what\":\"crypto API misuse\",",
@@ -2907,8 +2960,78 @@ mod project_part_tests {
             "",
         );
         assert_eq!(json, expected);
-        assert!(json.ends_with(&format!(", \"data\":{compiler_data}}}")), "{json}");
+        assert!(json.ends_with(&format!(",\"data\":{compiler_data}}}")), "{json}");
         assert!(!json.contains("backend"), "{json}");
+    }
+
+    #[test]
+    fn lsp_diagnostic_carries_the_complete_registry_report() {
+        let mut diagnostic = Diagnostic::error(
+            "E0999",
+            "one marker is written without brackets".into(),
+            "brackets group two or more markers; one marker stays bare".into(),
+            "replace `#[Codable]` with `#Codable`".into(),
+            Some(Span::new(0, 10)),
+        );
+        diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
+            span: Span::new(0, 10),
+            new_text: "#Codable".into(),
+        });
+        let json = diagnostic_json(&diagnostic, "src/main.jet", "#[Codable]\n");
+
+        assert!(json.contains(r#""message":"one marker is written without brackets""#, "{json}");
+        assert!(
+            json.contains(r#""codeDescription":{"href":"jet://explain/E0999"}"#),
+            "{json}"
+        );
+        assert!(json.contains(r#""data":{"schema":"jet.report/v1""#), "{json}");
+        assert!(
+            json.contains(r#""why":"brackets group two or more markers; one marker stays bare""#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""fix":"replace `#[Codable]` with `#Codable`""#),
+            "{json}"
+        );
+        assert!(json.contains(r#""new_text":"#Codable""#), "{json}");
+    }
+
+    #[test]
+    fn lsp_diagnostic_projects_cause_as_related_location() {
+        let root = Diagnostic::error(
+            "E0956",
+            "root construct failed".into(),
+            "the root construct is unsupported".into(),
+            "use a supported construct".into(),
+            Some(Span::new(0, 1)),
+        );
+        let dependent = Diagnostic::error(
+            "E2710",
+            "dependent expansion failed".into(),
+            "the dependent expansion ran the root".into(),
+            "fix the root construct".into(),
+            Some(Span::new(2, 3)),
+        )
+        .caused_by(&root);
+        let diagnostics = vec![root, dependent.clone()];
+        let json = diagnostic_json_with_clears(
+            &dependent,
+            "src/main.jet",
+            "a b",
+            0,
+            "file:///workspace/src/main.jet",
+            &diagnostics,
+        );
+
+        assert!(json.contains(r#""relatedInformation":["#), "{json}");
+        assert!(
+            json.contains(r#""uri":"file:///workspace/src/main.jet""#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""message":"[E0956] root construct failed""#),
+            "{json}"
+        );
     }
 
     #[test]

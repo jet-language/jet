@@ -1162,6 +1162,95 @@ fn lsp_check_json_matches_jet_check_json_for_diagnostic_fixture() {
 }
 
 #[test]
+fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let _guard = lock_lsp_process();
+
+    let source = "#[Codable]\nstruct Widget {\n    label: String\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let uri = "file:///tmp/lsp_report_test.jet";
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            uri,
+            json_string(source)
+        ),
+    );
+    let diagnostics = read_msg(&mut stdout);
+    assert!(diagnostics.contains("publishDiagnostics"), "{diagnostics}");
+    assert!(
+        diagnostics.contains(r#""message":"one marker is written without brackets""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""codeDescription":{"href":"jet://explain/E0999"}"#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""data":{"schema":"jet.report/v1""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""why":"brackets group two or more markers; one marker stays bare""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""fix":"replace `#[Codable]` with `#Codable`""#),
+        "{diagnostics}"
+    );
+    assert!(diagnostics.contains(r#""new_text":"#Codable""#), "{diagnostics}");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":10}}}},"context":{{"diagnostics":[]}}}}}}"#,
+            uri
+        ),
+    );
+    let actions = read_msg(&mut stdout);
+    assert!(actions.contains(r#""kind":"quickfix""#), "{actions}");
+    assert!(
+        actions.contains(r#""title":"replace `#[Codable]` with `#Codable`""#),
+        "{actions}"
+    );
+    assert!(actions.contains(r#""newText":"#Codable""#), "{actions}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn lsp_formatting_and_range_formatting_return_edits() {
     let jet = jet_bin();
     if !jet.exists() {

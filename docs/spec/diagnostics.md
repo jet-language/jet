@@ -1965,6 +1965,19 @@ walking or guessing the graph.
 Command status and ledger objects can keep their command schemas. Any report
 inside them uses `jet.report/v1`. No consumer of the shared renderer retains
 its legacy diagnostic envelope.
+
+## Editor reports (D-REPORT-EDITOR1=A)
+
+LSP diagnostics use the registered row's `what` as the LSP `message`. Every
+diagnostic also carries the complete `jet.report/v1` object in `data`, including
+`why`, `fix`, `fix_edits`, and `cause`. The `codeDescription.href` value is
+`jet://explain/<CODE>`, so an editor can open the same explanation as `jet explain`.
+
+When a report's `cause` names another report with a source span, LSP adds that
+report as standard `relatedInformation`. LSP code actions use the same
+row-owned `fix_edits` projection as `jet fix`; they do not parse diagnostic
+prose or maintain an editor-only edit path.
+
 ### E0910 — Published schema breaking change
 
 `#PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A

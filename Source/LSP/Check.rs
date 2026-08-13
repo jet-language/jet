@@ -60,7 +60,14 @@ pub struct Fix {
 /// Collect every machine-applicable fix for a document, in diagnostic order.
 /// Both the CLI and the LSP go through here.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
-    let mut fixes = fixes_from_diagnostics(check_document(path, text));
+    collect_fixes_from_diagnostics(check_document(path, text), text)
+}
+
+/// Project a checked diagnostic bundle and formatter edits into the same fix
+/// list used by the CLI. The LSP passes its overlay-checked bundle here so
+/// unsaved workspace documents remain part of the check.
+pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) -> Vec<Fix> {
+    let mut fixes = fixes_from_diagnostics(diagnostics);
     fixes.extend(
         crate::Formatter::retired_interpolation_selector_edits(text)
             .into_iter()
