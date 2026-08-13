@@ -2332,8 +2332,13 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         AST::Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | AST::Expr::Present(inner, _)
         | AST::Expr::Ok(inner, _)
-        | AST::Expr::Err(inner, _)
-        | AST::Expr::Try(inner, _, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
+        | AST::Expr::Err(inner, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
+        AST::Expr::Try(inner, _, _, note) => {
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
+            if let Some(note) = note {
+                structural_slot(ctx, "note", StructuralSlotKind::Scalar, |ctx| collect_expr(note, mp, ctx));
+            }
+        }
         AST::Expr::OrFallback {
             value, fallback, ..
         } => {

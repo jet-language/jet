@@ -169,10 +169,15 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         | Expr::Present(value, _)
         | Expr::Ok(value, _)
         | Expr::Err(value, _)
-        | Expr::Try(value, _, _)
         | Expr::Paren(value, _)
         | Expr::IncDec { operand: value, .. }
         | Expr::PtrFromAddr { addr: value, .. } => expr_has_comptime_evaluation(value),
+        Expr::Try(value, _, _, note) => {
+            expr_has_comptime_evaluation(value)
+                || note
+                    .as_deref()
+                    .is_some_and(expr_has_comptime_evaluation)
+        }
         Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
             expr_has_comptime_evaluation(key) || expr_has_comptime_evaluation(value)
         }),

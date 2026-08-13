@@ -798,11 +798,17 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a
         // total sema fact (`None`/`Fallible`/`Typed(fn)`), reproduced verbatim. The
-        // inner fallible value must itself be in-subset (a user fallible fn call, a
-        // local, an `ok`/`err` literal). A core/stdlib fallible call (e.g. `fs.read`)
+        // inner fallible value and the lazy note must themselves be in-subset (a
+        // user fallible fn call, a local, an `ok`/`err` literal, or a covered
+        // string interpolation). A core/stdlib fallible call (e.g. `fs.read`)
         // is NOT in-subset (it stays on the AST path — Phase 10), so a `?` on one is
         // excluded automatically.
-        Expr::Try(inner, _, _) => expr_in_subset(inner, cx, locals),
+        Expr::Try(inner, _, _, note) => {
+            expr_in_subset(inner, cx, locals)
+                && note
+                    .as_deref()
+                    .is_none_or(|note| expr_in_subset(note, cx, locals))
+        }
         // c109 Phase 8: the `??` fallback operator. `is_option` is total. The value
         // and the fallback must be in-subset. The Panic fallback form is deferred
         // (its `safe_locals_expr` reproduction is out of subset) — only Value and

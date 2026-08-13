@@ -1299,9 +1299,13 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
-            Expr::Try(inner, _, _) => {
+            Expr::Try(inner, _, _, note) => {
                 self.fmt_expr(inner, Prec::Postfix);
                 self.write("?");
+                if let Some(note) = note {
+                    self.write(" ");
+                    self.fmt_expr(note, Prec::Postfix);
+                }
             }
             Expr::OrFallback {
                 value, fallback, ..

@@ -446,11 +446,11 @@ fn parse_age(raw: String) => Int ? ParseError {
     return Ok(42)
 }
 fn load(raw: String) => Int ? ParseError {
-    n :: parse_age(raw)?
+    n :: parse_age(raw)? "loading age"
     return Ok((n * 2))
 }
 fn double(raw: String) => Int ? ParseError {
-    n :: load(raw)?
+    n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
 fn run() {
@@ -473,6 +473,45 @@ fn run() {
         "missing double frame: {stderr}"
     );
     assert!(stderr.contains("via ?"), "missing `via ?` suffix: {stderr}");
+    assert!(
+        stderr.contains("via ?: loading age"),
+        "missing note on a typed error: {stderr}"
+    );
+    assert!(
+        stderr.contains("via ?: doubling age"),
+        "missing second note on a typed error: {stderr}"
+    );
+}
+
+#[test]
+fn try_note_interpolation_is_lazy_on_success() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        return;
+    }
+
+    let src = r#"
+fn present() => String ? {
+    return Ok("ok")
+}
+fn note_value() => String {
+    print("evaluated")
+    return "unexpected"
+}
+fn wrapped() => String ? {
+    value :: present()? "never {note_value()}"
+    return Ok(value)
+}
+fn run() {
+    if wrapped() == {
+        .Ok(value) -> { print(value) }
+        .Err(_) -> { print("failed") }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_debug("try_note_lazy", src);
+    assert_eq!(code, 0, "successful propagation should exit 0: {stderr}");
+    assert_eq!(stdout.trim(), "ok", "success note was evaluated: {stdout}");
 }
 
 #[test]
@@ -482,18 +521,18 @@ fn uncaught_err_prints_propagation_chain() {
         return;
     }
 
-    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() => () ?` prints the
-    // `?` chain (file:line per frame) then the error text, exit 1.
+    // D-FAIL-CTX1=A: uncaught Err at `fn run() => () ?` prints the `?` journey
+    // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
 fn read_raw() => String ? {
     return Err("file not found")
 }
 fn parse_config() => String ? {
-    raw :: read_raw()?
+    raw :: read_raw()? "reading raw config"
     return Ok(raw)
 }
 fn load_config() => String ? {
-    cfg :: parse_config().context("loading config")?
+    cfg :: parse_config()? "loading config"
     return Ok(cfg)
 }
 fn run() => () ? {
@@ -515,8 +554,16 @@ fn run() => () ? {
         "missing `via ?` suffix: {stderr}"
     );
     assert!(
-        stderr.contains("loading config: file not found"),
-        "missing .context frame in uncaught Err text: {stderr}"
+        stderr.contains("via ?: reading raw config"),
+        "missing first ? note in uncaught Err text: {stderr}"
+    );
+    assert!(
+        stderr.contains("via ?: loading config"),
+        "missing second ? note in uncaught Err text: {stderr}"
+    );
+    assert!(
+        stderr.contains("Error: file not found"),
+        "missing original error text in uncaught Err text: {stderr}"
     );
 }
 

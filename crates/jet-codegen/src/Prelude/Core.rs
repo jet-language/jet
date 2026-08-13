@@ -674,7 +674,7 @@ fn jet_panic_rich(
     }
     jet_runtime_exit();
 }
-/// E3002 / D-ERRCTX1=D: `?`-propagation trace in **dev** builds.
+/// E3002 / D-FAIL-CTX1: `?`-propagation trace in **dev** builds.
 ///
 /// Gate is `not(jet_release)` (set by `--release` / `--profile=release`), not
 /// `debug_assertions`: the default `jet run` profile passes `-O`, which turns
@@ -682,31 +682,33 @@ fn jet_panic_rich(
 ///
 /// Consecutive identical frames (same fn + file + line) collapse — Go wrap-noise
 /// lesson — while each distinct site keeps its identity (Elixir lesson).
-thread_local! {
-    static JET_ERR_TRACE_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
-        const { std::cell::RefCell::new(None) };
-}
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if cfg!(not(jet_release)) {
         if r.is_err() {
-            let site = (fn_name.to_string(), file.to_string(), line);
-            let fresh = JET_ERR_TRACE_LAST.with(|last| {
-                let mut slot = last.borrow_mut();
-                if slot.as_ref() == Some(&site) {
-                    false
-                } else {
-                    *slot = Some(site);
-                    true
-                }
-            });
-            if fresh {
-                eprintln!(
-                    "error propagated from: {} ({}:{}) via ?",
-                    fn_name, file, line
-                );
+            if let Some(frame) = jet_journey_frame(file, line, fn_name, || String::new()) {
+                eprint!("{frame}");
             }
         } else {
-            JET_ERR_TRACE_LAST.with(|last| *last.borrow_mut() = None);
+            jet_journey_reset();
+        }
+    }
+    r
+}
+
+fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
+    r: Result<T, E>,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    note: F,
+) -> Result<T, E> {
+    if cfg!(not(jet_release)) {
+        if r.is_err() {
+            if let Some(frame) = jet_journey_frame(file, line, fn_name, note) {
+                eprint!("{frame}");
+            }
+        } else {
+            jet_journey_reset();
         }
     }
     r

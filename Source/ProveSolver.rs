@@ -958,8 +958,13 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
         | Expr::Present(base, _)
         | Expr::Ok(base, _)
         | Expr::Err(base, _)
-        | Expr::Try(base, _, _)
         | Expr::Paren(base, _) => visit_expr_calls(base, calls),
+        Expr::Try(base, _, _, note) => {
+            visit_expr_calls(base, calls);
+            if let Some(note) = note {
+                visit_expr_calls(note, calls);
+            }
+        }
         Expr::MapLit(entries, _) => {
             for (key, value) in entries {
                 visit_expr_calls(key, calls);

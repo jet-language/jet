@@ -157,13 +157,6 @@ pub(crate) fn method_call_in_subset(
             }
         }
     }
-    // D-ERRCTX1=D: `<fallible>.context("…")` — sema marks the receiver via
-    // `recv_type_out` (see `infer_method_call`).
-    if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
-        return args.len() == 1
-            && expr_in_subset(receiver, cx, locals)
-            && expr_in_subset(&args[0].expr, cx, locals);
-    }
     // D-FAIL-CARRIER1=A: the carrier's middle states. Sema marks the receiver
     // via `recv_type_out` once it has proved the shape (see `infer_method_call`).
     if recv_type.as_deref() == Some("__Carrier__") {

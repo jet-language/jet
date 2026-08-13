@@ -1518,7 +1518,7 @@ fn project_expr_node(
                 ret.ends_with('?'),
             ))
         }
-        Expr::Try(inner, span, _) => {
+        Expr::Try(inner, span, _, _) => {
             let node_id = format!("{}:expr:{ordinal}:fallible", g.graph_id);
             add_node(
                 g,

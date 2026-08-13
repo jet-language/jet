@@ -226,10 +226,15 @@ fn collect_interrupt_callback_scan(
                 | Expr::Present(inner, _)
                 | Expr::Ok(inner, _)
                 | Expr::Err(inner, _)
-                | Expr::Try(inner, _, _)
                 | Expr::Spread(inner, _)
                 | Expr::IncDec { operand: inner, .. } => {
                     work.push(InterruptScanTask::Expr(inner));
+                }
+                Expr::Try(inner, _, _, note) => {
+                    work.push(InterruptScanTask::Expr(inner));
+                    if let Some(note) = note {
+                        work.push(InterruptScanTask::Expr(note));
+                    }
                 }
                 Expr::Binary(_, left, right, _) => {
                     work.push(InterruptScanTask::Expr(right));
@@ -517,9 +522,14 @@ fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Spread(inner, _)
         | Expr::IncDec { operand: inner, .. } => collect_interrupt_aliases_expr(inner, aliases),
+        Expr::Try(inner, _, _, note) => {
+            collect_interrupt_aliases_expr(inner, aliases);
+            if let Some(note) = note {
+                collect_interrupt_aliases_expr(note, aliases);
+            }
+        }
         _ => {}
     }
 }
@@ -674,10 +684,15 @@ fn collect_interrupt_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(Strin
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Spread(inner, _)
         | Expr::IncDec { operand: inner, .. } => {
             collect_interrupt_lambda_captures_expr(inner, captures)
+        }
+        Expr::Try(inner, _, _, note) => {
+            collect_interrupt_lambda_captures_expr(inner, captures);
+            if let Some(note) = note {
+                collect_interrupt_lambda_captures_expr(note, captures);
+            }
         }
         _ => {}
     }

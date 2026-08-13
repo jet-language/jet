@@ -347,7 +347,13 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
         Expr::TupleLit(fields, _, _) => for (_, value) in fields { collect_expr_operations(value, out); },
         Expr::CallValue { callee, args, .. } => { collect_expr_operations(callee, out); for argument in args { collect_expr_operations(&argument.expr, out); } }
         Expr::Tainted(inner, _, _) | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) | Expr::IncDec { operand: inner, .. } => collect_expr_operations(inner, out),
+        | Expr::IncDec { operand: inner, .. } => collect_expr_operations(inner, out),
+        Expr::Try(inner, _, _, note) => {
+            collect_expr_operations(inner, out);
+            if let Some(note) = note {
+                collect_expr_operations(note, out);
+            }
+        }
         Expr::PatternTest { subject, .. } => collect_expr_operations(subject, out),
         Expr::OrFallback { value, fallback, .. } => {
             collect_expr_operations(value, out);

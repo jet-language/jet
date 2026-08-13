@@ -744,7 +744,12 @@ fn collect_serde_codec_demands(
                 walk_expr(segment, demands);
                 walk_expr(inner, demands);
             }
-            TExprKind::Try { inner, .. } => walk_expr(inner, demands),
+            TExprKind::Try { inner, note, .. } => {
+                walk_expr(inner, demands);
+                if let Some(note) = note {
+                    walk_expr(note, demands);
+                }
+            }
             TExprKind::OrFallback { value, fallback } => {
                 walk_expr(value, demands);
                 match fallback {
@@ -3577,6 +3582,9 @@ pub enum TExprKind {
     /// byte-for-byte (the emitter never reads `cx.current_fn`/`cx.src`).
     Try {
         inner: Box<TExpr>,
+        /// Optional D-FAIL-CTX1 note. Lowered as a closure/cold branch so its
+        /// interpolation is never evaluated when the operand succeeds.
+        note: Option<Box<TExpr>>,
         convert: TTryConvert,
         /// Pre-escaped Rust string literal for the source file (`escape_rust_str`).
         file: String,

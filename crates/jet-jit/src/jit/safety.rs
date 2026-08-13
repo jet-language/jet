@@ -1976,15 +1976,6 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         TIR::THostArg::Lambda(_) => false,
                     })
             }
-            THostCall::Helper { helper, args } if helper.ends_with("jet_context") => {
-                args.len() == 2
-                    && args.iter().all(|arg| match arg {
-                        TIR::THostArg::Expr(expr) | TIR::THostArg::Borrow(expr) => {
-                            resident_safe_expr(expr, callees)
-                        }
-                        TIR::THostArg::Lambda(_) => false,
-                    })
-            }
             THostCall::ExpiringValueNew {
                 value,
                 duration,

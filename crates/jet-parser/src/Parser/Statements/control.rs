@@ -2224,7 +2224,7 @@ impl<'a> Parser<'a> {
                     // D-META-STAGE1=B (formerly D-CTMARKER1=C): `$name;` as a standalone statement — valid in comptime contexts.
                     | Expr::ComptimeName { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
-                    | Expr::Try(_, _, _)
+                    | Expr::Try(_, _, _, _)
                     | Expr::OrFallback { .. }
                     | Expr::IncDec { .. } => {}
                     // D-LAYOUT1: inside a `layout NAME { … }` body, a bare

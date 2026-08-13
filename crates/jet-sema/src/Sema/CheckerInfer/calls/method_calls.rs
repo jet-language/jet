@@ -2133,40 +2133,6 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
-            // D-ERRCTX1=D: `<fallible>.context("loading config {path}")` — a lazily-
-            // evaluated human boundary message added to the error chain. Ordinary
-            // method: arity/type errors go through the normal call-arity/type-mismatch
-            // paths (no new diagnostic code), per the ratified text.
-            if method == "context" {
-                if let Type::Result { err, .. } = &recv_ty {
-                    // A custom error type (`T ? MyError`) is not the default
-                    // `Err` surface `.context()` targets — fall through so the
-                    // normal "unknown method" path teaches the actual shape.
-                    if matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERR) {
-                        if args.len() != 1 {
-                            self.diags
-                                .push(wrong_core_arity("context", 1, args.len(), span));
-                            for a in args.iter_mut() {
-                                self.infer(&mut a.expr);
-                            }
-                            return Some(recv_ty);
-                        }
-                        let saved = self.expected_type.clone();
-                        self.expected_type = Some(Type::String);
-                        let msg_ty = self.infer(&mut args[0].expr);
-                        self.expected_type = saved;
-                        if let Some(t) = msg_ty {
-                            self.check_type_assignable(&Type::String, &t, args[0].expr.span());
-                        }
-                        // D-ERRCTX1=D: cheap "receiver is `Result<_, Err>`" signal for
-                        // the TIR subset gate (mirrors how a named type's method sets
-                        // `recv_type_out`) — codegen/subset re-derive the shape from this
-                        // rather than re-inferring the receiver's full type.
-                        *recv_type_out = Some("__Fallible__".to_string());
-                        return Some(recv_ty);
-                    }
-                }
-            }
             // E0964: length-changing methods are forbidden on a fixed-size [T#N].
             if let Type::FixedList { .. } = &recv_ty {
                 if matches!(method, "push" | "pop" | "insert" | "remove" | "clear") {

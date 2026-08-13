@@ -2205,6 +2205,7 @@ impl LowerCtx<'_, '_> {
     fn lower_try(
         &mut self,
         inner: &TExpr,
+        note: Option<&TExpr>,
         convert: &TIR::TTryConvert,
         file: &str,
         line: usize,
@@ -2223,10 +2224,20 @@ impl LowerCtx<'_, '_> {
             let file_v = self.b.ins().iconst(types::I64, file_h);
             let line_v = self.b.ins().iconst(types::I64, line as i64);
             let fn_v = self.b.ins().iconst(types::I64, fn_h);
-            let trace = self
-                .module
-                .declare_func_in_func(self.host.trace_err, self.b.func);
-            self.b.ins().call(trace, &[file_v, line_v, fn_v]);
+            if let Some(note) = note {
+                let note_v = self.lower_expr(note)?;
+                let trace = self
+                    .module
+                    .declare_func_in_func(self.host.trace_err_note, self.b.func);
+                self.b
+                    .ins()
+                    .call(trace, &[file_v, line_v, fn_v, note_v]);
+            } else {
+                let trace = self
+                    .module
+                    .declare_func_in_func(self.host.trace_err, self.b.func);
+                self.b.ins().call(trace, &[file_v, line_v, fn_v]);
+            }
         }
         let return_handle = match convert {
             TIR::TTryConvert::None => handle,
@@ -2265,6 +2276,10 @@ impl LowerCtx<'_, '_> {
         self.emit_lexical_exit(Some(return_handle), false, self.shield_depth)?;
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
+        let reset = self
+            .module
+            .declare_func_in_func(self.host.trace_reset, self.b.func);
+        self.b.ins().call(reset, &[]);
         let ok_ty = inner
             .ty
             .unwrap_result()
@@ -7666,17 +7681,6 @@ impl LowerCtx<'_, '_> {
                 .as_ref()
                 .map(|(value, _)| *value)
                 .ok_or_else(|| "jit switch subject value outside switch".to_string()),
-            THostCall::Helper { helper, args } if helper.ends_with("jet_context") => {
-                let recv = match args.first() {
-                    Some(THostArg::Expr(e)) => self.lower_expr(e)?,
-                    _ => return Err("jit jet_context missing result".to_string()),
-                };
-                let msg = match args.get(1) {
-                    Some(THostArg::Expr(e)) => self.lower_expr(e)?,
-                    _ => return Err("jit jet_context missing message".to_string()),
-                };
-                Ok(self.call_host(self.host.result_context, &[recv, msg]))
-            }
             THostCall::TypedText { kind, arg } => {
                 let val = self.lower_expr(arg)?;
                 match kind {
@@ -16665,11 +16669,12 @@ impl LowerCtx<'_, '_> {
             TExprKind::Err(inner) => self.result_new(false, inner),
             TExprKind::Try {
                 inner,
+                note,
                 convert,
                 file,
                 line,
                 fn_name,
-            } => self.lower_try(inner, convert, file, *line, fn_name),
+            } => self.lower_try(inner, note.as_deref(), convert, file, *line, fn_name),
             TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
             TExprKind::Lambda(lam) => {
                 let id = super::functions_compile::lower_callable_lambda(

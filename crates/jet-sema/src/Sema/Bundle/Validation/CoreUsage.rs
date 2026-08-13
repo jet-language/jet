@@ -743,8 +743,13 @@ pub(crate) fn collect_core_expr(
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
+        | Expr::Err(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
+        Expr::Try(inner, _, _, note) => {
+            collect_core_expr(inner, imports, used, spans, ffi_cb);
+            if let Some(note) = note {
+                collect_core_expr(note, imports, used, spans, ffi_cb);
+            }
+        }
         Expr::Binary(_, lhs, rhs, _)
         | Expr::Index {
             base: lhs,

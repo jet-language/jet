@@ -1493,25 +1493,6 @@ fn lower_method_call_impl(
             }
         }
     }
-    // D-ERRCTX1=D: `<fallible>.context("…")` — lazily-evaluated (only formatted
-    // if the error actually propagates): wrap the message in a zero-arg closure
-    // and let the Outcome Prelude's `jet_err_context` call it only on the
-    // `Err` branch.
-    if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
-        let recv = lower_expr(receiver, cx, env);
-        let msg = lower_expr(&args[0].expr, cx, env);
-        return TExpr {
-            ty: recv.ty.clone(),
-            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
-                helper: format!("{}jet_context", cx.root_prefix),
-                args: vec![
-                    crate::Codegen::TIR::THostArg::Expr(recv),
-                    // emit formats as plain expr; wrap as zero-arg closure in emit Helper for jet_context
-                    crate::Codegen::TIR::THostArg::Expr(msg),
-                ],
-            })),
-        };
-    }
     // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — the audited escape.
     // `SQL`/`HTML` name the type here (sema already confirmed no local shadows
     // it), so `recv_type` was never set for this call; check the receiver
