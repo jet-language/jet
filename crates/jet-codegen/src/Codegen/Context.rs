@@ -1590,6 +1590,21 @@ impl Cx {
             {
                 name.clone()
             }
+            // Sema keeps visible imported leaves in user signatures (for example
+            // `Note`), while the codegen registry stores the canonical nominal
+            // identity. Resolve that projection before any prelude-name fallback
+            // so imported types cannot be emitted as local `__jet_Note` names.
+            Type::Named(name) if self.foreign_type_identity("", name).is_some() => {
+                let identity = self
+                    .foreign_type_identity("", name)
+                    .expect("foreign identity was checked above");
+                let rust_mod = self
+                    .foreign_types
+                    .get(&identity)
+                    .expect("foreign identity must have a Rust module");
+                let leaf = nominal_leaf(&identity);
+                format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
+            }
             Type::Named(name)
                 if (name == "Unit") && !self.type_names.contains(name) =>
             {
@@ -2580,6 +2595,19 @@ impl Cx {
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
         if let Some(rust_mod) = self.foreign_types.get(type_name) {
             let leaf = nominal_leaf(type_name);
+            return format!(
+                "{}{}::{}",
+                self.root_prefix,
+                rust_mod,
+                mangle_path(leaf)
+            );
+        }
+        if let Some(identity) = self.foreign_type_identity("", type_name) {
+            let rust_mod = self
+                .foreign_types
+                .get(&identity)
+                .expect("foreign identity must have a Rust module");
+            let leaf = nominal_leaf(&identity);
             return format!(
                 "{}{}::{}",
                 self.root_prefix,

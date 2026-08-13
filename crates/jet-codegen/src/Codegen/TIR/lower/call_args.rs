@@ -1,7 +1,7 @@
 use crate::jet_generated_format as jet_format;
 use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::mangle_generated;
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
@@ -206,7 +206,7 @@ pub(crate) fn lower_call_arg_value(
                 unreachable!()
             };
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
-            let name = mangle_generated(&format!(
+            let name = mangle(&format!(
                 "c_callback_{}_{}",
                 lam.span.start,
                 lam.span.end
@@ -246,7 +246,7 @@ pub(crate) fn lower_one_call_arg(
     // Default expressions carry private references to earlier declaration
     // slots. A plain worklist pass cannot install that mapping, so never reuse
     // its cached value here; lower the argument through the binder-aware path.
-    let value = if a.flags.binder_refs.is_empty() {
+    let value = if a.flags.binder_refs.is_empty() && !a.flags.c_callback_symbol {
         super::take_scheduled_expr(&a.expr, cx)
     } else {
         None

@@ -1273,6 +1273,20 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
     }
     if let Some(value) = expr_cache_take(e, cx) {
+        // A nested lowering context can rebind the same source identifier,
+        // notably a lambda capture, after the outer worklist cached its local
+        // read. Refresh the structured local and type from the active
+        // environment before using that cached value.
+        if let Expr::Ident(name, _) = e {
+            if matches!(&value.kind, TExprKind::Local(_)) {
+                if let Some(ty) = env.ty_of(name) {
+                    return TExpr {
+                        ty,
+                        kind: TExprKind::Local(env.local_of(name)),
+                    };
+                }
+            }
+        }
         return canonicalize_pre_tier_expr(value);
     }
     let cache_owner = ExprCacheOwner {
@@ -3309,6 +3323,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             payload: TEnumPayload::Unit,
                         },
                     };
+                }
+                if env.ty_of(enum_name).is_none() {
+                    if let Some(owner) = cx.variant_owner.get(member).filter(|owner| {
+                        owner.rsplit("::").next() == Some(enum_name)
+                    }) {
+                        return TExpr {
+                            ty: Type::Named(owner.clone()),
+                            kind: TExprKind::EnumLit {
+                                enum_type: owner.clone(),
+                                variant: member.clone(),
+                                payload: TEnumPayload::Unit,
+                            },
+                        };
+                    }
                 }
                 // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
                 // construction reaching codegen as a `Field`, the gate proved it).

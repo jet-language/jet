@@ -392,7 +392,11 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// Resolve a user nominal through the one canonical codegen import map.
 pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
-    cx.foreign_types.get(name).map(String::as_str)
+    if let Some(module) = cx.foreign_types.get(name) {
+        return Some(module.as_str());
+    }
+    let identity = cx.foreign_type_identity("", name)?;
+    cx.foreign_types.get(&identity).map(String::as_str)
 }
 
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.

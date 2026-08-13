@@ -3534,6 +3534,7 @@ fn stable_cargo_detail(stderr: &str) -> String {
             !t.is_empty()
                 && !t.starts_with("Updating crates.io")
                 && !t.starts_with("Locking ")
+                && !t.starts_with("Adding ")
                 && !t.contains("waiting for other jobs")
                 && !(t.starts_with("Compiling ") && !t.contains("jet_ffi_"))
         })

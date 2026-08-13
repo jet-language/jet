@@ -140,9 +140,13 @@ fn returned() => Box<Int> {
     return Box.new(4)
 }
 
+fn expected_box() => Box<[Int]> {
+    return Box.new([])
+}
+
 fn run() {
     direct :: Box.new(1)
-    expected :: Box.new([])
+    expected :: expected_box()
     nested :: Box.new(Box.new(2))
     pair :: Pair.new("three", 3)
     explicit :: Box<Int>.new(5)
@@ -503,7 +507,7 @@ use core.encoding.json as json
 fn run() {
     raw :: \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
     data :: json.parse(raw) ?? panic(\"bad json\")
-    if data == Object(entries) {
+    if data == .Object(entries) {
         print(entries.len())
     }
     obj := [String: JSON].{}
@@ -531,13 +535,13 @@ use core.encoding.json as json
 fn run() {
     raw :: \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
     data :: json.decode(raw) ?? panic(\"bad json\")
-    if data == Object(entries) {
+    if data == .Object(entries) {
         port :: entries[\"port\"]
         name :: entries[\"name\"]
-        if port == Int(n) {
+        if port == .Int(n) {
             print(n + 1)
         }
-        if name == Text(s) {
+        if name == .Text(s) {
             print(s)
         }
     }
@@ -557,7 +561,7 @@ use core.regex as re
 fn run() {
     text :: \"order 42 shipped\"
     m :: re.match(.{\"(\\\\d+) shipped\"}, text)
-    if m == Val(mat) {
+    if m == .Val(mat) {
         whole :: mat.group(0) ?? \"none\"
         print(whole)
     }
@@ -569,9 +573,9 @@ fn run() {
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).expect("front end rejected regex fixture");
-    // The `if let Some(__jet_mat)` if-let binds the `Match`; `.group(0)` reads it.
+    // The `if let Ok(__jet_mat)` outcome match binds the `Match`; `.group(0)` reads it.
     assert!(
-        out.rust.contains("if let Some(__jet_mat) ="),
+        out.rust.contains("if let Ok(__jet_mat) ="),
         "Match value not bound via if-let:\n{}",
         out.rust
     );
@@ -591,9 +595,9 @@ fn comptime_const_inline() {
     }
     let src = "\
 $version :: \"1.0\"
-$banner :: \"logbook {version}\"
+$banner :: \"logbook {$version}\"
 fn wrap(s: String) => String {
-    return \"{banner}: {s}\"
+    return \"{$banner}: {s}\"
 }
 fn run() {
     print(wrap(\"hi\"))
@@ -631,12 +635,12 @@ pub fn make_note(name: ^String, t: ^NoteType) => Note {
     return Note.{name: name, note_type: t, parent: None}
 }
 pub fn kind_str(n: Note) => String {
-    k :: n.note_type
+    k :: ~n.note_type
     if k == {
-        User -> { return \"user\" }
-        Feedback -> { return \"feedback\" }
-        Project -> { return \"project\" }
-        Reference -> { return \"reference\" }
+        .User -> { return \"user\" }
+        .Feedback -> { return \"feedback\" }
+        .Project -> { return \"project\" }
+        .Reference -> { return \"reference\" }
     }
 }
 fn run() { print(\"note\") }
@@ -651,20 +655,20 @@ fn classify(raw: String) => Query {
     if raw == \"user\" {
         return Query.Kind(NoteType.User)
     }
-    return Query.Tag(raw)
+    return Query.Tag(~raw)
 }
-fn describe(n: Note, q: Query) => String {
+fn describe(n: Note, q: ^Query) => String {
     if q == {
-        Tag(t) -> { return \"tag:{t}\" }
-        Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
+        .Tag(t) -> { return \"tag:{t}\" }
+        .Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
     }
 }
 fn run() {
     n :: note.make_note(\"x\", NoteType.User)
     q :: classify(\"user\")
-    print(describe(n, q))
+    print(describe(n, ^q))
     q2 :: classify(\"design\")
-    print(describe(n, q2))
+    print(describe(n, ^q2))
 }
 ";
     let (code, stdout) = build_and_run_multi(

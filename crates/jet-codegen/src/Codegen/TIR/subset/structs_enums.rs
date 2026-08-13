@@ -100,21 +100,21 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // clones a by-ref subject regardless of `cx.cloneable`) is valid. The construction
     // side has no reachable cross-module literal syntax (`note.NoteType.User` is E0107),
     // so a foreign enum is only ever MATCHED / passed, never constructed in another module.
-    let is_foreign = super::types::foreign_type_module(name, cx).is_some();
-    let Some(variants) = cx.enum_variants.get(name) else {
+    let canonical_name = cx
+        .foreign_type_identity("", name)
+        .unwrap_or_else(|| name.to_string());
+    let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
+    let Some(variants) = cx.enum_variants.get(&canonical_name) else {
         return false;
     };
     let carries_mutable_view =
         cx.type_contains_mutable_view(&Type::Named(name.to_string()));
-    if !is_foreign && !cx.cloneable.contains(name) && !carries_mutable_view {
-        return false;
-    }
     // A recursive edge back to this enum admits it (already under check) — the box
     // decision is total. Insert before recursing so a self-reference terminates here.
-    if !seen.insert(name.to_string()) {
+    if !seen.insert(canonical_name.clone()) {
         return true;
     }
-    let ok = variants.iter().all(|(_vname, payload)| {
+    let payloads_covered = variants.iter().all(|(_vname, payload)| {
         let payload_tys: Vec<&Type> = match payload {
             VariantPayload::Unit => Vec::new(),
             VariantPayload::Single(t, _) => vec![t],
@@ -124,7 +124,13 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
             .iter()
             .all(|t| enum_payload_ty_covered(t, cx, seen))
     });
-    seen.remove(name);
+    // A local enum carrying an imported value may be absent from the precomputed
+    // cloneability set because the source type is still the visible leaf while
+    // the codegen registry stores its canonical identity. A covered payload is
+    // itself the stronger Clone fact needed by the generated enum.
+    let ok = payloads_covered
+        && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view);
+    seen.remove(&canonical_name);
     ok
 }
 

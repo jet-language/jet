@@ -507,6 +507,19 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 {
                     return true;
                 }
+                // A selectively imported enum keeps its canonical owner in the
+                // variant table while the source receiver remains the visible leaf
+                // (`NoteType.User`). Resolve that owner before the ordinary local
+                // `variant_owner == enum_name` check; the canonical identity is the
+                // only Rust head the TIR may emit for a foreign enum.
+                if !locals.contains(enum_name)
+                    && cx.variant_owner.get(member).is_some_and(|owner| {
+                        owner.rsplit("::").next() == Some(enum_name)
+                            && enum_is_covered(owner, cx)
+                    })
+                {
+                    return true;
+                }
                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
                 // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::JSON::Null`,
                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).

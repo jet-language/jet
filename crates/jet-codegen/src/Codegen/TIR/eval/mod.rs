@@ -2834,13 +2834,34 @@ pub fn lower_expr_for_eval(
     distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<TExpr, Diagnostic> {
     let mut diagnostic = None;
+    let mut foreign_struct_span = None;
     crate::Comptime::walk_expr_nodes_for_validation(expr, &mut |node| {
         if diagnostic.is_none() {
             diagnostic = crate::Sema::Diagnostics::validate_typed_boundary_before_lowering(node);
         }
+        if foreign_struct_span.is_none()
+            && matches!(
+                node,
+                Expr::StructLit {
+                    import_ns: Some(_),
+                    ..
+                }
+            )
+        {
+            foreign_struct_span = Some(node.span());
+        }
     });
     if let Some(diagnostic) = diagnostic {
         return Err(diagnostic);
+    }
+    // Fragment evaluation has only the current module's struct registry. An
+    // imported struct literal needs the bundle name ledger to resolve its
+    // canonical owner, which this intentionally lightweight evaluator does
+    // not carry. Decline the optional fold and leave the checked runtime
+    // expression intact; attempting TIR lowering here would turn a normal
+    // fold miss into an I3 ICE.
+    if let Some(span) = foreign_struct_span {
+        return Err(unsupported("an imported struct literal", span));
     }
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);

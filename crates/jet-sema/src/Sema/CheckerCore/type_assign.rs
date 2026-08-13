@@ -825,6 +825,12 @@ impl<'a> Checker<'a> {
                 return true;
             }
             match (want, got) {
+                (Type::Named(want_name), Type::Named(got_name))
+                    if Syntax::is_data_type_name(want_name)
+                        && Syntax::is_data_type_name(got_name) =>
+                {
+                    true
+                }
                 (Type::Named(want_name), Type::Named(got_name)) => {
                     self.same_declared_name_identity(want_name, got_name)
                 }

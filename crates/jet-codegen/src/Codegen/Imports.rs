@@ -235,8 +235,21 @@ pub(crate) fn qualify_imported_call_type(
 /// `cx.type_names` and re-run the cloneability/hashability checks for any local
 /// structs or enums that reference those foreign types as fields.
 pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]) {
+    let mut foreign_leaf_counts: HashMap<String, usize> = HashMap::new();
     for name in cx.foreign_types.keys() {
         cx.type_names.insert(name.clone());
+        *foreign_leaf_counts
+            .entry(crate::Codegen::nominal_leaf(name).to_string())
+            .or_default() += 1;
+    }
+    // Local field types retain the visible leaf (`NoteType`), while the import
+    // map stores the canonical nominal (`<module>::NoteType`). Make the leaf
+    // available to the existing cloneability walk only when it identifies one
+    // foreign nominal; ambiguous leaves must remain unresolved.
+    for (leaf, count) in foreign_leaf_counts {
+        if count == 1 {
+            cx.type_names.insert(leaf);
+        }
     }
     for item in items {
         match item {

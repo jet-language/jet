@@ -878,7 +878,9 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 if let Some(vt) = vt {
-                                    if vt != *map_val_ty {
+                                    if vt != *map_val_ty
+                                        && !self.nominal_type_identity(&map_val_ty, &vt)
+                                    {
                                         self.diags.push(Diagnostic::error(
                                             "E0108",
                                             format!(
@@ -1497,10 +1499,18 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                             if let Expr::Ident(n, nspan) = &*e {
-                                if let Some(info) = self.lookup(n) {
-                                    if !info.ty.is_scalar()
-                                        && matches!(
-                                            info.param_conv,
+                                    if let Some(info) = self.lookup(n) {
+                                        if !info.ty.is_scalar()
+                                            && !matches!(
+                                                &info.ty,
+                                                Type::Named(name)
+                                                    if self
+                                                        .type_param_scope
+                                                        .iter()
+                                                        .any(|param| &param.name == name)
+                                            )
+                                            && matches!(
+                                                info.param_conv,
                                             Some(AccessConvention::Read)
                                                 | Some(AccessConvention::Write)
                                         )

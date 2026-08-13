@@ -497,7 +497,29 @@ impl<'a> Checker<'a> {
                 }
             }
             let diagnostics_before_init = self.diags.len();
+            // An immutable `::` binding is a read window. Let the existing
+            // field-read clone rule inspect the selected type without treating
+            // the read as an owning escape; the clone is inserted immediately
+            // after inference when the field is duplicable. Mutable bindings
+            // and all other owning positions keep the ordinary E0120 path.
+            let implicit_field_read = !b.mutable
+                && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
+                && field_read_to_clone(&b.init, self.registry, self.imports);
+            let saved_borrow_ctx = self.borrow_ctx;
+            if implicit_field_read {
+                self.borrow_ctx = true;
+            }
             let mut it = self.infer(&mut b.init);
+            self.borrow_ctx = saved_borrow_ctx;
+            if implicit_field_read
+                && it
+                    .as_ref()
+                    .is_some_and(|ty| crate::Sema::Diagnostics::is_cloneable(ty, self.registry))
+            {
+                let span = b.init.span();
+                let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
+                b.init = Expr::Copy(Box::new(inner), span);
+            }
             let init_has_error = self.diags[diagnostics_before_init..]
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Error);
