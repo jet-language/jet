@@ -45,7 +45,24 @@ fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
     assert_aot_and_default_parity(
         "compute_ml_targeted",
         include_str!("../examples/features/tooling/compute_ml.jet"),
-        &["loss:", "param:", "wire:shape=3;data=", "round:"],
+        &["before:", "loss:", "after:", "trained_loss:", "wire:shape=2,2;data="],
+    );
+    assert_aot_and_default_parity(
+        "compute_ml_f32_wire",
+        r#"
+use core.compute as compute
+
+fn run() {
+    left :: compute.matrix(1, 1, 2.0) ?? panic("left")
+    right :: compute.matrix(1, 1, 3.0) ?? panic("right")
+    model :: compute.matmul_f32_tile(left, right) ?? panic("model")
+    wire :: compute.serialize(model) ?? panic("wire")
+    print("wire:{wire}")
+    round :: compute.deserialize(wire) ?? panic("round")
+    print("round:{compute.to_list(round)}")
+}
+"#,
+        &["profile=F32Strict+Reproducible", "round:[6.0]"],
     );
     assert_aot_and_default_parity(
         "compute_device_targeted",

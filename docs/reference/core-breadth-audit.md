@@ -25,7 +25,7 @@ coverage in `tests/corelib.rs`.
 | `core.compute` Tensor / ndarray / FFT / sparse | shipped | CPU oracle; GPU deferred to E6 |
 | `core.compute` autodiff / ML / f32 tile | shipped | examples under `examples/features/tooling/compute_*.jet` |
 | BLAS/LAPACK vendor binding | non-goal | expert `#Unsafe` / package |
-| Full autograd graph beyond VJP/JVP helpers | non-goal this epoch | CPU `GradTriple` helpers only |
+| Full autograd graph beyond VJP/JVP helpers | non-goal this epoch | CPU reverse tape and composable VJP/JVP are shipped; accelerator graphs remain outside this slice |
 
 ## DB drivers (#117)
 

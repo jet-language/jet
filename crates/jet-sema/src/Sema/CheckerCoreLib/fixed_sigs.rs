@@ -1139,7 +1139,7 @@ pub fn core_fixed_sig(
         )),
         ("core.compute", "serialize") => Some((
             vec![(read, Type::Named("Tensor".to_string()))],
-            Some(Type::String),
+            Some(result_ty(Type::String, Type::Named("ComputeError".to_string()))),
         )),
         ("core.compute", "mse_loss") => Some((
             vec![

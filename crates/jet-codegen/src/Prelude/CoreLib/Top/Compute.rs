@@ -3088,34 +3088,101 @@ fn jet_compute_vjp_matmul(
     ))
 }
 
-// ── #1142: ML step + serialization over the Tensor oracle ───────────────────
+fn jet_compute_f32_value(value: f64, context: &str) -> Result<f32, JetComputeError> {
+    let narrowed = value as f32;
+    if !narrowed.is_finite() {
+        return Err(JetComputeError::Arithmetic(format!(
+            "{context} is outside the finite F32 range"
+        )));
+    }
+    Ok(narrowed)
+}
+
+fn jet_compute_validate_serialized_profile_values(
+    profile: &str,
+    values: &[f64],
+) -> Result<(), JetComputeError> {
+    if profile == CPU_ORACLE_F32_PROFILE {
+        for value in values {
+            let narrowed = jet_compute_f32_value(*value, "serialized Tensor value")?;
+            if f64::from(narrowed) != *value {
+                return Err(JetComputeError::Serialization(
+                    "serialized Tensor value is not canonical for its F32 profile".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn jet_compute_wire_checksum(body: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in body.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3_u64);
+    }
+    format!("{hash:016x}")
+}
+
+// ── #1142: ML training/inference + model serialization over the Tensor oracle ─
 
 fn jet_compute_mse_loss(pred: &JetTensor, target: &JetTensor) -> Result<f64, JetComputeError> {
+    jet_compute_validate_tensor(pred)?;
+    jet_compute_validate_tensor(target)?;
     if pred.trace.is_some() || target.trace.is_some() {
         return Err(JetComputeError::Unsupported(
             "mse_loss has no registered autodiff rule".to_string(),
         ));
     }
-    let diff = jet_compute_binary("sub", pred, target)?;
-    let sq = jet_compute_mul(&diff, &diff)?;
-    let n = jet_compute_numel(&sq.shape)? as f64;
-    if n == 0.0 {
+    if pred.shape != target.shape {
+        return Err(JetComputeError::RankMismatch(
+            "mse_loss prediction and target shapes must match".to_string(),
+        ));
+    }
+    if pred.device != target.device {
+        return Err(JetComputeError::Device(
+            "mse_loss prediction and target devices must match".to_string(),
+        ));
+    }
+    if pred.last_placement.profile != target.last_placement.profile {
+        return Err(JetComputeError::Device(
+            "mse_loss prediction and target precision profiles must match".to_string(),
+        ));
+    }
+    let pred_values = jet_compute_tensor_values(pred);
+    let target_values = jet_compute_tensor_values(target);
+    if pred_values.is_empty() {
         return Err(JetComputeError::InvalidShape(
             "mse_loss requires a non-empty tensor".to_string(),
         ));
     }
-    let sum = jet_compute_tensor_values(&sq)
-        .iter()
-        .try_fold(0.0, |sum, value| {
-            let next = sum + *value;
-            next.is_finite().then_some(next)
-        })
-        .ok_or_else(|| {
-            JetComputeError::Arithmetic(
-                "mse_loss accumulated a non-finite value".to_string(),
-            )
-        })?;
-    let loss = sum / n;
+    let loss = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        let mut sum = 0.0_f32;
+        for (pred_value, target_value) in pred_values.iter().zip(target_values.iter()) {
+            let pred_value = jet_compute_f32_value(*pred_value, "mse_loss prediction")?;
+            let target_value = jet_compute_f32_value(*target_value, "mse_loss target")?;
+            let next = sum + (pred_value - target_value) * (pred_value - target_value);
+            if !next.is_finite() {
+                return Err(JetComputeError::Arithmetic(
+                    "mse_loss accumulated a non-finite value".to_string(),
+                ));
+            }
+            sum = next;
+        }
+        f64::from(sum / pred_values.len() as f32)
+    } else {
+        let mut sum = 0.0_f64;
+        for (pred_value, target_value) in pred_values.iter().zip(target_values.iter()) {
+            let next = sum + (*pred_value - *target_value) * (*pred_value - *target_value);
+            if !next.is_finite() {
+                return Err(JetComputeError::Arithmetic(
+                    "mse_loss accumulated a non-finite value".to_string(),
+                ));
+            }
+            sum = next;
+        }
+        sum / pred_values.len() as f64
+    };
     if !loss.is_finite() {
         return Err(JetComputeError::Arithmetic(
             "mse_loss produced a non-finite value".to_string(),
@@ -3136,60 +3203,127 @@ fn jet_compute_sgd_step(
             "sgd parameter and gradient shapes must match".to_string(),
         ));
     }
-    if !lr.is_finite() {
-        return Err(JetComputeError::Arithmetic(
-            "sgd learning rate must be finite".to_string(),
+    if param.trace.is_some() || grad.trace.is_some() {
+        return Err(JetComputeError::Unsupported(
+            "sgd_step does not accept traced tensors".to_string(),
         ));
     }
-    let scaled = jet_compute_full(&grad.shape, lr)?;
-    let delta = jet_compute_mul(grad, &scaled)?;
-    jet_compute_binary("sub", param, &delta)
+    if param.device != grad.device {
+        return Err(JetComputeError::Device(
+            "sgd parameter and gradient devices must match".to_string(),
+        ));
+    }
+    if param.last_placement.profile != grad.last_placement.profile {
+        return Err(JetComputeError::Device(
+            "sgd parameter and gradient precision profiles must match".to_string(),
+        ));
+    }
+    if !lr.is_finite() || lr < 0.0 {
+        return Err(JetComputeError::Arithmetic(
+            "sgd learning rate must be finite and non-negative".to_string(),
+        ));
+    }
+
+    let param_values = jet_compute_tensor_values(param);
+    let grad_values = jet_compute_tensor_values(grad);
+    let data = if param.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+        param_values
+            .iter()
+            .zip(grad_values.iter())
+            .map(|(param_value, grad_value)| {
+                let param_value = jet_compute_f32_value(*param_value, "sgd parameter")?;
+                let grad_value = jet_compute_f32_value(*grad_value, "sgd gradient")?;
+                let next = param_value - learning_rate * grad_value;
+                next.is_finite().then_some(f64::from(next)).ok_or_else(|| {
+                    JetComputeError::Arithmetic(
+                        "sgd_step produced a non-finite value".to_string(),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        param_values
+            .iter()
+            .zip(grad_values.iter())
+            .map(|(param_value, grad_value)| {
+                let next = *param_value - lr * *grad_value;
+                next.is_finite().then_some(next).ok_or_else(|| {
+                    JetComputeError::Arithmetic(
+                        "sgd_step produced a non-finite value".to_string(),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let next = JetTensor {
+        shape: param.shape.clone(),
+        strides: jet_compute_row_major_strides(&param.shape)?,
+        data: std::sync::Arc::new(data),
+        device: param.device,
+        last_placement: param.last_placement.clone(),
+        last_transfer: None,
+        trace: None,
+    };
+    jet_compute_validate_tensor(&next)?;
+    Ok(next)
 }
 
-fn jet_compute_serialize(tensor: &JetTensor) -> String {
+fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?;
     if tensor.trace.is_some() {
-        jet_panic(
-            "Compute.rs",
-            line!(),
-            "Tensor serialization has no registered autodiff rule",
-        );
+        return Err(JetComputeError::Unsupported(
+            "Tensor serialization does not accept traced tensors".to_string(),
+        ));
     }
-    if let Err(error) = jet_compute_validate_tensor(tensor) {
-        jet_panic(
-            "core.compute.serialize",
-            line!(),
-            &format!("cannot serialize invalid Tensor: {}", error.jet_show()),
-        );
-    }
+    let values = jet_compute_tensor_values(tensor);
     let shape = tensor
         .shape
         .iter()
         .map(|d| d.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let data = jet_compute_tensor_values(tensor)
+    let data = values
         .iter()
         // Debug formatting is Rust's shortest round-tripping f64 spelling.
         // Keep it stable across the AOT/JIT/interpreter Prelude boundary.
         .map(|v| format!("{v:?}"))
         .collect::<Vec<_>>()
         .join(",");
-    format!("shape={shape};data={data}")
+    let profile = tensor.last_placement.profile.as_str();
+    jet_compute_validate_serialized_profile_values(profile, &values)?;
+    let body = format!("shape={shape};data={data};profile={profile}");
+    let checksum = jet_compute_wire_checksum(&body);
+    Ok(format!("{body};checksum={checksum}"))
 }
 
 fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
     let mut fields = payload.split(';');
     let Some(shape_part) = fields.next() else {
         return Err(JetComputeError::InvalidShape(
-            "deserialize expects shape=…;data=…".to_string(),
+            "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
         ));
     };
     let Some(data_part) = fields.next() else {
         return Err(JetComputeError::InvalidShape(
-            "deserialize expects shape=…;data=…".to_string(),
+            "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
         ));
     };
-    if fields.next().is_some() || !data_part.starts_with("data=") {
+    let Some(profile_part) = fields.next() else {
+        return Err(JetComputeError::InvalidShape(
+            "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+        ));
+    };
+    let Some(checksum_part) = fields.next() else {
+        return Err(JetComputeError::InvalidShape(
+            "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+        ));
+    };
+    if fields.next().is_some()
+        || !data_part.starts_with("data=")
+        || !profile_part.starts_with("profile=")
+        || !checksum_part.starts_with("checksum=")
+    {
         return Err(JetComputeError::Serialization(
             "deserialize contains duplicate or unknown fields".to_string(),
         ));
@@ -3250,6 +3384,29 @@ fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeErro
             })
             .collect::<Result<Vec<_>, _>>()?
     };
+    let profile = profile_part.strip_prefix("profile=").unwrap_or("");
+    let Some(capabilities) = jet_compute_registered_capabilities(profile) else {
+        return Err(JetComputeError::Serialization(format!(
+            "unsupported Tensor precision profile `{profile}`"
+        )));
+    };
+    jet_compute_validate_serialized_profile_values(profile, &data)?;
+    let checksum = checksum_part.strip_prefix("checksum=").unwrap_or("");
+    if checksum.len() != 16
+        || !checksum
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(JetComputeError::Serialization(
+            "serialized Tensor checksum is not canonical".to_string(),
+        ));
+    }
+    let body = format!("{shape_part};{data_part};{profile_part}");
+    if jet_compute_wire_checksum(&body) != checksum {
+        return Err(JetComputeError::Serialization(
+            "serialized Tensor checksum does not match its contents".to_string(),
+        ));
+    }
     let expected = jet_compute_storage_len(&shape)?;
     if expected != data.len() {
         return Err(JetComputeError::Serialization(format!(
@@ -3259,6 +3416,13 @@ fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeErro
     }
     let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu)?;
     tensor.data = std::sync::Arc::new(data);
+    tensor.last_placement.profile = profile.to_string();
+    tensor.last_placement.capabilities = capabilities
+        .iter()
+        .map(|capability| (*capability).to_string())
+        .collect();
+    tensor.last_placement.reason = "deserialized canonical Tensor".to_string();
+    jet_compute_validate_tensor(&tensor)?;
     Ok(tensor)
 }
 

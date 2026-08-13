@@ -1567,10 +1567,10 @@ pub fn apply(
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
-        "serialize" => Ok(CtValue::Str(jet_compute_serialize(&ct_to_tensor(
-            one(0)?,
-            span,
-        )?))),
+        "serialize" => Ok(match jet_compute_serialize(&ct_to_tensor(one(0)?, span)?) {
+            Ok(payload) => CtValue::Present(Box::new(CtValue::Str(payload))),
+            Err(e) => err_compute(e),
+        }),
         "deserialize" => {
             let payload = match one(0)? {
                 CtValue::Str(s) => s.clone(),

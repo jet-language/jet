@@ -3518,8 +3518,9 @@ fn run() {
 | `sum_axis` | reduce one axis |
 | `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
 | `to_sparse` / `sparse_mv` / `sparse_nnz` | CSR sparse view over dense |
-| `value_and_grad_mul` / `jvp_*` / `vjp_*` / `grad_*` | reverse default + composable JVP/VJP |
-| `mse_loss` / `sgd_step` / `serialize` / `deserialize` | ML step + tensor bytes |
+| `gradient` / `value_and_gradient` / `jvp` / `vjp` | reverse default + composable JVP/VJP |
+| `mse_loss` / `sgd_step` | checked CPU-oracle loss and precision-preserving SGD |
+| `serialize` / `deserialize` | checksummed Tensor model wire with profile receipt |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
 | `stream_new` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
@@ -3532,10 +3533,21 @@ symbols (I9). No accelerator provider is registered in this slice. Requests
 that need one return typed `ComputeError::Unsupported`; no engine substitutes
 an accelerator.
 
-Tensor serialization is the canonical wire `shape=axis,...;data=value,...`.
-The serializer uses shortest round-tripping finite f64 text. The decoder
-rejects duplicate or unknown fields, non-canonical axes or values, non-finite
-data, and storage-length mismatches before constructing a Tensor.
+Tensor serialization is the canonical wire
+`shape=axis,...;data=value,...;profile=name;checksum=hex16`.
+The serializer uses shortest round-tripping finite f64 text and records the
+CPU precision profile. The checksum is deterministic FNV-1a for corruption
+detection, not authenticity. The decoder rejects duplicate or unknown fields,
+non-canonical axes or values, unsupported profiles, non-finite data,
+storage-length mismatches, and checksum failures before constructing a Tensor.
+The retired two-field `shape=…;data=…` form is not accepted; there is no
+compatibility reader.
+
+`mse_loss` requires matching non-empty shape, device, and precision profile;
+`sgd_step` requires matching parameter/gradient metadata and a non-negative
+finite learning rate.
+The wire stores logical view values and deserializes them into contiguous
+storage with the recorded shape and profile.
 
 `D-COMPUTE-KERNEL1=D` / `D-COMPUTE-KERNEL-SURFACE1=B`: `#Kernel(.parallel) fn`
 is the explicit safe-kernel declaration. Sema accepts the marker only after proving the
@@ -3546,11 +3558,13 @@ attached to TIR and carried unchanged by AOT, default `jet run`, and the
 interpreter. Unsupported indexed writes, loops, captures, and provider calls
 are rejected; they do not silently fall back to an unproved kernel.
 
-`D-COMPUTE-AUTODIFF1=D`: reverse-mode VJP is the scalar-loss default;
-`jvp_*` and `vjp_*` are composable explicit transforms. Tangent/cotangent
-shapes are checked, broadcast gradients reduce to the input shape, and
-`value_and_grad_mul` rejects non-scalar outputs. Gradient receipts inherit the
-primal placement and profile.
+`D-COMPUTE-GRAD1=E`: `compute.gradient` and `compute.value_and_gradient` each
+support direct values and a bound transform. `wrt:` selects checked named
+parameters; both forms use the same reverse VJP core. `compute.jvp` and
+`compute.vjp` remain composable explicit transforms. Tangent/cotangent shapes
+are checked, broadcast gradients reduce to the input shape, and scalar-loss
+requirements reject non-scalar outputs. Gradient receipts inherit the primal
+placement and profile.
 
 `D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` publishes a stable backend,
 version, profile, cache identity, and closed capability list in placement
@@ -3717,6 +3731,7 @@ share that source-owned TIR path.
 | `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
 | `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
 | `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |
+| `examples/features/tooling/compute_ml.jet` | inference, autodiff training, SGD, and checksummed model serialization |
 | `examples/features/tooling/app_live.jet` | live queries + `#Transact` invalidate |
 | `docs/reference/framework-transplant-closeout.md` | framework transplant shipped-law ledger |
 | `docs/reference/language-shape-conformance.md` | #560 cross-surface conformance ledger |

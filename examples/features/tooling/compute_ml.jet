@@ -1,18 +1,36 @@
-// D-COMPUTE-ML1 / #1142: training step + Tensor serialization over the CPU oracle.
+// D-COMPUTE-ML1 / #1142: inference, autodiff training, and model serialization.
 use core.compute as compute
 
+fn predict(weight: Tensor, input: Tensor) => Tensor {
+    return compute.matmul(input, weight) ?? panic("predict")
+}
+
+fn training_loss(weight: Tensor, input: Tensor, target: Tensor) => Tensor {
+    prediction :: predict(weight, input)
+    error :: compute.sub(prediction, target) ?? panic("error")
+    squared :: compute.mul(error, error) ?? panic("square")
+    column_loss :: compute.sum_axis(squared, 0) ?? panic("column_loss")
+    return compute.sum_axis(column_loss, 0) ?? panic("loss")
+}
+
 fn run() {
-    pred :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("pred")
-    target :: compute.from_list([1.5, 2.5, 2.5]) ?? panic("target")
-    loss :: compute.mse_loss(pred, target) ?? panic("loss")
-    print("loss:{loss}")
+    weight :: compute.matrix(2, 2, 0.0) ?? panic("weight")
+    input :: compute.eye(2) ?? panic("input")
+    target :: compute.ones([2, 2]) ?? panic("target")
 
-    param :: compute.ones([3]) ?? panic("param")
-    grad :: compute.from_list([0.1, 0.2, 0.3]) ?? panic("grad")
-    next :: compute.sgd_step(param, grad, 0.5) ?? panic("sgd")
-    print("param:{compute.to_list(next)}")
+    before :: predict(weight, input)
+    print("before:{compute.to_list(before)}")
+    before_loss :: compute.mse_loss(before, target) ?? panic("before_loss")
+    print("loss:{before_loss}")
 
-    wire :: compute.serialize(next)
+    gradients :: compute.gradient(training_loss, ~weight, ~input, ~target, wrt: [weight])
+    next :: compute.sgd_step(weight, gradients.weight, 0.5) ?? panic("sgd")
+    after :: predict(next, input)
+    print("after:{compute.to_list(after)}")
+    after_loss :: compute.mse_loss(after, target) ?? panic("after_loss")
+    print("trained_loss:{after_loss}")
+
+    wire :: compute.serialize(next) ?? panic("serialize")
     print("wire:{wire}")
     round :: compute.deserialize(wire) ?? panic("deserialize")
     print("round:{compute.to_list(round)}")

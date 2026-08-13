@@ -25,7 +25,7 @@ fn run() {
     compute.set(&tensor, [1], 9.0) ?? panic("set")
     print("edited:{compute.to_list(tensor)}")
 
-    wire :: compute.serialize(product)
+    wire :: compute.serialize(product) ?? panic("wire")
     round :: compute.deserialize(wire) ?? panic("round")
     print("round:{compute.to_list(round)}")
 
@@ -45,6 +45,26 @@ fn run() {
     if bad_field == {
         .Ok(_) -> { print("field:accepted") }
         .Err(_) -> { print("field:rejected") }
+    }
+
+    bad_checksum :: compute.deserialize("shape=1;data=1.0;profile=F64Strict+Reproducible;checksum=0000000000000000")
+    if bad_checksum == {
+        .Ok(_) -> { print("checksum:accepted") }
+        .Err(_) -> { print("checksum:rejected") }
+    }
+
+    mse_left :: compute.full([2], 1.0) ?? panic("mse_left")
+    mse_right :: compute.full([3], 1.0) ?? panic("mse_right")
+    bad_loss :: compute.mse_loss(mse_left, mse_right)
+    if bad_loss == {
+        .Ok(_) -> { print("mse_shape:accepted") }
+        .Err(_) -> { print("mse_shape:rejected") }
+    }
+
+    bad_lr :: compute.sgd_step(mse_left, mse_left, -1.0)
+    if bad_lr == {
+        .Ok(_) -> { print("negative_lr:accepted") }
+        .Err(_) -> { print("negative_lr:rejected") }
     }
 
     bounds :: compute.kernel_bounds_ok([2, 3], [2, 0])
@@ -94,7 +114,7 @@ fn compute_cpu_oracle_aot_covers_storage_algebra_and_corruption() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
     );
 }
 
@@ -104,7 +124,7 @@ fn compute_cpu_oracle_default_run_matches_aot_meaning() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
     );
 }
 
