@@ -757,7 +757,7 @@ extern "C" fn jet_jit_list_range_end(
     start: i64,
     end: i64,
     exclusive: i64,
-    _line: u32,
+    line: u32,
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(len) = rt.heap.list_len(list) else {
@@ -766,7 +766,7 @@ extern "C" fn jet_jit_list_range_end(
         match range_semantics::jet_checked_view_bounds(start, end, exclusive != 0, len) {
             Ok((_, end_exclusive)) => end_exclusive,
             Err(message) => {
-                rt.set_trap(&message);
+                rt.set_runtime_stop("E3001", line, &message);
                 0
             }
         }

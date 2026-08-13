@@ -166,6 +166,29 @@ fn warm_hit_skips_front_end_and_matches_stdout() {
 }
 
 #[test]
+fn warm_runtime_stop_preserves_source_location() {
+    let _guard = lock_run_cache_tests();
+    let root = std::env::temp_dir().join(format!("jet_run_stop_location_{}", unique()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("bounds.jet");
+    std::fs::write(
+        &file,
+        "fn run() {\n    n := 1\n    xs := [n]\n    print(xs[9])\n}\n",
+    )
+    .unwrap();
+    let cache = root.join("cache");
+
+    let (cold_code, _, cold_err) = run_jet(&cache, &file, None, &[]);
+    let (warm_code, _, warm_err) = run_jet(&cache, &file, None, &[]);
+    let arrow = format!("  --> {}:4", file.display());
+    assert_eq!(cold_code, 70, "cold stderr: {cold_err}");
+    assert_eq!(warm_code, 70, "warm stderr: {warm_err}");
+    assert!(cold_err.contains(&arrow), "cold stderr: {cold_err}");
+    assert!(warm_err.contains(&arrow), "warm stderr: {warm_err}");
+}
+
+#[test]
 fn dependency_and_argv_invalidate_cache_key() {
     let _guard = lock_run_cache_tests();
     // WatchService discover folds import deps into the key even when ModuleCall
