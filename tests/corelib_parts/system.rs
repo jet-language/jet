@@ -1093,3 +1093,23 @@ fn run() {
         diags.iter().map(|d| d.code.to_string()).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn jet_time_namespace_uses_retirement_teaching() {
+    let source = concat!(
+        "use jet", ".time as time\n\n",
+        "fn run() {\n",
+        "    time.now()\n",
+        "}\n"
+    );
+    let diagnostics = jet::compile(source).expect_err("the retired time namespace must fail");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0341"),
+        "expected E0341 for the retired time namespace, got: {:?}",
+        diagnostics.iter().map(|diagnostic| diagnostic.code.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        jet::Syntax::rename_target(concat!("jet", ".time", ".now")),
+        Some("core.time.now")
+    );
+}

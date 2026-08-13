@@ -28,8 +28,13 @@
 use super::{
     COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, LEGACY_ENTRY_FILE,
     PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK, RETIRED_TARGET_PLUGIN,
-    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, TARGET_SANDBOX,
+    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_TYPE_BITS, RETIRED_TYPE_BYTES,
+    RETIRED_TYPE_QUEUE, RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX, TYPE_BITS,
+    TYPE_BYTES, TYPE_QUEUE, TYPE_RANK, TYPE_TALLY,
 };
+
+const RETIRED_JET_TIME_NOW: &str = concat!("jet", ".time", ".now");
+const RETIRED_JET_TIME_FORMAT: &str = concat!("jet", ".time", ".format");
 
 /// How the compiler answers a file still written in the retired form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +212,69 @@ pub const RETIREMENTS: &[Retirement] = &[
         since: "2026-08-07",
         code: None,
     },
+    Retirement {
+        id: "core-container-queue",
+        retired: RETIRED_TYPE_QUEUE,
+        canonical: TYPE_QUEUE,
+        kind: RetirementKind::Rename,
+        decision: "D-COLLNAME1=A",
+        since: "2026-08-05",
+        code: None,
+    },
+    Retirement {
+        id: "core-container-rank",
+        retired: RETIRED_TYPE_RANK,
+        canonical: TYPE_RANK,
+        kind: RetirementKind::Rename,
+        decision: "D-COLLNAME1=A",
+        since: "2026-08-05",
+        code: None,
+    },
+    Retirement {
+        id: "core-container-tally",
+        retired: RETIRED_TYPE_TALLY,
+        canonical: TYPE_TALLY,
+        kind: RetirementKind::Rename,
+        decision: "D-COLLNAME1=A",
+        since: "2026-08-05",
+        code: None,
+    },
+    Retirement {
+        id: "core-container-bits",
+        retired: RETIRED_TYPE_BITS,
+        canonical: TYPE_BITS,
+        kind: RetirementKind::Rename,
+        decision: "D-COLLNAME1=A",
+        since: "2026-08-05",
+        code: None,
+    },
+    Retirement {
+        id: "core-container-bytes",
+        retired: RETIRED_TYPE_BYTES,
+        canonical: TYPE_BYTES,
+        kind: RetirementKind::Rename,
+        decision: "D-COLLNAME1=A",
+        since: "2026-08-05",
+        code: None,
+    },
+    Retirement {
+        id: "jet-time-now",
+        retired: RETIRED_JET_TIME_NOW,
+        canonical: "core.time.now",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-LAYER1",
+        since: "2026-08-08",
+        code: None,
+    },
+    Retirement {
+        id: "jet-time-format",
+        retired: RETIRED_JET_TIME_FORMAT,
+        canonical: "DateTime.format_rfc3339()",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-LAYER1",
+        since: "2026-08-08",
+        code: None,
+    },
 ];
 
 /// The known package providers, in the order a ref may not put them.
@@ -312,6 +380,11 @@ mod tests {
         assert_eq!(rename_target("io.println"), Some("io.print"));
         assert_eq!(rename_target("io.sprint"), Some("{value}"));
         assert_eq!(rename_target("io.repr"), Some("{value:Debug}"));
+        assert_eq!(rename_target(RETIRED_TYPE_QUEUE), Some(TYPE_QUEUE));
+        assert_eq!(rename_target(RETIRED_TYPE_RANK), Some(TYPE_RANK));
+        assert_eq!(rename_target(RETIRED_TYPE_TALLY), Some(TYPE_TALLY));
+        assert_eq!(rename_target(RETIRED_TYPE_BITS), Some(TYPE_BITS));
+        assert_eq!(rename_target(RETIRED_TYPE_BYTES), Some(TYPE_BYTES));
         assert_eq!(rename_target("payload: {"), None);
         assert_eq!(rename_target("provider@target"), None);
     }

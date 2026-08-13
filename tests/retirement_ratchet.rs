@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet::Syntax::{
-    law_violations, Retirement, RetirementKind, REF_PROVIDERS,
+    law_violations, rename_target, Retirement, RetirementKind, REF_PROVIDERS,
     RETIREMENTS,
 };
 
@@ -50,6 +50,13 @@ const CEILINGS: &[(&str, usize)] = &[
     ("allow-impure", 0),
     ("core-path-free-functions", 0),
     ("target-plugin", 0),
+    ("core-container-queue", 0),
+    ("core-container-rank", 0),
+    ("core-container-tally", 0),
+    ("core-container-bits", 0),
+    ("core-container-bytes", 0),
+    ("jet-time-now", 0),
+    ("jet-time-format", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -472,6 +479,34 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
+        "core-container-queue"
+        | "core-container-rank"
+        | "core-container-tally"
+        | "core-container-bits"
+        | "core-container-bytes" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                let Some(text) = read(&path) else { continue };
+                if contains_word(&text, row.retired) {
+                    retired += 1;
+                } else if contains_word(&text, row.canonical) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "jet-time-now" | "jet-time-format" => {
+            let files = content_files();
+            let count = |needle: &str| {
+                files
+                    .iter()
+                    .filter_map(|path| read(path))
+                    .filter(|text| text.contains(needle))
+                    .count()
+            };
+            (count(row.retired), count(row.canonical))
+        }
         other => panic!("no way to count row `{other}`; teach `tally` how to count it"),
     }
 }
@@ -555,6 +590,18 @@ fn a_finished_retirement_stays_finished() {
             assert_eq!(retired, 0, "`{}` came back in {retired} files", row.retired);
         }
     }
+}
+
+#[test]
+fn retired_time_doors_map_to_the_one_clock_door() {
+    assert_eq!(
+        rename_target(concat!("jet", ".time", ".now")),
+        Some("core.time.now")
+    );
+    assert_eq!(
+        rename_target(concat!("jet", ".time", ".format")),
+        Some("DateTime.format_rfc3339()")
+    );
 }
 
 /// D-ONCE: `Syntax::REF_SOURCE_PROVIDERS` (`Syntax/effects_surface.rs`) is the

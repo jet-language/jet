@@ -3,6 +3,9 @@
 // core.crypto.random.bytes — cryptographically secure (/dev/urandom).
 use core.random
 use core.crypto.random as crypto_rand
+// D-ONCE-LAYER1=B: core.crypto is the typed rung; core.crypto.expert is the raw-byte rung.
+use core.crypto as crypto
+use core.crypto.expert as expert
 
 fn run() {
     // PRNG bytes: simulation, testing, shuffles.
@@ -17,4 +20,15 @@ fn run() {
     random.seed(42)
     b :: random.bytes(4)
     print("prng reproducible: {a == b}")
+
+    ikm :: [U8].{ 1, 2, 3, 4 }
+    salt :: [U8].{ 5, 6 }
+    info :: [U8].{ 7, 8 }
+    rungs_agree := false
+    #Unsafe("compare the typed and raw HKDF rungs") {
+        raw :: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? panic("raw hkdf")
+        typed :: crypto.hkdf_sha256(crypto.Secret.from_bytes(ikm), salt, info, 16) ?? panic("typed hkdf")
+        rungs_agree = crypto.constant_time_equal(typed, raw)
+    }
+    print("crypto rungs agree: {rungs_agree}")
 }

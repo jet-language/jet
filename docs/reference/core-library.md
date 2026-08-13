@@ -548,7 +548,8 @@ or configure them.
 
 ### `core.http` — HTTP client and server
 
-`core.http.client` is the request side; `core.http.server` is the serving side.
+`D-ONCE-LAYER1=B` makes `core.http` the one-shot rung and `core.http.client` the
+configurable rung; `core.http.server` is the serving side.
 The client accepts `String` or typed `Url` values, uses HTTPS by default through
 the hidden rustls bridge, and keeps the compiler itself dependency-free. The
 server is std-only HTTP/1.1 unless the named TLS option is supplied. Body
@@ -705,7 +706,9 @@ Acceptance matrix and agent cookbook:
 
 ### `core.crypto` — safe envelopes and expert primitives
 
-`core.crypto` is the safe-by-default cryptography surface. Beginner APIs hide
+`D-ONCE-LAYER1=B` makes `core.crypto` the typed rung and `core.crypto.expert`
+the raw-byte rung. `core.crypto` is the safe-by-default cryptography surface.
+Beginner APIs hide
 nonce handling and algorithm selection; raw algorithm choice lives under
 `core.crypto.expert` and requires an audited `#Unsafe` region. RustCrypto crates
 are linked only through the hidden bridge crate, not the compiler.

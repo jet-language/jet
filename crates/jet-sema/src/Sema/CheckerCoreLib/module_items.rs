@@ -708,6 +708,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "flush",
             "enabled",
         ],
+        // D-ONCE-LAYER1=B: the typed rung is core.crypto; the raw-byte rung is core.crypto.expert.
         "core.crypto" => &[
             "Secret",
             "SigningKey",
@@ -756,6 +757,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "sha512",
             "constant_time_equal",
         ],
+        // D-ONCE-LAYER1=B: the raw-byte rung is core.crypto.expert; the typed rung is core.crypto.
         // D-CRYPTO-API1=A: exact expert surface — every call is #Unsafe-gated.
         "core.crypto.expert" => &[
             "xchacha20poly1305_seal",
@@ -871,6 +873,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ClientConfig", "RootCertificates", "ClientIdentity", "TLSVersion",
             "client", "read", "read_text", "write", "write_all", "write_text", "close",
         ],
+        // D-ONCE-LAYER1=B: the one-shot rung is core.http; the configurable rung is core.http.client.
         "core.http" => &["get", "post", "serve"],
         // D-REGEXENGINE1=A: std-only linear regex package.
         "core.regex" => &[
@@ -1032,6 +1035,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-TIMEDEPTH1=A: civil-time constructors.
         "core.time.date" => &["new", "today", "parse"],
         "core.time.datetime" => &["from_timestamp", "now"],
+        // D-ONCE-LAYER1=B: the configurable rung is core.http.client; the one-shot rung is core.http.
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["Client", "Proxy", "RedirectPolicy", "get", "post", "request"],
         "core.http.server" => &[

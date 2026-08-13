@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn core_module_keys_reject_internal_jet_prefix() {
         assert!(KNOWN_CORE_MODULES.iter().all(|name| !name.starts_with("jet.")));
-        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "raylib", "db", "plugin"] {
+        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "raylib", "db", "plugin", "time"] {
             assert!(is_known_core_module(&format!("core.{ring}")));
             assert!(!is_known_core_module(&format!("jet.{ring}")));
         }
@@ -243,7 +243,7 @@ pub fn core_modules_list() -> String {
 pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
-        "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db"
+        "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db" | "time"
             // D-DEP-WASM1=A (c81): `core.plugin` — the
             // wasmtime-backed plugin loader (`Plugin.load`/`.call`).
             | "plugin"

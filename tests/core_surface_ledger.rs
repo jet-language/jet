@@ -35,6 +35,74 @@ fn run(flag: &str) -> (bool, String, String) {
     )
 }
 
+fn source(path: &str) -> String {
+    std::fs::read_to_string(root().join(path))
+        .unwrap_or_else(|error| panic!("{path} must be readable: {error}"))
+}
+
+fn assert_layering_contract_is_taught() {
+    let checker_surface = source("crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs");
+    for marker in [
+        "D-ONCE-LAYER1=B: the typed rung is core.crypto; the raw-byte rung is core.crypto.expert.",
+        "D-ONCE-LAYER1=B: the raw-byte rung is core.crypto.expert; the typed rung is core.crypto.",
+        "D-ONCE-LAYER1=B: the one-shot rung is core.http; the configurable rung is core.http.client.",
+        "D-ONCE-LAYER1=B: the configurable rung is core.http.client; the one-shot rung is core.http.",
+    ] {
+        assert!(
+            checker_surface.contains(marker),
+            "Core module surface lost layering marker: {marker}"
+        );
+    }
+
+    let mem_surface = source("crates/jet-foundation/src/Syntax/core_surface.rs");
+    assert!(
+        mem_surface.contains(
+            "The import gate (`use core.mem`) unlocks every name; the audit gate (`#Unsafe(\"reason\")`) is required only for items marked `Audit`."
+        ),
+        "core.mem must state both gates at its module gate"
+    );
+
+    let laws = source("docs/spec/stdlib-api-laws.md");
+    assert!(
+        laws.contains("D-ONCE-LAYER1=B")
+            && laws.contains("core.crypto.expert")
+            && laws.contains("core.http.client"),
+        "the ratified layering split must be in the API laws"
+    );
+
+    let crypto_example = source("examples/features/crypto/random_api_split.jet");
+    assert!(
+        crypto_example.contains("D-ONCE-LAYER1=B")
+            && crypto_example.contains("use core.crypto as crypto")
+            && crypto_example.contains("use core.crypto.expert as expert")
+            && crypto_example.contains("crypto rungs agree: {rungs_agree}"),
+        "the crypto example must teach both ratified rungs"
+    );
+
+    let http_example = source("examples/features/net/http_client.jet");
+    assert!(
+        http_example.contains("D-ONCE-LAYER1=B")
+            && http_example.contains("use core.http as http")
+            && http_example.contains("use core.http.client as http_client")
+            && http_example.contains("http.get(")
+            && http_example.contains("http_client.request("),
+        "the HTTP example must teach both ratified rungs"
+    );
+
+    let retired_now = concat!("jet", ".time", ".now");
+    let retired_format = concat!("jet", ".time", ".format");
+    assert_eq!(
+        jet::Syntax::rename_target(retired_now),
+        Some("core.time.now"),
+        "the retired clock door must use Syntax::RETIREMENTS"
+    );
+    assert_eq!(
+        jet::Syntax::rename_target(retired_format),
+        Some("DateTime.format_rfc3339()"),
+        "the retired time format door must use Syntax::RETIREMENTS"
+    );
+}
+
 /// Source-surface drift, an unmapped shipped method, a missing competitor
 /// member, a duplicate row, a hidden exclusion, a stale owner, and an
 /// unratified scope exclusion all fail here.
@@ -49,6 +117,7 @@ fn core_surface_ledger_matches_its_sources() {
         stdout.contains("11 recorded competitor surfaces"),
         "the ledger must compare against all eleven languages the owner named:\n{stdout}"
     );
+    assert_layering_contract_is_taught();
 }
 
 /// A gate that stops firing fails here rather than going quiet in CI.

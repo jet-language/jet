@@ -156,6 +156,15 @@ Resolved disposition, #1691: `core.crypto.expert` now uses distinct
 `examples/features/crypto/crypto_migration.jet` covers the audited raw path
 while the safe `core.crypto` APIs retain typed defaults.
 
+### Core rung splits
+
+`D-ONCE-LAYER1=B` ratifies two taught rungs when one Core subject has a safe
+default and an explicit control surface. `core.crypto` is the typed rung;
+`core.crypto.expert` is the raw-byte rung. `core.http` is the one-shot rung;
+`core.http.client` is the configurable rung. Each pair keeps a cross-reference
+in the compiler surface and a golden example that shows the same operation
+through both doors.
+
 **2026-08-06 — the core-library slate: D-CORE-DOCTRINE1=A,
 D-CORE-EAGER1=A, D-CORE-PATH1=A, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B,
 D-CORE-TREE1=A, D-CORE-USELIST1=A** *(card #1495, proposal

@@ -477,6 +477,8 @@ const MATCH_DOMAIN = {
 // builtin_method_return.
 const TYPE_CONTAINER = {
   Int: "core.math",
+  // D-CMP3WAY1=B: Comparable returns the shared three-way numeric result.
+  Ordering: "core.math",
   Float: "core.math",
   Float32: "core.math",
   BigInt: "core.math",
@@ -610,7 +612,7 @@ const CLUSTER_OWNER = {
   "core.archive": 1470,
   "core.regex": 1471,
   "core.url": 1472,
-  "core.crypto": 1473,
+  "core.crypto": 1725,
   "core.log": 1474,
   Deque: 1475,
   String: 1581,

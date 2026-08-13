@@ -9,8 +9,6 @@ hand-written workflow inventory.
 
 Generated on: 2026-08-13
 
-Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
-
 ## What decides a row
 
 - What Jet ships comes from the compiler tables: module_items.rs,
@@ -53,38 +51,38 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1110 |
-| Collection method rows | 726 |
-| Jet-side rows | 1836 |
+| Module members | 1131 |
+| Collection method rows | 724 |
+| Jet-side rows | 1855 |
 | Total rows | 10270 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 402 |
-| Equal | 862 |
-| Jet loses (two or more languages agree) | 174 |
-| Single witness (recorded, not scored) | 8152 |
-| Exported type, not an operation | 155 |
-| Not compared | 417 |
+| Jet wins | 404 |
+| Equal | 880 |
+| Jet loses (two or more languages agree) | 158 |
+| Single witness (recorded, not scored) | 8149 |
+| Exported type, not an operation | 156 |
+| Not compared | 415 |
 | Deliberately declined | 108 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 364 | 8 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 410 | 56 |
+| Rust | standard-library source (rust-src component) | 1032 | 362 | 10 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 415 | 51 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 4 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 246 | 16 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 326 | 27 |
-| TypeScript | runtime introspection | 724 | 225 | 47 |
-| Ruby | runtime introspection | 1294 | 346 | 31 |
-| Elixir | runtime introspection | 1270 | 373 | 53 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 281 | 57 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 415 | 102 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 17 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 26 |
+| TypeScript | runtime introspection | 724 | 229 | 43 |
+| Ruby | runtime introspection | 1294 | 348 | 29 |
+| Elixir | runtime introspection | 1270 | 379 | 47 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 288 | 50 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 52 | 0 |
+| Python | runtime introspection | 2232 | 432 | 86 |
 
 ## Loss clusters
 
@@ -97,21 +95,23 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 54 | #288 | building | live |
-| core.crypto | 17 | #1473 | ready | live |
 | core.tasks | 17 | #1468 | done | closed |
-| core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
+| core.crypto | 9 | #1725 | building | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.os | 9 | #1465 | done | closed |
-| ByteBuffer | 8 | #1467 | done | closed |
+| Bytes | 8 | #1467 | done | closed |
+| core.archive | 5 | #1470 | done | closed |
 | core.regex | 4 | #1471 | done | closed |
 | core.tls | 2 | #1593 | ready | live |
-| BitSet | 1 | #1493 | ready | live |
+| Bits | 1 | #1493 | ready | live |
+| Set | 2 | #1584 | done | closed |
 | core.process | 1 | #1590 | done | closed |
 | core.uuid | 1 | #1590 | done | closed |
-| Deque | 1 | #1475 | done | closed |
+| Queue | 1 | #1475 | done | closed |
+| Map | 1 | #1477 | done | closed |
 | String | 1 | #1581 | done | closed |
 
 ## Containers indexed per package

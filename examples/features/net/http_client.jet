@@ -1,5 +1,6 @@
-// core.http.client: request builder, response methods. HTTPS works by default;
-// this golden uses loopback plain HTTP to stay hermetic.
+// D-ONCE-LAYER1=B: core.http is the one-shot rung; core.http.client is the configurable rung.
+// HTTPS works by default; this golden uses loopback plain HTTP to stay hermetic.
+use core.http as http
 use core.http.client as http_client
 use core.net as net
 use core.tasks as tasks
@@ -10,13 +11,20 @@ fn run() {
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         sender.send(listener.local_addr() ?? panic("address failed"))
-        stream :: listener.accept() ?? panic("accept failed")
-        _req :: stream.read_text(8192) ?? panic("read failed")
-        net.tcp_reply(^stream, "200 OK", "hello from core.http.client") ?? panic("tcp reply")
+        stream_one :: listener.accept() ?? panic("first accept failed")
+        _req_one :: stream_one.read_text(8192) ?? panic("first read failed")
+        net.tcp_reply(^stream_one, "200 OK", "hello from core.http") ?? panic("first reply")
+        stream_two :: listener.accept() ?? panic("second accept failed")
+        _req_two :: stream_two.read_text(8192) ?? panic("second read failed")
+        net.tcp_reply(^stream_two, "200 OK", "hello from core.http") ?? panic("second reply")
     }
     addr :: ch.receive() ?? panic("no addr")
-    resp :: http_client.get("http://{addr}/") ?? panic("client get failed")
-    print(resp.status())
-    print(resp.body().text(8 * 1024 * 1024) ?? panic("body text"))
+    simple :: http.get("http://{addr}/") ?? panic("simple get failed")
+    configured :: http_client.request("GET", "http://{addr}/")
+        .connect_timeout(1000)
+        .send() ?? panic("configured get failed")
+    simple_body :: simple.body().text(8 * 1024 * 1024) ?? panic("simple body")
+    configured_body :: configured.body().text(8 * 1024 * 1024) ?? panic("configured body")
+    print("http rungs agree: {simple.status() == configured.status() && simple_body == configured_body}")
     t.join() ?? panic("server failed")
 }

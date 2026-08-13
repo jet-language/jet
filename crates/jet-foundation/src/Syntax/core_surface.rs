@@ -570,6 +570,7 @@ pub const FOREIGN_UNSAFE: &str = "unsafe";
 /// requires `use core.mem`. The complete named-item tier map lives in
 /// `CORE_MEM_GATE_TIERS`; the rule and reasons live beside S58 in
 /// `docs/spec/syntax-decisions.md`.
+/// The import gate (`use core.mem`) unlocks every name; the audit gate (`#Unsafe("reason")`) is required only for items marked `Audit`.
 pub const CORE_MEM_MODULE: &str = "core.mem";
 
 /// D-UNINIT1 (ratified 2026-06-21, opt C): the `#Uninit` binding marker.
