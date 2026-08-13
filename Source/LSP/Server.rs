@@ -1,6 +1,6 @@
 //! JSON-RPC transport over stdio + request/notification dispatch + handlers.
 
-use crate::Diagnostics::{Diagnostic, Severity, Span};
+use crate::Diagnostics::{report_clear_counts, Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
 use crate::AST::ProgramBundle;
 use jet_driver::QueryService::CompilerQueries;
@@ -755,11 +755,12 @@ fn publish_diagnostics(
     diags: &[Diagnostic],
 ) -> String {
     let mut items = String::new();
+    let clears = report_clear_counts(diags);
     for (i, d) in diags.iter().enumerate() {
         if i > 0 {
             items.push(',');
         }
-        items.push_str(&diagnostic_json(d, file, src));
+        items.push_str(&diagnostic_json_with_clears(d, file, src, clears[i]));
     }
     format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
@@ -769,7 +770,17 @@ fn publish_diagnostics(
     )
 }
 
+#[cfg(test)]
 fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
+    diagnostic_json_with_clears(d, file, src, 0)
+}
+
+fn diagnostic_json_with_clears(
+    d: &Diagnostic,
+    file: &str,
+    src: &str,
+    clears: usize,
+) -> String {
     let severity = match d.severity {
         Severity::Error => 1,
         Severity::Lint => 2,
@@ -781,7 +792,7 @@ fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
     let data = d
         .structured
         .as_ref()
-        .map(|_| format!(r#", "data":{}"#, d.to_json(file, src)))
+        .map(|_| format!(r#", "data":{}"#, d.to_json_with_clears(file, src, clears)))
         .unwrap_or_default();
     format!(
         r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}"{}}}"#,
@@ -2875,22 +2886,26 @@ mod project_part_tests {
         let src = "xxxx[0]";
         let compiler_data = diagnostic.to_json(&file, src);
         let json = diagnostic_json(&diagnostic, &file, src);
-        assert_eq!(
-            json,
+        let expected = format!(
             concat!(
-                "{\"range\":{\"start\":{\"line\":0,\"character\":4},",
-                "\"end\":{\"line\":0,\"character\":7}},\"severity\":1,",
-                "\"code\":\"E2702\",\"source\":\"jet\",\"message\":\"crypto API misuse\", ",
-                "\"data\":{\"schema\":\"jet.report/v1\",\"moment\":\"compile\",",
-                "\"severity\":\"error\",\"code\":\"E2702\",\"what\":\"crypto API misuse\",",
+                "{{\"range\":{},\"severity\":1,",
+                "\"code\":\"E2702\",\"source\":\"jet\",",
+                "\"message\":\"crypto API misuse\", ",
+                "\"data\":{{\"schema\":\"jet.report/v1\",",
+                "\"moment\":\"compile\",\"severity\":\"error\",",
+                "\"code\":\"E2702\",\"what\":\"crypto API misuse\",",
                 "\"why\":\"nonce has 1 byte; this operation requires exactly 24\",",
-                "\"fix\":\"pass a 24-byte nonce\",\"detail\":null,\"file\":\"src/main.jet\",",
-                "\"line\":1,\"col\":5,\"span\":{\"start\":4,\"end\":7},",
-                "\"fix_edits\":[],\"cause\":[],\"reason\":\"nonce_length\",",
-                "\"operation\":\"xchacha20poly1305_seal\",\"expected\":\"exactly 24\",",
-                "\"actual\":1}}"
-            )
+                "\"fix\":\"pass a 24-byte nonce\",\"detail\":null,",
+                "\"file\":\"src/main.jet\",\"line\":1,\"col\":5,",
+                "\"span\":{{\"start\":4,\"end\":7}},\"fix_edits\":[],",
+                "\"cause\":[{}],\"clears\":0,",
+                "\"reason\":\"nonce_length\",\"operation\":\"xchacha20poly1305_seal\",",
+                "\"expected\":\"exactly 24\",\"actual\":1}}}}"
+            ),
+            range_json(byte_span_to_range(src, Span::new(4, 7))),
+            "",
         );
+        assert_eq!(json, expected);
         assert!(json.ends_with(&format!(", \"data\":{compiler_data}}}")), "{json}");
         assert!(!json.contains("backend"), "{json}");
     }

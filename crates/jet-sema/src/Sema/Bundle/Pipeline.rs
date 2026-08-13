@@ -664,7 +664,7 @@ fn check_bundle_opts_for_output_inner(
                                     "fix the `derive` body so it generates valid Jet at compile time"
                                         .to_string()
                                 };
-                                diags.push(Diagnostic::error(
+                                super::super::push_causal_report(&mut diags, Diagnostic::error(
                                     "E2710",
                                     format!(
                                         "`derive T.{}` body failed while expanding `#{}` on `{}`",
@@ -673,7 +673,7 @@ fn check_bundle_opts_for_output_inner(
                                     why,
                                     fix,
                                     Some(*derive_span),
-                                ));
+                                ), inner);
                             }
                         }
                     }

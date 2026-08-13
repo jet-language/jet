@@ -15,6 +15,34 @@ use crate::AST::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+/// Keep a registered underlying report visible when sema adds a contextual
+/// report around it. The root is emitted once; every contextual report carries
+/// the same machine-readable chain.
+pub(crate) fn push_causal_report(
+    diagnostics: &mut Vec<Diagnostic>,
+    dependent: Diagnostic,
+    cause: Diagnostic,
+) {
+    if jet_foundation::Registry::diagnostic(&cause.code).is_none() {
+        diagnostics.push(dependent);
+        return;
+    }
+    let already_reported = diagnostics.iter().any(|existing| {
+        existing.moment == cause.moment
+            && existing.severity == cause.severity
+            && existing.code == cause.code
+            && existing.what == cause.what
+            && existing.why == cause.why
+            && existing.fix == cause.fix
+            && existing.span == cause.span
+            && existing.cause == cause.cause
+    });
+    if !already_reported {
+        diagnostics.push(cause.clone());
+    }
+    diagnostics.push(dependent.caused_by(&cause));
+}
+
 mod Casing;
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
@@ -733,6 +761,9 @@ pub(crate) struct LocalInfo {
     /// Pure compile-time value for immutable-local diagnostics and folding.
     /// This does not make an ordinary local available to `comptime` code.
     constant_value: Option<crate::Comptime::CtValue>,
+    /// The initializer failed sema. Reads stop at this binding so the original
+    /// diagnostic remains the only report for the failed value.
+    invalid: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

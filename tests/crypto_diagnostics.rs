@@ -47,7 +47,7 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
         "\"expected\":\"0..8160\"",
         "\"actual\":8161",
         "\"span\":",
-        "\"cause\":[]",
+        "\"cause\":[],\"clears\":0",
     ] {
         assert!(json.contains(field), "missing {field}: {json}");
     }
