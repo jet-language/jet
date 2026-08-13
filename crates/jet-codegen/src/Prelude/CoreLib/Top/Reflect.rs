@@ -18,11 +18,14 @@ struct JetReflectField {
 }
 
 impl JetReflectValue {
-    fn from_field<T: JetDisplay>(value: &T, type_name: &str, path: &str) -> Self {
+    fn from_field<T: JetShow>(value: &T, type_name: &str, path: &str) -> Self {
         Self {
             type_name: type_name.to_string(),
             path: path.to_string(),
-            display: value.jet_display(),
+            // A reflected outer value is checked for `Display`; an individual
+            // field is not. Keep the typed Value total by using the universal
+            // show projection for the field's display text.
+            display: value.jet_show(),
             fields: Vec::new(),
         }
     }
