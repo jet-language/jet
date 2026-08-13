@@ -2374,7 +2374,7 @@ fn run() { print(0) }
 }
 
 #[test]
-fn returned_string_view_field_matches_aot_and_default_dev() {
+fn returned_string_view_field_matches_all_execution_tiers() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping returned-string-view AOT/dev regression");
         return;
@@ -2398,6 +2398,9 @@ fn run() {
     email := "user@example.com"
     result :: domain(email)
     print(result.value)
+    print("wrapped: {result.value}")
+    expected :: "example.com"
+    print("wrapped: {expected}")
 }
 "#,
     )
@@ -2410,8 +2413,29 @@ fn run() {
         "returned_string_view",
         &shown,
     );
-    assert_eq!(aot.stdout, "example.com\n");
-    assert_default_dev_jit_gap("returned_string_view", &shown);
+    let expected = ProgramOutput::ran(
+        "example.com\nwrapped: example.com\nwrapped: example.com\n".to_string(),
+        String::new(),
+        0,
+    );
+    assert_eq!(aot, expected, "AOT View<str> interpolation drifted from String");
+    for (tier, use_interpreter) in [("default dev", false), ("interpreter", true)] {
+        let output = match dev_iteration_with_timeout(
+            "returned_string_view",
+            &shown,
+            use_interpreter,
+        ) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("{tier} returned diagnostics for stored View<str>: {diags:?}")
+            }
+        };
+        assert_eq!(output, expected, "{tier} View<str> interpolation drifted from String");
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 

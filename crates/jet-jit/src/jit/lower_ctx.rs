@@ -9189,6 +9189,11 @@ impl LowerCtx<'_, '_> {
                     } else {
                         push_ty
                     };
+                    let push_ty = if Self::is_string_abi_ty(&push_ty) {
+                        Type::String
+                    } else {
+                        push_ty
+                    };
                     if let Type::Named(type_name) = &push_ty {
                         if matches!(
                             type_name.as_str(),

@@ -3486,6 +3486,9 @@ fn run() {
     token :: parse(source)
     print(token.text)
     print(token.rest)
+    expected :: "name"
+    print("wrapped: {token.text}")
+    print("wrapped: {expected}")
 }
 "#;
     let out = jet::compile(src)
@@ -3591,7 +3594,7 @@ fn zero_copy_parser_example_covers_production_pipeline() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
-        "7\nexample.com\nname\nvalue\na longer value\nleft\nright\nmessage\nhello\n"
+        "7\nexample.com\nname\nwrapped: name\nvalue\na longer value\nleft\nright\nmessage\nhello\n"
     );
 }
 
