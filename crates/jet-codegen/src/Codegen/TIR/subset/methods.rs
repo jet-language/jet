@@ -1376,7 +1376,11 @@ pub(crate) fn static_method_call_in_subset(
     }
     if matches!(
         (type_name, method, args.len()),
-        ("Clock", "new", 1) | ("Clock", "system", 0)
+        ("Clock", "new", 1)
+            | ("Clock", "system", 0)
+            | ("Clock", "now", 0)
+            | ("Date", "today", 0)
+            | ("Path", "home", 0)
     ) {
         return true;
     }

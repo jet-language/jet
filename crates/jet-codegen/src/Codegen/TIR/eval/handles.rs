@@ -18,6 +18,10 @@ mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
 }
 
+mod path_kernel {
+    include!("../../../Prelude/Core/Path.rs");
+}
+
 fn handle_op_name(op: &THandleOp) -> String {
     let name = match op {
         THandleOp::HTTPClientMethod { kind, method } => {
@@ -71,9 +75,11 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::DBRollback => "DBRollback",
         THandleOp::DBClose => "DBClose",
         THandleOp::PathFrom => "PathFrom",
+        THandleOp::PathHome => "PathHome",
         THandleOp::PathWriteAtomic => "PathWriteAtomic",
         THandleOp::PathToString => "PathToString",
         THandleOp::PathJoin => "PathJoin",
+        THandleOp::PathNormalize => "PathNormalize",
         THandleOp::DBValueInt => "DBValueInt",
         THandleOp::DBValueFloat => "DBValueFloat",
         THandleOp::DBValueText => "DBValueText",
@@ -125,7 +131,7 @@ fn handle_op_name(op: &THandleOp) -> String {
     name.to_string()
 }
 
-fn path_string(recv: &CtValue) -> Option<String> {
+pub(super) fn path_string(recv: &CtValue) -> Option<String> {
     match recv {
         CtValue::Str(s) => Some(s.clone()),
         CtValue::Struct { type_name, fields } if type_name == "Path" => fields
@@ -507,6 +513,7 @@ pub(super) fn eval_handle_with_type(
                 .ok_or_else(|| unsupported("Path.from expects text", span))?;
             Ok(path_value(s))
         }
+        THandleOp::PathHome => Ok(path_value(path_kernel::jet_std_path_home())),
         THandleOp::PathToString => {
             let s = path_string(recv).ok_or_else(|| unsupported("Path.to_string", span))?;
             Ok(CtValue::Str(s))
@@ -993,10 +1000,40 @@ pub(super) fn eval_handle_with_type(
         THandleOp::JSONText => Err(unsupported("handle `JSONText`", span)),
         THandleOp::JSONBool => Err(unsupported("handle `JSONBool`", span)),
         THandleOp::JSONFloat => Err(unsupported("handle `JSONFloat`", span)),
-        THandleOp::PathParent => Err(unsupported("handle `PathParent`", span)),
-        THandleOp::PathExtension => Err(unsupported("handle `PathExtension`", span)),
-        THandleOp::PathStem => Err(unsupported("handle `PathStem`", span)),
-        THandleOp::PathWalk => Err(unsupported("handle `PathWalk`", span)),
+        THandleOp::PathParent => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.parent", span))?;
+            Ok(match path_kernel::jet_std_path_parent_opt(&path) {
+                Some(parent) => CtValue::Present(Box::new(path_value(parent))),
+                None => CtValue::failed(Box::new(CtValue::Unit)),
+            })
+        }
+        THandleOp::PathExtension => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.extension", span))?;
+            Ok(match path_kernel::jet_std_path_extension_opt(&path) {
+                Some(extension) => CtValue::Present(Box::new(CtValue::Str(extension))),
+                None => CtValue::failed(Box::new(CtValue::Unit)),
+            })
+        }
+        THandleOp::PathStem => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.stem", span))?;
+            Ok(match path_kernel::jet_std_path_stem_opt(&path) {
+                Some(stem) => CtValue::Present(Box::new(CtValue::Str(stem))),
+                None => CtValue::failed(Box::new(CtValue::Unit)),
+            })
+        }
+        THandleOp::PathNormalize => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.normalize", span))?;
+            Ok(path_value(path_kernel::jet_std_path_normalize(&path)))
+        }
+        THandleOp::PathWalk => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.walk", span))?;
+            Ok(CtValue::List(
+                path_kernel::jet_std_path_walk(&path)
+                    .into_iter()
+                    .map(path_value)
+                    .collect(),
+            ))
+        }
         THandleOp::UiBackendMethod { .. } => Err(unsupported("handle `UiBackendMethod`", span)),
         THandleOp::DevServerMethod { .. } => Err(unsupported("handle `DevServerMethod`", span)),
         THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),

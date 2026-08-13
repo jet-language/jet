@@ -5015,6 +5015,9 @@ pub enum THandleOp {
     JSONFloat,
     /// D-PATHFS1: `Path.from(str)` constructor → `{root}jet_path_from(&(recv))`.
     PathFrom,
+    /// D-CORE-PATH1: `Path.home()` reads the host home path through the shared
+    /// Prelude path kernel and returns a typed `Path`.
+    PathHome,
     /// D-PATHFS1: `path.join(other)` → `{root}jet_path_join(&(recv), &(a0))` → `JetPath`.
     PathJoin,
     /// D-PATHFS1: `path.parent()` → `{root}jet_path_parent(&(recv))` → `Option<JetPath>`.
@@ -5023,6 +5026,8 @@ pub enum THandleOp {
     PathExtension,
     /// D-PATHFS1: `path.stem()` → `{root}jet_path_stem(&(recv))` → `Option<String>`.
     PathStem,
+    /// D-PATHFS1: `path.normalize()` → `{root}jet_path_normalize(&(recv))` → `Path`.
+    PathNormalize,
     /// D-PATHFS1: `path.to_string()` → `(recv).jet_show()` → `String`.
     PathToString,
     /// D-PATHFS1: `path.write_atomic(bytes)` → `{root}jet_path_write_atomic(&(recv), &(a0))` → `Result<(), IOError>`.

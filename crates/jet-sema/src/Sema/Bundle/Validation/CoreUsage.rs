@@ -219,7 +219,7 @@ fn note_typed_boundary_core_usage(
     };
     let key = match kind {
         Syntax::TypedHeadKind::URL => "core.url::typed_head",
-        Syntax::TypedHeadKind::Path => "core.path::typed_head",
+        Syntax::TypedHeadKind::Path => "core.files::typed_head",
         Syntax::TypedHeadKind::DateTime => "core.time::typed_head",
         _ => unreachable!("typed boundary usage descriptor is complete"),
     };
@@ -491,7 +491,7 @@ pub(crate) fn collect_core_expr(
                 }
                 // D-PATHFS1: `Path.from(...)` or any Path static call triggers path prelude.
                 if n == "Path" {
-                    note_core_usage(used, spans, "core.path::__pathapi__", Some(*method_span));
+                    note_core_usage(used, spans, "core.files::__pathapi__", Some(*method_span));
                 }
             }
         }

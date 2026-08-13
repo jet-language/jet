@@ -1,5 +1,4 @@
 // D-SERVICE1 + delivery/state/workflow/identity/upgrade (#1148–#1153).
-use core.path as path
 use core.services as services
 use core.testing as testing
 
@@ -8,7 +7,7 @@ fn run() {
     tree := services.tree("app")
     services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-runtime")
-    state_store :: path.join(temp, "state.log")
+    state_store :: Path.from(temp).join("state.log").to_string()
     store :: services.state_store(state_store) ?? panic("state store")
     services.set_state_event_log(&tree, store, "app-events", 1, "reversible") ?? panic("state")
     a :: services.worker(&tree, "a", 2) ?? panic("a")

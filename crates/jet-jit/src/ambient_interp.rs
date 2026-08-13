@@ -1745,6 +1745,7 @@ fn ambient_time_call(
     method: &str,
     args: &[CtValue],
     span: Span,
+    resolved_ret: Option<&Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if !matches!(
         (module, method),
@@ -1757,7 +1758,12 @@ fn ambient_time_call(
     let result = (|| match (module, method) {
         ("core.time", "now") => Ok(CtValue::Int(jet_codegen::scheduler::jet_std_time_now())),
         ("core.time", "now_utc") => Ok(crate::Time::ambient_datetime_now_value()),
-        ("core.time", "today") => Ok(crate::Time::ambient_date_today_value()),
+        ("core.time", "today") => Ok(crate::Time::ambient_date_today_value_as(
+            match resolved_ret {
+                Some(Type::Named(name)) if name == "LocalDate" => "LocalDate",
+                _ => "Date",
+            },
+        )),
         ("core.time", "instant") => Ok(crate::Time::ambient_instant_value()),
         ("core.time", "sleep") => {
             let millis = ambient_int_arg(args, 0, "time.sleep", span)?;
@@ -1771,7 +1777,12 @@ fn ambient_time_call(
                 CtValue::Int(crate::Time::ambient_monotonic_now_ms()),
             )],
         }),
-        ("core.time.date", "today") => Ok(crate::Time::ambient_date_today_value()),
+        ("core.time.date", "today") => Ok(crate::Time::ambient_date_today_value_as(
+            match resolved_ret {
+                Some(Type::Named(name)) if name == "LocalDate" => "LocalDate",
+                _ => "Date",
+            },
+        )),
         ("core.time.datetime", "now") => Ok(crate::Time::ambient_datetime_now_value()),
         _ => unreachable!("ambient time method was filtered above"),
     })();
@@ -2226,7 +2237,7 @@ pub fn ambient_core_call(
                 .map_err(|error| unsupported(&error.to_string(), span)),
         );
     }
-    if let Some(result) = ambient_time_call(module, method, &args, span) {
+    if let Some(result) = ambient_time_call(module, method, &args, span, resolved_ret.as_ref()) {
         return Some(result);
     }
     // I9: core.http.server adapters call the same Prelude helpers as AOT/JIT.

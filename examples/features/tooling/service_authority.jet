@@ -1,5 +1,4 @@
 // D-SERVICE-AUTHORITY1=A: durable receipts survive runtime reopen.
-use core.path as path
 use core.services as services
 use core.testing as testing
 use core.time as time
@@ -28,7 +27,7 @@ fn receipt_kind(receipt: ServiceReceipt) => String {
 
 fn run() {
     temp := testing.temp_dir("service-authority")
-    store :: path.join(temp, "authority.log")
+    store :: Path.from(temp).join("authority.log").to_string()
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("orders")

@@ -2048,6 +2048,18 @@ fn lower_method_call_impl(
                 })),
             };
         }
+        if method == "now" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named("Instant".to_string()),
+                kind: TExprKind::CoreCall {
+                    module: "core.time".to_string(),
+                    method: "instant".to_string(),
+                    args: Vec::new(),
+                    source_span: method_span,
+                    widen_to_vec: Vec::new(),
+                },
+            };
+        }
     }
     // D-SHAPE-DURATION1=A: a bare `Duration.unit(value)` is a type-owned
     // checked constructor, not an instance/static user method.
@@ -4972,6 +4984,35 @@ fn lower_method_call_impl(
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+        if type_name == "Date" && method == "today" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named("Date".to_string()),
+                kind: TExprKind::CoreCall {
+                    module: "core.time.date".to_string(),
+                    method: "today".to_string(),
+                    args: Vec::new(),
+                    source_span: method_span,
+                    widen_to_vec: Vec::new(),
+                },
+            };
+        }
+        if type_name == "Path"
+            && method == "home"
+            && args.is_empty()
+            && !cx.type_names.contains("Path")
+        {
+            return TExpr {
+                ty: Type::Named("Path".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::Unit,
+                    }),
+                    op: THandleOp::PathHome,
+                    args: Vec::new(),
+                },
+            };
+        }
         // D-VALIDATE-DECODE1=B: generated codecs frame a child Result at the
         // one field/index boundary before applying `?`. Keep this as a TIR
         // node so AOT, JIT, and interpreter use one implementation.

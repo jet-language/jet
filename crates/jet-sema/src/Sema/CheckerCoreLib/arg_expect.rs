@@ -101,6 +101,14 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, Option<String>, Span)> {
     Some((root, place, Span::new(root_span.start, end)))
 }
 
+fn core_arg_needs_borrow(ty: &Type) -> bool {
+    match ty {
+        Type::String | Type::List(_) | Type::Map { .. } => true,
+        Type::Union(members) => members.iter().any(core_arg_needs_borrow),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn expect_core_arg(
             &mut self,
@@ -188,7 +196,7 @@ impl<'a> Checker<'a> {
                     Some(arg.span),
                 ));
             }
-            if matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. }) {
+            if core_arg_needs_borrow(param_ty) {
                 self.borrow_ctx = true;
             }
             // D-SG9: expose the parameter's type to `infer` so a fixed-width integer
@@ -248,7 +256,7 @@ impl<'a> Checker<'a> {
             // compile — insert a clone, exactly as a consuming `fn` call does (B1).
             if consumes
                 && matches!(arg.convention, AccessConvention::Read)
-                && matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. })
+                && core_arg_needs_borrow(param_ty)
             {
                 if let Some((root, place, place_span)) = core_consuming_place(&arg.expr) {
                     if self.is_borrowed_binding(&root) {

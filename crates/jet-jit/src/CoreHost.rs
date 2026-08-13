@@ -1,5 +1,5 @@
-//! Host shims for `core.os`, `core.log`, `core.math`, `core.files`,
-//! `core.path`, `core.env`, and `core.process` CoreCalls (#729). Behavior
+//! Host shims for `core.os`, `core.log`, `core.math`, and `core.files`,
+//! plus `core.env` and `core.process` CoreCalls (#729). Behavior
 //! mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`, `jet_ring_log_*`,
 //! `jet_std_math_*`, `jet_std_fs_*`, `jet_std_path_*`, `jet_std_env_*`,
 //! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
@@ -868,7 +868,7 @@ extern "C" fn jet_jit_log_info_fields(msg: i64, fields: i64) {
     }
 }
 
-// ── core.files / core.path (mirrors jet_std_fs_* / jet_std_path_*) ───────────
+// ── core.files and typed Path (mirrors jet_std_fs_* / jet_std_path_*) ────────
 
 extern "C" fn jet_jit_fs_exists(path: i64) -> i8 {
     let p = clone_string(path);
@@ -911,30 +911,8 @@ extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
-    let b = clone_string(base);
-    let p = clone_string(part);
-    let joined = path_kernel::jet_std_path_join(&b, &p);
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
-}
-
-/// String-form `core.path.parent` / `.extension` / `.normalize` (D-IO1 helpers).
-extern "C" fn jet_jit_path_parent_str(path: i64) -> i64 {
-    let s = clone_string(path);
-    let out = path_kernel::jet_std_path_parent(&s);
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
-}
-
-extern "C" fn jet_jit_path_extension_str(path: i64) -> i64 {
-    let s = clone_string(path);
-    let out = path_kernel::jet_std_path_extension(&s);
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
-}
-
-extern "C" fn jet_jit_path_normalize_str(path: i64) -> i64 {
-    let s = clone_string(path);
-    let out = path_kernel::jet_std_path_normalize(&s);
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+extern "C" fn jet_jit_path_home() -> i64 {
+    path_record(path_kernel::jet_std_path_home())
 }
 
 extern "C" fn jet_jit_path_write_atomic(rec: i64, bytes: i64) -> i64 {
@@ -971,6 +949,11 @@ extern "C" fn jet_jit_path_stem(rec: i64) -> i64 {
     option_string_bits(path_kernel::jet_std_path_stem_opt(&s))
 }
 
+extern "C" fn jet_jit_path_normalize(rec: i64) -> i64 {
+    let s = path_string_from_record(rec);
+    path_record(path_kernel::jet_std_path_normalize(&s))
+}
+
 extern "C" fn jet_jit_path_to_string(rec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path_string_from_record(rec)))
 }
@@ -981,31 +964,7 @@ extern "C" fn jet_jit_path_to_string(rec: i64) -> i64 {
 /// (`jit list len: bad handle` → non-unwinding abort).
 extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
     let root_s = path_string_from_record(rec);
-    let root = std::path::PathBuf::from(root_s);
-    let mut result_paths = Vec::new();
-    let mut stack = vec![root];
-    let mut visited = std::collections::HashSet::new();
-    while let Some(dir) = stack.pop() {
-        let canonical = match std::fs::canonicalize(&dir) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if !visited.insert(canonical) {
-            continue;
-        }
-        let rd = match std::fs::read_dir(&dir) {
-            Ok(rd) => rd,
-            Err(_) => continue,
-        };
-        for entry in rd {
-            let Ok(entry) = entry else { continue };
-            let path = entry.path();
-            result_paths.push(path.to_string_lossy().to_string());
-            if path.is_dir() {
-                stack.push(path);
-            }
-        }
-    }
+    let result_paths = path_kernel::jet_std_path_walk(&root_s);
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for path in result_paths {
@@ -2002,16 +1961,14 @@ host_fns! {
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
     mod_load: "jet_jit_mod_load" => jet_jit_mod_load: sig_i64_i64_i64;
     mod_on_tick: "jet_jit_mod_on_tick" => jet_jit_mod_on_tick: sig_i64_i64_i64;
-    path_join: "jet_jit_path_join" => jet_jit_path_join: sig_i64_i64_i64;
-    path_parent_str: "jet_jit_path_parent_str" => jet_jit_path_parent_str: sig_unary_i64;
-    path_extension_str: "jet_jit_path_extension_str" => jet_jit_path_extension_str: sig_unary_i64;
-    path_normalize_str: "jet_jit_path_normalize_str" => jet_jit_path_normalize_str: sig_unary_i64;
+    path_home: "jet_jit_path_home" => jet_jit_path_home: sig_unary_i64;
     path_from: "jet_jit_path_from" => jet_jit_path_from: sig_unary_i64;
     path_write_atomic: "jet_jit_path_write_atomic" => jet_jit_path_write_atomic: sig_i64_i64_i64;
     path_join_handle: "jet_jit_path_join_handle" => jet_jit_path_join_handle: sig_i64_i64_i64;
     path_parent: "jet_jit_path_parent" => jet_jit_path_parent: sig_unary_i64;
     path_extension: "jet_jit_path_extension" => jet_jit_path_extension: sig_unary_i64;
     path_stem: "jet_jit_path_stem" => jet_jit_path_stem: sig_unary_i64;
+    path_normalize: "jet_jit_path_normalize" => jet_jit_path_normalize: sig_unary_i64;
     path_to_string: "jet_jit_path_to_string" => jet_jit_path_to_string: sig_unary_i64;
     path_walk: "jet_jit_path_walk" => jet_jit_path_walk: sig_unary_i64;
     math_sin: "jet_jit_math_sin" => jet_jit_math_sin: sig_f64_f64;

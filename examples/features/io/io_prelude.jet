@@ -1,17 +1,39 @@
-// D-NAME-ALIAS1=A: the readable Core prelude opens its closed ambient surface
-// without a `use` line. A first program needs no namespace boilerplate.
-//
-// `greet` exercises `input` resolution (no `use`); main calls `print` for the
-// deterministic golden output. Interactive use of input() is tested in
-// tests/corelib.rs (io_input_reads_a_line_from_stdin).
+// D-NAME-ALIAS1=A / D-CORE-PRELUDE1=A: the readable Core prelude opens its
+// closed ambient surface without a `use` line. A first program needs no
+// namespace boilerplate. `core.files` is imported only for cleanup; the file
+// trio below remains ambient.
+use core.files as files
+
 fn greet() => String {
     name :: input() ?? "world"
+    if name.is_empty() { return "hello, world" }
     return "hello, {name}"
 }
 
 fn run() {
-    assert(1 == 1)
-    assert_eq(2, 2)
     print("prelude: print works without use")
-    print("prelude: input is ambient (see greet fn)")
+    eprint("prelude: eprint works")
+    assert(1 == 1)
+    assert_eq([[1, 2], [3, 4]], [[1, 2], [3, 4]])
+    print("prelude: input: {greet()}")
+
+    now :: Clock.now()
+    today :: Date.today()
+    duration :: Duration.seconds(1) ?? panic("duration")
+    _ :: now
+    _ :: today
+    _ :: duration
+    print("prelude: Clock.now, Date.today and Duration are ambient")
+
+    path :: Path.home().join("logs").join("x.txt")
+    home_join_ok :: path.to_string().ends_with("x.txt")
+    print("prelude: Path.home().join works: {home_join_ok}")
+
+    temp :: "/tmp/jet-io-prelude.txt"
+    if files.exists(temp) { files.remove(temp) ?? panic("cleanup") }
+    write_file(Path.from(temp), "ambient") ?? panic("write_file")
+    print("prelude: file_exists: {file_exists(temp)}")
+    print("prelude: read_file String: {read_file(temp) ?? return}")
+    print("prelude: read_file Path: {read_file(Path.from(temp)) ?? return}")
+    files.remove(temp) ?? return
 }

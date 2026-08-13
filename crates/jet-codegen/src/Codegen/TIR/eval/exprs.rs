@@ -3331,16 +3331,24 @@ impl<'a> EvalCtx<'a> {
                         work.push(EvalExprWork::Enter(right));
                     }
                     EvalExprWork::RequireAfterRight { state, left } => {
-                        let TRequireKind::RequireEq { right, .. } = state.kind else {
+                        let TRequireKind::RequireEq {
+                            left: left_expr,
+                            right: right_expr,
+                        } = state.kind else {
                             unreachable!("require_eq right continuation has non-equality kind")
                         };
-                        let right = eval_expr_cache_take(right).ok_or_else(|| {
+                        let right = eval_expr_cache_take(right_expr).ok_or_else(|| {
                             unreachable!("require_eq right missing from evaluator worklist")
                         })?;
                         if left == right {
                             eval_expr_cache_put(state.original, CtValue::Unit);
                         } else {
-                            self.eval_require_failure(state.loc, "values are not equal", scope)?;
+                            let message = format!(
+                                "expected: {}, got: {}",
+                                self.debug_value_typed(&right, &right_expr.ty),
+                                self.debug_value_typed(&left, &left_expr.ty),
+                            );
+                            self.eval_require_failure(state.loc, &message, scope)?;
                             eval_expr_cache_put(state.original, CtValue::Unit);
                         }
                     }
@@ -3738,6 +3746,20 @@ impl<'a> EvalCtx<'a> {
                 let updated = result?;
                 self.write_back_place(&args[0], updated, scope)?;
                 return Ok(CtValue::Unit);
+            }
+        }
+        if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+            for (index, value) in argv.iter_mut().enumerate() {
+                if row.path_arg(index)
+                    && args.get(index).is_some_and(|arg| {
+                        matches!(&arg.ty, Type::Named(name) if name == "Path")
+                    })
+                {
+                    *value = CtValue::Str(
+                        super::handles::path_string(value)
+                            .ok_or_else(|| unsupported("Path file argument", source_span))?,
+                    );
+                }
             }
         }
         // A typed JSON encoder must pass through the same Codable protocol as
@@ -6812,7 +6834,38 @@ impl<'a> EvalCtx<'a> {
                 .or_else(|| place.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).and_then(|name| scope.get(name).cloned()))
                 .or_else(|| self.globals.get(place).cloned())
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
-            TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
+            TExprKind::AmbientInput { prompt } => {
+                // Ambient input is a runtime-only expression. The quick-run
+                // evaluator must decline it at build time, but runtime deopt
+                // uses the same Core I/O adapter as an ordinary `core.io.input`
+                // call so default `jet run` does not turn the prelude into an
+                // AOT-only surface.
+                if !self.runtime_execution {
+                    return Err(unsupported("expr `AmbientInput`", self.span()));
+                }
+                let argv = prompt
+                    .as_ref()
+                    .map(|prompt| self.eval_expr_child(prompt, scope))
+                    .transpose()?
+                    .into_iter()
+                    .collect();
+                let mut sink = self
+                    .sink
+                    .as_ref()
+                    .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+                apply_impure_core_call_with_type(
+                    "core.io",
+                    "input",
+                    argv,
+                    self.span(),
+                    &self.base_dir,
+                    sink.as_deref_mut(),
+                    false,
+                    None,
+                    None,
+                    Some(&expr.ty),
+                )
+            }
             TExprKind::RequireStop { .. } => {
                 unreachable!("require/panic stop bypassed its evaluator continuation")
             }

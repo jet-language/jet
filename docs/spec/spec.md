@@ -258,6 +258,16 @@ keep code readable from top to bottom. See
   ballot. Core meaning stays in Prelude/CoreLib (I9).
   **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of every readable prelude
   name. Use a qualified Core call, or remove the marker.
+
+  **Prelude membership law (D-CORE-PRELUDE1=A):** an ambient name must pass
+  all seven checks: measured direct frequency; total and safe behavior; a name
+  that carries no semantics; no better home; first-hour coverage; one fixed set
+  for every file; and a collision-conscious name. User declarations win over
+  an ambient name and produce L0510. The set changes only at an epoch boundary.
+  The edition migration lint is L2001; it points older packages at the new
+  name. A prelude entry may be total or return a `Result`; it may not add an
+  implicit conversion. `Duration` and `Instant` remain the Time-family
+  quantities from D-TYPE2-TIME1.
 - **Tool artifact extensions (D-ARTIFACT-EXT1=A):** the closed family is
   `.jetmap` (source maps), `.jetnb` (notebooks), `.jetproof` (proof evidence),
   `.jettrace` (performance traces), `.jetreplay` (game input replays), and

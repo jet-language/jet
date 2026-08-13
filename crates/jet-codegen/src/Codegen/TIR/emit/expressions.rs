@@ -5082,10 +5082,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::JSONFloat => format!("({}).float()", recv),
                 // D-PATHFS1: Path object methods.
                 THandleOp::PathFrom => format!("{}jet_path_from(&({}))", root, recv),
+                THandleOp::PathHome => format!("{}jet_path_home()", root),
                 THandleOp::PathJoin => format!("{}jet_path_join(&({}), &({}))", root, recv, a(0)),
                 THandleOp::PathParent => format!("{}jet_path_parent(&({}))", root, recv),
                 THandleOp::PathExtension => format!("{}jet_path_extension(&({}))", root, recv),
                 THandleOp::PathStem => format!("{}jet_path_stem(&({}))", root, recv),
+                THandleOp::PathNormalize => format!("{}jet_path_normalize(&({}))", root, recv),
                 THandleOp::PathToString => format!("({}).jet_show()", recv),
                 THandleOp::PathWriteAtomic => {
                     format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0))

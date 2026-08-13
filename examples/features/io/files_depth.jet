@@ -1,15 +1,14 @@
 // D-FSOPS1=A: std-backed filesystem depth beyond read/write/list_dir.
 use core.files as fs
-use core.path as path
 
 fn run() {
     root :: "/tmp/jet_files_depth_demo"
     copy_root :: "/tmp/jet_files_depth_demo_copy"
     if fs.exists(root) { fs.remove_all(root) ?? panic("cleanup root failed") }
     if fs.exists(copy_root) { fs.remove_all(copy_root) ?? panic("cleanup copy failed") }
-    nested :: path.join(root, "a/b")
+    nested :: Path.from(root).join("a/b")
     fs.create_dir_all(nested) ?? panic("mkdir failed")
-    file :: path.join(nested, "data.txt")
+    file :: nested.join("data.txt")
     fs.write(file, "abcdef") ?? panic("write failed")
     stat :: fs.stat(file) ?? panic("stat failed")
     print("stat: {stat.kind} {stat.size} {stat.is_file}")
@@ -21,20 +20,20 @@ fn run() {
     text :: fs.read(file) ?? panic("read failed")
     print(text)
     atom :: [U8].{79, 75}
-    atomic_path :: path.join(nested, "atomic.txt")
+    atomic_path :: nested.join("atomic.txt")
     fs.write_atomic(atomic_path, atom) ?? panic("atomic write failed")
     atomic_text :: fs.read(atomic_path) ?? panic("atomic read failed")
     print("atomic: {atomic_text}")
     walked :: fs.walk(root) ?? panic("walk failed")
     print("walk count: {walked.len()}")
-    matches :: fs.glob(path.join(root, "*.txt")) ?? panic("glob failed")
+    matches :: fs.glob(Path.from(root).join("*.txt")) ?? panic("glob failed")
     print("glob count: {matches.len()}")
-    link :: path.join(root, "data.link")
+    link :: Path.from(root).join("data.link")
     fs.symlink(file, link) ?? panic("symlink failed")
     link_stat :: fs.stat(link) ?? panic("link stat failed")
     link_target :: fs.read_link(link) ?? panic("read_link failed")
     print("link: {link_stat.is_symlink} {link_target}")
-    hard :: path.join(root, "hard.txt")
+    hard :: Path.from(root).join("hard.txt")
     fs.hard_link(file, hard) ?? panic("hard link failed")
     print("hard exists: {fs.exists(hard)}")
     canon :: fs.canonicalize(file) ?? panic("canonicalize failed")
@@ -44,12 +43,12 @@ fn run() {
     abs_has_examples :: abs.contains("examples")
     print("absolute examples: {abs_has_examples}")
     fs.copy_dir(root, copy_root) ?? panic("copy_dir failed")
-    copied :: path.join(copy_root, "a/b/data.txt")
+    copied :: Path.from(copy_root).join("a/b/data.txt")
     print("copy exists: {fs.exists(copied)}")
     tmpd :: fs.temp_dir("jet-depth") ?? panic("temp_dir failed")
     tmpf :: fs.temp_file("jet-depth") ?? panic("temp_file failed")
     print("temp handles: {fs.exists(tmpd.path)} {fs.exists(tmpf.path)}")
-    lock_path :: path.join(root, "build.lock")
+    lock_path :: Path.from(root).join("build.lock")
     lock :: fs.lock(lock_path) ?? panic("lock failed")
     print("lock exists: {fs.exists(lock.path)}")
     fs.remove_all(root) ?? panic("remove root failed")

@@ -44,6 +44,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("map-replace", 0),
     ("set-replace", 0),
     ("allow-impure", 0),
+    ("core-path-free-functions", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -356,6 +357,22 @@ fn tally(row: &Retirement) -> (usize, usize) {
             ".replace(",
             ".add(",
         ),
+        "core-path-free-functions" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains("use core.path") || text.contains("core.path.") {
+                    retired += 1;
+                } else if text.contains("Path.from") || text.contains("Path.home") {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
         other => panic!("no way to count row `{other}`; teach `tally` how to count it"),
     }
 }

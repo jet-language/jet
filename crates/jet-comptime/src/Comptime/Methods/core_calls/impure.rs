@@ -41,6 +41,7 @@ pub fn apply_impure_core_call_with_type(
     verified_root: Option<&std::fs::File>,
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
+    let args = super::normalize_path_args(module, method, args, span)?;
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
         if !row.accepts_arity(args.len()) {
             return Err(unsupported(

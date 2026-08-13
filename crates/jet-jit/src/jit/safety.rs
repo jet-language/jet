@@ -5063,10 +5063,12 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::XMLWriterWrite
         | THandleOp::CBORWriterWrite => args.len() == 1,
         THandleOp::PathFrom => matches!(&recv.ty, Type::String) && args.is_empty(),
+        THandleOp::PathHome => args.is_empty(),
         THandleOp::PathJoin => args.len() == 1 && matches!(&args[0].ty, Type::String),
         THandleOp::PathParent
         | THandleOp::PathExtension
         | THandleOp::PathStem
+        | THandleOp::PathNormalize
         | THandleOp::PathToString
         |         THandleOp::PathWalk => args.is_empty(),
         THandleOp::PathWriteAtomic => args.len() == 1,

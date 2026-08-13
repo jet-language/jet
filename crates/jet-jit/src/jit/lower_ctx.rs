@@ -368,8 +368,18 @@ impl LowerCtx<'_, '_> {
         };
         let arg_values = args
             .iter()
-            .map(|arg| self.lower_expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
+            .enumerate()
+            .map(|(index, arg)| {
+                let value = self.lower_expr(arg)?;
+                if row.path_arg(index)
+                    && matches!(&arg.ty, Type::Named(name) if name == "Path")
+                {
+                    Ok(self.call_host(self.host.core.path_to_string, &[value]))
+                } else {
+                    Ok(value)
+                }
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         self.lower_recorded_core_call_values(row, &arg_values, ret_ty)
     }
 
@@ -13496,32 +13506,6 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.path" {
-                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "join" if args.len() == 2 => (
-                            self.host.core.path_join,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
-                        "parent" if args.len() == 1 => (
-                            self.host.core.path_parent_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "extension" if args.len() == 1 => (
-                            self.host.core.path_extension_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        "normalize" if args.len() == 1 => (
-                            self.host.core.path_normalize_str,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
-                        _ => {
-                            return Err(format!("jit core call unsupported: {module}.{method}"))
-                        }
-                    };
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
                 if module == "core.random" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "seed" if args.len() == 1 => {
@@ -22108,6 +22092,9 @@ impl LowerCtx<'_, '_> {
             THandleOp::PathFrom => {
                 Ok(self.call_host(self.host.core.path_from, &[recv_val]))
             }
+            THandleOp::PathHome => {
+                Ok(self.call_host(self.host.core.path_home, &[]))
+            }
             THandleOp::PathJoin => {
                 let part = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.core.path_join_handle, &[recv_val, part]))
@@ -22120,6 +22107,9 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::PathStem => {
                 Ok(self.call_host(self.host.core.path_stem, &[recv_val]))
+            }
+            THandleOp::PathNormalize => {
+                Ok(self.call_host(self.host.core.path_normalize, &[recv_val]))
             }
             THandleOp::PathToString => {
                 Ok(self.call_host(self.host.core.path_to_string, &[recv_val]))

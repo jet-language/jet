@@ -3,7 +3,6 @@
 use core.tasks as tasks
 use core.files as fs
 use core.io as io
-use core.path as path
 
 fn count_lines(text: String) => Int = text.lines().len()
 
@@ -14,8 +13,8 @@ fn scan_one(file_path: String) => String {
 }
 
 fn default_paths() => [String] {
-    a :: path.join("/tmp", "jet_parallel_scan_a.txt")
-    b :: path.join("/tmp", "jet_parallel_scan_b.txt")
+    a :: Path.from("/tmp").join("jet_parallel_scan_a.txt").to_string()
+    b :: Path.from("/tmp").join("jet_parallel_scan_b.txt").to_string()
     _ :: fs.write(a, "one\ntwo\n")
     _ :: fs.write(b, "alpha\nbeta\ngamma\n")
     return [a, b]

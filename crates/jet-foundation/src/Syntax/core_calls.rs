@@ -208,6 +208,36 @@ impl CoreCallRecord {
         self
     }
 
+    /// Positions whose erased Core ABI takes a filesystem path. Sema accepts
+    /// `String | Path`; AOT, JIT, and the interpreter marshal a `Path` through
+    /// its canonical string representation at this boundary.
+    pub fn path_mask(self) -> &'static [bool] {
+        match (self.module, self.member) {
+            ("core.files", "read" | "read_bytes" | "exists" | "is_dir" | "remove"
+                | "remove_dir" | "remove_all" | "list_dir" | "create_dir"
+                | "create_dir_all" | "stat" | "canonicalize" | "absolute" | "walk"
+                | "glob" | "fsync" | "lock" | "open" | "create" | "append") => &[true],
+            ("core.files", "write" | "append_all" | "write_atomic") => &[true],
+            ("core.files", "copy" | "copy_dir" | "rename" | "symlink" | "hard_link") => {
+                &[true, true]
+            }
+            ("core.files", "read_link") => &[true],
+            ("core.files", "read_at") => &[true],
+            ("core.files", "write_at") => &[true],
+            ("core.watcher", "files") => &[true],
+            ("core.io", "binread") => &[true],
+            ("core.io", "binwrite") => &[true],
+            ("core.os", "set_current_dir" | "mkfifo") => &[true],
+            ("core.os", "utime") => &[true, false, false],
+            _ => &[],
+        }
+    }
+
+    pub fn path_arg(self, index: usize) -> bool {
+        let mask = self.path_mask();
+        index < mask.len() && mask[index]
+    }
+
     /// Candidate resident-JIT symbols for this Prelude projection.
     ///
     /// The JIT host is an ABI adapter, so its exported name has the same
@@ -615,10 +645,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true]),
     CoreCallRecord::new("core.files", "create", "jet_std_files_create", true, &[true]),
     CoreCallRecord::new("core.files", "append", "jet_std_files_append", true, &[true]),
-    CoreCallRecord::new("core.path", "join", "jet_std_path_join", true, &[true, true]), // E2-M7: std.path helpers (D-IO1).
-    CoreCallRecord::new("core.path", "parent", "jet_std_path_parent", true, &[true]),
-    CoreCallRecord::new("core.path", "extension", "jet_std_path_extension", true, &[true]),
-    CoreCallRecord::new("core.path", "normalize", "jet_std_path_normalize", true, &[true]),
     CoreCallRecord::new("core.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new("core.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true]),
     CoreCallRecord::new("core.url", "file", "jet_url_file", true, &[true]),

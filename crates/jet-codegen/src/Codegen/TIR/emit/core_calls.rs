@@ -459,6 +459,7 @@ pub(crate) fn emit_http_response_from_bridge(call: String, ffi: &str) -> String 
 fn emit_plain_core_call(
     module: &str,
     method: &str,
+    args: &[TExpr],
     arg: &dyn Fn(usize) -> String,
     helper: &dyn Fn(&str) -> String,
 ) -> Option<String> {
@@ -473,6 +474,15 @@ fn emit_plain_core_call(
         .enumerate()
         .map(|(idx, borrow)| {
             let a = arg(idx);
+            let a = if row.path_arg(idx)
+                && args.get(idx).is_some_and(|arg| {
+                    matches!(&arg.ty, Type::Named(name) if name == "Path")
+                })
+            {
+                format!("({a}).jet_show()")
+            } else {
+                a
+            };
             if *borrow { format!("&({a})") } else { a }
         })
         .collect();
@@ -537,7 +547,7 @@ pub(crate) fn emit_tir_core_call(
             return rendered;
         }
     }
-    if let Some(rendered) = emit_plain_core_call(module, method, &arg, &helper) {
+    if let Some(rendered) = emit_plain_core_call(module, method, args, &arg, &helper) {
         return rendered;
     }
     fn vault_key_type(ty: &Type) -> Option<&str> {

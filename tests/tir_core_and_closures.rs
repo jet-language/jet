@@ -12,9 +12,9 @@ use tir_support::{
 };
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
-/// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
+/// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms
-/// (`jet_std_math_*`, `jet_std_path_join`, `jet_ring_crypto_sha256`) reproduce
+/// (`jet_std_math_*`, `jet_path_join`, `jet_ring_crypto_sha256`) reproduce
 /// `emit_core_call` byte-for-byte; here we prove they compile (I2) and run.
 /// parity: guard tests/tir_core_and_closures.rs::core_math_path_crypto_calls
 #[test]
@@ -24,7 +24,6 @@ fn core_math_path_crypto_calls() {
     }
     let src = "\
 use core.math as math
-use core.path as path
 use core.crypto as crypto
 fn calc(a: Float) => Float {
     r :: math.sqrt(a)
@@ -33,7 +32,7 @@ fn calc(a: Float) => Float {
     return (f + c)
 }
 fn make_path(a: String, b: String) => String {
-    return path.join(~a, ~b)
+    return Path.from(a).join(b).to_string()
 }
 fn hash(s: String) => String {
     return crypto.sha256(s.bytes()).hex()

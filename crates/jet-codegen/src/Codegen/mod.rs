@@ -896,7 +896,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         used_core,
         &[
             "core.files",
-            "core.path",
             "core.watcher",
             "core.io",
             "core.env",
@@ -1311,7 +1310,6 @@ fn uses_native_scheduler(bundle: &ProgramBundle) -> bool {
             "core.http",
             "core.process",
             "core.files",
-            "core.path",
             "core.watcher",
             "core.io",
             "core.env",

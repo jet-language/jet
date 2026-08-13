@@ -453,10 +453,12 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             method: method.to_string(),
         },
         // D-PATHFS1: typed Path instance methods.
+        ("Path", "home", 0) => THandleOp::PathHome,
         ("Path", "join", 1) => THandleOp::PathJoin,
         ("Path", "parent", 0) => THandleOp::PathParent,
         ("Path", "extension", 0) => THandleOp::PathExtension,
         ("Path", "stem", 0) => THandleOp::PathStem,
+        ("Path", "normalize", 0) => THandleOp::PathNormalize,
         ("Path", "to_string", 0) => THandleOp::PathToString,
         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
         ("Path", "walk", 0) => THandleOp::PathWalk,

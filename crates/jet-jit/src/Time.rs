@@ -23,9 +23,13 @@ pub(crate) enum TimeValue {
 }
 
 pub(crate) fn ambient_date_today_value() -> CtValue {
+    ambient_date_today_value_as("Date")
+}
+
+pub(crate) fn ambient_date_today_value_as(type_name: &str) -> CtValue {
     let date = time_rt::JetDate::today_utc();
     CtValue::Struct {
-        type_name: "LocalDate".to_string(),
+        type_name: type_name.to_string(),
         fields: vec![
             ("year".to_string(), CtValue::Int(date.year())),
             ("month".to_string(), CtValue::Int(date.month())),

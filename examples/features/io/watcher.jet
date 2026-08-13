@@ -4,7 +4,6 @@ use core.files as fs
 use core.io as io
 use core.net as net
 use core.os as os
-use core.path as path
 use core.process as process
 use core.time as time
 use core.watcher as watcher
@@ -18,14 +17,14 @@ fn run() {
     root :: "/tmp/jet_watcher_demo"
     if fs.exists(root) { fs.remove_all(root) ?? panic("cleanup failed") }
     fs.create_dir_all(root) ?? panic("mkdir failed")
-    nested :: path.join(root, "nested")
+    nested :: Path.from(root).join("nested")
     fs.create_dir_all(nested) ?? panic("nested mkdir failed")
-    created :: path.join(nested, "note.txt")
+    created :: nested.join("note.txt")
     scope :: event.scope()
     files :: watcher.files(root) ?? panic("watch files failed")
-    callback_path :: ~created
+    callback_path :: created.to_string()
     sub :: files.on(scope, ev => {
-        if ev.path == ~callback_path {
+        if ev.path == callback_path {
             print("callback {ev.domain}:{ev.kind}:recursive")
         }
     })
@@ -33,25 +32,25 @@ fn run() {
     first :: files.poll()
     first_kind := "none"
     loop ev, first {
-        if ev.path == created { first_kind = ev.kind }
+        if ev.path == created.to_string() { first_kind = ev.kind }
     }
     print("recursive file: {first_kind}")
     print("callback active: {sub.is_active()}")
     scope.cancel()
     print("callback after scope cancel: {sub.is_active()}")
-    after_drop :: path.join(nested, "after-drop.txt")
-    dropped_path :: ~after_drop
+    after_drop :: nested.join("after-drop.txt")
+    dropped_path :: after_drop.to_string()
     if true {
         dropped_scope :: event.scope()
         files.on(dropped_scope, ev => {
-            if ev.path == ~dropped_path { print("leaked callback after scope drop") }
+            if ev.path == dropped_path { print("leaked callback after scope drop") }
         })
     }
     fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
     after_drop_events :: files.poll()
     after_drop_kind := "none"
     loop ev, after_drop_events {
-        if ev.path == after_drop { after_drop_kind = ev.kind }
+        if ev.path == after_drop.to_string() { after_drop_kind = ev.kind }
     }
     print("scope drop file: {after_drop_kind}")
     child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
@@ -82,7 +81,7 @@ fn run() {
     print("set events: {combined.len()}")
     files.cancel()
     print("file watcher active: {files.is_active()}")
-    cancelled_path :: path.join(nested, "after-cancel.txt")
+    cancelled_path :: nested.join("after-cancel.txt")
     fs.write(cancelled_path, "stopped") ?? panic("cancelled watcher write failed")
     print("file events after cancel: {files.poll().len()}")
     fs.remove_all(root) ?? panic("remove failed")

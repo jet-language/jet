@@ -283,7 +283,14 @@ compiled in.
 ### `core.files` — files and folders
 
 One module for both whole-file convenience helpers and streaming handles
-(D-FILES-WRITE1). Paths are plain `String`s.
+(D-FILES-WRITE1). Path-taking functions accept a plain `String` or a `Path`.
+Use `Path` methods when composing paths; the type keeps separators and parent
+rules correct on every supported system.
+
+The `Path` methods are the expert Path-only APIs: their receiver is always a
+`Path`. Convert once at the boundary with `Path.from(value)`, then pass the
+typed value through file APIs or keep the simpler string form where no path
+composition is needed.
 
 ```jet
 use core.files as fs
@@ -383,10 +390,11 @@ hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 `is_dir`, `is_symlink`, and `kind` (`"file"`, `"dir"`, `"symlink"`, or
 `"other"`). `WalkEntry` fields are `path`, `relative`, `is_dir`, and `depth`.
 `TempDir`, `TempFile`, and `FileLock` expose `.path`; cleanup is RAII on the
-last handle drop. `core.path` provides `path.join(dir, name) => String` plus
-`.parent()`, `.extension()`, and `.normalize()` for composing paths
-independently of `DirEntry`. Examples: `examples/features/io/dir_entry.jet`
-and `examples/features/io/files_depth.jet`.
+last handle drop. `Path` is the portable path value. Build one with
+`Path.from(value)`, compose it with `.join(part)`, and inspect it with
+`.parent()`, `.extension()`, `.stem()`, and `.normalize()`. The old
+`core.path` free functions are retired by D-CORE-PATH1. Examples:
+`examples/features/io/dir_entry.jet` and `examples/features/io/files_depth.jet`.
 
 ### `core.url` and `core.mime` — typed web addresses and media types
 
@@ -3649,7 +3657,7 @@ exact automatic promotion sites to migrate back to ownership.
 
 `core.compiler`, `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
 `core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
-`core.solve`, `core.data`, `core.compute`, `core.files`, `core.path`, `core.url`, `core.mime`,
+`core.solve`, `core.data`, `core.compute`, `core.files`, `core.url`, `core.mime`,
 `core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
 `core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
 `core.encoding.csv`, `core.encoding.toml`, `core.encoding.yaml`,

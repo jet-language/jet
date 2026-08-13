@@ -10,7 +10,7 @@ template or engine-specific public fallback is part of the path.
 | Module | Ownership | Effects | Failure | Blocking | Platform | Backend |
 |--------|-----------|---------|---------|----------|----------|---------|
 | Kernel (`JetStd` brace chain) | owned values | pure unless noted | typed `Result` / panic | sync | all native | audited intrinsic/ABI kernel |
-| `core.files` / `core.path` | path/handle owned | `IO` | `IOError` | may block | host FS | reachable Core runtime + audited host ABI |
+| `core.files` / `Path` | path/handle owned | `IO` | `IOError` | may block | host FS | reachable Core runtime + audited host ABI |
 | `core.net` / `core.tls` | stream owned | `Net` | `NetError` | may block | Linux proven; macOS/Windows E9 | reachable Core runtime + audited host ABI |
 | `core.http.*` | request/response owned | `Net` | `HTTPError` | may block | native | reachable Core runtime + audited network ABI |
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |

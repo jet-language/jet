@@ -1183,11 +1183,20 @@ impl<'a> Checker<'a> {
                         if let Some(ret) =
                             Collections::builtin_method_return(&ty, method, args.len(), true)
                         {
-                            if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                            if (type_name == crate::Syntax::CLOCK_TYPE && method == "system")
+                                || (type_name == crate::Syntax::CLOCK_TYPE && method == "now")
+                                || (type_name == "Date" && method == "today")
+                            {
                                 self.record_effect(Effect::Time.name(), span);
                                 if self.in_pure && self.det_suppress == 0 {
                                     self.diags.push(crate::Sema::e3403(
-                                        "Clock.system",
+                                        if type_name == "Date" {
+                                            "Date.today"
+                                        } else if method == "now" {
+                                            "Clock.now"
+                                        } else {
+                                            "Clock.system"
+                                        },
                                         Some(span),
                                     ));
                                 }

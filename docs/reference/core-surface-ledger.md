@@ -50,39 +50,39 @@ Generated on: 2026-08-13
 | --- | ---: |
 | Languages compared | 11 |
 | Shared containers | 54 |
-| Core modules | 86 |
-| Module members | 1135 |
-| Collection method rows | 713 |
-| Jet-side rows | 1848 |
-| Total rows | 10405 |
+| Core modules | 85 |
+| Module members | 1110 |
+| Collection method rows | 726 |
+| Jet-side rows | 1836 |
+| Total rows | 10270 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
 | Jet wins | 402 |
-| Equal | 875 |
-| Jet loses (two or more languages agree) | 177 |
-| Single witness (recorded, not scored) | 8272 |
-| Exported type, not an operation | 156 |
-| Not compared | 415 |
+| Equal | 862 |
+| Jet loses (two or more languages agree) | 174 |
+| Single witness (recorded, not scored) | 8152 |
+| Exported type, not an operation | 155 |
+| Not compared | 417 |
 | Deliberately declined | 108 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 360 | 12 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 411 | 54 |
+| Rust | standard-library source (rust-src component) | 1032 | 364 | 8 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 410 | 56 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 4 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 18 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 323 | 27 |
-| TypeScript | runtime introspection | 724 | 225 | 49 |
-| Ruby | runtime introspection | 1294 | 347 | 41 |
-| Elixir | runtime introspection | 1270 | 376 | 53 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 284 | 58 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 246 | 16 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 326 | 27 |
+| TypeScript | runtime introspection | 724 | 225 | 47 |
+| Ruby | runtime introspection | 1294 | 346 | 31 |
+| Elixir | runtime introspection | 1270 | 373 | 53 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 281 | 57 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 427 | 102 |
+| Python | runtime introspection | 2232 | 415 | 102 |
 
 ## Loss clusters
 
@@ -94,17 +94,16 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.files | 66 | #288 | building | live |
+| core.files | 54 | #288 | building | live |
+| core.crypto | 17 | #1473 | ready | live |
 | core.tasks | 17 | #1468 | done | closed |
+| core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
-| core.os | 10 | #1465 | done | closed |
-| core.crypto | 9 | #1473 | ready | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
-| core.path | 9 | #288 | building | live |
+| core.os | 9 | #1465 | done | closed |
 | ByteBuffer | 8 | #1467 | done | closed |
-| core.archive | 5 | #1470 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
 | core.tls | 2 | #1593 | ready | live |
 | BitSet | 1 | #1493 | ready | live |

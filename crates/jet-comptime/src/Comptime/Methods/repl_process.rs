@@ -6,7 +6,7 @@ use crate::AST::{CtValue, Type};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
-    IoErrorOperation,
+    normalize_path_args, IoErrorOperation,
 };
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
@@ -147,6 +147,7 @@ pub fn apply_repl_authorized_core_call_with_type(
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
+    args = normalize_path_args(module, method, args, span)?;
     // REPL eprint is the inline transcript sink. It does not need an effect
     // prompt or a lexical grant; the existing REPL surface keeps it available.
     if module == "core.io" && method == "eprint" {

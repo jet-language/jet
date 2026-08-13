@@ -93,7 +93,7 @@ fn layer_of(module: &str) -> RuntimeLayer {
         | "core.regex" => RuntimeLayer::Alloc,
 
         // ── hosted: OS I/O, networking, processes ──────────────────────────
-        "core.io" | "core.env" | "core.process" | "core.files" | "core.path" | "core.watcher"
+        "core.io" | "core.env" | "core.process" | "core.files" | "core.watcher"
         | "core.net" | "core.tls" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "core.http" | "core.http.client" | "core.http.server" | "core.archive"
         | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "core.db"

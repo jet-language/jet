@@ -2,7 +2,6 @@
 use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
-use core.path as path
 
 fn xml_name(local: String) => DataTree {
     return DataTree.Object([
@@ -13,7 +12,7 @@ fn xml_name(local: String) => DataTree {
     ])
 }
 
-fn write_catalog(path: String) {
+fn write_catalog(path: Path) {
     output :: files.create(path) ?? panic("create")
     writer :: xml.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])])) ?? panic("document_start")
@@ -46,7 +45,7 @@ fn run() {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
     scratch :: files.temp_dir("jet-encoding-xml") ?? panic("temp_dir")
-    path :: path.join(scratch.path, "catalog.xml")
+    path :: Path.from(scratch.path).join("catalog.xml")
     write_catalog(path)
     input :: files.open(path) ?? panic("open")
     reader :: xml.reader(^input) ?? panic("reader")
