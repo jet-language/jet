@@ -865,7 +865,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.ui", "text", "jet_ui_text", true, &[true])
         .with_pure_route(CoreCallPureRoute::Ui),
+    // D-WEB-CLICK-PORT1=D: the optional labeled handler is admitted by the
+    // bespoke sema/codegen path after the one-label core row is checked.
     CoreCallRecord::new("core.ui", "button", "jet_ui_button", true, &[true])
+        .with_max_arity(2)
         .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.ui", "key_event", "jet_ui_key_event", true, &[true])
         .with_pure_route(CoreCallPureRoute::Ui),

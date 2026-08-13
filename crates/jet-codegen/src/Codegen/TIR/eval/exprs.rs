@@ -33,12 +33,30 @@ impl crate::option_lift2::JetOptionValue for EvalOptionValue {
     type Item = CtValue;
 
     fn jet_option_is_present(&self) -> bool {
-        matches!(self.0, CtValue::Present(_))
+        let present = matches!(&self.0, CtValue::Present(_))
+            || matches!(
+                &self.0,
+                CtValue::Enum {
+                    type_name,
+                    variant,
+                    args,
+                } if type_name.is_empty() && variant == "Val" && !args.is_empty()
+            );
+        present
     }
 
     fn jet_option_into_item(self) -> Self::Item {
         match self.0 {
             CtValue::Present(value) => *value,
+            CtValue::Enum {
+                type_name,
+                variant,
+                mut args,
+            } if type_name.is_empty() && variant == "Val" => args
+                .drain(..)
+                .next()
+                .map(|(_, value)| value)
+                .expect("option payload requested from empty Val"),
             _ => unreachable!("option payload requested from absence"),
         }
     }
@@ -1151,7 +1169,10 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         TExprKind::IfExpr { .. } | TExprKind::OrFallback { .. } | TExprKind::InlineBlock(_) => {
             Vec::new()
         }
-        TExprKind::OptionLift2 { f, a, b } => vec![f.as_ref(), a.as_ref(), b.as_ref()],
+        // `f` is a lazy callback factory input. It must not be scheduled with
+        // strict children: an absent operand must skip both callback creation
+        // and callback evaluation, matching the Prelude and emitted AOT code.
+        TExprKind::OptionLift2 { a, b, .. } => vec![a.as_ref(), b.as_ref()],
         TExprKind::ClosureMethod { recv, args, .. } => std::iter::once(recv.as_ref())
             .chain(eval_closure_children(args))
             .collect(),
@@ -3624,6 +3645,26 @@ impl<'a> EvalCtx<'a> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
             argv.push(self.eval_expr_child(a, scope)?);
+        }
+        // A typed JSON encoder must pass through the same Codable protocol as
+        // the AOT helper.  The generic CtValue renderer only knows a record's
+        // storage shape, so using it here would bypass a hand-written nested
+        // codec (and make a folded call disagree with the emitted call).
+        if module == "core.encoding.json"
+            && matches!(method, "to_string" | "to_string_pretty")
+            && args.len() == 1
+        {
+            let value = argv
+                .first()
+                .cloned()
+                .ok_or_else(|| unsupported("JSON encoder missing its value", source_span))?;
+            let tree = self.eval_serde_encode_value(value, &args[0].ty)?;
+            let rendered = if method == "to_string_pretty" {
+                crate::Comptime::render_datatree_pretty_for_tir(&tree)
+            } else {
+                crate::Comptime::render_datatree_for_tir(&tree)
+            };
+            return Ok(CtValue::Str(rendered));
         }
         let progress_known_total = if module == "core.io" && method == "progress" {
             if let Some((items, known_total)) = argv.first().and_then(progress_iter_parts) {
@@ -7159,7 +7200,9 @@ impl<'a> EvalCtx<'a> {
                     EvalOptionValue(a),
                     EvalOptionValue(b),
                     || Ok(CtValue::absent(expr.ty.clone())),
-                    |value| value,
+                    |value: Result<CtValue, Diagnostic>| {
+                        value.map(|value| CtValue::Present(Box::new(value)))
+                    },
                     || {
                         move |left, right| {
                             self.apply_callable_once(

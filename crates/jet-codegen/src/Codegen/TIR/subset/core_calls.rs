@@ -38,6 +38,35 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.time" && method == "parse_time" {
         return true;
     }
+    // D-UITREE1=A: `ui.box` has a typed AOT emitter and a dedicated resident-JIT
+    // symbol, but intentionally no direct AOT registry symbol. It is still a
+    // complete TIR core call, so coverage follows the emitter here.
+    if module == "core.ui" && method == "box" {
+        return true;
+    }
+    // c109 Phase 18: low-level pointer operations have bespoke sema return
+    // types and Rust expressions, so their registry rows are not direct AOT
+    // symbols. The enclosing `#Unsafe` gate is checked by the statement and
+    // expression subset walkers; this only admits their total call shapes.
+    if module == "core.mem"
+        && matches!(method, "address_of" | "volatile_read" | "volatile_write")
+    {
+        return true;
+    }
+    // D-ENCXML-PROJECTION1=A: typed XML decode is a total Prelude call whose
+    // target comes from sema's resolved return type rather than a direct-symbol
+    // registry row. The emitter and all tiers use that same target metadata.
+    if module == "core.encoding.xml" && matches!(method, "decode" | "decode_bytes") {
+        return true;
+    }
+    // D-SHAPE-DURATION1=A: duration constructors are Prelude calls with a
+    // unit selected by the method name, not direct registry symbols. Their
+    // fixed integer argument and Result type are already resolved by sema.
+    if module == "core.time"
+        && matches!(method, "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours")
+    {
+        return true;
+    }
     // Plain Core calls are rows in the foundation registry. Their argument
     // expressions and resolved value types are checked by the callers below;
     // this lookup owns the call-key coverage decision.
@@ -46,17 +75,6 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     }
     if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
     {
-        return true;
-    }
-    // c109 Phase 18: the low-level `core.mem` pointer ops (`address_of`/`volatile_read`,
-    // S58). NOT in `core_fixed_sig` (their types come from bespoke sema logic), but both
-    // are deterministic and reproducible from total facts: `address_of(x) -> Int` is an
-    // inert address cast (no `unsafe`); `volatile_read(p) -> ptr_elem(p)` reads through a
-    // typed pointer, and `volatile_write(p, value) -> Unit` writes through one (the
-    // volatile ops are valid because they are only reachable inside an
-    // `#Unsafe` region/fn — sema E3101 — already lowered to a Rust `unsafe` context). The
-    // return type is resolved at lowering (see `lower_method_call`), so it is total.
-    if module == "core.mem" && matches!(method, "address_of" | "volatile_read" | "volatile_write") {
         return true;
     }
     // D-PIN1=A: `mem.pin(&place)` lowers to the same exclusive borrow node as
@@ -290,7 +308,7 @@ pub(super) fn core_call_args_in_subset(
             let label_ok = if idx == 2 {
                 matches!(
                     a.label.as_ref().map(|(label, _)| label.as_str()),
-                    Some("tls")
+                    None | Some("tls")
                 )
             } else {
                 a.label.is_none()

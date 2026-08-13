@@ -291,7 +291,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             jet_format!(
-                "{{ let {jet_prefix}fixed = ({b}); jet_fixed_list_index({jet_prefix}fixed.len(), ({i}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {line}, &{jet_prefix}error.message())) }}",
+                "{{ let {jet_prefix}fixed = &({b}); jet_fixed_list_index({jet_prefix}fixed.len(), ({i}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {line}, &{jet_prefix}error.message())) }}",
                 cx.file
             )
         }
@@ -2380,7 +2380,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             {
                 return format!("({}).grads_or_panic()", emit_tir_expr(recv, cx));
             }
-            if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
+            if matches!(recv.ty.erased_carrier(), Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
                 let helper = match field.as_str() {
                     "message" => "jet_err_message",
                     "code" => "jet_err_code",

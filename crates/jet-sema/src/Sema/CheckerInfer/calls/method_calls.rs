@@ -20,6 +20,7 @@ use crate::Sema::CheckerCoreLib::{
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
     terminal_session_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
+    core_generic_struct_field,
     simd_reduce_markers, sketch_method_return, sketch_type_name,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
@@ -1543,7 +1544,11 @@ impl<'a> Checker<'a> {
                 }
                 // D-TAG1: `Bag.new()` → `Bag<T>`. Turbofish / annotation supplies T.
                 if type_name == "Bag" && method == "new" && args.is_empty() {
-                    let elem_ty = type_args.first().cloned().unwrap_or_else(|| {
+                    let elem_ty = type_args
+                        .first()
+                        .or_else(|| owner_type_args.first())
+                        .cloned()
+                        .unwrap_or_else(|| {
                         match &self.expected_type {
                             Some(Type::Apply { name, args, .. })
                                 if name == "Bag" && !args.is_empty() =>
@@ -1552,7 +1557,7 @@ impl<'a> Checker<'a> {
                             }
                             _ => Type::Int,
                         }
-                    });
+                        });
                     if !Collections::is_hashable_type(&elem_ty) {
                         self.diags.push(Diagnostic::error(
                             "E0506",
@@ -1673,6 +1678,7 @@ impl<'a> Checker<'a> {
                         type_args
                             .first()
                             .cloned()
+                            .or_else(|| owner_type_args.first().cloned())
                             .unwrap_or_else(|| match &self.expected_type {
                                 Some(Type::Apply { name, args, .. })
                                     if name == "Pool" && !args.is_empty() =>
@@ -4298,6 +4304,28 @@ impl<'a> Checker<'a> {
             };
             let (_, dispatch_type_name) = self.struct_type_name_parts(&type_name);
             let display_type_name = self.display_type_name(&type_name, None);
+            // Reserved generic core records do not live in the ordinary struct
+            // registry. Their function-valued fields still use the same field
+            // call surface as user structs (`vjp_run.pull(seed)`).
+            if let Type::Apply {
+                name,
+                args: type_args,
+            } = &recv_ty
+            {
+                if let Some(field_ty) = core_generic_struct_field(name, method, type_args) {
+                    if matches!(field_ty, Type::Fn { .. }) {
+                        *recv_type_out = Some(dispatch_type_name.to_string());
+                        let mut callee = Box::new(Expr::Field(
+                            receiver.clone(),
+                            method.to_string(),
+                            span,
+                        ));
+                        let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
+                        let call_span = Span::new(span.start, end);
+                        return self.infer_call_value(&mut callee, args, call_span);
+                    }
+                }
+            }
             if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
                 if let Some((_, _, field_ty)) =
                     fields.iter().find(|(fname, _, _)| fname == method)

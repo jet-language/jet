@@ -8,7 +8,7 @@ use core.db as db
 fn run() {
     conn :: db.open_memory()
     policy :: db.policy("greet", "true") ?? panic("policy failed")
-    scoped :: conn.with_policy(policy, "owner") ?? panic("scope failed")
+    scoped :: conn.with_policy(policy, "owner")
     _created :: db.migrate(scoped, "greet-v1", ["CREATE TABLE greet (id INTEGER PRIMARY KEY, msg TEXT)"]) ?? panic("create failed")
     // An "injection-looking" literal — because it is a BIND PARAMETER, not
     // spliced SQL text, it round-trips as inert data.

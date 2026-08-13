@@ -714,7 +714,22 @@ fn check_bundle_opts_for_output_inner(
         st.consts.extend(comptime_types);
         // D-ONCE-DERIVE1=A / I3: built-in capability requests re-enter as
         // ordinary Jet impl blocks before the final trait registration pass.
+        let known_functions: HashSet<String> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(function) => Some(function.name.clone()),
+                _ => None,
+            })
+            .collect();
         super::super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);
+        for item in &module.items {
+            if let Item::Func(function) = item {
+                if !known_functions.contains(&function.name) {
+                    register_func_item(function, st, &mut diags, !module.no_prelude);
+                }
+            }
+        }
         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
         // bundle builds too; this is the production multi-file path.
         super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);

@@ -704,14 +704,16 @@ pub(crate) fn render_lambda_str(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String
     render_lambda_str_expecting(lam, cx, env, None)
 }
 
-/// Like [`render_lambda_str`], but force `Arc` wrapping for hosts that require
-/// `Send + Sync` (UI `reactive_render` / portable `button` `on_click`). Escaping
-/// Fn values otherwise prefer `Rc`, which is not Sync and fails rustc for those
-/// prelude signatures.
-pub(crate) fn render_lambda_str_sync(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
+/// Render a closure for a Prelude generic callback parameter.
+///
+/// The Prelude owns any storage or synchronization wrapper it needs. Passing
+/// `Rc`/`Arc` here changes the generic argument from the closure type to the
+/// wrapper type and loses the callback's `Fn` contract at the boundary.
+pub(crate) fn render_lambda_str_unboxed(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
     let mut tl = lower_lambda(lam, cx, env);
-    tl.arc = true;
+    tl.boxed = false;
     tl.rc = false;
+    tl.arc = false;
     wrap_lowered_lambda(&tl)
 }
 

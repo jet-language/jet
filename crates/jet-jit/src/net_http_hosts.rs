@@ -1714,33 +1714,36 @@ extern "C" fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
         return 0;
     };
     let f: HTTPMiddlewareFn = unsafe { std::mem::transmute(mw_fn as usize) };
-    jet_http_mux_middleware(&mux, move |next| {
-        Concurrency::with_http_jet_runtime(|| {
-            let next_h = push_handle(NetHttpHandle::HTTPHandler(next));
-            let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f(next_h) }));
-            let fail = |op: &'static str| -> JetHTTPHandler {
-                Arc::new(move |_| Err(JetHTTPError::IO { operation: op.into() }))
-            };
-            match out {
-                Ok(out) => {
-                    if let Some(h) = with_handle(out, |h| match h {
-                        NetHttpHandle::HTTPHandler(h) => Some(Arc::clone(h)),
-                        _ => None,
-                    }) {
-                        let _ = take_handle(out);
-                        return h;
-                    }
-                    if let Some((true, bits)) = decode_result(out) {
-                        if let Some(NetHttpHandle::HTTPHandler(h)) = take_handle(bits as i64) {
+    jet_http_mux_middleware(
+        &mux,
+        Arc::new(move |next| {
+            Concurrency::with_http_jet_runtime(|| {
+                let next_h = push_handle(NetHttpHandle::HTTPHandler(next));
+                let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f(next_h) }));
+                let fail = |op: &'static str| -> JetHTTPHandler {
+                    Arc::new(move |_| Err(JetHTTPError::IO { operation: op.into() }))
+                };
+                match out {
+                    Ok(out) => {
+                        if let Some(h) = with_handle(out, |h| match h {
+                            NetHttpHandle::HTTPHandler(h) => Some(Arc::clone(h)),
+                            _ => None,
+                        }) {
+                            let _ = take_handle(out);
                             return h;
                         }
+                        if let Some((true, bits)) = decode_result(out) {
+                            if let Some(NetHttpHandle::HTTPHandler(h)) = take_handle(bits as i64) {
+                                return h;
+                            }
+                        }
+                        fail("middleware returned non-handler")
                     }
-                    fail("middleware returned non-handler")
+                    Err(_) => fail("middleware panic"),
                 }
-                Err(_) => fail("middleware panic"),
-            }
-        })
-    });
+            })
+        }) as JetHTTPMiddleware,
+    );
     0
 }
 

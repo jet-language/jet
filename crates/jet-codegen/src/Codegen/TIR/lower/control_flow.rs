@@ -799,7 +799,22 @@ pub(crate) fn lower_switch<'a>(
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
     if crate::AST::is_subjectless_guard(subject, span) {
-        return lower_guard_switch(arms, else_body, env);
+        return lower_guard_switch(arms, else_body, env, None);
+    }
+    // `DataTree` is a prelude enum whose variants have a specialized if-let
+    // lowering (`Object` binds ordered entries and materializes the public map
+    // view). A non-identifier dispatch subject is represented in the AST with
+    // the parser's private `it` pattern subject, so preserve the real subject
+    // while lowering these arms instead of sending them through the generic
+    // user-enum match path.
+    if !arms.is_empty()
+        && arms.iter().all(|arm| {
+            arm_variant_pattern(cx, &arm.cond, subject).is_some_and(|pattern| {
+                matches!(pattern, Pattern::Variant { ref variant, .. } if is_json_variant(variant))
+            })
+        })
+    {
+        return lower_guard_switch(arms, else_body, env, Some(subject));
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -829,7 +844,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, env);
+        return lower_guard_switch(arms, else_body, env, Some(subject));
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -850,6 +865,15 @@ pub(crate) fn lower_switch<'a>(
 }
 
 fn same_branch_subject(candidate: &Expr, subject: &Expr) -> bool {
+    // A classic `if` is represented as a subjectless guard with a private
+    // `true` subject. Generated source can give that private subject and a
+    // comparison operand the same synthetic span; treating the spans as an
+    // identity match rewrites `left < right` to `switch_subject < right` and
+    // leaks the guard's Bool carrier into the comparison. Only a real Bool
+    // dispatch uses the private subject as a comparison operand.
+    if matches!(subject, Expr::Bool(true, _)) {
+        return false;
+    }
     candidate.span() == subject.span()
         || matches!((candidate, subject), (Expr::Ident(a, _), Expr::Ident(b, _)) if a == b)
 }
@@ -975,6 +999,7 @@ fn lower_guard_switch<'a>(
     arms: &'a [SwitchArm],
     else_body: &'a Option<Vec<Stmt>>,
     env: &mut LowerEnv,
+    subject_override: Option<&'a Expr>,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
     // bodies run in reverse source order. Prepare each condition immediately before
@@ -991,7 +1016,10 @@ fn lower_guard_switch<'a>(
         let branch = fork_panic(env);
         bodies.push(
             LowerBody::scoped(&arm.body, branch).prepare(move |cx, branch| {
-                let (cond, bindings, prefix) = lower_if_cond(&arm.cond, cx, branch);
+                let condition = subject_override
+                    .map(|subject| replace_pattern_subject(&arm.cond, subject))
+                    .unwrap_or_else(|| arm.cond.clone());
+                let (cond, bindings, prefix) = lower_if_cond(&condition, cx, branch);
                 for (name, place, ty) in bindings {
                     branch.bind(&name, place, ty);
                 }
@@ -1027,6 +1055,23 @@ fn lower_guard_switch<'a>(
         }
         chain.into_iter().next().expect("guard table has at least one arm")
     })
+}
+
+fn replace_pattern_subject(condition: &Expr, subject: &Expr) -> Expr {
+    match condition {
+        Expr::PatternTest { pattern, span, .. } => Expr::PatternTest {
+            subject: Box::new(subject.clone()),
+            pattern: pattern.clone(),
+            span: *span,
+        },
+        Expr::Binary(BinOp::And, left, right, span) => Expr::Binary(
+            BinOp::And,
+            Box::new(replace_pattern_subject(left, subject)),
+            Box::new(replace_pattern_subject(right, subject)),
+            *span,
+        ),
+        _ => condition.clone(),
+    }
 }
 
 /// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.

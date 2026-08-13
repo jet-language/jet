@@ -8,7 +8,6 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
 use crate::Codegen::TIR::call_return_type_with_args;
@@ -73,6 +72,7 @@ use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower_method_args;
 use crate::Codegen::TIR::lower_module_args;
 use crate::Codegen::TIR::lower_one_call_arg;
+use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
@@ -282,7 +282,10 @@ fn lower_archive_source_call(
             .unwrap_or_else(unit_type),
         kind: TExprKind::ModuleCall {
             form: TModuleCallForm::Qualified {
-                rust_mod: mangle_generated("core_archive"),
+                // The source package is emitted as `mod __jet_core_archive`.
+                // `mangle_generated` would add a second generated prefix and
+                // produce the nonexistent `__jet___core_archive` path.
+                rust_mod: crate::Codegen::mangle("core_archive"),
                 rust_fn: mangle(method).to_string(),
             },
             type_args: type_args.to_vec(),
@@ -393,7 +396,7 @@ fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
             matches!(
                 (&arg.ty, params.get(index).map(|(_, ty)| ty)),
                 (Type::FixedList { elem: actual, .. }, Some(Type::List(want)))
-                    if actual == want
+                    if fixed_list_elem_compatible(actual, want)
             )
         })
         .collect()
@@ -4639,7 +4642,12 @@ fn lower_method_call_impl(
             // Keep the lowered lambda arg so AOT emit still receives it.
             if matches!(op, THandleOp::GameSceneOnFrame) {
                 if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
-                    let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                    let mut jit_lambda = lower_spawn_lambda_for_jit_expecting(
+                        lam,
+                        cx,
+                        env,
+                        &[Type::Named("GameFrame".to_string())],
+                    );
                     for (_, ty) in &mut jit_lambda.params {
                         *ty = Type::Named("GameFrame".to_string());
                     }

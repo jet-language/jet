@@ -2,7 +2,8 @@
 //!
 //! When a program declares `extern rust` blocks with crate dependencies, the
 //! driver materializes a cached cargo project under `~/.cache/jet/ffi/` and
-//! links the built rlib into the user's generated program.
+//! links the built rlib into the user's generated program. `JET_FFI_CACHE_DIR`
+//! overrides that root for isolated test or tool invocations.
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
@@ -2621,6 +2622,9 @@ fn publish_bridge_manifest(cache_root: &Path, artifacts: &[PathBuf]) -> Result<(
 }
 
 fn cache_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("JET_FFI_CACHE_DIR") {
+        return PathBuf::from(dir);
+    }
     dirs_home().join(".cache").join("jet").join("ffi")
 }
 

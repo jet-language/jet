@@ -21,7 +21,7 @@ fn person_count(conn: DBScope) =[DB.Read]=> Int {
 fn run() {
     conn :: db.open_memory()
     policy :: db.policy("person", "true") ?? panic("policy")
-    scoped :: conn.with_policy(policy, "owner") ?? panic("scope")
+    scoped :: conn.with_policy(policy, "owner")
     _created :: db.migrate(scoped, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"]) ?? panic("create failed")
     _a :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Ada")]) ?? panic("insert failed")
     _b :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Grace")]) ?? panic("insert failed")

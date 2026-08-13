@@ -1,9 +1,10 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{Type};
+use crate::AST::{AccessConvention, Type};
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
+use crate::Codegen::rust_param_type;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::enc_arg_is_json;
 use crate::Codegen::TIR::enc_arg_is_string_rows;
@@ -14,7 +15,7 @@ use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
-use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::{TExpr, TExprKind};
 
 fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     let Type::Tuple(fields) = ty else {
@@ -181,7 +182,14 @@ fn emit_compute_transform_call(
     let targets = emit_tir_expr(args.last()?, cx);
     let base_call = |base: &str, inputs: &str| {
         let call_args = (0..primal_count)
-            .map(|index| format!("({inputs})[{index}].clone()"))
+            .map(|index| {
+                let input = format!("({inputs})[{index}]");
+                if base_params[index].is_scalar() {
+                    format!("({input}).clone()")
+                } else {
+                    format!("&{input}")
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         format!("({base})({call_args})")
@@ -224,7 +232,7 @@ fn emit_compute_transform_call(
             "vjp" => {
                 let gradient_ty = gradient_ty.as_ref()?;
                 Some(jet_format!(
-                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"vjp\", &{state}, &[], &{target_expr}, \"compute.vjp\"); let JetComputeTransformResult::Vjp {{ value: {jet_prefix}vjp_value, state: {jet_prefix}vjp_state }} = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.vjp returned the wrong result\") }}; let {jet_prefix}pull_state = {jet_prefix}vjp_state.clone(); let {jet_prefix}grads_state = {jet_prefix}vjp_state; let {jet_prefix}pull_targets = {target_expr}.clone(); let {jet_prefix}grads_targets = {target_expr}.clone(); JetComputeVjpRun {{ value: {jet_prefix}vjp_value, pull: std::rc::Rc::new(move |{jet_prefix}seed: JetTensor| {{ let {jet_prefix}gradients = jet_compute_vjp_pull_or_panic(&{jet_prefix}pull_state, &{jet_prefix}seed, &{jet_prefix}pull_targets, \"compute.vjp.pull\"); {} }}), grads: std::rc::Rc::new(move || {{ let {jet_prefix}gradients = jet_compute_vjp_unit_grads_or_panic(&{jet_prefix}grads_state, &{jet_prefix}grads_targets, \"compute.vjp.grads\"); {} }}) }} }}",
+                    "{{ let {jet_prefix}result = jet_compute_transform_or_panic(\"vjp\", &{state}, &[], &{target_expr}, \"compute.vjp\"); let JetComputeTransformResult::Vjp {{ value: {jet_prefix}vjp_value, state: {jet_prefix}vjp_state }} = {jet_prefix}result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.vjp returned the wrong result\") }}; let {jet_prefix}pull_state = {jet_prefix}vjp_state.clone(); let {jet_prefix}grads_state = {jet_prefix}vjp_state; let {jet_prefix}pull_targets = {target_expr}.clone(); let {jet_prefix}grads_targets = {target_expr}.clone(); JetComputeVjpRun {{ value: {jet_prefix}vjp_value, pull: std::rc::Rc::new(move |{jet_prefix}seed: &JetTensor| {{ let {jet_prefix}gradients = jet_compute_vjp_pull_or_panic(&{jet_prefix}pull_state, {jet_prefix}seed, &{jet_prefix}pull_targets, \"compute.vjp.pull\"); {} }}), grads: std::rc::Rc::new(move || {{ let {jet_prefix}gradients = jet_compute_vjp_unit_grads_or_panic(&{jet_prefix}grads_state, &{jet_prefix}grads_targets, \"compute.vjp.grads\"); {} }}) }} }}",
                     compute_gradient_tuple(gradient_ty, &mangle_generated("gradients")),
                     compute_gradient_tuple(gradient_ty, &mangle_generated("gradients"))
                 ))
@@ -232,7 +240,14 @@ fn emit_compute_transform_call(
             "jvp" => {
                 let tangents = if transform {
                     (0..primal_count)
-                        .map(|index| jet_format!("{jet_prefix}arg{}", index + primal_count))
+                        .map(|index| {
+                            let arg = index + primal_count;
+                            if base_params[index].is_scalar() {
+                                jet_format!("{jet_prefix}arg{arg}.clone()")
+                            } else {
+                                jet_format!("(*{jet_prefix}arg{arg}).clone()")
+                            }
+                        })
                         .collect::<Vec<_>>()
                 } else {
                     (0..primal_count)
@@ -260,13 +275,23 @@ fn emit_compute_transform_call(
                 .iter()
                 .chain(base_params.iter())
                 .enumerate()
-                .map(|(index, ty)| jet_format!("{jet_prefix}arg{index}: {}", cx.rust_type(ty)))
+                .map(|(index, ty)| {
+                    jet_format!(
+                        "{jet_prefix}arg{index}: {}",
+                        rust_param_type(cx, AccessConvention::Read, ty)
+                    )
+                })
                 .collect::<Vec<_>>()
         } else {
             base_params
                 .iter()
                 .enumerate()
-                .map(|(index, ty)| jet_format!("{jet_prefix}arg{index}: {}", cx.rust_type(ty)))
+                .map(|(index, ty)| {
+                    jet_format!(
+                        "{jet_prefix}arg{index}: {}",
+                        rust_param_type(cx, AccessConvention::Read, ty)
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         let target = jet_format!("{jet_prefix}targets");
@@ -287,11 +312,24 @@ fn emit_compute_transform_call(
             "{{ let {jet_prefix}base = ({f}).clone(); std::rc::Rc::new(move |{}| {{ let ({jet_prefix}tape, {jet_prefix}inputs) = jet_compute_trace_inputs(vec![{}]); let {jet_prefix}value = ({jet_prefix}base)({}); {state_setup} let {jet_prefix}targets = {}; {} }}) as {} }}",
             params.join(", "),
             (0..primal_count)
-                .map(|index| jet_format!("{jet_prefix}arg{index}.clone()"))
+                .map(|index| {
+                    if base_params[index].is_scalar() {
+                        jet_format!("{jet_prefix}arg{index}.clone()")
+                    } else {
+                        jet_format!("(*{jet_prefix}arg{index}).clone()")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..primal_count)
-                .map(|index| jet_format!("({jet_prefix}inputs)[{index}].clone()"))
+                .map(|index| {
+                    let input = jet_format!("({jet_prefix}inputs)[{index}]");
+                    if base_params[index].is_scalar() {
+                        format!("({input}).clone()")
+                    } else {
+                        format!("&{input}")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", "),
             targets,
@@ -523,7 +561,23 @@ pub(crate) fn emit_tir_core_call(
         // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
         // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
         // E3101), already lowered to a Rust `unsafe` context.
-        ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
+        ("core.mem", "address_of") => {
+            let place = arg(0);
+            let mutable = args.first().is_some_and(|expr| {
+                matches!(&expr.kind, TExprKind::Local(local) if local.mutable)
+            });
+            if mutable {
+                format!("(&mut ({place}) as *mut _ as usize as i64)")
+            } else {
+                format!("(&({place}) as *const _ as usize as i64)")
+            }
+        }
+        ("core.mem", "volatile_read") => {
+            format!("std::ptr::read_volatile({})", arg(0))
+        }
+        ("core.mem", "volatile_write") => {
+            format!("std::ptr::write_volatile({}, {})", arg(0), arg(1))
+        }
         
         ("core.tasks", "channel") => {
             let fields = match ret_ty {
@@ -2290,7 +2344,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.vault", "get") => {
             format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
         }
-        ("core.vault", "current" | "versions" | "prepare_generate" | "prepare_rotate") =>
+        ("core.vault", "current") =>
+            format!("{}::<{}>(&({})).map(jet_outcome_of)", regex_fn("jet_vault_current_impl"), vault_rust(), arg(0)),
+        ("core.vault", "versions" | "prepare_generate" | "prepare_rotate") =>
             format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),
         ("core.vault", "load" | "status") =>
             format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),

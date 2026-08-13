@@ -12,7 +12,7 @@
 // the call site before it ever runs.
 fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] = items.map(x => f(x))
 
-fn run_each(items: [Int], act: fn(Int) =[IO]=>) =[via act]=> {
+fn run_each(items: [Int], act: fn(Int)) =[via act]=> {
     loop x, items {
         act(x)
     }
@@ -20,12 +20,12 @@ fn run_each(items: [Int], act: fn(Int) =[IO]=>) =[via act]=> {
 
 fn double(n: Int) =[]=> Int = n * 2
 
-fn show(n: Int) {
+fn show(n: Int, /) =[IO]=> {
     print("{n}")
 }
 
 fn run() {
     doubled :: transform([1, 2, 3], double)
     print("{doubled}")
-    run_each([10, 20], show)
+    run_each([10, 20], n => print("{n}"))
 }

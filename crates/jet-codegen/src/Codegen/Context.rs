@@ -1489,7 +1489,7 @@ impl Cx {
             Type::Named(name)
                 if name == Syntax::TYPE_TASK_FAILURE && !self.type_names.contains(name) =>
             {
-                format!("{}JetTaskFailure", self.root_prefix)
+                format!("{}jet_std::JetTaskFailure", self.root_prefix)
             }
             // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
             // internal collector. The surface remains second-class.
@@ -4407,7 +4407,7 @@ pub(crate) fn field_type_cloneable(
         // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
-        Type::Named(n) if is_json_type_name(n) => true,
+        Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
         Type::Named(n) => types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable

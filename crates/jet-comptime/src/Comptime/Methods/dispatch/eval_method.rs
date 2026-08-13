@@ -44,6 +44,30 @@ fn decode_xml_error(error: jet_foundation::XmlPull::Error) -> CtValue {
     )
 }
 
+// D-OPTION-SURFACE1: an option constructor written as `Val(x)`/`None` reaches
+// the comptime and interpreter tiers as a raw enum, while lowered/runtime
+// option values use the shared Present/Clean carrier. Keep both views at this
+// boundary so static folding and runtime evaluation apply one option law.
+fn option_surface_view(value: CtValue) -> Option<Option<CtValue>> {
+    match value {
+        CtValue::Present(value) => Some(Some(*value)),
+        CtValue::Failed(CtReport::Clean(_)) => Some(None),
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name.is_empty() && variant == "Val" => {
+            args.into_iter().next().map(|(_, value)| Some(value))
+        }
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name.is_empty() && variant == "None" && args.is_empty() => Some(None),
+        _ => None,
+    }
+}
+
 impl<'a> Interp<'a> {
     pub(in super::super::super) fn eval_method(
         &mut self,
@@ -789,7 +813,7 @@ impl<'a> Interp<'a> {
         // so it never lands here. Checked after the enum-variant-literal case
         // above (capitalized `Type.Variant(…)` wins first).
         if let Expr::Ident(name, _) = receiver {
-            if !scope.contains_key(name.as_str()) {
+            if !(name == "Option" && method == "lift2") && !scope.contains_key(name.as_str()) {
                 if let Some(f) = self
                     .methods
                     .get(&(name.clone(), method.to_string()))
@@ -842,20 +866,27 @@ impl<'a> Interp<'a> {
                         span,
                     ));
                 }
+                // Evaluate operands before the callback expression. This is
+                // the lazy branch of Option.lift2: an absent operand must not
+                // run a callback-producing expression with effects.
+                let a = option_surface_view(self.eval(&args[1].expr, scope)?);
+                let b = option_surface_view(self.eval(&args[2].expr, scope)?);
+                let (Some(a), Some(b)) = (a, b) else {
+                    return Err(unsupported("`Option.lift2` operands", span));
+                };
+                let Some((a, b)) = a.zip(b) else {
+                    return Ok(CtValue::absent(
+                        CtValue::resolved_option_element_type(resolved_ret)
+                            .unwrap_or(Type::Int),
+                    ));
+                };
                 let f = self.eval(&args[0].expr, scope)?;
-                let a = self.eval(&args[1].expr, scope)?;
-                let b = self.eval(&args[2].expr, scope)?;
-                return Ok(match (a, b) {
-                    (CtValue::Present(av), CtValue::Present(bv)) => {
-                        CtValue::Present(Box::new(self.call_inline_closure(
-                            &f,
-                            vec![*av, *bv],
-                            span,
-                            scope,
-                        )?))
-                    }
-                    _ => CtValue::absent(Type::Int),
-                });
+                return Ok(CtValue::Present(Box::new(self.call_inline_closure(
+                    &f,
+                    vec![a, b],
+                    span,
+                    scope,
+                )?)));
             }
         }
 

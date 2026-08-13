@@ -9,15 +9,17 @@
 use core.mem
 
 fn run() {
-    // A scalar left uninit: the compiler proves `n` is written before `print(n)`.
-    n := Int.{ uninit }
-    n = 99
-    print(n)
-    // Both branches write `m`, so every read path is provably post-write.
-    m := Int.{ uninit }
-    if {
-        1 > 0 -> m = 10
-        else -> m = 20
+    #Unsafe("uninitialized plain-data storage is filled before every read") {
+        // A scalar left uninit: the compiler proves `n` is written before `print(n)`.
+        n := Int.{ uninit }
+        n = 99
+        print(n)
+        // Both branches write `m`, so every read path is provably post-write.
+        m := Int.{ uninit }
+        if {
+            1 > 0 -> m = 10
+            else -> m = 20
+        }
+        print(m)
     }
-    print(m)
 }

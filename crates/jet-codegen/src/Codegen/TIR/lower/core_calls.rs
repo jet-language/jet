@@ -7,9 +7,8 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
-use crate::Codegen::TIR::render_lambda_str;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
-use crate::Codegen::TIR::render_lambda_str_sync;
+use crate::Codegen::TIR::render_lambda_str_unboxed;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
@@ -398,7 +397,7 @@ pub(crate) fn lower_core_closure_call(
         ("core.reactive", "derived") => {
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
-            let closure = render_lambda_str(lam, cx, env);
+            let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             // Captured signals need the spawn-lambda ABI (explicit capture params).
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
@@ -418,7 +417,7 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.reactive", "effect") => {
             let lam = lam_at(0)?;
-            let closure = render_lambda_str(lam, cx, env);
+            let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
@@ -428,7 +427,7 @@ pub(crate) fn lower_core_closure_call(
         ("core.reactive", "computed") => {
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
-            let closure = render_lambda_str(lam, cx, env);
+            let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
@@ -448,8 +447,7 @@ pub(crate) fn lower_core_closure_call(
         // D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
         ("core.ui", "reactive_render") => {
             let lam = lam_at(0)?;
-            // Send+Sync host: Arc, not Rc (see `jet_ui_reactive_render`).
-            let closure = render_lambda_str_sync(lam, cx, env);
+            let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
@@ -459,8 +457,7 @@ pub(crate) fn lower_core_closure_call(
         ("core.ui", "button") if args.len() == 2 => {
             let lam = lam_at(1)?;
             let label = Box::new(lower_expr(&args[0].expr, cx, env));
-            // Send+Sync host: Arc, not Rc (see `jet_ui_button_on_click`).
-            let closure = render_lambda_str_sync(lam, cx, env);
+            let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);

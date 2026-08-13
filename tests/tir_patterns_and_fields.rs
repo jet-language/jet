@@ -378,6 +378,27 @@ fn run() {
     assert_eq!(stdout, "2\n4\n");
 }
 
+/// D-FIXARR1: an inferred fixed-list local keeps its array type until the
+/// ordinary call boundary decides to copy it into the callee's `Vec` slot.
+#[test]
+fn inferred_fixed_list_widens_at_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn total(xs: [Int]) => Int {
+    return xs[0] + xs[1] + xs[2]
+}
+fn run() {
+    values :: [Int#3].{ 1, 2, 3 }
+    print(total(values))
+}
+";
+    let (code, stdout) = build_and_run("tir_fixed_list_inferred_call", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "6\n");
+}
+
 /// D-FIXARR1 / D-CRYPTO-DIAG1: Core calls use the same fixed-list widening as
 /// ordinary calls after sema consumes the compile-known length fact.
 #[test]

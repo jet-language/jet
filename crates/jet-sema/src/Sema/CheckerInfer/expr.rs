@@ -1837,7 +1837,16 @@ impl<'a> Checker<'a> {
                     self.validate_write_place(inner, *span);
                 }
                 self.borrow_ctx = true;
-                let ty = self.infer(inner)?;
+                // The complete place is checked above.  While inferring its
+                // base, suppress the partial owner read (`particles` in
+                // `&particles[2]`); otherwise a known disjoint index is
+                // rejected before `place_from_expr` can compare the full
+                // projected path with a live window.
+                let suppress = self.suppress_partial_move_root_read;
+                self.suppress_partial_move_root_read = true;
+                let ty = self.infer(inner);
+                self.suppress_partial_move_root_read = suppress;
+                let ty = ty?;
                 if matches!(inner.as_ref(), Expr::Slice { .. }) {
                     let elem = match ty {
                         Type::List(elem) => *elem,

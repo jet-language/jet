@@ -29,7 +29,7 @@ fn run() {
     async_scope :: event.scope()
     queued :: event.async_result<Int, String>(AsyncPolicy.{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     queued.on(async_scope, (n: Int) => print("async {n}"))
-    async_report :: queued.emit_async(7).join()
+    async_report :: queued.emit_async(7).join() ?? panic("join")
     print("async delivered={async_report.state() == .Delivered} handlers={async_report.delivered_handlers()}")
     queued.close()
     decision_scope :: event.scope()

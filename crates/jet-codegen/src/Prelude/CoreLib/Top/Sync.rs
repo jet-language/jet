@@ -70,10 +70,10 @@ pub struct JetRowPolicy {
 /// policy and user on the scope prevents a caller from replacing either one
 /// between SQL operations while retaining the underlying connection handle.
 #[derive(Clone, Debug)]
-struct JetDbScope {
-    handle: u64,
-    policy: JetRowPolicy,
-    user: String,
+pub struct JetDbScope {
+    pub handle: u64,
+    pub policy: JetRowPolicy,
+    pub user: String,
 }
 
 #[derive(Clone, Debug)]

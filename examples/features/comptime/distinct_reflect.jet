@@ -3,13 +3,15 @@
 #Comparable CustomerId :: distinct Int
 
 fn build(b: BuildContext) => BuildPlan ? {
-    found := false
     loop info, b.program.types() {
-        if info.name == "CustomerId" {
-            found = info.reflect().has_marker("Comparable")
-            if !found {
-                b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
+        if {
+            info.name == "CustomerId" -> {
+                if {
+                    info.has_marker("Comparable") -> next
+                    else -> b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
+                }
             }
+            else -> next
         }
     }
     app :: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])?

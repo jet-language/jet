@@ -75,10 +75,10 @@ impl<'a> Checker<'a> {
                     best = Some((cand, d));
                 }
             }
-            if let Some((cand, _)) = best {
-                fix = format!("did you mean `{}`?", cand);
-            }
-            self.diags.push(Diagnostic::error(
+        if let Some((cand, _)) = best {
+            fix = format!("did you mean `{}`?", cand);
+        }
+        self.diags.push(Diagnostic::error(
                 "E0107",
                 format!("nothing named `{}` exists here", name),
                 "a name must be declared before it's used".to_string(),
