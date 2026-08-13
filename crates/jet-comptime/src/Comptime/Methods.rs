@@ -27,7 +27,7 @@ pub use dispatch::apply_seeded_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;
 pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch,
-    is_tier2_core_call, vault_comptime_denied,
+    is_tier2_core_call, project_rejection, vault_comptime_denied,
 };
 pub use repl_process::apply_repl_authorized_core_call;
 pub use repl_process::apply_repl_authorized_core_call_with_type;

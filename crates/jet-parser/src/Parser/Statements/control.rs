@@ -336,16 +336,34 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-DSLBLOCK1=A: recognize one fixed-whitelist stdlib DSL block without
-    /// giving third-party code a grammar hook.
-    pub(in super::super) fn at_stdlib_dsl_block(&self) -> bool {
+    /// D-META-DSL1=A: recognize one library-declared block shape. The parser
+    /// owns only the `#Name { … }` boundary; sema resolves the name against
+    /// the bundle's declaration registry.
+    pub(in super::super) fn at_declared_dsl_block(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Hash) {
             return false;
         }
         let TokKind::Ident(name) = &self.peek2().kind else {
             return false;
         };
-        if !Syntax::is_stdlib_dsl_block_marker(name) {
+        if matches!(
+            name.as_str(),
+            Syntax::RETIRED_MARKER_KNOWN
+                | Syntax::KW_UNSAFE
+                | Syntax::CTX_BLOCK
+                | Syntax::MARKER_REGION
+                | Syntax::MARKER_POLICY
+                | Syntax::MARKER_LIVE
+                | Syntax::MARKER_NONDETERMINISTIC
+                | Syntax::KW_CAPS
+                | Syntax::KW_GRANT
+                | Syntax::KW_TRANSACT
+                | Syntax::KW_IMPURE
+                | Syntax::KW_SHIELD
+                | Syntax::KW_REACTIVE
+                | Syntax::MARKER_OFF
+                | Syntax::MARKER_DEBUG_ONLY
+        ) {
             return false;
         }
         self.marker_head_is_followed_by(TokKind::LBrace)
@@ -356,7 +374,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.toks.get(self.pos + 5).map(|token| &token.kind), Some(TokKind::LBrace)))
     }
 
-    pub(in super::super) fn at_stdlib_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+    pub(in super::super) fn at_declared_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let name = marker.name.clone();
@@ -386,7 +404,7 @@ impl<'a> Parser<'a> {
                 Some(Span::new(marker.span.start, old_span.end)),
             ));
         }
-        self.expect(TokKind::LBrace, "after a stdlib DSL marker")?;
+        self.expect(TokKind::LBrace, "after a checked text-block marker")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
@@ -400,6 +418,7 @@ impl<'a> Parser<'a> {
             args,
             args_span,
             body,
+            dsl: true,
             dot_span: start,
             span: Span::new(start.start, end),
         })
@@ -1643,7 +1662,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
-            TokKind::Hash if self.at_stdlib_dsl_block() => self.at_stdlib_dsl_block_stmt(),
+            TokKind::Hash if self.at_declared_dsl_block() => self.at_declared_dsl_block_stmt(),
             // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>

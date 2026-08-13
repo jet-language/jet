@@ -787,7 +787,13 @@ impl<'a> Parser<'a> {
                 {
                     return false;
                 }
-                if !crate::Policy::rule_allows(name, site) {
+                // Source-declared rules are resolved after all modules are
+                // loaded. Keep their bracket group intact here; the bundle
+                // vocabulary applies the site check once it can see the
+                // declaration.
+                if crate::Policy::applied_rule(name).is_some()
+                    && !crate::Policy::rule_allows(name, site)
+                {
                     return false;
                 }
                 cursor += 1;
@@ -925,6 +931,21 @@ impl<'a> Parser<'a> {
             if !self.at_marker_list() || self.marker_sequence_leads_to_function() {
                 return false;
             }
+            // A source-declared marker group can be attached to a type even
+            // before the bundle registry is available. Keep `#[A, B] struct`
+            // on the type path instead of treating its PascalCase names as
+            // file rules.
+            if let Some(mut close) = Self::skip_bracket_group(&self.toks, self.pos + 1) {
+                while matches!(self.toks.get(close).map(|token| &token.kind), Some(TokKind::Semi)) {
+                    close += 1;
+                }
+                if matches!(
+                    self.toks.get(close).map(|token| &token.kind),
+                    Some(TokKind::KwStruct | TokKind::KwEnum)
+                ) {
+                    return false;
+                }
+            }
             self.bracket_group_allows_site(self.pos + 1, crate::Policy::RuleSite::File)
         }
 
@@ -1032,14 +1053,24 @@ impl<'a> Parser<'a> {
                     ));
                     continue;
                 }
-                // D-VERDICT-1455-1: an unregistered name at a callable site is
-                // a typo, not a user derive (derives attach to types), so it
-                // gets the one E0927 vocabulary family instead of a site error.
-                if crate::Policy::applied_rule(&marker.name).is_none() {
-                    return Err(crate::Policy::marker_unknown_error(
-                        &marker.name,
-                        &crate::Policy::active_rule_names(),
-                        marker.name_span,
+                // D-META-USER1=A: a source-declared rule is a callable marker
+                // too. The parser cannot see declarations from imported files,
+                // so unknown names remain in the shared fact stream for the
+                // bundle registry to validate. Built-in rules keep their
+                // existing applicator checks.
+                if crate::Policy::applied_rule(&marker.name).is_some()
+                    && !Self::function_marker_has_applicator(&marker.name)
+                {
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        format!(
+                            "`#{}` cannot attach through this function marker list",
+                            marker.name
+                        ),
+                        "the marker registry gives every marker exact sites and a typed signature"
+                            .to_string(),
+                        "remove the marker or move it to its registered site".to_string(),
+                        Some(marker.span),
                     ));
                 }
                 if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
@@ -1342,7 +1373,7 @@ impl<'a> Parser<'a> {
             function.markers = ordered_markers
                 .iter()
                 .filter(|marker| {
-                    crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                    crate::Policy::applied_rule(&marker.name).is_none_or(|rule| {
                         matches!(rule.status, crate::Policy::RuleStatus::Active)
                     })
                 })
@@ -1359,7 +1390,7 @@ impl<'a> Parser<'a> {
                 ordered_markers
                     .into_iter()
                     .filter(|marker| {
-                        crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                        crate::Policy::applied_rule(&marker.name).is_none_or(|rule| {
                             matches!(rule.status, crate::Policy::RuleStatus::Active)
                         })
                     })

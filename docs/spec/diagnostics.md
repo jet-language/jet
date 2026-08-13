@@ -383,7 +383,7 @@ renumbered, and no new `W` code may be allocated.
 | E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
 | E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
-| E0381 | parse | `marker Name(...)` fact stated as an `on` clause, a second parameter list, or a scope block, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
+| E0381 | parse | `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1503,7 +1503,7 @@ already-freed arena), these track the views themselves.
 | E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
 | E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
-| E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause, a second parameter list, or a scope block. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as an `@`-marked named parameter, e.g. `@sites: [.Function, …]`, `@repeatable: true`. |
+| E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as an `@`-marked named parameter, e.g. `@sites: [.Function, …]`, `@repeatable: true`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

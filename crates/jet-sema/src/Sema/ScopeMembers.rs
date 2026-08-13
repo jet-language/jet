@@ -1,10 +1,11 @@
 //! D-DOTSCOPE1: contextual scope-member validation.
 //!
-//! A statement-position `.name { … }` / `.name(args) { … }` (parsed context-free
-//! as `Stmt::ScopeMember`) is legal only as a **direct** statement of a marker
-//! block that declares a vocabulary (`Syntax::scope_members`). Today the only
-//! such marker is `#Test`, whose members are `.setup` / `.expect_fail` /
-//! `.timeout` / `.skip`. This pass is the single owner of the member rules:
+//! A statement-position `.name { … }` / `.name(args) { … }` and a declared
+//! `#Name { … }` checked text block are parsed context-free as
+//! `Stmt::ScopeMember`. Dot members are legal only as a **direct** statement
+//! of a marker block that declares a vocabulary (`Syntax::scope_members`),
+//! while checked text blocks resolve their `#Name` through the bundle marker
+//! registry. This pass is the single owner of both shapes:
 //!
 //! - E0614 — unknown member (lists the vocabulary), or a member used inside a
 //!   marker that declares none (e.g. `#Bench`).
@@ -32,31 +33,34 @@ use crate::AST::{
 /// (not just `jet test`): a malformed member is a structural error that `jet
 /// check` / `jet run` should surface too, even though the members only *run*
 /// under `jet test`. The check needs no type information.
-pub fn check(items: &[Item]) -> Vec<Diagnostic> {
+pub fn check(
+    items: &[Item],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    check_dsl_items(items, &mut diags);
+    check_dsl_items(items, vocabulary, &mut diags);
     check_assertionless_tests(items, &mut diags);
     for item in items {
         match item {
-            Item::Test(t) => check_marker_body(Syntax::KW_TEST, &t.body, &mut diags),
-            Item::Bench(b) => check_marker_body(Syntax::KW_BENCH, &b.body, &mut diags),
-            Item::Func(f) => reject_all(&f.body, &mut diags),
+            Item::Test(t) => check_marker_body(Syntax::KW_TEST, &t.body, vocabulary, &mut diags),
+            Item::Bench(b) => check_marker_body(Syntax::KW_BENCH, &b.body, vocabulary, &mut diags),
+            Item::Func(f) => reject_all(&f.body, vocabulary, &mut diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    reject_all(&m.body, &mut diags);
+                    reject_all(&m.body, vocabulary, &mut diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    reject_all(&m.body, &mut diags);
+                    reject_all(&m.body, vocabulary, &mut diags);
                 }
-                reject_in_trait_impls(&s.trait_impls, &mut diags);
+                reject_in_trait_impls(&s.trait_impls, vocabulary, &mut diags);
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    reject_all(&m.body, &mut diags);
+                    reject_all(&m.body, vocabulary, &mut diags);
                 }
-                reject_in_trait_impls(&e.trait_impls, &mut diags);
+                reject_in_trait_impls(&e.trait_impls, vocabulary, &mut diags);
             }
             _ => {}
         }
@@ -154,7 +158,7 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         .any(|body| statements_have_assertion(body))
 }
 
-fn statement_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
+pub(crate) fn statement_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
     match statement {
         Stmt::Switch {
             arms, else_body, ..
@@ -391,10 +395,14 @@ fn pattern_has_assertion(pattern: &Pattern) -> bool {
     }
 }
 
-fn reject_in_trait_impls(blocks: &[TraitImplBlock], diags: &mut Vec<Diagnostic>) {
+fn reject_in_trait_impls(
+    blocks: &[TraitImplBlock],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
     for block in blocks {
         for m in &block.methods {
-            reject_all(&m.body, diags);
+            reject_all(&m.body, vocabulary, diags);
         }
     }
 }
@@ -402,7 +410,12 @@ fn reject_in_trait_impls(blocks: &[TraitImplBlock], diags: &mut Vec<Diagnostic>)
 /// The top level of a marker body: the only place members are legal. Each
 /// direct-child member is validated against the marker's vocabulary; anything
 /// deeper (nested in a member, an `if`, a loop, …) is E0618.
-fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
+fn check_marker_body(
+    marker: &str,
+    body: &[Stmt],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
     for (i, s) in body.iter().enumerate() {
         match s {
             Stmt::ScopeMember {
@@ -412,9 +425,10 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 body: mbody,
                 dot_span,
                 span,
+                dsl,
                 ..
             } => {
-                if is_registered_dsl_marker(name) {
+                if *dsl {
                     continue;
                 }
                 validate_member(
@@ -428,12 +442,12 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                     diags,
                 );
                 // Members inside a member's body are nested → E0618.
-                reject_nested(mbody, diags);
+                reject_nested(mbody, vocabulary, diags);
             }
             other => {
                 // A member buried inside a control block is not at the top level.
                 for child in child_bodies(other) {
-                    reject_nested(child, diags);
+                    reject_nested(child, vocabulary, diags);
                 }
             }
         }
@@ -442,9 +456,13 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
 
 /// Emit E0618 for every scope member found anywhere in `body` (used for the
 /// interior of a marker block, where members must stay flat at the top level).
-fn reject_nested(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
-    walk_members(body, &mut |name, dot_span| {
-        if is_registered_dsl_marker(name) {
+fn reject_nested(
+    body: &[Stmt],
+    _vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
+    walk_members(body, &mut |name, dot_span, dsl| {
+        if dsl {
             return;
         }
         diags.push(Diagnostic::error(
@@ -462,9 +480,13 @@ fn reject_nested(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
 
 /// Emit E0615 for every scope member found anywhere in `body` (used for ordinary
 /// function bodies, where a member statement is out of place entirely).
-fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
-    walk_members(body, &mut |name, dot_span| {
-        if is_registered_dsl_marker(name) {
+fn reject_all(
+    body: &[Stmt],
+    _vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
+    walk_members(body, &mut |name, dot_span, dsl| {
+        if dsl {
             return;
         }
         diags.push(Diagnostic::error(
@@ -483,34 +505,38 @@ fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
     });
 }
 
-fn check_dsl_items(items: &[Item], diags: &mut Vec<Diagnostic>) {
+fn check_dsl_items(
+    items: &[Item],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
     for item in items {
         match item {
-            Item::Test(test) => check_dsl_body(&test.body, diags),
-            Item::Bench(bench) => check_dsl_body(&bench.body, diags),
-            Item::Func(func) => check_dsl_body(&func.body, diags),
+            Item::Test(test) => check_dsl_body(&test.body, vocabulary, diags),
+            Item::Bench(bench) => check_dsl_body(&bench.body, vocabulary, diags),
+            Item::Func(func) => check_dsl_body(&func.body, vocabulary, diags),
             Item::Impl(implementation) => {
                 for method in &implementation.methods {
-                    check_dsl_body(&method.body, diags);
+                    check_dsl_body(&method.body, vocabulary, diags);
                 }
             }
             Item::Struct(def) => {
                 for method in &def.methods {
-                    check_dsl_body(&method.body, diags);
+                    check_dsl_body(&method.body, vocabulary, diags);
                 }
                 for implementation in &def.trait_impls {
                     for method in &implementation.methods {
-                        check_dsl_body(&method.body, diags);
+                        check_dsl_body(&method.body, vocabulary, diags);
                     }
                 }
             }
             Item::Enum(def) => {
                 for method in &def.methods {
-                    check_dsl_body(&method.body, diags);
+                    check_dsl_body(&method.body, vocabulary, diags);
                 }
                 for implementation in &def.trait_impls {
                     for method in &implementation.methods {
-                        check_dsl_body(&method.body, diags);
+                        check_dsl_body(&method.body, vocabulary, diags);
                     }
                 }
             }
@@ -519,7 +545,11 @@ fn check_dsl_items(items: &[Item], diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_dsl_body(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
+fn check_dsl_body(
+    body: &[Stmt],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+    diags: &mut Vec<Diagnostic>,
+) {
     for statement in body {
         match statement {
             Stmt::ScopeMember {
@@ -528,27 +558,76 @@ fn check_dsl_body(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 args_span,
                 body,
                 span,
+                dsl: true,
                 ..
-            } if is_registered_dsl_marker(name) => {
-                validate_dsl_args(name, args, args_span, *span, diags);
-                check_dsl_body(body, diags);
+            } => {
+                if !dsl_rule_allowed(name, vocabulary) {
+                    let known = vocabulary.knows(name) || Syntax::is_applied_rule(name);
+                    let at = args_span.unwrap_or(*span);
+                    if known {
+                        diags.push(Diagnostic::error(
+                            "E0355",
+                            format!("`#{name}` cannot open a checked text block"),
+                            "a checked text block must declare `.Block` as a legal site".to_string(),
+                            "add `.Block` to the rule declaration or use the rule at its declared site".to_string(),
+                            Some(at),
+                        ));
+                    } else {
+                        diags.push(Diagnostic::error(
+                            "E0927",
+                            format!("`#{name}` is not a declared checked text block"),
+                            "checked text blocks come from the one library rule registry".to_string(),
+                            format!("declare `marker {name}(…)` with `@sites: [.Block]` before using `#{name} {{ … }}`"),
+                            Some(at),
+                        ));
+                    }
+                } else {
+                    validate_dsl_args(name, args, args_span, *span, diags);
+                }
+                check_dsl_body(body, vocabulary, diags);
             }
             _ => {
                 for child in child_bodies(statement) {
-                    check_dsl_body(child, diags);
+                    check_dsl_body(child, vocabulary, diags);
                 }
             }
         }
     }
 }
 
-fn is_registered_dsl_marker(name: &str) -> bool {
-    crate::Policy::applied_rule(name).is_some_and(|row| {
-        matches!(row.status, crate::Policy::RuleStatus::Active)
-            && row.sites.contains(&crate::Policy::RuleSite::Block)
-    })
+fn dsl_rule_allowed(name: &str, vocabulary: &crate::Policy::MarkerVocabulary) -> bool {
+    if crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {
+        return true;
+    }
+    vocabulary
+        .declaration(name)
+        .is_some_and(|declaration| declared_sites(declaration).contains(&crate::Policy::RuleSite::Block))
 }
 
+fn declared_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::RuleSite> {
+    declaration
+        .params
+        .iter()
+        .find(|parameter| parameter.name == "@sites")
+        .and_then(|parameter| parameter.value.as_deref())
+        .and_then(|value| match value {
+            Expr::ListLit(values, _) => Some(values.as_slice()),
+            _ => None,
+        })
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| match value {
+                    Expr::Ident(name, _) => Some(name.trim_start_matches('.')),
+                    Expr::Field(_, member, _) => Some(member.as_str()),
+                    Expr::EnumLit { variant, .. } => Some(variant.as_str()),
+                    _ => None,
+                })
+                .filter_map(|name| crate::Policy::RuleSite::ALL.iter().copied().find(|site| site.name() == name))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 fn validate_dsl_args(
     name: &str,
     args: &[Expr],
@@ -556,22 +635,26 @@ fn validate_dsl_args(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let valid = crate::Policy::applied_rule(name).is_some_and(|row| {
-        row.sites.contains(&crate::Policy::RuleSite::Block)
-            && row
-                .signature
-                .argument_bindings(&vec![None; args.len()])
-                .is_some()
-    });
+    let valid = match name {
+        Syntax::DSL_BLOCK_SQL => {
+            args.is_empty() || (args.len() == 1 && matches!(args[0], Expr::Ident(..)))
+        }
+        Syntax::MARKER_HTML => args.is_empty(),
+        _ => args.is_empty() || (args.len() == 1 && matches!(args[0], Expr::Ident(..))),
+    };
     if !valid {
         let at = args_span.unwrap_or(span);
-        let expected = crate::Policy::applied_rule(name)
-            .map(|row| format!("`#{name}{}`", row.signature.render()))
-            .unwrap_or_else(|| format!("`#{name}(…)`"));
+        let expected = if name == Syntax::DSL_BLOCK_SQL {
+            "`#SQL { … }` or `#SQL<Row> { … }`"
+        } else if name == Syntax::MARKER_HTML {
+            "`#HTML { … }`"
+        } else {
+            "the declared checked text-block header"
+        };
         diags.push(Diagnostic::error(
             "E0617",
             format!("`#{name}` has an invalid DSL header"),
-            "a DSL marker uses the typed signature published by the applied-rule registry".to_string(),
+            "a checked text block keeps its Jet boundary; only its declared header shape is legal".to_string(),
             format!("write {expected}"),
             Some(at),
         ));
@@ -717,16 +800,17 @@ fn vocab_list(vocab: &[&str]) -> String {
 
 /// Invoke `f(member_name, dot_span)` for every scope member anywhere in `stmts`,
 /// recursing through control blocks and member bodies.
-fn walk_members(stmts: &[Stmt], f: &mut impl FnMut(&str, Span)) {
+fn walk_members(stmts: &[Stmt], f: &mut impl FnMut(&str, Span, bool)) {
     for s in stmts {
         if let Stmt::ScopeMember {
             name,
             dot_span,
             body,
+            dsl,
             ..
         } = s
         {
-            f(name, *dot_span);
+            f(name, *dot_span, *dsl);
             walk_members(body, f);
         } else {
             for child in child_bodies(s) {

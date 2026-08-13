@@ -8100,6 +8100,11 @@ impl<'a> EvalCtx<'a> {
             }
             return Ok(CtValue::Unit);
         }
+        // D-META-USER1=A: the TIR evaluator marshals the ordered fields to
+        // the comptime registry helper; it does not invent diagnostic rules.
+        if name == "reject" {
+            return crate::Comptime::project_rejection(&argv, self.span());
+        }
         // D-CTIO1: the sanctioned build-time IO builtins. The path law, the
         // reads, and every diagnostic (E0955/E0957) stay in the one Comptime
         // implementation; this arm only marshals the literal and the sink.

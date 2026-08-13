@@ -79,10 +79,9 @@ pub enum Item {
     /// Expanded to a `CodeModule` by sema before registration and body-checking.
     ModuleAlias(ModuleAliasDef),
     /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)` — a rule
-    /// declaration written as an ordinary Jet item. Declaration-side parse
-    /// only (card #1456); erases before TIR like `EffectDecl`. Lowering the
-    /// parsed declaration into the runtime registry row the rest of the
-    /// compiler consumes is #1457's and #1458's job.
+    /// declaration written as an ordinary Jet item. A body is checked at
+    /// compile time and may add ordinary Jet items; the declaration erases
+    /// after its row has been registered.
     MarkerDecl(MarkerDecl),
     /// D-FACTDECL1=A: `fact Name(@holds: …, @safe: …, …)` declares one
     /// non-code registry row. It erases before TIR after the registry has read
@@ -100,14 +99,16 @@ pub struct EffectDecl {
 /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`. The rule's own
 /// arguments and facts about the rule (@sites, @repeatable, …) share one
 /// named-parameter list; a fact is a parameter whose name carries the
-/// compile-time sigil (`Syntax::is_comptime_name`). No `on` clause, no
-/// second parameter list, no scope block — D-META-FORM1=A rejected all
-/// three by name.
+/// compile-time sigil (`Syntax::is_comptime_name`). A body is optional: when
+/// present it is checked at compile time and may reject or emit additive code.
 #[derive(Debug, Clone)]
 pub struct MarkerDecl {
     pub name: String,
     pub name_span: Span,
     pub params: Vec<MarkerDeclParam>,
+    /// D-META-USER1=A: absent means this rule only records its declaration
+    /// facts; present means the body may reject or emit checked Jet items.
+    pub body: Option<Vec<Stmt>>,
     pub span: Span,
 }
 

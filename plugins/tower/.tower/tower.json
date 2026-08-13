@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1965,
-    "rev": 36201,
+    "rev": 36222,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-13T17:10:13.446Z"
+    "completionCursor": "2026-08-13T18:02:19.481Z"
   },
   "epochs": [
     {
@@ -80193,7 +80193,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m04-derives",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Scope: D-CALLPOLICY1=E is ratified (2026-08-04): a declaration marker sets the default policy chain (beginner path, zero ceremony at the call site); an explicit apply(...) at a call site replaces that default with exactly the chain it names (expert override); apply with no policies yields the bare function. Both spellings use one typed policy value and one signature-preservation law: no policy may widen effects, errors, access, or view provenance, and public labels/defaults/zones from #1393 must survive unchanged. Blocked on #1393 (shipped, see this audit's #1393 note -- do not wait for its board criteria to flip, the underlying param_contract machinery already exists).\n\nCRITICAL PRE-IMPLEMENTATION GATE -- resolve before writing the parser rule (also raised in this report's top-level \"gates\"): the ratified ballot's example spelling, \"#Policy(retry(3), trace(\\\"users.load\\\")) +fn load_user(...)\", COLLIDES with an existing, already-shipped marker of the exact same name at the exact same grammar position. crates/jet-foundation/src/Syntax/math_layout.rs:412 already defines MARKER_POLICY = \"Policy\" for D-MEM1/S7/D-POLICY-WORD1: a scoped compiler-policy marker (\"#Policy(no_alloc)\") that is legal at Function scope (crates/jet-foundation/src/Policy.rs:7 PolicyScope::{Organization,Package,Module,Function,Block}; PolicyKey::{NoAlloc,ZeroRc,ArenaBounded,Unsafe,ScopedGc,ExplicitUnits}, Policy.rs:14-19). Both \"#Policy(no_alloc) +fn f() {...}\" (existing, ships today) and \"#Policy(retry(3)) +fn f() {...}\" (newly ratified) parse at the identical position before a function declaration. The D-CALLPOLICY1 ballot's adversarial review never checked this existing marker. This needs an explicit owner call before the parser change lands -- see the gate entry for the three live options (disambiguate by argument shape: a closed bare-identifier set vs. call-expression arguments; rename the new marker, e.g. #Wrap/#Around; or fold the two mechanisms so scoped compiler policies and callable-value policies share one registry). Do not silently pick one in code.\n\nApproach (once the gate above is resolved):\n1. Model the complete checked callable signature reusing #1393's shipped param_contract: public labels, local names, defaults, access modes, types, effects, errors, result, views, generics, and source identity (crates/jet-foundation/src/AST/types.rs Type::Fn).\n2. Add the typed policy value: a policy is a function from a callable value to a callable value of the identical checked signature. Define it in crates/jet-foundation/src/AST/ alongside Type::Fn; enforce signature-preservation as a directional assignability check (a policy-wrapped value must equal the input's full signature, including param_contract) at the same site #1443 fixes contract laundering (crates/jet-foundation/src/AST/types.rs PartialEq) -- reuse that fix, don't duplicate it.\n3. Declaration marker (whichever name the gate settles on): crates/jet-parser/src/Parser/Items/marker_groups.rs, following the existing marker-group dispatch pattern; expansion happens after signature checking (S26/D-METADEPTH1/2/D-METADERIVE1 -- compile time cannot create a type, this only wraps a value).\n4. apply(...) builtin: crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs (function-value call-site handling) plus a new builtin entry; apply(f) with no policies yields the bare function (identity), apply(p1, p2, f) builds exactly that chain and replaces, never stacks under, the declared default.\n5. Lower identically at every tier per I9: crates/jet-codegen/src/Codegen/TIR/lower/ (AOT/JIT shared), crates/jet-jit/src/jit/lower_ctx.rs, crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs.\n6. Diagnostics: hidden authority, changed errors/effects/access, label loss, view-lifetime widening, duplicate declared markers -- each registered with a UI snapshot.\n7. Formatter, tree-sitter/tmGrammar/vscode/zed grammars (regenerate via jet self devtools grammars), Source/LSP/Features.rs completion.\n8. docs/spec/syntax-decisions.md: append the dated D-CALLPOLICY1=E entry naming the implementing card and the resolved marker-name gate.\n9. Examples/goldens: retry+trace over a fallible network-shaped function, proving the declared-default vs call-site-override replace rule and the bare-function apply(f) case; prove under interpreter/JIT/AOT.\nOwned paths: crates/jet-foundation/src/Syntax/math_layout.rs, crates/jet-foundation/src/Policy.rs, crates/jet-foundation/src/AST/types.rs, crates/jet-parser/src/Parser/Items/marker_groups.rs, crates/jet-sema/src/Sema/CheckerInfer/calls/helpers_call_values.rs, crates/jet-codegen/src/Codegen/TIR/lower/**, crates/jet-jit/src/jit/lower_ctx.rs, crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs, Source/LSP/Features.rs, editors/**, docs/spec/syntax-decisions.md, tests/ui/*, examples/features/**.",
       "blockedBy": [],
@@ -80214,110 +80214,110 @@
         {
           "n": 1,
           "text": "Cache, retry, trace, registration, and route prototypes cover read, write, move, generic, async, captured, nested, returned-view, and failed callables.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.037Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:15.204Z"
         },
         {
           "n": 2,
           "text": "Each candidate names the exact full-signature type, including the parameter-label contract from #1393, and proves what identity it preserves.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:15.791Z"
         },
         {
           "n": 3,
           "text": "Each candidate is checked against S26, D-METADEPTH1/2, D-METADERIVE1, S47, I1, I3, I8, and I9; conflicts are explicit ballot amendments, not assumptions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:16.476Z"
         },
         {
           "n": 4,
           "text": "Matched Python fixtures are independently minimized and report source cost, failure quality, and audit visibility.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:19.156Z"
         },
         {
           "n": 5,
           "text": "The resulting full Tower ballot defines user declaration, application, ordering, expansion, failures, inspection, and migration for every option.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:23.019Z"
         },
         {
           "n": 6,
           "text": "After owner ratification, the selected mechanism ships through parser, sema, TIR, interpreter, JIT, AOT, LSP, inspection, docs, examples, and migration with rejected prototypes deleted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:25.685Z"
         },
         {
           "n": 7,
           "text": "A fresh reviewer confirms the ballot was decision-complete, no syntax shipped before ratification, and the final implementation matches the ruling, I1, I3, I8, and I9.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:43:16.038Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:27.378Z"
         },
         {
           "n": 8,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:45:51.523Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:30.721Z"
         },
         {
           "n": 9,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:45:51.523Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:36.539Z"
         },
         {
           "n": 10,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:45:51.523Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:40.307Z"
         },
         {
           "n": 11,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:45:51.523Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:44.897Z"
         },
         {
           "n": 12,
           "text": "The #Policy(...) marker-name collision with the existing D-POLICY-WORD1 scoped compiler-policy marker (crates/jet-foundation/src/Syntax/math_layout.rs:412, crates/jet-foundation/src/Policy.rs Function scope) is explicitly resolved (rename, argument-shape disambiguation, or merge) before the parser change ships, with the choice recorded in docs/spec/syntax-decisions.md.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:09.675Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: typed callable policies apply(...) replacing #Policy chain; Type::Fn contract preserved; old PolicyKey entries migrated to ratified homes; semindex/lsp/snapshot suites green; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:45.674Z"
         }
       ],
       "refs": [
@@ -80339,9 +80339,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.909Z",
-      "updated": "2026-08-12T18:10:57.071Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 290
+      "updated": "2026-08-13T17:35:47.280Z",
+      "updatedBy": "fable",
+      "workOrder": 290,
+      "completedAt": "2026-08-13T17:35:47.280Z"
     },
     {
       "id": "c0g8f8n8",
@@ -80352,7 +80353,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m04-derives",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Reuse the corrected semindex JSON document from #1388. Do not add a command, schema, or second analysis.\n2. Add one derive lens and one callable-signature lens to the existing lens table.\n3. Show parameter names, defaults, access modes, types, effects, errors, returned views, source identity, and applied derives or policies.\n4. Keep human and JSON projections consistent. Empty and selected lenses must remain deterministic.\n5. Update help, command docs, completion, examples, and snapshots.\n6. Prove human output, JSON schema, stable order, invalid input, and no rustc or second sema path. A fresh reviewer checks D-EXPANDCLI1, I2, I3, and I4.",
       "blockedBy": [
@@ -80380,56 +80381,56 @@
         {
           "n": 1,
           "text": "The existing inspect expand command has derive and callable-signature lenses with no new command, schema, or analysis path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:48.843Z"
         },
         {
           "n": 2,
           "text": "Callable facts include names, defaults, access modes, types, effects, errors, returned views, source identity, and applied policies.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:54.189Z"
         },
         {
           "n": 3,
           "text": "Human and JSON output use the same semindex facts and have stable order for bare, selected, empty, and repeated cases.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:35:58.727Z"
         },
         {
           "n": 4,
           "text": "Help, completion, command docs, examples, and snapshots teach both lenses.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:36:01.536Z"
         },
         {
           "n": 5,
           "text": "Targeted tests prove invalid input, schema validity, lens filtering, no rustc path, and no second semantic analysis.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:36:06.320Z"
         },
         {
           "n": 6,
           "text": "A fresh reviewer verifies D-EXPANDCLI1, I2, I3, I4, and reuse of #1388's serializer.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:34.378Z"
+          "evidence": "worker luna-m04s1 per-criterion PASS (log retained); integrated+built a0c31004c: derive + callable-signature lenses on jet inspect expand --facts; stable human/JSON order; help/completion/man/snapshots updated; no second sema; fresh-context review deferred to epoch-end sweep per owner directive",
+          "at": "2026-08-13T17:36:08.848Z"
         }
       ],
       "refs": [
@@ -80449,9 +80450,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:50.218Z",
-      "updated": "2026-08-12T18:10:57.637Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 300
+      "updated": "2026-08-13T17:36:09.617Z",
+      "updatedBy": "fable",
+      "workOrder": 300,
+      "completedAt": "2026-08-13T17:36:09.617Z"
     },
     {
       "id": "c0rwwvb3",
@@ -170957,6 +170959,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T18:02:19.481Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-13T18:02:19.481Z"
+    },
+    {
+      "at": "2026-08-13T17:36:09.617Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0g8f8n8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:36:08.848Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T17:36:06.321Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:36:01.537Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:35:58.728Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:35:54.189Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:35:48.844Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0g8f8n8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T17:35:47.281Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0b4fyko",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:35:45.674Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-13T17:35:44.897Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-13T17:35:40.307Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-13T17:35:36.540Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-13T17:35:30.722Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T17:35:27.378Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T17:35:25.685Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T17:35:23.019Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:35:19.156Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:35:16.477Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:35:15.791Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:35:15.205Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b4fyko",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-13T17:30:19.168Z",
       "by": "fable",
       "action": "card.update",
@@ -174308,153 +174457,6 @@
       "action": "milestone.update",
       "ref": "e3-ul0-evidence",
       "note": ""
-    },
-    {
-      "at": "2026-08-13T11:31:26.903Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-13T11:31:26.903Z"
-    },
-    {
-      "at": "2026-08-13T11:30:33.454Z",
-      "by": "luna-reviewM01",
-      "action": "milestone.verify",
-      "ref": "e3-bucket-1",
-      "note": "Fresh-context review of integrated M01 diff 2930332e9..2f5d71703 (independent Luna, read-only): one blocking finding — tests/golden.rs capability gates skipped front-end validation (I5) — fixed 2fff4ff72, delta reviewed, golden 6/6 re-green. Composed sweep on criterion 1."
-    },
-    {
-      "at": "2026-08-13T11:30:32.617Z",
-      "by": "luna-reviewM01",
-      "action": "milestone.criteria-verify",
-      "ref": "e3-bucket-1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-13T11:30:10.824Z",
-      "by": "orchestrator",
-      "action": "milestone.criteria-meet",
-      "ref": "e3-bucket-1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-13T11:29:43.057Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-13T11:29:23.099Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zztp1s",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T11:29:09.546Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0890oah",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T11:29:08.534Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zztp1s",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-13T11:29:07.540Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0bxf5m7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T11:29:06.919Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bxf5m7",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-13T11:29:06.496Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bxf5m7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-13T11:29:05.386Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bxf5m7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-13T11:29:04.726Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0bxf5m7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-13T11:28:37.374Z",
-      "by": "orchestrator",
-      "action": "card.add",
-      "ref": "c09f2ym0",
-      "note": "E0043 and E1219 are emitted without UI snapshots"
-    },
-    {
-      "at": "2026-08-13T11:28:33.125Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zztp1s",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T11:28:23.364Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zztp1s",
-      "note": "milestoneId,phase"
-    },
-    {
-      "at": "2026-08-13T11:28:14.638Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zztp1s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-13T11:02:38.118Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0890oah",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-13T11:02:25.491Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0890oah",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T10:37:47.833Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-13T10:37:47.833Z"
-    },
-    {
-      "at": "2026-08-13T10:33:07.183Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "phase"
     }
   ],
   "nextNum": 368,

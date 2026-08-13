@@ -1,5 +1,5 @@
-//! D-DSLBLOCK1: fixed stdlib DSL blocks are syntax islands with ordinary Jet
-//! checking inside them.
+//! D-META-DSL1=A: declared checked text blocks are syntax islands with
+//! ordinary Jet checking inside them.
 
 mod common;
 
@@ -18,7 +18,7 @@ fn sql_and_html_blocks_compile_and_formatter_round_trip() {
     }
 }
 "#;
-    let _compiled = jet::compile(source).expect("stdlib DSL blocks should compile");
+    let _compiled = jet::compile(source).expect("declared library blocks should compile");
     let formatted = jet::format_source(source).expect("DSL blocks should format");
     assert!(formatted.contains("#SQL(User)"));
     assert!(formatted.contains("#HTML {"));
@@ -30,7 +30,7 @@ fn sql_and_html_blocks_compile_and_formatter_round_trip() {
 }
 
 #[test]
-fn dsl_block_body_keeps_normal_sema_and_whitelist_rules() {
+fn dsl_block_body_keeps_normal_sema_and_registry_rules() {
     let body_error = jet::compile(
         "fn run() { #SQL { missing :: unknown_name() } }\n",
     )
@@ -41,7 +41,47 @@ fn dsl_block_body_keeps_normal_sema_and_whitelist_rules() {
     );
 
     let foreign_marker = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
-    assert!(!foreign_marker.is_empty(), "third-party DSL markers must not parse as a DSL");
+    assert!(!foreign_marker.is_empty(), "undeclared block markers must be rejected");
+}
+
+#[test]
+fn undeclared_checked_text_block_reports_one_registered_error() {
+    let diagnostics = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0927")
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one E0927: {diagnostics:?}");
+    let diagnostic = errors[0];
+    assert!(!diagnostic.what.is_empty());
+    assert!(!diagnostic.why.is_empty());
+    assert!(!diagnostic.fix.is_empty());
+}
+
+#[test]
+fn declared_block_receives_the_whole_nested_region() {
+    let source = r#"
+marker Check($sites: [.Block]) {
+    if !target.contains("after") {
+        reject(
+            code: "E0927",
+            what: "the complete block text is required",
+            why: "the checker reads one lexical region",
+            fix: "keep the trailing statement inside the block"
+        )
+    }
+}
+
+fn run() {
+    #Check {
+        if true {
+            print("inside")
+        }
+        print("after")
+    }
+}
+"#;
+    jet::compile(source).expect("a declared block must include nested and trailing text");
 }
 
 #[test]

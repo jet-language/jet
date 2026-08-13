@@ -668,8 +668,14 @@ fn distinct_fact_rows(definition: &DistinctDef) -> Vec<CtValue> {
 /// D-TYPE2-PLANE1=A: a marker reflects as the typed record its registry row
 /// describes, at every position it may be written — the type, a field, a
 /// method, a variant. Nothing reflects a marker as a bare name.
-fn marker_infos(markers: &[Marker]) -> Vec<CtValue> {
-    markers.iter().map(marker_info).collect()
+fn marker_infos(
+    markers: &[Marker],
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> Vec<CtValue> {
+    markers
+        .iter()
+        .map(|marker| marker_info(marker, vocabulary))
+        .collect()
 }
 
 fn marker_arg_path(expression: &crate::AST::Expr) -> Option<String> {
@@ -709,7 +715,10 @@ fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue
     }
 }
 
-fn marker_info(marker: &Marker) -> CtValue {
+fn marker_info(
+    marker: &Marker,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> CtValue {
     // D-META-REG1=A: reflection reads the one registration table, not a
     // marker-only table beside it. A marker is the row whose target is written
     // code, so its signature rides on the row.
@@ -720,29 +729,58 @@ fn marker_info(marker: &Marker) -> CtValue {
         .iter()
         .enumerate()
         .map(|(index, argument)| {
+            let declaration_parameter = vocabulary
+                .and_then(|vocabulary| vocabulary.declaration(&marker.name))
+                .and_then(|declaration| {
+                    marker
+                        .arg_labels
+                        .get(index)
+                        .and_then(|label| label.as_ref())
+                        .and_then(|(name, _)| {
+                            declaration
+                                .params
+                                .iter()
+                                .find(|parameter| parameter.name == *name)
+                        })
+                        .or_else(|| {
+                            declaration
+                                .params
+                                .iter()
+                                .filter(|parameter| !parameter.name.starts_with('$'))
+                                .nth(index)
+                        })
+                });
             let binding = bindings
                 .as_ref()
                 .and_then(|bindings| bindings.iter().find(|binding| binding.source_index == index));
             let parameter = binding
                 .and_then(|binding| binding.parameter_index)
                 .and_then(|parameter| row.and_then(|row| row.signature.params.get(parameter)));
-            let source_type = parameter
-                .map(|parameter| parameter.source_type)
-                .unwrap_or("Value");
+            let (argument_name, source_type) = if let Some(parameter) = declaration_parameter {
+                (
+                    parameter.name.clone(),
+                    parameter
+                        .ty
+                        .as_ref()
+                        .map(Type::name)
+                        .unwrap_or_else(|| "Value".to_string()),
+                )
+            } else {
+                (
+                    parameter
+                        .map(|parameter| parameter.name.to_string())
+                        .unwrap_or_else(|| "value".to_string()),
+                    parameter
+                        .map(|parameter| parameter.source_type.to_string())
+                        .unwrap_or_else(|| "Value".to_string()),
+                )
+            };
             ct_struct(
                 "MarkerArgInfo",
                 &[
-                    (
-                        "name",
-                        ct_str(parameter.map(|parameter| parameter.name).unwrap_or("value")),
-                    ),
-                    (
-                        "ty",
-                        ct_str(
-                            source_type,
-                        ),
-                    ),
-                    ("value", marker_arg_value(argument, source_type)),
+                    ("name", ct_str(argument_name)),
+                    ("ty", ct_str(source_type.clone())),
+                    ("value", marker_arg_value(argument, &source_type)),
                 ],
             )
         })
@@ -776,12 +814,22 @@ fn format_method_sig(method: &Func) -> String {
 
 /// One reflected struct field (D-METAREFLECT1).
 pub fn build_field_info(field: &Field) -> CtValue {
+    build_field_info_with_vocabulary(field, None)
+}
+
+fn build_field_info_with_vocabulary(
+    field: &Field,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> CtValue {
     ct_struct(
         "FieldInfo",
         &[
             ("name", ct_str(field.name.clone())),
             ("ty", ct_str(field.ty.name())),
-            ("markers", ct_list(marker_infos(&field.serde_markers))),
+            (
+                "markers",
+                ct_list(marker_infos(&field.serde_markers, vocabulary)),
+            ),
             ("dimensions", ct_list(type_dimensions(&field.ty))),
             ("is_pub", ct_bool(field.is_pub)),
             (
@@ -800,6 +848,13 @@ pub fn build_field_info(field: &Field) -> CtValue {
 
 /// One reflected inherent method (D-REFLECT1).
 pub fn build_method_info(method: &Func) -> CtValue {
+    build_method_info_with_vocabulary(method, None)
+}
+
+fn build_method_info_with_vocabulary(
+    method: &Func,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> CtValue {
     let param_strs = method
         .params
         .iter()
@@ -842,7 +897,10 @@ pub fn build_method_info(method: &Func) -> CtValue {
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
-            ("markers", ct_list(marker_infos(&method.markers))),
+            (
+                "markers",
+                ct_list(marker_infos(&method.markers, vocabulary)),
+            ),
             ("is_pub", ct_bool(method.is_pub)),
             (
                 "span",
@@ -897,12 +955,21 @@ fn type_level_marker_views(
     serde_markers: &[Marker],
     derives: &[(String, crate::Diagnostics::Span)],
 ) -> (Vec<CtValue>, Vec<CtValue>) {
+    type_level_marker_views_with_vocabulary(type_markers, serde_markers, derives, None)
+}
+
+fn type_level_marker_views_with_vocabulary(
+    type_markers: &[Marker],
+    serde_markers: &[Marker],
+    derives: &[(String, crate::Diagnostics::Span)],
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> (Vec<CtValue>, Vec<CtValue>) {
     let written_source = if type_markers.is_empty() {
         serde_markers
     } else {
         type_markers
     };
-    let mut written = marker_infos(written_source);
+    let mut written = marker_infos(written_source, vocabulary);
     let mut expanded = Vec::new();
     for (name, span) in derives {
         if written_source
@@ -1032,14 +1099,34 @@ pub fn build_struct_type_info_with_path(
     states: &[String],
     path: &str,
 ) -> CtValue {
-    let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
+    build_struct_type_info_with_path_and_vocabulary(s, states, path, None)
+}
+
+/// Build the struct reflection handle against the bundle's one marker
+/// vocabulary. Source-declared marker rows are therefore reflected with their
+/// declared argument types, not as an untyped fallback beside Prelude rows.
+pub fn build_struct_type_info_with_path_and_vocabulary(
+    s: &StructDef,
+    states: &[String],
+    path: &str,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+) -> CtValue {
+    let fields_info: Vec<CtValue> = s
+        .fields
+        .iter()
+        .map(|field| build_field_info_with_vocabulary(field, vocabulary))
+        .collect();
     let dimensions = s
         .fields
         .iter()
         .flat_map(|field| type_dimensions(&field.ty))
         .collect::<Vec<_>>();
     let layout = build_struct_layout_info(s);
-    let methods_info: Vec<CtValue> = s.methods.iter().map(build_method_info).collect();
+    let methods_info: Vec<CtValue> = s
+        .methods
+        .iter()
+        .map(|method| build_method_info_with_vocabulary(method, vocabulary))
+        .collect();
     let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
     let state_info = states
         .iter()
@@ -1070,8 +1157,12 @@ pub fn build_struct_type_info_with_path(
     for field in &s.fields {
         facts.extend(type_fact_rows(&format!("{}.{}", s.name, field.name), &field.ty));
     }
-    let (markers, expanded_markers) =
-        type_level_marker_views(&s.type_markers, &s.serde_markers, &s.derives);
+    let (markers, expanded_markers) = type_level_marker_views_with_vocabulary(
+        &s.type_markers,
+        &s.serde_markers,
+        &s.derives,
+        vocabulary,
+    );
     ct_struct(
         "TypeInfo",
         &[
@@ -1238,7 +1329,10 @@ fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str, path: &str)
         ct_struct("FieldInfo", &[
             ("name", ct_str(variant.name.clone())),
             ("ty", ct_str(ty)),
-            ("markers", ct_list(marker_infos(&variant.serde_markers))),
+            (
+                "markers",
+                ct_list(marker_infos(&variant.serde_markers, None)),
+            ),
             ("dimensions", ct_list(variant_dimensions)),
             ("is_pub", ct_bool(def.is_pub)),
             ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[
@@ -1582,6 +1676,14 @@ fn build_function_info(
             ("facts", ct_list(declared_facts)),
         ],
     )
+}
+
+/// Build the function reflection handle passed into a source rule body. The
+/// function body is checked in the bundle that owns the rule, so the target's
+/// stable source shape is the useful projection here; program-wide effect
+/// facts remain a separate reflection input.
+pub fn build_function_type_info(func: &Func) -> CtValue {
+    build_function_info(func, 0, "", &ProgramSemanticFacts::default())
 }
 
 #[cfg(test)]

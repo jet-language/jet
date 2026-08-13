@@ -6886,3 +6886,11 @@ variadics, and returned-view provenance. The old scoped `PolicyKey` entries
 move to their ratified homes: memory keys are rights-tree denials, unsafe is
 an authority-manifest permission, and `explicit_units` is a typed fact-plane
 setting. They are not aliases or fallback spellings.
+
+**2026-08-13 — D-META-USER1=A / D-META-DSL1=A implementation log** *(cards
+#1540, #1542)*: a `marker` declaration may have an ordinary checked body;
+without one it records facts, and with one it may reject or emit additive
+items. A checked text block uses the closed `#Name { … }` boundary and resolves
+the name through the declaration registry; `#SQL<Row>` and `#HTML { … }` now
+use their declared `.Block` rows. The old marker-only DSL whitelist is retired
+by the syntax-chore lane.

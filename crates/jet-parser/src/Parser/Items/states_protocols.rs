@@ -442,12 +442,9 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
 
-        /// D-META-FORM1=A: parse `marker Name(params…)`. The rule's own
-        /// arguments and facts about the rule (@sites, @repeatable, …) share
-        /// one named-parameter list, told apart by the `@` mark the lexer
-        /// already carried into the name (`marker_decl_param_list`).
-        /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
-        /// list, and a scope block by name — each teaches the ratified form.
+        /// D-META-FORM1=A / D-META-USER1=A: parse `marker Name(params…)`
+        /// with an optional checked body. The rule's own arguments and facts
+        /// still share one named-parameter list, told apart by `@` marks.
         pub(super) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `marker`
@@ -456,10 +453,18 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LParen, "to open the marker's parameter list")?;
             let params = self.marker_decl_param_list()?;
             let mut end = self.toks[self.pos - 1].span.end;
-            if let Some(diagnostic) = self.reject_marker_decl_trailer() {
+            let body = if matches!(self.peek().kind, TokKind::LBrace) {
+                self.bump();
+                let body = self.block_stmts();
+                end = self.toks[self.pos - 1].span.end;
+                Some(body)
+            } else if let Some(diagnostic) = self.reject_marker_decl_trailer() {
                 self.diags.push(diagnostic);
                 end = self.toks[self.pos - 1].span.end;
-            }
+                None
+            } else {
+                None
+            };
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -467,6 +472,7 @@ impl<'a> Parser<'a> {
                 name,
                 name_span,
                 params,
+                body,
                 span: Span::new(start.start, end),
             })
         }
@@ -556,10 +562,10 @@ impl<'a> Parser<'a> {
             Ok(params)
         }
 
-        /// D-META-FORM1=A rejected three spellings for facts about a rule —
-        /// a trailing `on` clause, a second parameter list, and a scope
-        /// block — in favor of ordinary `@`-marked named parameters in the
-        /// one list `marker_decl` already read. Recognize and consume each
+        /// D-META-FORM1=A rejects a trailing `on` clause and a second
+        /// parameter list. A scope body is the checked code form from
+        /// D-META-USER1=A and is consumed by `marker_decl` above. Recognize
+        /// and consume rejected trailers so the writer sees one teaching error,
         /// so the writer sees one teaching error naming the ratified fix,
         /// not a cascade of unrelated parse errors.
         fn reject_marker_decl_trailer(&mut self) -> Option<Diagnostic> {
@@ -576,12 +582,7 @@ impl<'a> Parser<'a> {
                     "D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists",
                     "fold the second list's facts into the first as `@sites: […]`, `@repeatable: true`".to_string(),
                 ),
-                TokKind::LBrace => (
-                    "E0381",
-                    "a scope block isn't how a marker states a fact",
-                    "D-META-FORM1=A: a fact about the rule is an ordinary `@`-marked named parameter in the declaration's own parameter list — not a member line in a trailing block",
-                    "write the facts as parameters, e.g. `@sites: [.Function, …], @repeatable: true`".to_string(),
-                ),
+
                 _ => return None,
             };
             let span = self.peek().span;
@@ -727,19 +728,15 @@ mod marker_decl_tests {
         }
     }
 
-    /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
-    /// list, and a scope block by name, in favor of `@`-marked named
-    /// parameters in the declaration's own list.
+    /// D-META-FORM1=A rejects a trailing `on` clause and a second parameter
+    /// list in favor of `@`-marked named parameters in the declaration's own
+    /// list. D-META-USER1=A makes the scope body the checked code form.
     #[test]
     fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
         let source = r#"
 marker Inline(mode: String) on [.Function]
 
 marker Pre(condition: String)(sites: [.Function])
-
-marker Unsafe(reason: String) {
-    .sites [.Function]
-}
 
 fn run() {}
 "#;
@@ -750,7 +747,7 @@ fn run() {}
             Err(diagnostics) => diagnostics,
         };
         let codes: Vec<_> = diagnostics.iter().map(|d| d.code.as_str()).collect();
-        assert_eq!(codes, ["E0381", "E0381", "E0381"], "{diagnostics:?}");
+        assert_eq!(codes, ["E0381", "E0381"], "{diagnostics:?}");
         for diagnostic in &diagnostics {
             assert!(
                 diagnostic.fix.contains('@'),

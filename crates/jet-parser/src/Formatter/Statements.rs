@@ -668,12 +668,12 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-DOTSCOPE1: a scope-member statement `.name { … }` /
-            // `.name(args) { … }` inside a marker block.
+            // D-DOTSCOPE1 / D-META-DSL1: a scope-member statement `.name { … }` /
+            // `.name(args) { … }`, or a declared `#Name { … }` block.
             Stmt::ScopeMember {
-                name, args, body, ..
+                name, args, body, dsl, ..
             } => {
-                if Syntax::is_stdlib_dsl_block_marker(name) {
+                if *dsl {
                     self.write(&format!("#{}", name));
                 } else {
                     self.write(&format!(".{}", name));

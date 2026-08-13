@@ -1,5 +1,135 @@
 use super::*;
 
+fn existing_member_span(items: &[crate::AST::Item], type_name: &str, member: &str) -> Option<Span> {
+    for item in items {
+        match item {
+            Item::Struct(def) if def.name == type_name => {
+                if let Some(field) = def.fields.iter().find(|field| field.name == member) {
+                    return Some(field.name_span);
+                }
+                if let Some(method) = def.methods.iter().find(|method| method.name == member) {
+                    return Some(method.name_span);
+                }
+            }
+            Item::Enum(def) if def.name == type_name => {
+                if let Some(method) = def.methods.iter().find(|method| method.name == member) {
+                    return Some(method.name_span);
+                }
+            }
+            Item::Impl(def) if def.type_name == type_name => {
+                if let Some(method) = def.methods.iter().find(|method| method.name == member) {
+                    return Some(method.name_span);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn block_source(
+    source: &str,
+    body: &[crate::AST::Stmt],
+    block_spans: &[Span],
+    outer: Span,
+) -> String {
+    let candidate = if let (Some(first), Some(last)) = (body.first(), body.last()) {
+        block_spans
+            .iter()
+            .filter(|span| {
+                span.start > outer.start
+                    && span.end < outer.end
+                    && span.start <= first.span().start
+                    && span.end >= last.span().end
+            })
+            .max_by_key(|span| span.end.saturating_sub(span.start))
+    } else {
+        block_spans
+            .iter()
+            .filter(|span| span.start > outer.start && span.end < outer.end)
+            .min_by_key(|span| span.start)
+    };
+    candidate
+        .and_then(|span| source.get(span.start..span.end))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn collect_declared_text_blocks(
+    statements: &[crate::AST::Stmt],
+    source: &str,
+    block_spans: &[Span],
+    blocks: &mut Vec<(String, String, Span)>,
+) {
+    for statement in statements {
+        if let crate::AST::Stmt::ScopeMember {
+            name,
+            body,
+            dsl: true,
+            span,
+            ..
+        } = statement
+        {
+            blocks.push((
+                name.clone(),
+                block_source(source, body, block_spans, *span),
+                *span,
+            ));
+        }
+        for child in super::super::ScopeMembers::statement_bodies(statement) {
+            collect_declared_text_blocks(child, source, block_spans, blocks);
+        }
+    }
+}
+
+fn collect_item_declared_text_blocks(
+    item: &crate::AST::Item,
+    source: &str,
+    block_spans: &[Span],
+    blocks: &mut Vec<(String, String, Span)>,
+) {
+    match item {
+        Item::Func(function) => {
+            collect_declared_text_blocks(&function.body, source, block_spans, blocks)
+        }
+        Item::Test(test) => collect_declared_text_blocks(&test.body, source, block_spans, blocks),
+        Item::Bench(bench) => collect_declared_text_blocks(&bench.body, source, block_spans, blocks),
+        Item::Impl(implementation) => {
+            for method in &implementation.methods {
+                collect_declared_text_blocks(&method.body, source, block_spans, blocks);
+            }
+        }
+        Item::Struct(definition) => {
+            for method in &definition.methods {
+                collect_declared_text_blocks(&method.body, source, block_spans, blocks);
+            }
+            for implementation in &definition.trait_impls {
+                for method in &implementation.methods {
+                    collect_declared_text_blocks(&method.body, source, block_spans, blocks);
+                }
+            }
+        }
+        Item::Enum(definition) => {
+            for method in &definition.methods {
+                collect_declared_text_blocks(&method.body, source, block_spans, blocks);
+            }
+            for implementation in &definition.trait_impls {
+                for method in &implementation.methods {
+                    collect_declared_text_blocks(&method.body, source, block_spans, blocks);
+                }
+            }
+        }
+        Item::CodeModule(module) => {
+            if let Some(body) = &module.body {
+                for item in body {
+                    collect_item_declared_text_blocks(item, source, block_spans, blocks);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::new();
@@ -253,12 +383,83 @@ fn check_bundle_opts_for_output_inner(
         })
         .collect();
 
-    // D-MARK-VOCAB1 (card #518): the dynamic half of the `#Rule` vocabulary
-    // vocabulary — every `derive T.Name { … }` provider in the bundle, not
-    // just this module's own, per the same bundle-wide orphan-rule view as
-    // `derive_providers` above.
-    let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives(
+    // D-META-REG1=A / D-META-USER1=A: source marker declarations join the
+    // same bundle-local registry as compiler rows and derive providers. Keep
+    // the first declaration for lookup, but report every duplicate with both
+    // source spans before any body can run.
+    let mut marker_declarations = Vec::new();
+    let mut marker_declaration_spans = HashMap::<String, (usize, Span)>::new();
+    let mut fact_declaration_spans = HashMap::<String, (usize, Span)>::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for item in &module.items {
+            match item {
+                Item::MarkerDecl(declaration) => {
+                    if let Some((first_module, first_span)) =
+                        marker_declaration_spans.insert(
+                            declaration.name.clone(),
+                            (module_idx, declaration.name_span),
+                        )
+                    {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!(
+                                "marker `{}` is declared twice (spans {}..{} and {}..{})",
+                                declaration.name,
+                                first_span.start,
+                                first_span.end,
+                                declaration.name_span.start,
+                                declaration.name_span.end,
+                            ),
+                            "one rule name must resolve to one declaration in the loaded bundle"
+                                .to_string(),
+                            "rename or remove one of the marker declarations".to_string(),
+                            Some(declaration.name_span),
+                        ).with_detail(format!(
+                            "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
+                            first_span.start,
+                            first_span.end,
+                            declaration.name_span.start,
+                            declaration.name_span.end,
+                        )));
+                    } else {
+                        marker_declarations.push(declaration.clone());
+                    }
+                }
+                Item::FactDecl(declaration) => {
+                    if let Some((first_module, first_span)) = fact_declaration_spans.insert(
+                        declaration.name.clone(),
+                        (module_idx, declaration.name_span),
+                    ) {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!(
+                                "fact `{}` is declared twice (spans {}..{} and {}..{})",
+                                declaration.name,
+                                first_span.start,
+                                first_span.end,
+                                declaration.name_span.start,
+                                declaration.name_span.end,
+                            ),
+                            "one fact name must resolve to one declaration in the loaded bundle"
+                                .to_string(),
+                            "rename or remove one of the fact declarations".to_string(),
+                            Some(declaration.name_span),
+                        ).with_detail(format!(
+                            "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
+                            first_span.start,
+                            first_span.end,
+                            declaration.name_span.start,
+                            declaration.name_span.end,
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives_and_declarations(
         derive_providers.iter().map(|(_, name, _, _, _)| name.clone()),
+        marker_declarations,
     );
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
         .modules
@@ -299,7 +500,10 @@ fn check_bundle_opts_for_output_inner(
         super::super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
         // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
-        diags.extend(super::super::ScopeMembers::check(&module.items));
+        diags.extend(super::super::ScopeMembers::check(
+            &module.items,
+            &marker_vocabulary,
+        ));
         // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field`
         // rewrite + synthesized getter methods, before anything else.
         process_computed_fields(&mut module.items, &mut diags);
@@ -357,7 +561,11 @@ fn check_bundle_opts_for_output_inner(
             None
         };
         let st = &mut states[idx];
-        for item in &module.items {
+        for item in module
+            .items
+            .iter()
+            .filter(|item| !matches!(item, Item::MarkerDecl(_) | Item::FactDecl(_)))
+        {
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
@@ -529,13 +737,14 @@ fn check_bundle_opts_for_output_inner(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
-                // D-META-NAME1/FORM1: registration is #1457's/#1458's job; no
-                // registry row for #1456's declaration-side parse.
+                // D-META-USER1=A: declaration rows were consumed by the
+                // bundle-local marker registry before ordinary registration.
                 Item::EffectDecl(_)
-                | Item::MarkerDecl(_)
-                | Item::FactDecl(_)
                 | Item::GenericModule(_)
                 | Item::ModuleAlias(_) => {}
+                Item::MarkerDecl(_) | Item::FactDecl(_) => {
+                    unreachable!("declaration items are consumed by the bundle registry")
+                }
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
@@ -712,6 +921,328 @@ fn check_bundle_opts_for_output_inner(
             }
         }
 
+        // D-META-USER1=A: a declared marker body uses the same checked
+        // comptime fragment path as a derive body. The target TypeInfo is
+        // immutable input; generated items re-enter ordinary registration.
+        {
+            let declared_targets: Vec<(
+                crate::AST::StructDef,
+                crate::AST::Marker,
+                crate::AST::MarkerDecl,
+            )> = module
+                .items
+                .iter()
+                .flat_map(|item| {
+                    let Item::Struct(def) = item else { return None };
+                    Some(def.type_markers.iter().filter_map(|marker| {
+                        let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+                        declaration.body.as_ref()?;
+                        Some((def.clone(), marker.clone(), declaration))
+                    }))
+                })
+                .flatten()
+                .collect();
+            let helper_funcs_owned: HashMap<String, Func> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Func(function) => Some((function.name.clone(), function.clone())),
+                    _ => None,
+                })
+                .collect();
+            let actual_funcs: HashMap<String, &Func> = helper_funcs_owned
+                .iter()
+                .map(|(name, function)| (name.clone(), function))
+                .collect();
+            let mut new_items = Vec::new();
+
+            for (target, marker, declaration) in declared_targets {
+                if marker.negated {
+                    continue;
+                }
+                let Some(body) = declaration.body.as_ref() else {
+                    continue;
+                };
+                let states = module
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        Item::StateDecl(state) if state.type_name == target.name => Some(
+                            state
+                                .states
+                                .iter()
+                                .map(|(name, _)| name.clone())
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let type_path = name_ledger
+                    .canonical_path(idx, &target.name)
+                    .expect("declared rule target missing from the name ledger");
+                let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary(
+                    &target,
+                    &states,
+                    &type_path,
+                    Some(&marker_vocabulary),
+                );
+                match crate::Comptime::evaluate_derive_body(
+                    body,
+                    "target",
+                    type_info,
+                    &actual_funcs,
+                    &bundle.project_root,
+                ) {
+                    Ok(fragments) => {
+                        for fragment in fragments {
+                            let what = format!(
+                                "rule `{}` generated invalid Jet while expanding `#{}` on `{}`",
+                                declaration.name, declaration.name, target.name
+                            );
+                            let Some(mut parsed) = super::super::Registration::parse_generated_fragment(
+                                &fragment,
+                                what,
+                                "fix the rule body so every emitted fragment is valid Jet source".to_string(),
+                                marker.span,
+                                &mut diags,
+                            ) else {
+                                continue;
+                            };
+                            for item in parsed.drain(..) {
+                                let Item::Impl(implementation) = &item else {
+                                    new_items.push(item);
+                                    continue;
+                                };
+                                let mut accepted = implementation.clone();
+                                accepted.methods.retain(|method| {
+                                    let existing = existing_member_span(
+                                        &module.items,
+                                        &accepted.type_name,
+                                        &method.name,
+                                    )
+                                    .or_else(|| {
+                                        existing_member_span(
+                                            &new_items,
+                                            &accepted.type_name,
+                                            &method.name,
+                                        )
+                                    });
+                                    let Some(existing) = existing else {
+                                        return true;
+                                    };
+                                    diags.push(
+                                        Diagnostic::error(
+                                            "E0105",
+                                            format!(
+                                                "generated member `{}` would change or shadow `{}` on `{}`",
+                                                method.name, method.name, accepted.type_name
+                                            ),
+                                            "a rule may add a member but cannot change or shadow a written member".to_string(),
+                                            "rename the generated member or remove the existing member".to_string(),
+                                            Some(method.name_span),
+                                        )
+                                        .with_detail(format!(
+                                            "generated rule `{}` at span {}..{}\nexisting member at span {}..{}",
+                                            declaration.name,
+                                            marker.span.start,
+                                            marker.span.end,
+                                            existing.start,
+                                            existing.end,
+                                        )),
+                                    );
+                                    false
+                                });
+                                if !accepted.methods.is_empty() {
+                                    new_items.push(Item::Impl(accepted));
+                                }
+                            }
+                        }
+                    }
+                    Err(inner) => {
+                        super::super::push_causal_report(
+                            &mut diags,
+                            Diagnostic::error(
+                                "E2710",
+                                format!(
+                                    "rule `{}` body failed while expanding `#{}` on `{}`",
+                                    declaration.name, declaration.name, target.name
+                                ),
+                                inner.what.clone(),
+                                "fix the rule body so it succeeds at compile time".to_string(),
+                                Some(marker.span),
+                            ),
+                            inner,
+                        );
+                    }
+                }
+            }
+
+            // Function-site rules use the same body evaluator. Their target
+            // projection is a FunctionInfo, and a body may reject the
+            // declaration or emit ordinary top-level Jet items.
+            let declared_function_targets: Vec<(
+                crate::AST::Func,
+                crate::AST::Marker,
+                crate::AST::MarkerDecl,
+            )> = module
+                .items
+                .iter()
+                .flat_map(|item| {
+                    let Item::Func(function) = item else { return None };
+                    Some(function.markers.iter().filter_map(|marker| {
+                        let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+                        declaration.body.as_ref()?;
+                        Some((function.clone(), marker.clone(), declaration))
+                    }))
+                })
+                .flatten()
+                .collect();
+
+            for (target, marker, declaration) in declared_function_targets {
+                if marker.negated {
+                    continue;
+                }
+                let Some(body) = declaration.body.as_ref() else {
+                    continue;
+                };
+                let target_info = crate::Comptime::build_function_type_info(&target);
+                match crate::Comptime::evaluate_derive_body(
+                    body,
+                    "target",
+                    target_info,
+                    &actual_funcs,
+                    &bundle.project_root,
+                ) {
+                    Ok(fragments) => {
+                        for fragment in fragments {
+                            let what = format!(
+                                "rule `{}` generated invalid Jet while expanding `#{}` on `{}`",
+                                declaration.name, declaration.name, target.name
+                            );
+                            if let Some(mut parsed) =
+                                super::super::Registration::parse_generated_fragment(
+                                    &fragment,
+                                    what,
+                                    "fix the rule body so every emitted fragment is valid Jet source".to_string(),
+                                    marker.span,
+                                    &mut diags,
+                                )
+                            {
+                                new_items.extend(parsed.drain(..));
+                            }
+                        }
+                    }
+                    Err(inner) => {
+                        super::super::push_causal_report(
+                            &mut diags,
+                            Diagnostic::error(
+                                "E2710",
+                                format!(
+                                    "rule `{}` body failed while expanding `#{}` on `{}`",
+                                    declaration.name, declaration.name, target.name
+                                ),
+                                inner.what.clone(),
+                                "fix the rule body so it succeeds at compile time".to_string(),
+                                Some(marker.span),
+                            ),
+                            inner,
+                        );
+                    }
+                }
+            }
+
+            // D-META-DSL1=A: a `.Block` rule receives the text inside Jet's
+            // closed braces as its `target` value. The library body can check
+            // that text and emit ordinary Jet items through the same re-entry
+            // path as a type or function rule.
+            let mut declared_text_blocks = Vec::new();
+            for item in &module.items {
+                collect_item_declared_text_blocks(
+                    item,
+                    &module.source,
+                    &module.block_spans,
+                    &mut declared_text_blocks,
+                );
+            }
+            for (block_name, block_text, block_span) in declared_text_blocks {
+                let Some(declaration) = marker_vocabulary.declaration(&block_name) else {
+                    continue;
+                };
+                let Some(body) = declaration.body.as_ref() else {
+                    continue;
+                };
+                match crate::Comptime::evaluate_derive_body(
+                    body,
+                    "target",
+                    crate::AST::CtValue::Str(block_text),
+                    &actual_funcs,
+                    &bundle.project_root,
+                ) {
+                    Ok(fragments) => {
+                        for fragment in fragments {
+                            let what = format!(
+                                "rule `{}` generated invalid Jet while expanding `#{}`",
+                                declaration.name, block_name
+                            );
+                            if let Some(mut parsed) =
+                                super::super::Registration::parse_generated_fragment(
+                                    &fragment,
+                                    what,
+                                    "fix the rule body so every emitted fragment is valid Jet source".to_string(),
+                                    block_span,
+                                    &mut diags,
+                                )
+                            {
+                                new_items.extend(parsed.drain(..));
+                            }
+                        }
+                    }
+                    Err(inner) => {
+                        super::super::push_causal_report(
+                            &mut diags,
+                            Diagnostic::error(
+                                "E2710",
+                                format!(
+                                    "rule `{}` body failed while checking `#{}`",
+                                    declaration.name, block_name
+                                ),
+                                inner.what.clone(),
+                                "fix the rule body so it succeeds at compile time".to_string(),
+                                Some(block_span),
+                            ),
+                            inner,
+                        );
+                    }
+                }
+            }
+
+            for item in &new_items {
+                match item {
+                    Item::Func(function) => {
+                        register_func_item(function, st, &mut diags, !module.no_prelude)
+                    }
+                    Item::Struct(def) => register_struct(
+                        def,
+                        &mut st.registry,
+                        &mut diags,
+                        &st.funcs,
+                        &st.consts,
+                    ),
+                    Item::Enum(def) => register_enum(
+                        def,
+                        &mut st.registry,
+                        &mut diags,
+                        &st.funcs,
+                        &st.consts,
+                    ),
+                    Item::Tag(_) => {}
+                    Item::Impl(_) => {}
+                    _ => {}
+                }
+            }
+            module.items.extend(new_items);
+        }
+
         st.consts.extend(comptime_types);
         // D-ONCE-DERIVE1=A / I3: built-in capability requests re-enter as
         // ordinary Jet impl blocks before the final trait registration pass.
@@ -779,6 +1310,10 @@ fn check_bundle_opts_for_output_inner(
         // nothing (the parser accepts any PascalCase name structurally).
         diags.extend(check_marker_vocabulary(
             &module.items,
+            &module.rule_facts,
+            &marker_vocabulary,
+        ));
+        diags.extend(check_declared_rule_facts(
             &module.rule_facts,
             &marker_vocabulary,
         ));
@@ -1770,24 +2305,24 @@ fn check_bundle_opts_for_output_inner(
                     walk_stmts_for_const_refs(&b.body, &const_names, &mut address_taken)
                 }
                 Item::EffectDecl(_)
-            | Item::MarkerDecl(_)
-            | Item::FactDecl(_)
-            | Item::Const(_)
-            | Item::ExternRust(_)
-            | Item::Trait(_)
-            | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::Module(_)
-            | Item::Distinct(_)
-            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
-            | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
-            | Item::CModule(_) | Item::CodeModule(_)
-            | Item::ErrorConv(_)
-            | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) // D-STATE-DECL: erases
-            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
-            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+                | Item::MarkerDecl(_)
+                | Item::FactDecl(_)
+                | Item::Const(_)
+                | Item::ExternRust(_)
+                | Item::Trait(_)
+                | Item::Tag(_) // D-QUAL2: tags erase
+                | Item::Module(_)
+                | Item::Distinct(_)
+                | Item::TypeAlias(_) // D-TYPEALIAS1: erases
+                | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
+                | Item::CModule(_) | Item::CodeModule(_)
+                | Item::ErrorConv(_)
+                | Item::Migration(_) // D-MIGRATE1
+                | Item::StateDecl(_) // D-STATE-DECL: erases
+                | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+                | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
+                | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+                | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
             }
         }
         for item in &mut module.items {
