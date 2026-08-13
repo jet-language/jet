@@ -116,6 +116,15 @@ mod native {
             .and_then(|v| as_str(v, span))
     }
 
+    fn optional_str_arg(args: &[CtValue], i: usize, span: Span) -> Result<Option<String>, Diagnostic> {
+        match args.get(i) {
+            Some(CtValue::Str(value)) => Ok(Some(value.clone())),
+            Some(CtValue::Unit) | Some(CtValue::Failed(crate::AST::CtReport::Clean(_))) => Ok(None),
+            Some(_) => Err(unsupported("args expects optional text", span)),
+            None => Err(unsupported("args: missing argument", span)),
+        }
+    }
+
     pub fn core_args_spec() -> CtValue {
         spec_value(push_spec(jet_args_spec()))
     }
@@ -127,6 +136,15 @@ mod native {
         span: Span,
     ) -> Option<Result<CtValue, Diagnostic>> {
         let result = match op {
+            "ArgsSpecProgram" => {
+                let id = spec_id(recv)?;
+                let spec = take_spec(id)?;
+                let prog = match str_arg(args, 0, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                Ok(spec_value(replace_spec(id, jet_args_program(spec, &prog))))
+            }
             "ArgsSpecFlag" => {
                 let id = spec_id(recv)?;
                 let spec = take_spec(id)?;
@@ -243,6 +261,65 @@ mod native {
                     id,
                     jet_args_option_float(spec, &name, &help, &meta),
                 )))
+            }
+            "ArgsSpecOptionBase" => {
+                let id = spec_id(recv)?;
+                let spec = take_spec(id)?;
+                let name = match str_arg(args, 0, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let short = match optional_str_arg(args, 1, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let help = match str_arg(args, 2, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let meta = match str_arg(args, 3, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let default = match optional_str_arg(args, 4, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let env = match optional_str_arg(args, 5, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                let required = match args.get(6) {
+                    Some(CtValue::Bool(value)) => *value,
+                    _ => return Some(Err(unsupported("args expects Bool", span))),
+                };
+                let repeat = match args.get(7) {
+                    Some(CtValue::Bool(value)) => *value,
+                    _ => return Some(Err(unsupported("args expects Bool", span))),
+                };
+                let kind = match str_arg(args, 8, span) {
+                    Ok(kind) => {
+                        let value = match kind.as_str() {
+                            "Int" => JetArgValueKind::Int,
+                            "Float" => JetArgValueKind::Float,
+                            _ => JetArgValueKind::String,
+                        };
+                        jet_args_option_base(
+                            spec,
+                            &name,
+                            short,
+                            &help,
+                            &meta,
+                            default,
+                            env,
+                            required,
+                            repeat,
+                            value,
+                        )
+                    }
+                    Err(e) => return Some(Err(e)),
+                };
+                Ok(spec_value(replace_spec(id, kind)))
             }
             "ArgsSpecOptionChoice" => {
                 let id = spec_id(recv)?;

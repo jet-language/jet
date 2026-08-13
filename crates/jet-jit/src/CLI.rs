@@ -1,5 +1,6 @@
 //! Typed CLI entry adapter (#1219) — CLISchema + canonical Args parser.
-//! Zero-arg `jet_jit_cli_main` decodes argv and calls user `run(args)`.
+//! The zero-argument `jet_jit_cli_main` trampoline decodes argv and calls user
+//! `run(args)`.
 
 use super::Concurrency;
 use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type, VariantPayload};
@@ -12,7 +13,7 @@ use crate::Marshal::alloc_string;
 
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
-    use super::Concurrency;
+    use super::{CLIValueKind, Concurrency};
 
     trait JetShow {
         fn jet_show(&self) -> String;
@@ -58,7 +59,14 @@ mod runtime {
         help: &str,
         meta: &str,
         env: Option<&str>,
+        kind: CLIValueKind,
     ) -> Spec {
+        let value = match kind {
+            CLIValueKind::Int => JetArgValueKind::Int,
+            CLIValueKind::Float => JetArgValueKind::Float,
+            CLIValueKind::String | CLIValueKind::Path => JetArgValueKind::String,
+            CLIValueKind::Bool => JetArgValueKind::String,
+        };
         Spec(jet_args_option_base(
             spec.0,
             &name.to_string(),
@@ -69,7 +77,7 @@ mod runtime {
             env.map(str::to_string),
             false,
             false,
-            JetArgValueKind::String,
+            value,
         ))
     }
 
@@ -111,6 +119,9 @@ pub(crate) struct CLIPlan {
     pub field_types: Vec<(String, Type)>,
     /// Enum variant order: (variant_name_lower, payload_struct_fields).
     pub variants: Vec<(String, Vec<(String, Type)>)>,
+    /// The typed entry's ABI carries a value (including the canonical Result
+    /// carrier for an omitted return type).
+    pub run_returns_value: bool,
     pub user_run: String,
 }
 
@@ -146,6 +157,7 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
 pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
     let schema = CLISchema::entry_schema(items)?;
     let entry = schema.entry_type.clone();
+    let run_returns_value = cli_run_returns_value(items);
     if !schema.commands.is_empty() {
         let enumeration = items.iter().find_map(|item| match item {
             Item::Enum(e) if e.name == entry => Some(e),
@@ -163,6 +175,7 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
             schema,
             field_types: Vec::new(),
             variants,
+            run_returns_value,
             user_run: "run".to_string(),
         });
     }
@@ -171,8 +184,24 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
         schema,
         field_types,
         variants: Vec::new(),
+        run_returns_value,
         user_run: "run".to_string(),
     })
+}
+
+fn cli_run_returns_value(items: &[Item]) -> bool {
+    match items
+        .iter()
+        .find_map(|item| match item {
+            Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
+                function.return_type.as_ref()
+            }
+            _ => None,
+        })
+    {
+        Some(Type::Named(name)) if name == "Unit" => false,
+        Some(_) | None => true,
+    }
 }
 
 fn struct_fields(items: &[Item], name: &str) -> Option<Vec<(String, Type)>> {
@@ -216,6 +245,7 @@ fn build_spec(inputs: &[CLIInputSchema], description: Option<&str>, prog: &str) 
                     &help,
                     &meta,
                     input.env.as_deref(),
+                    input.value_kind(),
                 );
                 if input.positional.is_some() {
                     spec = positional(spec, &flag_name, &help);
@@ -362,14 +392,26 @@ fn print_usage(schema: &CLICommandSchema, prog: &str) {
     });
 }
 
+fn report_cli_error(error: &str) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.stderr.push_str(error);
+        rt.stderr.push('\n');
+        rt.exit_code = Some(2);
+    });
+}
+
+fn finish_cli_success() {
+    Concurrency::with_runtime_mut(|rt| rt.exit_code = Some(0));
+}
+
 /// Zero-arg trampoline installed as `jet_jit_cli_main` for typed CLI programs.
-pub(crate) extern "C" fn jet_jit_cli_main() {
+pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
     let plan = CLI_PLAN.with(|slot| slot.borrow().clone());
     let Some(plan) = plan else {
         Concurrency::with_runtime_mut(|rt| {
             rt.stderr.push_str("jit CLI: no plan installed\n");
         });
-        return;
+        return 0;
     };
     let argv = crate::program_args();
     let run_ptr = CLI_RUN_PTR.load(Ordering::SeqCst);
@@ -377,9 +419,18 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
         Concurrency::with_runtime_mut(|rt| {
             rt.stderr.push_str("jit CLI: run pointer missing\n");
         });
-        return;
+        return 0;
     }
-    let run: extern "C" fn(i64) = unsafe { std::mem::transmute(run_ptr) };
+    let call_run = |args: i64| {
+        if plan.run_returns_value {
+            let run: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(run_ptr) };
+            run(args)
+        } else {
+            let run: extern "C" fn(i64) = unsafe { std::mem::transmute(run_ptr) };
+            run(args);
+            0
+        }
+    };
 
     if !plan.variants.is_empty() {
         // Enum subcommands — bare / --help prints usage and exits 0.
@@ -388,7 +439,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
                 &plan.schema,
                 argv.first().map(String::as_str).unwrap_or(""),
             );
-            return;
+            finish_cli_success();
+            return 0;
         }
         let sub = argv[1].to_lowercase();
         let Some((disc, fields)) = plan
@@ -398,10 +450,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
             .find(|(_, (name, _))| name == &sub)
             .map(|(i, (_, f))| (i as i64, f))
         else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.stderr.push_str(&format!("unknown command `{sub}`\n"));
-            });
-            return;
+            report_cli_error(&format!("unknown command `{sub}`"));
+            return 0;
         };
         let cmd_schema = plan
             .schema
@@ -420,11 +470,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
         let parsed = match parse(&spec, &rest) {
             Ok(p) => p,
             Err(e) => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.stderr.push_str(&e);
-                    rt.stderr.push('\n');
-                });
-                return;
+                report_cli_error(&e);
+                return 0;
             }
         };
         if flag_set(&parsed, "help") {
@@ -432,21 +479,18 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
                 rt.stdout.push_str(&help_text(&spec));
                 rt.stdout.push('\n');
             });
-            return;
+            finish_cli_success();
+            return 0;
         }
         let payload = match decode_struct(&cmd_schema.inputs, fields, &parsed, &spec) {
             Ok(h) => h,
             Err(e) => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.stderr.push_str(&e);
-                    rt.stderr.push('\n');
-                });
-                return;
+                report_cli_error(&e);
+                return 0;
             }
         };
         let packed = (payload << 8) | (disc & 0xff);
-        run(packed);
-        return;
+        return call_run(packed);
     }
 
     // Struct typed entry.
@@ -455,11 +499,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
     let parsed = match parse(&spec, &argv) {
         Ok(p) => p,
         Err(e) => {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.stderr.push_str(&e);
-                rt.stderr.push('\n');
-            });
-            return;
+            report_cli_error(&e);
+            return 0;
         }
     };
     if flag_set(&parsed, "help") {
@@ -467,19 +508,17 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
             rt.stdout.push_str(&help_text(&spec));
             rt.stdout.push('\n');
         });
-        return;
+        finish_cli_success();
+        return 0;
     }
     let args = match decode_struct(&plan.schema.inputs, &plan.field_types, &parsed, &spec) {
         Ok(h) => h,
         Err(e) => {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.stderr.push_str(&e);
-                rt.stderr.push('\n');
-            });
-            return;
+            report_cli_error(&e);
+            return 0;
         }
     };
-    run(args);
+    call_run(args)
 }
 
 // `jet_jit_cli_main`'s registration + import lives in the top-level

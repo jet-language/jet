@@ -2,6 +2,7 @@
 
 mod builtins;
 mod browser;
+mod cli;
 mod closure_ops;
 mod compute_calls;
 mod data_calls;
@@ -3267,6 +3268,57 @@ pub fn run_program_with_structs_at_stage(
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
+    run_program_with_structs_at_stage_and_cli(
+        program,
+        base_dir,
+        sink,
+        globals,
+        core_imports,
+        gates,
+        struct_fields,
+        struct_field_types,
+        stage,
+        None,
+    )
+}
+
+fn run_program_with_structs_at_stage_and_cli(
+    program: &JitProgram,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    globals: HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    gates: jet_foundation::Policy::GateSet,
+    struct_fields: HashMap<String, Vec<(String, bool)>>,
+    struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    stage: Comptime::PurityStage,
+    cli_bundle: Option<&ProgramBundle>,
+) -> Result<CtValue, Diagnostic> {
+    let cli_args = if let Some(bundle) = cli_bundle.filter(|_| {
+        program.entry == crate::Codegen::mangle_generated("cli_main")
+    }) {
+        let argv = Comptime::runtime_argv().unwrap_or_else(|| std::env::args().collect());
+        match cli::prepare(bundle, &argv)? {
+            cli::Dispatch::Run(args) => Some(args),
+            cli::Dispatch::Help(help) => {
+                sink.stdout.push_str(&help);
+                if !help.ends_with('\n') {
+                    sink.stdout.push('\n');
+                }
+                return Ok(CtValue::Unit);
+            }
+            cli::Dispatch::Error(error) => {
+                sink.stderr.push_str(&error);
+                if !error.ends_with('\n') {
+                    sink.stderr.push('\n');
+                }
+                sink.exit_code = Some(2);
+                return Ok(CtValue::Unit);
+            }
+        }
+    } else {
+        None
+    };
     // The evaluator's exhaustive expression dispatcher is intentionally one
     // semantic spine, but its large Rust frame makes ordinary test/CLI stacks
     // too small for nested aggregate literals. Keep the public runtime seam
@@ -3288,6 +3340,7 @@ pub fn run_program_with_structs_at_stage(
                         struct_fields,
                         struct_field_types,
                         stage,
+                        cli_args,
                     )
                 })
             })
@@ -3306,6 +3359,7 @@ fn run_program_with_structs_on_stack(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
+    cli_args: Option<CtValue>,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
@@ -3316,10 +3370,16 @@ fn run_program_with_structs_on_stack(
         struct_field_types.entry(name).or_insert(fields);
     }
     let funcs = program_funcs(program);
-    let entry = funcs.get(&program.entry).copied().ok_or_else(|| {
+    let cli_entry = cli_args.is_some();
+    let entry_name = if cli_entry {
+        "run".to_string()
+    } else {
+        program.entry.clone()
+    };
+    let entry = funcs.get(&entry_name).copied().ok_or_else(|| {
         crate::Sema::Diagnostics::render_registered(
             "E2201",
-            format!("entry `{}` missing from lowered TIR", program.entry),
+            format!("entry `{entry_name}` missing from lowered TIR"),
             "the interpreter needs the selected entry function in the TIR program".to_string(),
             "report this as a compiler bug".to_string(),
             None,
@@ -3381,7 +3441,8 @@ fn run_program_with_structs_on_stack(
     };
     let mut scope = HashMap::new();
     let result = ctx.with_task_dispatcher(|ctx| {
-        let result = ctx.run_func(entry, Vec::new(), &mut scope);
+        let args = cli_args.into_iter().collect();
+        let result = ctx.run_func(entry, args, &mut scope);
         if returns_app(entry.ret.as_ref()) {
             result.and_then(|value| serve_entry_value(ctx, value))
         } else {
@@ -3563,7 +3624,7 @@ fn run_bundle_at_stage(
             }
         }
     }
-    run_program_with_structs_at_stage(
+    run_program_with_structs_at_stage_and_cli(
         &program,
         &bundle.project_root,
         sink,
@@ -3573,6 +3634,7 @@ fn run_bundle_at_stage(
         collect_struct_fields(bundle),
         collect_struct_field_types(bundle),
         stage,
+        Some(bundle),
     )
 }
 

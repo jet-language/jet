@@ -456,20 +456,18 @@ fn cli_option_spec_line(
 ) -> String {
     let help = input.builder_help();
     let flag = &input.flag;
-    match (&input.short, &input.env) {
-        (Some(short), Some(env)) => format!(
-            "    let __s = {root}jet_args_option_base(__s, &{flag:?}.to_string(), Some({short:?}.to_string()), &{help:?}.to_string(), &{metavar:?}.to_string(), None, Some({env:?}.to_string()), false, false, {root}JetArgValueKind::String);\n"
-        ),
-        (Some(short), None) => format!(
-            "    let __s = {root}jet_args_option_short(__s, &{flag:?}.to_string(), &{short:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
-        ),
-        (None, Some(env)) => format!(
-            "    let __s = {root}jet_args_option_env(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string(), &{env:?}.to_string());\n"
-        ),
-        (None, None) => format!(
-            "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
-        ),
-    }
+    let value = match input.value_kind() {
+        jet_foundation::CLISchema::CLIValueKind::Int => "Int",
+        jet_foundation::CLISchema::CLIValueKind::Float => "Float",
+        jet_foundation::CLISchema::CLIValueKind::Bool
+        | jet_foundation::CLISchema::CLIValueKind::String
+        | jet_foundation::CLISchema::CLIValueKind::Path => "String",
+    };
+    format!(
+        "    let __s = {root}jet_args_option_base(__s, &{flag:?}.to_string(), {short:?}.map(str::to_string), &{help:?}.to_string(), &{metavar:?}.to_string(), None, {env:?}.map(str::to_string), false, false, {root}JetArgValueKind::{value});\n",
+        short = input.short.as_deref(),
+        env = input.env.as_deref(),
+    )
 }
 
 fn cli_helper_name(kind: &str, type_name: &str) -> String {

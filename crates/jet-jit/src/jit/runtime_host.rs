@@ -2525,6 +2525,8 @@ host_fns! {
         }
         sig_deopt.returns.push(AbiParam::new(types::I64));
         let sig_noarg = Signature::new(cc);
+        let mut sig_noarg_i64 = Signature::new(cc);
+        sig_noarg_i64.returns.push(AbiParam::new(types::I64));
     }
     #extra {
         coll: Collections::CollectionsHostFns,
@@ -2699,7 +2701,7 @@ host_fns! {
     reflect_field_value: "jet_jit_reflect_field_value" => jet_jit_reflect_field_value: sig_str_unary_i64;
     testing_temp_dir: "jet_jit_testing_temp_dir" => jet_jit_testing_temp_dir: sig_str_unary_i64;
     testing_snap: "jet_jit_testing_snap" => jet_jit_testing_snap: sig_str_eq;
-    cli_main: "jet_jit_cli_main" => crate::CLI::jet_jit_cli_main: sig_noarg;
+    cli_main: "jet_jit_cli_main" => crate::CLI::jet_jit_cli_main: sig_noarg_i64;
 }
 
 #[cfg(test)]

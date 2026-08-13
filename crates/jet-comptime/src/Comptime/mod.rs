@@ -75,7 +75,10 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 use crate::Syntax;
 
-pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
+pub use Interpreter::{
+    runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer,
+    ReplEffectRequest, REPL_FUEL_BUDGET,
+};
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
     apply_impure_core_call_with_type,

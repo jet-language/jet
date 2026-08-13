@@ -461,6 +461,11 @@ fn register_union_type(
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
     lower_jit_program(bundle).map(|p| {
         let entry = p.entry;
+        let entry = if entry == super::mangle_generated("cli_main") {
+            "run".to_string()
+        } else {
+            entry
+        };
         p.funcs
             .into_iter()
             .find(|f| f.name == entry)

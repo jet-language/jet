@@ -1,0 +1,14 @@
+// D-APP-ARGS1=A: the checked CLI schema reaches an App-returning entry.
+// Try `jet run examples/features/web/app_typed_args.jet -- --help` or
+// `jet run examples/features/web/app_typed_args.jet -- --port=9000`.
+use core.web as web
+
+#CLI
+struct ServeArgs {
+    #[Doc("port to listen on")] port: Int = 8080
+}
+
+fn run(args: ServeArgs) => App {
+    print(args.port)
+    return web.app()
+}

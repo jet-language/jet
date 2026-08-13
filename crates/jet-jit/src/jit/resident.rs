@@ -1,4 +1,4 @@
-use jet_codegen::Codegen::TIR::JitProgram;
+use jet_codegen::Codegen::TIR::{JitProgram, TFunc};
 use jet_foundation::{JitBackend::RunOutcome, AST::Type};
 use std::collections::HashMap;
 
@@ -11,13 +11,24 @@ use super::tiers::TierPlan;
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
 use crate::Collections;
 
+fn main_func(program: &JitProgram) -> Option<&TFunc> {
+    let name = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
+        "run"
+    } else {
+        program.entry.as_str()
+    };
+    program.funcs.iter().find(|func| func.name == name)
+}
+
 fn main_error_type(program: &JitProgram) -> Option<Type> {
-    program.funcs.iter().find_map(|func| {
-        (func.name == program.entry).then(|| match &func.ret {
-            Some(Type::Result { err, .. }) => Some(err.as_ref().clone()),
-            _ => None,
-        })?
+    main_func(program).and_then(|func| match &func.ret {
+        Some(Type::Result { err, .. }) => Some(err.as_ref().clone()),
+        _ => None,
     })
+}
+
+fn main_returns_result(program: &JitProgram) -> bool {
+    main_func(program).is_some_and(|func| matches!(func.ret, Some(Type::Result { .. })))
 }
 
 fn main_returns_default_err(program: &JitProgram) -> bool {
@@ -35,15 +46,12 @@ fn main_error_is_packed(program: &JitProgram) -> bool {
 }
 
 fn main_returns_app(program: &JitProgram) -> bool {
-    program.funcs.iter().any(|func| {
-        func.name == program.entry
-            && match &func.ret {
-                Some(Type::Named(name)) => name == "App",
-                Some(Type::Result { ok, .. }) => {
-                    matches!(ok.as_ref(), Type::Named(name) if name == "App")
-                }
-                _ => false,
-            }
+    main_func(program).is_some_and(|func| match &func.ret {
+        Some(Type::Named(name)) => name == "App",
+        Some(Type::Result { ok, .. }) => {
+            matches!(ok.as_ref(), Type::Named(name) if name == "App")
+        }
+        _ => false,
     })
 }
 
@@ -235,9 +243,7 @@ pub(crate) fn resident_teardown() {
 }
 
 pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
-    let main_returns_result = program.funcs.iter().any(|func| {
-        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
-    });
+    let main_returns_result = main_returns_result(program);
     let main_returns_default_err = main_returns_default_err(program);
     let main_error_type = main_error_type(program);
     let main_error_is_packed = main_error_is_packed(program);
@@ -483,9 +489,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
     // SAFETY: `program` outlives the invoke below (same stack frame).
     install_deopt_program(program, &deopt_names);
 
-    let main_returns_result = program.funcs.iter().any(|func| {
-        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
-    });
+    let main_returns_result = main_returns_result(program);
     let main_returns_default_err = main_returns_default_err(program);
     let main_error_type = main_error_type(program);
     let main_error_is_packed = main_error_is_packed(program);
@@ -547,9 +551,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;
     runtime.snapshot_compile_strings();
-    let main_returns_result = program.funcs.iter().any(|func| {
-        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
-    });
+    let main_returns_result = main_returns_result(program);
     let main_returns_default_err = main_returns_default_err(program);
     let main_error_type = main_error_type(program);
     let main_error_is_packed = main_error_is_packed(program);

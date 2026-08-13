@@ -50,6 +50,7 @@ backend without `--target=web`. `jet run` never infers web.
 | File | Teaches |
 |------|---------|
 | `web_hello.jet` | DOM shim round-trip via `core.ui` null backend |
+| `app_typed_args.jet` | Typed CLI flags reaching an App-returning entry |
 | `web_compute.jet` | `#WasmExport` compute called from `#Target(JS) run` |
 | `ui_web_reactive.jet` | `reactive_render` + DOM command stream |
 | `ui_web_click.jet` + `ui_web_click.html` | Real clickable page, `#HTML`, exported `render` |

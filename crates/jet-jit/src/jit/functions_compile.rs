@@ -1571,6 +1571,19 @@ pub(crate) fn compile_program_tiered(
     }
 
     let cli_entry = program.entry == jet_foundation::Names::mangle_generated("cli_main");
+    if cli_entry {
+        // The typed decoder and its return carrier are process-local host
+        // state; a cached machine-code blob cannot reconstruct either one.
+        super::tier_cache::abort_capture();
+    }
+    let cli_returns_value = cli_entry
+        && program.funcs.iter().any(|func| {
+            func.name == "run"
+                && func
+                    .ret
+                    .as_ref()
+                    .is_some_and(|ty| !matches!(ty, Type::Named(name) if name == "Unit"))
+        });
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut cli_import_id: Option<FuncId> = None;
     if cli_entry {
@@ -1579,7 +1592,10 @@ pub(crate) fn compile_program_tiered(
             Some(id) => id,
             None => {
                 let cc = module.target_config().default_call_conv;
-                let sig = Signature::new(cc);
+                let mut sig = Signature::new(cc);
+                if cli_returns_value {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
                 module
                     .declare_function("__jet_jit_main", Linkage::Export, &sig)
                     .map_err(|e| e.to_string())?
@@ -1682,7 +1698,11 @@ pub(crate) fn compile_program_tiered(
         let import_id = cli_import_id.expect("cli import");
         let mut ctx = module.make_context();
         let cc = module.target_config().default_call_conv;
-        ctx.func.signature = Signature::new(cc);
+        let mut signature = Signature::new(cc);
+        if cli_returns_value {
+            signature.returns.push(AbiParam::new(types::I64));
+        }
+        ctx.func.signature = signature;
         let mut fbcx = FunctionBuilderContext::new();
         {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
@@ -1691,8 +1711,13 @@ pub(crate) fn compile_program_tiered(
             b.switch_to_block(entry);
             b.seal_block(entry);
             let callee = module.declare_func_in_func(import_id, b.func);
-            b.ins().call(callee, &[]);
-            b.ins().return_(&[]);
+            let call = b.ins().call(callee, &[]);
+            if cli_returns_value {
+                let result = b.inst_results(call)[0];
+                b.ins().return_(&[result]);
+            } else {
+                b.ins().return_(&[]);
+            }
             b.finalize();
         }
         module

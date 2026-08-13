@@ -5291,6 +5291,19 @@ with watch, reload, and hot swap. An explicit `fn dev()` remains the expert
 override. The hidden app-name convention, synthesized `run` overlay, and
 run/app/dev precedence table are deleted.
 
+**D-APP-UNIFY1=B — one App type, target by marker** *(card #1447)*: every
+target uses the same `App` value and builder surface. The resolved `#Target`
+marker or manifest target selects platform behavior; the type name never
+selects a platform-specific application type. A capability unavailable on the
+resolved target is a compile-time error naming the target and the capability.
+
+**D-APP-ARGS1=A — typed CLI inputs reach an App entry** *(card #1450)*:
+`fn run(args: T) => App` uses the same checked `T` schema, `core.args` parser,
+help text, defaults, and value errors as a typed script entry. Jet constructs
+`T`, invokes `run(args)`, and serves the returned `App`; the App return does
+not create a second CLI mechanism or change the `#CLI` field mapping. A typed
+`Result` return keeps the same entry error boundary before serving its `App`.
+
 **D-WEBAUTHOR1=D — explicit builder with opt-in conventions**: the builder is
 always canonical and one file remains complete. File routing activates only
 through `.routes(from: "routes")` written in that builder. Every file under the

@@ -3393,6 +3393,11 @@ No variadic entry signature exists; raw argv access stays explicit inside
 `fn run()` via `core.args`/`core.io.args`. `main` has no entry meaning in Jet.
 Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
 
+An App-returning typed entry uses the same contract: Jet decodes the one typed
+argument, calls `run(args)`, and serves the returned `App` at the runtime edge.
+The return shape changes the entry boundary only; it does not change the CLI
+schema or parser.
+
 ### Checked Output callable references (D-SHAPE-OUTPUT-CALLABLE1)
 
 A runnable Package `Output` links to ordinary Jet code with a function
