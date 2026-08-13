@@ -1026,11 +1026,13 @@ fn check_flags(raw: &[String], subcmd: &str) {
 
 fn reject_bench_test_flags(argv: &[String]) {
     let Some(flag) = argv.iter().find(|arg| {
-        matches!(arg.as_str(), "-u" | "--serial" | "--coverage" | "--shuffle")
+        matches!(
+            arg.as_str(),
+            "-u" | "--serial" | "--coverage" | "--shuffle" | "--update-snapshots"
+        )
             || arg.starts_with("--shuffle=")
             || arg.starts_with("--coverage=")
             || arg.starts_with("--update-snapshots=")
-            || arg == "--update-snapshots"
     }) else {
         return;
     };
