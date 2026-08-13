@@ -253,6 +253,12 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             collect_tuple_shapes_from_expr(value, out);
             match fallback {
                 OrFallback::Value(v) => collect_tuple_shapes_from_expr(v, out),
+                OrFallback::Block { body, value, .. } => {
+                    for stmt in body {
+                        collect_tuple_shapes_from_stmt(stmt, out);
+                    }
+                    collect_tuple_shapes_from_expr(value, out);
+                }
                 OrFallback::Return(Some(v), _) => collect_tuple_shapes_from_expr(v, out),
                 OrFallback::Return(None, _) => {}
                 OrFallback::Panic { args, .. } => {

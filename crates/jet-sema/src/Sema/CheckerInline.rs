@@ -384,6 +384,10 @@ impl<'a> InlineAlwaysScan<'a> {
                 self.scan_expr(value);
                 match fallback {
                     crate::AST::OrFallback::Value(e) => self.scan_expr(e),
+                    crate::AST::OrFallback::Block { body, value, .. } => {
+                        self.scan_stmts(body);
+                        self.scan_expr(value);
+                    }
                     crate::AST::OrFallback::Return(e, _) => {
                         if let Some(e) = e {
                             self.scan_expr(e);

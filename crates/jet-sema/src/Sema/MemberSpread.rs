@@ -369,6 +369,10 @@ fn desugar_expr(expr: &mut Expr) {
                 crate::AST::OrFallback::Value(e) | crate::AST::OrFallback::Return(Some(e), _) => {
                     desugar_expr(e);
                 }
+                crate::AST::OrFallback::Block { body, value, .. } => {
+                    desugar_stmts(body);
+                    desugar_expr(value);
+                }
                 crate::AST::OrFallback::Panic { args, .. } => {
                     for arg in args {
                         desugar_expr(&mut arg.expr);

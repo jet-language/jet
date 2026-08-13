@@ -1678,6 +1678,9 @@ impl<'a> Fmt<'a> {
     fn fmt_or_fallback(&mut self, fb: &OrFallback) {
         match fb {
             OrFallback::Value(e) => self.fmt_expr(e, Prec::OrFallback),
+            OrFallback::Block { body, value, .. } => {
+                self.fmt_value_block(body, value, false);
+            }
             OrFallback::Return(expr, _) => {
                 self.write("return");
                 if let Some(e) = expr {

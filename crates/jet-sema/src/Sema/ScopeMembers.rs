@@ -360,6 +360,9 @@ fn fallback_has_assertion(fallback: &OrFallback) -> bool {
         OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
             expr_has_assertion(value)
         }
+        OrFallback::Block { body, value, .. } => {
+            statements_have_assertion(body) || expr_has_assertion(value)
+        }
         OrFallback::Panic { args, .. } => args.iter().any(|arg| expr_has_assertion(&arg.expr)),
         OrFallback::Return(None, _)
         | OrFallback::Break(_)

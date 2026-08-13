@@ -48,6 +48,7 @@ use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TStrPart;
+use crate::Codegen::TIR::ambient_err_local;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::tuple_fields_plain;
@@ -288,14 +289,37 @@ fn lower_or_fallback(
         Type::Result { ok, .. } => (**ok).clone(),
         other => other.clone(),
     };
+    let mut fallback_env = clone_env(env);
+    if let Type::Result { err, .. } = &value_t.ty {
+        fallback_env.bind(
+            Syntax::AMBIENT_ERR,
+            ambient_err_local(),
+            Some((**err).clone()),
+        );
+    }
     let tfallback = match fallback {
-        OrFallback::Value(e) => TOrFallback::Value(Box::new(lower_expr(e, cx, env))),
+        OrFallback::Value(e) => {
+            TOrFallback::Value(Box::new(lower_expr(e, cx, &mut fallback_env)))
+        }
+        OrFallback::Block { body, value, .. } => {
+            let mut stmts = lower_stmts(body, cx, &mut fallback_env);
+            let value = lower_expr(value, cx, &mut fallback_env);
+            stmts.push(TStmt::ExprStmt(value));
+            TOrFallback::Value(Box::new(TExpr {
+                ty: result_ty.clone(),
+                kind: TExprKind::InlineBlock(stmts),
+            }))
+        }
         OrFallback::Return(None, _) => TOrFallback::Return(None),
         OrFallback::Return(Some(e), _) => {
-            TOrFallback::Return(Some(Box::new(lower_expr(e, cx, env))))
+            TOrFallback::Return(Some(Box::new(lower_expr(
+                e,
+                cx,
+                &mut fallback_env,
+            ))))
         }
         OrFallback::Panic { name_span, args } => {
-            let (kind, loc) = lower_panic_stop(name_span, args, cx, env);
+            let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
             let TRequireKind::Panic { msg } = kind else { unreachable!() };
             TOrFallback::Panic { msg, loc }
         }
@@ -630,20 +654,13 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
             }
             children
         }
-        Expr::OrFallback { value, fallback, .. } => {
-            let mut children = vec![value.as_ref()];
-            match fallback {
-                OrFallback::Value(expr) | OrFallback::Return(Some(expr), _) => {
-                    children.push(expr.as_ref())
-                }
-                OrFallback::Return(None, _)
-                | OrFallback::Panic { .. }
-                | OrFallback::Break(_)
-                | OrFallback::Continue(_)
-                | OrFallback::BreakLabel(_, _)
-                | OrFallback::ContinueLabel(_, _) => {}
-            }
-            children
+        Expr::OrFallback { value, .. } => {
+            // D-FAIL-BIND1=A: lower the fallback only from `lower_or_fallback`,
+            // after that function installs the contextual `err` slot. If the
+            // fallback is pre-lowered here, an `err` identifier becomes an
+            // ordinary user local before the slot exists and the interpreter
+            // reports it as unbound.
+            vec![value.as_ref()]
         }
         Expr::If { cond, .. } => vec![cond.as_ref()],
         Expr::Lambda(_) => Vec::new(),

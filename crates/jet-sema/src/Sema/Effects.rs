@@ -1471,6 +1471,10 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::OrFallback { value, fallback, .. } => expr_handle_escape(value, handle).or_else(|| {
             match fallback {
                 OrFallback::Value(e) => expr_handle_escape(e, handle),
+                OrFallback::Block { body, value, .. } => body
+                    .iter()
+                    .find_map(|stmt| stmt_handle_escape(stmt, handle))
+                    .or_else(|| expr_handle_escape(value, handle)),
                 OrFallback::Return(Some(e), _) => expr_handle_escape(e, handle),
                 _ => None,
             }

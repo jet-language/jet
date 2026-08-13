@@ -490,6 +490,10 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(value);
                 match fallback {
                     OrFallback::Value(e) => self.check_expr(e),
+                    OrFallback::Block { body, value, .. } => {
+                        self.check_block(body);
+                        self.check_expr(value);
+                    }
                     OrFallback::Return(Some(e), _) => self.check_expr(e),
                     _ => {}
                 }

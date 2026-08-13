@@ -297,6 +297,14 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             rewrite_field_refs(value, names, receiver);
             match fallback {
                 OrFallback::Value(e) => rewrite_field_refs(e, names, receiver),
+                OrFallback::Block { body, value, .. } => {
+                    for stmt in body {
+                        stmt.for_each_expr_mut(|expr| {
+                            rewrite_field_refs(expr, names, receiver);
+                        });
+                    }
+                    rewrite_field_refs(value, names, receiver);
+                }
                 OrFallback::Return(Some(e), _) => rewrite_field_refs(e, names, receiver),
                 _ => {}
             }

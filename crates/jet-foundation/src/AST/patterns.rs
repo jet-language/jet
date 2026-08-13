@@ -1,4 +1,4 @@
-use super::{CallArg, CtValue, Expr, MetaAttr, Type};
+use super::{CallArg, CtValue, Expr, MetaAttr, Stmt, Type};
 use crate::Diagnostics::Span;
 
 /// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.
@@ -251,6 +251,14 @@ impl BindPattern {
 #[derive(Debug, Clone)]
 pub enum OrFallback {
     Value(Box<Expr>),
+    /// D-FAIL-BIND1=A: `expr ?? { statements; value }`. The final `return
+    /// value` spelling is normalized to this same value-bearing block by the
+    /// parser; sema provides the fallback-only ambient `err` binding.
+    Block {
+        body: Vec<Stmt>,
+        value: Box<Expr>,
+        span: Span,
+    },
     Return(Option<Box<Expr>>, Span),
     Panic {
         name_span: Span,

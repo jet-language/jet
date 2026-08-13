@@ -32,6 +32,7 @@ use crate::Codegen::TIR::TEnumArg;
 use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::ambient_err_local;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::TModuleCallForm;
@@ -3004,7 +3005,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::OrFallback { value, fallback } => {
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
-            jet_format!("match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err(_) => {} }}", v, fb)
+            jet_format!(
+                "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {} }}",
+                v,
+                ambient_err_local().rust_name(),
+                fb
+            )
         }
         // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
         // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is

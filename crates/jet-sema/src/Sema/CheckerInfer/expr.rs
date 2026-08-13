@@ -1327,6 +1327,22 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                // D-FAIL-BIND1=A: `err` is ambient only while checking the
+                // right side of `??`. An optional fallback has no report to
+                // expose, so keep the failure in sema rather than allowing an
+                // outer user binding (or rustc) to decide its meaning.
+                if name == Syntax::AMBIENT_ERR && self.fallback_has_err == Some(false) {
+                    self.diags.push(Diagnostic::error(
+                        "E0408",
+                        "`err` is not available in an optional fallback".to_string(),
+                        "an optional can be absent, but it has no failure report to name"
+                            .to_string(),
+                        "remove `err`, or use a fallible result when the fallback needs the failure"
+                            .to_string(),
+                        Some(*span),
+                    ));
+                    return None;
+                }
                 if self.lookup(name).is_some_and(|info| info.invalid) {
                     return None;
                 }

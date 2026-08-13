@@ -574,6 +574,13 @@ impl TLocal {
     }
 }
 
+/// D-FAIL-BIND1=A: the one compiler-generated slot used to carry a failed
+/// report into a `??` fallback. Its reserved spelling is shared by AOT, JIT,
+/// and TIR-eval; engines only marshal the value already placed here.
+pub fn ambient_err_local() -> TLocal {
+    TLocal::generated("ambient_err")
+}
+
 /// A resolved user method identity. `name` is the Jet method name — the key the
 /// JIT and interpreter dispatch on. `mangled` records the one Rust spelling fact:
 /// an inherent method becomes `__jet_<name>`, while a trait-impl or dynamic-dispatch

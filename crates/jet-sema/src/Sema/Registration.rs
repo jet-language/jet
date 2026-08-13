@@ -201,6 +201,19 @@ impl<'a> Checker<'a> {
             self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
         }
         for p in &f.params {
+            // D-FAIL-BIND1=A: parameters share the ordinary binding namespace,
+            // so `err` is still worth flagging even when it is outside a
+            // fallback today. A future fallback would give that spelling a
+            // different, ambient meaning.
+            if p.name == Syntax::AMBIENT_ERR {
+                self.diags.push(Diagnostic::lint(
+                    "L0511",
+                    "binding `err` shadows the fallback's ambient failure report".to_string(),
+                    "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there".to_string(),
+                    "rename the binding, or use it outside a fallback".to_string(),
+                    Some(p.name_span),
+                ));
+            }
             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
             // as an unused `Type::Named("")` placeholder (the real bound list is
             // `variadic_bound_list`) — nothing to declared-type-check there.

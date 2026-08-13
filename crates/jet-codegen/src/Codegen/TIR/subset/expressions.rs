@@ -904,12 +904,22 @@ pub(crate) fn orfallback_rhs_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    // D-FAIL-BIND1=A: sema provides `err` only for a fallible fallback, and
+    // TIR lowers it to the generated ambient slot. Include the source spelling
+    // in the coverage environment so the gate agrees with that lowering.
+    let mut fallback_locals = locals.clone();
+    fallback_locals.insert(Syntax::AMBIENT_ERR.to_string());
     match fallback {
-        OrFallback::Value(e) => expr_in_subset(e, cx, locals),
+        OrFallback::Value(e) => expr_in_subset(e, cx, &fallback_locals),
+        OrFallback::Block { body, value, .. } => {
+            body.iter().all(|stmt| {
+                stmt_in_subset(stmt, cx, &mut fallback_locals)
+            }) && expr_in_subset(value, cx, &fallback_locals)
+        }
         OrFallback::Return(None, _) => true,
-        OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
+        OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, &fallback_locals),
         OrFallback::Panic { args, .. } => {
-            args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals)
+            args.len() == 1 && expr_in_subset(&args[0].expr, cx, &fallback_locals)
         }
         OrFallback::Break(_)
         | OrFallback::Continue(_)

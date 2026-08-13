@@ -60,6 +60,7 @@ impl<'a> Parser<'a> {
                 let fallback = self.parse_or_fallback(allow_struct_lit)?;
                 let end = match &fallback {
                     OrFallback::Value(e) => e.span().end,
+                    OrFallback::Block { span, .. } => span.end,
                     OrFallback::Return(_, s) => s.end,
                     OrFallback::Panic { name_span, .. } => name_span.end,
                     OrFallback::Break(s)
@@ -80,15 +81,7 @@ impl<'a> Parser<'a> {
     
         fn parse_or_fallback(&mut self, allow_struct_lit: bool) -> Result<OrFallback, Diagnostic> {
             if matches!(self.peek().kind, TokKind::LBrace) {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "a `??` fallback cannot be a bare block".to_string(),
-                    "`??` accepts one fallback value or a control action, not a block with several steps"
-                        .to_string(),
-                    "write `value ?? fallback`, `value ?? return`, or `value ?? make_fallback()`"
-                        .to_string(),
-                    Some(self.peek().span),
-                ));
+                return self.parse_or_fallback_block();
             }
             if matches!(self.peek().kind, TokKind::KwReturn) {
                 let span = self.bump().span;
@@ -136,6 +129,100 @@ impl<'a> Parser<'a> {
                 }
             }
             Ok(OrFallback::Value(Box::new(e)))
+        }
+
+        /// D-FAIL-BIND1=A: a fallback block has ordinary statements followed
+        /// by one value. `return value` is the block's value spelling, not a
+        /// function return; it keeps the common early-return shape readable
+        /// while remaining one value-producing fallback.
+        fn parse_or_fallback_block(&mut self) -> Result<OrFallback, Diagnostic> {
+            let start = self.peek().span.start;
+            self.expect(TokKind::LBrace, "to open the `??` fallback block")?;
+            let mut body = Vec::new();
+            loop {
+                match &self.peek().kind {
+                    TokKind::RBrace => {
+                        let span = self.peek().span;
+                        self.bump();
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "a `??` fallback block needs a value".to_string(),
+                            "a fallback block runs its statements and then produces one value"
+                                .to_string(),
+                            "add a final value, such as `{ log(err); default_value }`".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    TokKind::Eof => {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "expected `}` to close the `??` fallback block, found the end of the file"
+                                .to_string(),
+                            "every `{` needs a matching `}`".to_string(),
+                            "add a closing `}`".to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
+                    _ => {}
+                }
+
+                // The final `return value` is the block-value spelling. A
+                // bare return remains an ordinary statement and will fail the
+                // value check below if it is the tail.
+                if matches!(self.peek().kind, TokKind::KwReturn) {
+                    let save = self.pos;
+                    let saved_diags = self.diags.len();
+                    self.bump();
+                    if self.starts_expr(&self.peek().kind) {
+                        if let Ok(value) = self.expr() {
+                            if matches!(self.peek().kind, TokKind::Semi)
+                                && matches!(self.peek2().kind, TokKind::RBrace)
+                            {
+                                self.bump();
+                            }
+                            if matches!(self.peek().kind, TokKind::RBrace) {
+                                let end = self.bump().span.end;
+                                return Ok(OrFallback::Block {
+                                    body,
+                                    value: Box::new(value),
+                                    span: Span::new(start, end),
+                                });
+                            }
+                        }
+                    }
+                    self.pos = save;
+                    self.diags.truncate(saved_diags);
+                }
+
+                // As with value-if blocks, speculate on a trailing ordinary
+                // expression before parsing a statement.
+                let save = self.pos;
+                let saved_diags = self.diags.len();
+                if let Ok(value) = self.expr() {
+                    if matches!(self.peek().kind, TokKind::Semi)
+                        && matches!(self.peek2().kind, TokKind::RBrace)
+                    {
+                        self.bump();
+                    }
+                    if matches!(self.peek().kind, TokKind::RBrace) {
+                        let end = self.bump().span.end;
+                        return Ok(OrFallback::Block {
+                            body,
+                            value: Box::new(value),
+                            span: Span::new(start, end),
+                        });
+                    }
+                }
+                self.pos = save;
+                self.diags.truncate(saved_diags);
+                match self.stmt() {
+                    Ok(stmt) => body.push(stmt),
+                    Err(diag) => {
+                        self.diags.push(diag);
+                        self.sync_stmt();
+                    }
+                }
+            }
         }
 
         /// D-RANGE-VALUE1=A: ranges are ordinary values and bind looser than
