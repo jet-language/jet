@@ -462,10 +462,12 @@ impl<'a> Parser<'a> {
         let next = &self.toks[scan.min(self.toks.len() - 1)];
         match &next.kind {
             TokKind::Semi => true, // `module name;` — always a code module
-            // D-GENMOD2=A: `module name<params> { … }` — generic module template.
-            TokKind::Lt => true,
-            // D-GENMOD2=A: `module alias = module_name<args>` — module alias.
-            TokKind::Eq => true,
+            // D-CONF-GENSPELL1=A: `module name<types>(values) { … }` — generic
+            // module template. A value-only template starts directly with `(`.
+            TokKind::Lt | TokKind::LParen => true,
+            // D-CONF-GENSPELL1=A: `module alias :: module_name<types>(values)` —
+            // module alias.
+            TokKind::ColonColon => true,
             TokKind::LBrace => {
                 // Peek inside the `{` at scan+1
                 let inside = &self.toks[(scan + 1).min(self.toks.len() - 1)];
@@ -508,7 +510,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-MOD1/2: parse `[pub] module name ;` or `[pub] module name { items }`,
-    /// or D-GENMOD2=A generic/alias forms. Returns an `Item` (CodeModule,
+    /// or D-CONF-GENSPELL1=A generic/alias forms. Returns an `Item` (CodeModule,
     /// GenericModule, or ModuleAlias) so all callers share one return type.
     pub(super) fn code_module(&mut self, is_pub: bool) -> Result<Item, Diagnostic> {
         self.code_module_with_pkg(is_pub, false)
@@ -563,12 +565,15 @@ impl<'a> Parser<'a> {
         let start = self.bump().span; // consume `module`
         let (name, name_span) = self.expect_ident("for the code module name")?;
         match &self.peek().kind {
-            // D-GENMOD2=A: `module name<params> { body }` — generic module template
-            TokKind::Lt => {
+            // D-CONF-GENSPELL1=A: `module name<types>(values) { body }` — generic
+            // module template.
+            TokKind::Lt | TokKind::LParen => {
                 self.finish_generic_module(name, name_span, is_pub, is_package_pub, start)
             }
-            // D-GENMOD2=A: `module alias = target<args>` — module alias
-            TokKind::Eq => self.finish_module_alias(name, name_span, is_pub, is_package_pub, start),
+            // D-CONF-GENSPELL1=A: `module alias :: target<types>(values)` — module alias
+            TokKind::ColonColon => {
+                self.finish_module_alias(name, name_span, is_pub, is_package_pub, start)
+            }
             TokKind::Semi => {
                 let end = self.bump().span.end; // consume `;`
                 Ok(Item::CodeModule(CodeModule {
@@ -624,6 +629,13 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end),
                 }))
             }
+            TokKind::Eq => Err(Diagnostic::error(
+                "E0003",
+                "module aliases use `::`, not `=`".to_string(),
+                "D-CONF-GENSPELL1=A gives generic modules the same shape as functions: type arguments use `<…>`, value arguments use `(…)`, and `::` binds the instance".to_string(),
+                format!("write `module {name} :: Target<…>(…)`"),
+                Some(self.peek().span),
+            )),
             other => Err(Diagnostic::error(
                 "E0003",
                 format!(
@@ -639,7 +651,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-GENMOD2=A: finish parsing `module name<params> { body }` after the name.
+    /// D-CONF-GENSPELL1=A: finish parsing `module name<types>(values) { body }`.
     fn finish_generic_module(
         &mut self,
         name: String,
@@ -648,23 +660,74 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
         start: Span,
     ) -> Result<Item, Diagnostic> {
-        self.bump(); // consume `<`
         let mut params = Vec::new();
-        while !matches!(self.peek().kind, TokKind::Gt | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Comma) {
-                self.bump();
-                continue;
+        if matches!(self.peek().kind, TokKind::Lt) {
+            self.bump(); // consume `<`
+            while !matches!(self.peek().kind, TokKind::Gt | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    continue;
+                }
+                let (pname, pname_span) =
+                    self.expect_ident("for a generic module type parameter name")?;
+                if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump();
+                    let (annotation, _) = self.type_()?;
+                    if matches!(
+                        annotation,
+                        Type::Bool
+                            | Type::Char
+                            | Type::Int
+                            | Type::Float
+                            | Type::String
+                            | Type::IntN { .. }
+                            | Type::Float32
+                    ) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "generic module value parameters use parentheses, not angle brackets".to_string(),
+                            "angle brackets contain type parameters; the canonical module spelling mirrors a function: `<types>(values)` (D-CONF-GENSPELL1=A)".to_string(),
+                            format!("write `module {name}<K>({pname}: Int) {{ … }}`"),
+                            Some(pname_span),
+                        ));
+                    }
+                    params.push(GenericModuleParam::Type {
+                        name: pname,
+                        name_span: pname_span,
+                        bound: Some(annotation),
+                    });
+                } else {
+                    params.push(GenericModuleParam::Type {
+                        name: pname,
+                        name_span: pname_span,
+                        bound: None,
+                    });
+                }
             }
-            let (pname, pname_span) = self.expect_ident("for a generic module parameter name")?;
-            if matches!(self.peek().kind, TokKind::Colon) {
-                self.bump();
-                let (annotation, _) = self.type_()?;
-                params.push(GenericModuleParam::Annotated { name:pname, name_span:pname_span, annotation });
-            } else {
-                params.push(GenericModuleParam::Bare { name:pname, name_span:pname_span });
-            }
+            self.expect(TokKind::Gt, "to close the generic module type parameter list")?;
         }
-        self.expect(TokKind::Gt, "to close the generic module parameter list")?;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // consume `(`
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    continue;
+                }
+                let (pname, pname_span) =
+                    self.expect_ident("for a generic module value parameter name")?;
+                self.expect(TokKind::Colon, "after a generic module value parameter name")?;
+                let (annotation, _) = self.type_()?;
+                params.push(GenericModuleParam::Value {
+                    name: pname,
+                    name_span: pname_span,
+                    ty: annotation,
+                });
+            }
+            self.expect(
+                TokKind::RParen,
+                "to close the generic module value parameter list",
+            )?;
+        }
         self.expect(TokKind::LBrace, "to open the generic module body")?;
         let mut body = Vec::new();
         let mut imports = Vec::new();
@@ -705,7 +768,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// D-GENMOD2=A: finish parsing `module alias = target<args>` after the name.
+    /// D-CONF-GENSPELL1=A: finish parsing `module alias :: target<types>(values)`.
     fn finish_module_alias(
         &mut self,
         name: String,
@@ -714,7 +777,7 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
         start: Span,
     ) -> Result<Item, Diagnostic> {
-        self.bump(); // consume `=`
+        self.bump(); // consume `::`
         let (target, target_span) = self.expect_ident("for the target module name")?;
         let mut args = Vec::new();
         if matches!(self.peek().kind, TokKind::Lt) {
@@ -725,49 +788,23 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 let arg_start = self.peek().span;
-                // Preserve unresolved syntax. Literal-led and enum-case
-                // expressions are values; an identifier can still be
-                // contextualized as either a type or an earlier constant by sema.
-                match &self.peek().kind {
-                    TokKind::Int(_, _) | TokKind::KwTrue | TokKind::KwFalse | TokKind::Char(_) | TokKind::Str(_)
-                    | TokKind::LParen | TokKind::Minus | TokKind::Bang => {
-                        let expr = self.module_arg_expr()?;
-                        args.push(ModuleArg::Value(expr, arg_start));
-                    }
-                    TokKind::Ident(_)
-                        if matches!(
-                            self.peek2().kind,
-                            TokKind::Dot
-                                | TokKind::LParen
-                                | TokKind::Plus
-                                | TokKind::Minus
-                                | TokKind::Star
-                                | TokKind::Slash
-                                | TokKind::Percent
-                                | TokKind::Amp
-                                | TokKind::Pipe
-                                | TokKind::Caret
-                                | TokKind::Shl
-                                | TokKind::Shr
-                                | TokKind::AndAnd
-                                | TokKind::OrOr
-                                | TokKind::EqEq
-                                | TokKind::NotEq
-                                | TokKind::Le
-                                | TokKind::Ge
-                                | TokKind::Compare
-                        ) =>
-                    {
-                        let expr = self.module_arg_expr()?;
-                        args.push(ModuleArg::Value(expr, arg_start));
-                    }
-                    _ => {
-                        let (ty, _) = self.type_()?;
-                        args.push(ModuleArg::Type(ty, arg_start));
-                    }
-                }
+                let (ty, _) = self.type_()?;
+                args.push(ModuleArg::Type(ty, arg_start));
             }
             self.expect(TokKind::Gt, "to close the module alias argument list")?;
+        }
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // consume `(`
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    continue;
+                }
+                let arg_start = self.peek().span;
+                let expr = self.module_arg_expr()?;
+                args.push(ModuleArg::Value(expr, arg_start));
+            }
+            self.expect(TokKind::RParen, "to close the module alias value argument list")?;
         }
         let end = self.peek().span.end;
         // Consume optional trailing `;`

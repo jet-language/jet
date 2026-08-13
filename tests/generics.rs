@@ -5,6 +5,34 @@ mod common;
 use std::process::Command;
 
 #[test]
+fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
+    let source = r#"
+@base :: 40
+
+module cache<K>(capacity: Int) {
+    @computed_size :: @base + capacity
+    pub struct Entry { items: [K#capacity] }
+    pub fn size() => Int = @computed_size
+}
+
+module x :: cache<Int>(64)
+
+module plain_template<K> {
+    pub fn identity(value: K) => K = value
+}
+module plain :: plain_template<Int>
+
+fn run() {
+    print(x.size())
+    print(plain.identity(7))
+}
+"#;
+    jet::compile(source).unwrap_or_else(|diags| {
+        panic!("canonical generic-module spelling failed: {diags:#?}")
+    });
+}
+
+#[test]
 fn generic_modules_complete_instantiation() {
     // CAPABILITY_CLAIM: claim.generic-modules / complete-instantiation
     let complete = include_str!("../examples/features/modules/generic_modules.jet");
@@ -17,20 +45,20 @@ fn generic_modules_complete_instantiation() {
     );
 
     let nested = r#"
-module outer<T, count: Int> {
-    module inner<U, extra: Int> {
+module outer<T>(count: Int) {
+    module inner<U>(extra: Int) {
         pub fn total(first: T, second: U) => Int { return count + extra }
     }
-    module closed = inner<T, count>
+    module closed :: inner<T>(count)
 }
-module instance = outer<String, 3>
+module instance :: outer<String>(3)
 fn run() {}
 "#;
     jet::compile(nested)
         .unwrap_or_else(|diags| panic!("nested generic-module instantiation failed: {diags:#?}"));
 
     let body_items = r#"
-module complete<T, count: Int, label: String> {
+module complete<T>(count: Int, label: String) {
     #Meta(category: label)
     @value :: count
     @comptime_value :: count + 1
@@ -46,7 +74,7 @@ module complete<T, count: Int, label: String> {
     impl Wrapped { fn linux_value(self) => T { return self.value } }
     module plain { pub fn value() => Int { return count } }
     module nested<U> { pub fn keep(value: U) => U { return ~value } }
-    module nested_use = nested<T>
+    module nested_use :: nested<T>
     #Meta(category: label)
     pub fn marked(value: ^#Marked T) => #Marked T {
         #Meta(category: label)
@@ -56,7 +84,7 @@ module complete<T, count: Int, label: String> {
     #Test fn identity(value: T) { expect(count == count) }
     #Bench("complete") { expect(label == label) }
 }
-module complete_use = complete<Int, 3, "generic module">
+module complete_use :: complete<Int>(3, "generic module")
 fn run() {}
 "#;
     jet::compile(body_items)
@@ -65,8 +93,8 @@ fn run() {}
     let distinct_generated_names = r#"
 module with_bar_baz<T> { pub struct BarBaz { value: T } }
 module with_baz<T> { pub struct Baz { value: T } }
-module foo = with_bar_baz<Int>
-module foo_bar = with_baz<Int>
+module foo :: with_bar_baz<Int>
+module foo_bar :: with_baz<Int>
 fn run() {
     first :: M3FooBarBaz.{ value: 1 }
     second :: M3Foo3BarBaz.{ value: 2 }
@@ -84,12 +112,12 @@ fn run() {
     std::fs::create_dir_all(&root).expect("create generic-module acceptance directory");
     std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T, n: Int> { pub fn value() => Int { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() => Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T, n: Int> { pub fn value() => Int { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() => Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -100,11 +128,11 @@ module left
 module right
 use left.[boxed as left_boxed]
 use right.[boxed as right_boxed]
-module first = left_boxed<Int, 3>
-module equivalent = left_boxed<Int, 3>
-module different_type = left_boxed<String, 3>
-module different_value = left_boxed<Int, 4>
-module different_path = right_boxed<Int, 3>
+module first :: left_boxed<Int>(3)
+module equivalent :: left_boxed<Int>(3)
+module different_type :: left_boxed<String>(3)
+module different_value :: left_boxed<Int>(4)
+module different_path :: right_boxed<Int>(3)
 fn run() {}
 "#,
     )
@@ -152,7 +180,7 @@ fn run() {}
 #[test]
 fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
-module box<capacity: Int> {
+module box(capacity: Int) {
     @base :: capacity
     pub fn shadowed() => Int {
         @base :: 5
@@ -163,7 +191,7 @@ module box<capacity: Int> {
         return capacity
     }
 }
-module b32 = box<32>
+module b32 :: box(32)
 fn run() {
     print(b32.shadowed())
     print(b32.plain_shadowed())
@@ -204,13 +232,13 @@ fn run() {
 
 fn assert_nested_generic_module_execution() {
     let source = r#"
-module outer<T, count: Int> {
+module outer<T>(count: Int) {
     module plain {
         module inner<U> {
             pub fn total(value: U) => Int { return count }
         }
-        module closed = inner<T>
-        module forwarded = closed
+        module closed :: inner<T>
+        module forwarded :: closed
         pub fn result(value: T) => Int {
             return closed.total(value) + forwarded.total(value)
         }
@@ -219,7 +247,7 @@ module outer<T, count: Int> {
         return plain.result(value)
     }
 }
-module selected = outer<Int, 3>
+module selected :: outer<Int>(3)
 fn run() {
     print(selected.result(1))
 }
@@ -280,16 +308,16 @@ fn run() {
 fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
-module keyed<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
+module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
     pub fn value() => Int { return count }
 }
-module same = keyed<true, 3, 'a', "x", Mode.Fast>
-module equivalent = keyed<1 < 2, 1 + 2, 'a', "x", Mode.Fast>
-module different_bool = keyed<false, 3, 'a', "x", Mode.Fast>
-module different_int = keyed<true, 4, 'a', "x", Mode.Fast>
-module different_char = keyed<true, 3, 'b', "x", Mode.Fast>
-module different_string = keyed<true, 3, 'a', "y", Mode.Fast>
-module different_enum = keyed<true, 3, 'a', "x", Mode.Safe>
+module same :: keyed(true, 3, 'a', "x", Mode.Fast)
+module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
+module different_bool :: keyed(false, 3, 'a', "x", Mode.Fast)
+module different_int :: keyed(true, 4, 'a', "x", Mode.Fast)
+module different_char :: keyed(true, 3, 'b', "x", Mode.Fast)
+module different_string :: keyed(true, 3, 'a', "y", Mode.Fast)
+module different_enum :: keyed(true, 3, 'a', "x", Mode.Safe)
 fn run() {}
 "#;
     let root = std::env::temp_dir().join(format!(
@@ -681,8 +709,8 @@ impl Box {
 
     fn make<U>(value: ^U) => U {
         return value
+        }
     }
-}
 
 fn run() {
     box :: Box<Int>.new(3)

@@ -579,7 +579,7 @@ mod tests {
         let main = root.join("main.jet");
         std::fs::write(
             &main,
-            "module boxed<T, n: Int> { pub fn value() => Int { return n } }\nmodule a = boxed<Int, 3>\nmodule b = boxed<Int, 3>\nfn run() {}\n",
+            "module boxed<T>(n: Int) { pub fn value() => Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
         ).unwrap();
 
         let index = open(&main).expect("generic module should index");

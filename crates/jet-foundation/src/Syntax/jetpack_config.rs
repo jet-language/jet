@@ -89,10 +89,10 @@ pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 /// U3 (ratified 2026-06-16): module declaration keyword — `module name { … }`.
 pub const KW_MODULE: &str = "module";
 
-/// D-GENMOD2=A (ratified 2026-06-28): generic module parameter list uses `<…>`.
-/// Type params: `K: Hash` (name starts uppercase; bound is a trait).
-/// Value params: `capacity: Int` (name starts lowercase; annotation is a concrete type).
-/// Instantiation: `module alias = module_name<TypeArg, value_arg>`.
+/// D-CONF-GENSPELL1=A (ratified 2026-08-06): generic modules use `<…>` for
+/// type parameters, `(…)` for typed value parameters, and `::` for aliases.
+/// `module cache<K>(capacity: Int) { … }` and
+/// `module int_cache :: cache<Int>(64)` are the canonical forms.
 /// Reuses existing `<`/`>` angle-bracket tokens (no new sigil, I7 satisfied).
 pub const GENMOD_OPEN: &str = "<"; // reuses OP_LT
 pub const GENMOD_CLOSE: &str = ">"; // reuses OP_GT

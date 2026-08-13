@@ -193,7 +193,6 @@ pub(crate) fn eval_comptime_items(
     {
         return;
     }
-    let mut results: Vec<(String, crate::Comptime::CtValue)> = Vec::new();
     {
         // Comptime runs before the production serde expansion pass. Expand a
         // clone so the canonical TIR evaluator can call the same generated
@@ -236,82 +235,80 @@ pub(crate) fn eval_comptime_items(
                 _ => {}
             }
         }
-        // Earlier comptime bindings are in scope for later ones.
+        // Earlier comptime bindings are in scope for later ones. Keep each
+        // value on its declaration as soon as it is known: generic-module
+        // expansion can hand registration a declaration whose predecessor
+        // was already folded, and delayed write-back loses that binding.
         let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
-        for item in items.iter() {
-            if let Item::Const(c) = item {
-                if c.is_comptime {
-                    // D-CTIO1: report a bad embed path against the call itself,
-                    // then skip evaluation so the law isn't reported twice.
-                    if !crate::Comptime::check_build_time_io(&c.value, base_dir, diags) {
-                        continue;
-                    }
-                    // D-FACT-READ1=A: direct registered-plane reads have a
-                    // typed value before the general evaluator runs. This is
-                    // the same reader used after registration; the early pass
-                    // only supplies source declarations because sema has not
-                    // built the module registry yet.
-                    if let Some(value) = crate::Comptime::fact_read_value(
-                        &c.value,
-                        &eval_items,
-                        build_facts,
-                    )
-                    {
-                        let ty = value.jet_type();
-                        consts.insert(c.name.clone(), ty);
-                        globals.insert(c.name.clone(), value.clone());
-                        results.push((c.name.clone(), value));
-                        continue;
-                    }
-                    // D-META-EFFECT1: evaluate_with_imports resolves Core calls
-                    // through the shared effect facts.
-                    match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
-                        &c.value,
-                        &funcs,
-                        &externs,
-                        base_dir,
-                        &globals,
-                        core_imports,
-                        crate::Policy::GateSet::default(),
-                        0,
-                        &structs,
-                        None,
-                    ) {
-                        Ok((v, inputs)) => {
-                            // `v.jet_type()` reads the element type off the value's
-                            // first element (D-BIGINT1-adjacent `CtValue::jet_type`
-                            // convention). For a fixed-return-type comptime builtin
-                            // (e.g. `find(glob)`, always `[String]`) whose result is
-                            // an EMPTY collection, that read has nothing to sample and
-                            // falls back to a placeholder — wrong, and (via codegen)
-                            // an unannotated `vec![]` rustc rejects as E0282 (I2). Prefer
-                            // the builtin's known static return type when one applies.
-                            let ty = comptime_builtin_fixed_return_type(
-                                &c.value,
-                                core_imports,
-                                &v,
-                            )
-                            .unwrap_or_else(|| v.jet_type());
-                            consts.insert(c.name.clone(), ty);
-                            globals.insert(c.name.clone(), v.clone());
-                            results.push((c.name.clone(), v));
-                            if let Some(out) = embed_inputs_out.as_deref_mut() {
-                                out.extend(inputs);
-                            }
-                        }
-                        Err(d) => diags.push(d),
-                    }
+        for index in 0..items.len() {
+            let (name, value, known, known_ty) = match &items[index] {
+                Item::Const(c) if c.is_comptime => {
+                    (c.name.clone(), c.value.clone(), c.ct.clone(), c.ty.clone())
                 }
+                _ => continue,
+            };
+            if let Some(value) = known {
+                let ty = known_ty.unwrap_or_else(|| value.jet_type());
+                consts.insert(name.clone(), ty.clone());
+                globals.insert(name, value.clone());
+                if let Item::Const(c) = &mut items[index] {
+                    c.ty = Some(ty);
+                    c.ct = Some(value);
+                }
+                continue;
             }
-        }
-    }
-    for item in items.iter_mut() {
-        if let Item::Const(c) = item {
-            if c.is_comptime {
-                c.ty = consts.get(&c.name).cloned();
-                if let Some(pos) = results.iter().position(|(n, _)| n == &c.name) {
-                    c.ct = Some(results.remove(pos).1);
+            // D-CTIO1: report a bad embed path against the call itself,
+            // then skip evaluation so the law isn't reported twice.
+            if !crate::Comptime::check_build_time_io(&value, base_dir, diags) {
+                continue;
+            }
+            // D-FACT-READ1=A: direct registered-plane reads have a typed value
+            // before the general evaluator runs. This is the same reader used
+            // after registration; the early pass only supplies source
+            // declarations because sema has not built the module registry yet.
+            if let Some(value) =
+                crate::Comptime::fact_read_value(&value, &eval_items, build_facts)
+            {
+                let ty = value.jet_type();
+                consts.insert(name.clone(), ty.clone());
+                globals.insert(name.clone(), value.clone());
+                if let Item::Const(c) = &mut items[index] {
+                    c.ty = Some(ty);
+                    c.ct = Some(value);
                 }
+                continue;
+            }
+            // D-META-EFFECT1: evaluate_with_imports resolves Core calls
+            // through the shared effect facts.
+            match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
+                &value,
+                &funcs,
+                &externs,
+                base_dir,
+                &globals,
+                core_imports,
+                crate::Policy::GateSet::default(),
+                0,
+                &structs,
+                None,
+            ) {
+                Ok((v, inputs)) => {
+                    // `v.jet_type()` reads the element type off the value's
+                    // first element. For a fixed-return-type builtin whose
+                    // result is empty, prefer its known static return type.
+                    let ty = comptime_builtin_fixed_return_type(&value, core_imports, &v)
+                        .unwrap_or_else(|| v.jet_type());
+                    consts.insert(name.clone(), ty.clone());
+                    globals.insert(name.clone(), v.clone());
+                    if let Item::Const(c) = &mut items[index] {
+                        c.ty = Some(ty);
+                        c.ct = Some(v);
+                    }
+                    if let Some(out) = embed_inputs_out.as_deref_mut() {
+                        out.extend(inputs);
+                    }
+                }
+                Err(d) => diags.push(d),
             }
         }
     }
@@ -963,8 +960,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::StateDecl(_) // D-STATE-DECL
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2
             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
-            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+            | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             Item::MarkerDecl(_) | Item::FactDecl(_) => {
                 unreachable!("declaration items are consumed by the bundle registry")
             }

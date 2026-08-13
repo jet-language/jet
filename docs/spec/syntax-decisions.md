@@ -1384,9 +1384,8 @@ their own namespace and state.
 
 **D-GENMOD1 / D-GENMOD2 — Generic modules**: ML-functor style — a module
 parameterized by types and values; instantiation yields a specialized normal
-module. Type parameters (`K: Hash`) and value parameters (`capacity: Int`) share
-one `<…>` list, and application mirrors it: `module cache64 = cache<String,
-64>`.
+module. Type parameters (`K: Hash`) use `<…>`, value parameters (`capacity: Int`)
+use `(…)`, and application mirrors it: `module cache64 :: cache<String>(64)`.
 
 **D-GENMOD-VALUE1=A — Closed value specialization**: value parameters are
 immutable Tier-0 comptime values of type `Bool`, `Int`, `Char`, `String`, or a
@@ -1395,12 +1394,11 @@ they do not convert between value types. An `Int` value parameter may also fill
 the narrowly approved generic-module layout slot `[T#capacity]` under S26,
 S76, and D-FIXARR1.
 
-Parameter kind comes from sema resolution of its declaration annotation in the
-definition scope, never casing. A bare parameter is a type parameter; an
-annotated parameter is a type parameter when its annotation resolves to a
-trait/bound and a value parameter when it resolves to an allowed concrete value
-type. Alias arguments remain unresolved syntax until the target resolves, then
-each slot contextualizes one ordinary type or expression. There are no defaults,
+Parameter kind comes from its declaration list, never casing. An angle-list
+parameter is a type parameter (optionally bounded); a parenthesis-list
+parameter is a typed value parameter. Alias arguments remain unresolved syntax
+until the target resolves, then each slot contextualizes one ordinary type or
+expression. There are no defaults,
 named arguments, inference, packs, implicit conversions, or module-valued
 parameters.
 

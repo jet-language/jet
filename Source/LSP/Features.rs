@@ -244,7 +244,7 @@ mod generic_instance_tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
-        let source = "module value<n: Int> { pub fn get() => Int { return n } }\nmodule a = value<3>\nmodule b = value<3>\nfn run() { print(a.get()); print(b.get()) }\n";
+        let source = "module value(n: Int) { pub fn get() => Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get()); print(b.get()) }\n";
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
@@ -268,8 +268,8 @@ mod generic_instance_tests {
         let main = root.join("main.jet");
         let left = root.join("left.jet");
         let right = root.join("right.jet");
-        let left_source = "module value<n: Int> { pub fn get() => Int { return n } }\nmodule same = value<3>\nfn left_value() => Int { return same.get() }\n";
-        let right_source = "module value<n: Int> { pub fn get() => Int { return n } }\nmodule same = value<4>\nfn right_value() => Int { return same.get() }\n";
+        let left_source = "module value(n: Int) { pub fn get() => Int { return n } }\nmodule same :: value(3)\nfn left_value() => Int { return same.get() }\n";
+        let right_source = "module value(n: Int) { pub fn get() => Int { return n } }\nmodule same :: value(4)\nfn right_value() => Int { return same.get() }\n";
         std::fs::write(&main, "module left\nmodule right\nfn run() {}\n").unwrap();
         std::fs::write(&left, left_source).unwrap();
         std::fs::write(&right, right_source).unwrap();
@@ -285,7 +285,7 @@ mod generic_instance_tests {
         let offset = left_source.find("same =").unwrap();
         let references = compute_references(&db, &tokens, &shown_left, offset, true);
         assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
-        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct value<4> instance joined by alias spelling: {references:?}");
+        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct value(4) instance joined by alias spelling: {references:?}");
         let _ = std::fs::remove_dir_all(root);
     }
 }

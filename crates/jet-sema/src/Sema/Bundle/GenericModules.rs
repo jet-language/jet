@@ -5,10 +5,10 @@ mod Substitution;
 use Substitution::{substitute_expr, substitute_marker, substitute_markers, substitute_meta, substitute_stmts};
 
 // ---------------------------------------------------------------------------
-// D-GENMOD2=A: generic module expansion (R11 pre-pass)
+// D-CONF-GENSPELL1=A: generic module expansion (R11 pre-pass)
 // ---------------------------------------------------------------------------
 //
-// `module string_cache32 = lru<String, 32>` expands into a synthetic
+// `module string_cache32 :: lru<String>(32)` expands into a synthetic
 // `CodeModule` with the same body as the generic template, with every
 // TypeParam name substituted by the supplied type arg. The original
 // GenericModule/ModuleAlias items are then erased. This runs before
@@ -702,7 +702,7 @@ fn expand_nested_generics_in_code_module(
             def: def.clone(),
             definition_id: crate::SHA256::sha256_hex(&full_key),
             definition_full_key: full_key,
-            params: resolve_params(def, &traits, &enums, diags),
+            params: resolve_params(def, &enums, diags),
             source_module: consumer_module,
             source_items: Vec::new(),
             source_values: values.clone(),
@@ -734,7 +734,7 @@ fn expand_nested_generics_in_code_module(
                 format!("generic module `{}` not found in this scope", resolved.target),
                 "check the module template name and make sure it is defined in the same file"
                     .to_string(),
-                format!("example: `module {} = MyTemplate<String>`", local_name),
+                format!("example: `module {} :: MyTemplate<String>`", local_name),
                 Some(resolved.target_span),
             ));
             invalid_aliases.insert(nested_alias.name.clone());
@@ -782,8 +782,24 @@ fn expand_nested_generics_in_code_module(
             resolved.name.clone()
         };
         call_projections.insert(local_name.clone(), canonical.clone());
-        type_projections.insert(local_name, Type::Named(canonical.clone()));
-        type_projections.insert(resolved.name, Type::Named(canonical));
+        type_projections.insert(local_name.clone(), Type::Named(canonical.clone()));
+        type_projections.insert(resolved.name.clone(), Type::Named(canonical.clone()));
+        // Nested aliases expose the same source-facing nominal-member paths
+        // as top-level instances (`closed.Item`). Their declarations are
+        // generated from this template under the canonical alias prefix.
+        for item in &info.def.body {
+            let Some(name) = match item {
+                Item::Struct(def) => Some(&def.name),
+                Item::Enum(def) => Some(&def.name),
+                _ => None,
+            } else {
+                continue;
+            };
+            let generated = module_type_name(&canonical, name);
+            let resolved_type = Type::Named(generated);
+            type_projections.insert(format!("{local_name}.{name}"), resolved_type.clone());
+            type_projections.insert(format!("{}.{name}", resolved.name), resolved_type);
+        }
     }
 
     items.retain(|item| !matches!(item, Item::GenericModule(_) | Item::ModuleAlias(_)));
@@ -1133,43 +1149,37 @@ fn instance_key(
 
 fn resolve_params(
     def: &GenericModuleDef,
-    traits: &TraitRegistry,
     enums: &HashMap<String, bool>,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<ResolvedModuleParam> {
     def.params
         .iter()
         .map(|param| match param {
-            GenericModuleParam::Bare { name, .. } => ResolvedModuleParam::Type {
+            GenericModuleParam::Type { name, bound, .. } => ResolvedModuleParam::Type {
                 name: name.clone(),
-                bound: None,
+                bound: match bound {
+                    Some(Type::Named(bound)) => Some(bound.clone()),
+                    _ => None,
+                },
             },
-            GenericModuleParam::Annotated {
+            GenericModuleParam::Value {
                 name,
                 name_span,
-                annotation,
+                ty,
             } => {
-                if let Type::Named(bound) = annotation {
-                    if traits.traits.contains_key(bound) {
-                        return ResolvedModuleParam::Type {
-                            name: name.clone(),
-                            bound: Some(bound.clone()),
-                        };
-                    }
-                }
-                let allowed = matches!(annotation, Type::Bool | Type::Int | Type::Char | Type::String)
-                    || matches!(annotation, Type::Named(n) if enums.get(n).copied() == Some(true));
+                let allowed = matches!(ty, Type::Bool | Type::Int | Type::Char | Type::String)
+                    || matches!(ty, Type::Named(n) if enums.get(n).copied() == Some(true));
                 if allowed {
                     ResolvedModuleParam::Value {
                         name: name.clone(),
-                        ty: annotation.clone(),
+                        ty: ty.clone(),
                     }
                 } else {
                     diags.push(Diagnostic::error(
                         "E0856",
                         format!(
                             "generic module value parameter `{name}` uses unsupported type `{}`",
-                            type_name(annotation)
+                            type_name(ty)
                         ),
                         "value parameters admit only Bool, Int, Char, String, or a fieldless enum"
                             .to_string(),
@@ -1318,7 +1328,7 @@ fn expand_alias(
                 format!("generic module `{}` not found in this scope", alias.target),
                 "check the module template name and make sure it is defined in the same file"
                     .to_string(),
-                format!("example: `module {} = MyTemplate<String>`", alias.name),
+                format!("example: `module {} :: MyTemplate<String>`", alias.name),
                 Some(alias.target_span),
             ));
             return None;
@@ -1342,7 +1352,7 @@ fn expand_alias(
             ),
             "the number of type/value arguments must match the template parameter list".to_string(),
             format!(
-                "example: `module {} = {}<{}>` with {} arg(s)",
+                "example: `module {} :: {}<{}>` with {} arg(s)",
                 alias.name,
                 alias.target,
                 template
@@ -1419,11 +1429,10 @@ fn expand_alias(
 
     // Constants specialize in declaration order. Their evaluated definition-site
     // values are then available to later constants and every template function.
-    let mut definition_values = if info.source_module == consumer_module {
-        HashMap::new()
-    } else {
-        info.source_values.clone()
-    };
+    // Definition-site comptime bindings belong to the template, including
+    // same-file templates. Keep them alive through expansion; registration
+    // must not be the first phase that can see an earlier `@` binding.
+    let mut definition_values = info.source_values.clone();
     definition_values.extend(value_args);
     let mut declarations = Vec::new();
     for item in source_items {
@@ -1463,18 +1472,29 @@ fn expand_alias(
         let Item::Const(source) = item else { continue };
         let mut value = source.value.clone();
         substitute_expr(&mut value, &definition_types, &definition_values);
-        let evaluated = crate::Comptime::evaluate(
-            &value,
-            funcs,
-            &HashSet::new(),
-            Path::new("."),
-            &definition_values,
-        );
-        if let Ok(evaluated) = evaluated {
-            definition_values.insert(source.name.clone(), evaluated);
+        // Keep the folded value on the generated declaration. Expansion runs
+        // before ordinary item registration, so dropping this result leaves
+        // the later comptime context unable to resolve an earlier `@` binding.
+        let evaluated = source.ct.clone().or_else(|| {
+            crate::Comptime::evaluate(
+                &value,
+                funcs,
+                &HashSet::new(),
+                Path::new("."),
+                &definition_values,
+            )
+            .ok()
+        });
+        if let Some(evaluated) = &evaluated {
+            definition_values.insert(source.name.clone(), evaluated.clone());
         }
         let mut meta = source.meta.clone();
         substitute_meta(&mut meta, &definition_types, &definition_values);
+        let ty = source
+            .ty
+            .as_ref()
+            .map(|ty| specialize_module_type(ty, &definition_types, &definition_values))
+            .or_else(|| evaluated.as_ref().map(crate::AST::CtValue::jet_type));
         declarations.push(Item::Const(crate::AST::ConstDef {
             span: source.span,
             name: module_value_name(&alias.name, &source.name),
@@ -1484,8 +1504,8 @@ fn expand_alias(
             attrs: source.attrs.clone(),
             rust_kind: source.rust_kind,
             is_comptime: source.is_comptime,
-            ct: source.ct.clone(),
-            ty: source.ty.as_ref().map(|ty| specialize_module_type(ty, &definition_types, &definition_values)),
+            ct: evaluated,
+            ty,
             is_persist: source.is_persist,
             persist_span: source.persist_span,
             mutable: source.mutable,
@@ -1639,7 +1659,7 @@ fn expand_alias(
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
             let full_key = definition_full_key("nested", "", &enclosing_identity, &def.name);
             (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
-                params: resolve_params(def, &nested_traits, &nested_enums, diags),
+                                params: resolve_params(def, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone(),
                 source_rule_facts: info.source_rule_facts.clone() })
         }).collect();
@@ -1847,7 +1867,7 @@ fn resolve_local_alias(
                     current.target
                 ),
                 "an alias-to-alias link reuses an already-bound module instance".to_string(),
-                format!("remove the arguments and write `module {} = {}`", current.name, current.target),
+                format!("remove the arguments and write `module {} :: {}`", current.name, current.target),
                 Some(current.span),
             ));
             return None;
@@ -1903,7 +1923,7 @@ fn alias_chain_contains(
     false
 }
 
-/// D-GENMOD2=A: expand every `ModuleAlias` in each module's item list into a
+/// D-CONF-GENSPELL1=A: expand every `ModuleAlias` in each module's item list into a
 /// concrete `CodeModule` using the corresponding `GenericModule` template.
 /// Templates and aliases are removed from the item list after expansion.
 pub(crate) fn expand_generic_module_aliases(
@@ -1915,26 +1935,6 @@ pub(crate) fn expand_generic_module_aliases(
         .iter()
         .enumerate()
         .map(|(source_module, module)| {
-            // This registry only feeds `resolve_params`/`resolve_args` (does a
-            // bound name exist, does a type implement it?) — it is NOT the
-            // canonical per-module trait pass (that runs later, once, in the
-            // main loop below with synthetic hooks pre-registered). Register
-            // the same builtin hook traits here so a generic-module bound
-            // like `T: Index` resolves, and throw the diagnostics away: the
-            // canonical pass re-validates every impl block and is the only
-            // place user-facing E0119/E0906/… should be reported. Without
-            // this, every `impl T.Index`/`.Iterable`/`.Rollback`/`.Display`/
-            // `.Debug` in the bundle spuriously fails E0119 here (empty trait
-            // table) before the real pass ever runs.
-            let mut traits = TraitRegistry::default();
-            traits.register_synthetic_rollback();
-            traits.register_synthetic_display_debug();
-            traits.register_synthetic_close();
-            traits.register_synthetic_operators();
-            traits.register_synthetic_iter_index();
-            traits.register_synthetic_io();
-            traits.register_synthetic_driver();
-            traits.register_items(&module.items, &mut Vec::new());
             let enums: HashMap<String, bool> = module
                 .items
                 .iter()
@@ -1992,7 +1992,7 @@ pub(crate) fn expand_generic_module_aliases(
                                 def: gm.clone(),
                                 definition_id: crate::SHA256::sha256_hex(&full_key),
                                 definition_full_key: full_key,
-                                params: resolve_params(gm, &traits, &enums, diags),
+                                params: resolve_params(gm, &enums, diags),
                                 source_module,
                                 source_items: clone_definition_items(&source_items),
                                 source_values: source_values.clone(),
@@ -2179,7 +2179,7 @@ pub(crate) fn expand_generic_module_aliases(
                         format!("generic module `{}` not found in this scope", resolved.target),
                         "check the module template name and make sure it is defined in the same file"
                             .to_string(),
-                        format!("example: `module {} = MyTemplate<String>`", resolved.name),
+                        format!("example: `module {} :: MyTemplate<String>`", resolved.name),
                         Some(resolved.target_span),
                     ));
                     invalid_aliases.insert(alias.name.clone());
@@ -2200,6 +2200,9 @@ pub(crate) fn expand_generic_module_aliases(
                     });
                 if let Some(canonical) = bundle_instances.get(&key) {
                     projections.insert(alias.name.clone(), canonical.clone());
+                    if let Some(nominals) = bundle_instance_nominals.get(canonical).cloned() {
+                        bundle_instance_nominals.insert(alias.name.clone(), nominals);
+                    }
                     continue;
                 }
                 if let Some(mut cm) = expand_alias(
@@ -2269,14 +2272,35 @@ pub(crate) fn expand_generic_module_aliases(
         }
         // Resolve projected nominal spellings before registration/codegen. No
         // duplicate declaration or zero-parameter surface alias leaks out.
-        let projection_types: HashMap<String, Type> = projections.iter().flat_map(|(alias, canonical)| {
+        let mut projection_types = HashMap::new();
+        for (alias, nominals) in &bundle_instance_nominals {
+            let canonical = projections.get(alias).unwrap_or(alias);
             let prefix = module_type_prefix(canonical);
-            bundle_instance_nominals.get(canonical).into_iter().flatten().filter_map(move |canonical_name| {
-                canonical_name.strip_prefix(&prefix).map(|suffix| {
-                    (module_type_name(alias, suffix), Type::Named(canonical_name.clone()))
-                })
-            })
-        }).collect();
+            for canonical_name in nominals {
+                let Some(suffix) = canonical_name.strip_prefix(&prefix) else {
+                    continue;
+                };
+                let resolved = Type::Named(canonical_name.clone());
+                // Rewrite the source-facing member path as well as the
+                // generated spelling used by specialized declarations.
+                projection_types.insert(format!("{alias}.{suffix}"), resolved.clone());
+                projection_types.insert(module_type_name(alias, suffix), resolved);
+            }
+        }
+        for (alias, canonical) in &projections {
+            let prefix = module_type_prefix(canonical);
+            for canonical_name in bundle_instance_nominals
+                .get(canonical)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(suffix) = canonical_name.strip_prefix(&prefix) {
+                    let resolved = Type::Named(canonical_name.clone());
+                    projection_types.insert(format!("{alias}.{suffix}"), resolved.clone());
+                    projection_types.insert(module_type_name(alias, suffix), resolved);
+                }
+            }
+        }
         for (alias, canonical) in &projections {
             let names = HashSet::from([alias.clone()]);
             for item in &mut module.items {
@@ -2436,7 +2460,7 @@ module everything<T> {
     fn id(value: T) => T { return ~value }
     module nested { fn nested() {} }
     module inner<U> { fn inner(value: U) => U { return ~value } }
-    module int_inner = inner<Int>
+    module int_inner :: inner<Int>
     #Test("smoke") { expect(@answer == 42) }
     #Bench("work") { expect(@answer == 42) }
 }

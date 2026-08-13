@@ -606,12 +606,12 @@ fn run() {}
 fn generic_instances_materialize_distinct_test_and_bench_names() {
     let (bundle, diagnostics) = checked(
         r#"
-module suite<label: String> {
+module suite(label: String) {
     #Test(label) {}
     #Bench(label) {}
 }
-module first = suite<"case">
-module second = suite<"other">
+module first :: suite("case")
+module second :: suite("other")
 fn run() {}
 "#,
         jet::Sema::CompileMode::Check,

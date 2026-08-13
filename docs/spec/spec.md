@@ -1942,28 +1942,29 @@ inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,
 value_wrong_type,value_not_comptime,disallowed_value_type,trait_bound_unsatisfied,
 cycle_direct,cycle_indirect}`.
 
-### Generic modules (D-GENMOD1, D-GENMOD2, D-GENMOD-VALUE1,
+### Generic modules (D-GENMOD1, D-GENMOD2, D-CONF-GENSPELL1, D-GENMOD-VALUE1,
 D-GENMOD-BODY1, D-GENMOD-IDENTITY1)
 
 A **generic module** is a module template parameterized by types and compile-time
 values. Instantiating it produces a specialized ordinary module.
 
-**Template form (D-GENMOD2=A):**
+**Template form (D-CONF-GENSPELL1=A):**
 
 ```jet
-module cache<K> {
+module cache<K>(capacity: Int) {
     pub fn key_of(k: K) => String { … }
 }
 ```
 
-Type parameters use PascalCase names with an optional bound (`K: Hash`).
-Value parameters use lowercase names with a type annotation (`capacity: Int`).
-Both live in one `<…>` list.
+Type parameters and bounds use the angle list (`<K>` or `<K: Hash>`).
+Value parameters use the typed parenthesis list (`(capacity: Int)`).
+The two lists are separate, in the same order as a function's type and value
+arguments.
 
 **Instantiation alias:**
 
 ```jet
-module int_cache = cache<Int>
+module int_cache :: cache<Int>(64)
 ```
 
 Value parameters are immutable Tier-0 comptime `Bool`, `Int`, `Char`, `String`,

@@ -115,7 +115,7 @@ effective value with `jet explain`.
 | 10 | Effect budget (`effects: { allow: [...] }`) | `crates/jet-pkg-model/src/EffectBudget.rs` (D-EFFBUDGET1) | Authority fact with its own schema; D-AUTHORITY-MANIFEST1 targets it. |
 | 11 | `#Policy(...)` scope ladder | `crates/jet-foundation/src/Policy.rs` (D-MARK-SCOPE1) | The right source-scope law — applied only to memory facts, on four of six scopes. |
 | 12 | jetos module options (`OptionValue.{ value, priority }`) | `docs/plans/epoch-7/native-jetos.md:41-45` (D-JOS-PRIORITY-SURFACE2) | A second override rule beside row 11. |
-| 13 | Generic-module value params (`module retry<count: Int>`) | `docs/spec/spec.md:1867-1912` (D-GENMOD-VALUE1) | Configuration under another name. |
+| 13 | Generic-module value params (`module retry(count: Int)`) | `docs/spec/spec.md:1867-1912` (D-GENMOD-VALUE1) | Configuration under another name. |
 | 14 | Computed module fields | `crates/jet-env-model/src/ModuleEval/Computed.rs` (D-MODCOMPUTE1) | Derived facts; no spec section of its own. |
 | 15 | `fn build(b: BuildContext)` + BuildContext defaults | `crates/jet-comptime/src/Comptime/Build/` (D-BUILDENTRY1, built; D-BUILDCTX-FLAGS1) | Actions and fact-setting share one bag; no law says which home owns what. |
 | 16 | CLI flags (`--profile`, `--release`, `--allow-*`) | `crates/jet-cli/src/CLI.rs` | Contributions with their own vocabulary. |

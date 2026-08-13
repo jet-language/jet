@@ -186,8 +186,8 @@ pub(crate) fn collect_used_core(
                 | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
-                | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-                | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+                | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+                | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             }
         }
     }

@@ -4139,9 +4139,9 @@ fn run() ? {
 fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"
-module value<n: Int> { pub fn get() => Int { return n } }
-module three = value<3>
-module same = value<3>
+module value(n: Int) { pub fn get() => Int { return n } }
+module three :: value(3)
+module same :: value(3)
 fn run() { print(three.get()); print(same.get()) }
 "#;
     let jit = run_cranelift_without_fallback(src, "generic_module_instance");
@@ -4413,15 +4413,15 @@ fn run() {
 fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"
-module outer<T, n: Int> {
+module outer<T>(n: Int) {
     module plain {
         module inner<U> { pub fn total(value: U) => Int { return n } }
-        module closed = inner<T>
+        module closed :: inner<T>
         pub fn result(value: T) => Int { return closed.total(value) }
     }
     pub fn result(value: T) => Int { return plain.result(value) }
 }
-module selected = outer<Int, 6>
+module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }
 "#;
     let jit = run_cranelift_without_fallback(src, "nested_ordinary_generic_module");
@@ -6803,10 +6803,6 @@ fn run() {
 
 #[test]
 fn generic_modules_full_example_matches_resident_jit_and_aot() {
-    // Corpus gate classifies this stem as frontend_rejected (E0857); skip three-way.
-    if frontend_rejected_stems().contains("modules/generic_modules") {
-        return;
-    }
     assert_cranelift_three_way(
         "examples/features/modules/generic_modules.jet",
         "modules/generic_modules",

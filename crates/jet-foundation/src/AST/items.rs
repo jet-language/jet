@@ -72,10 +72,12 @@ pub enum Item {
     ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
     UserDerive(DeriveDef),
-    /// D-GENMOD2=A: `module name<params> { … }` — a parameterized module template.
+    /// D-CONF-GENSPELL1=A: `module name<types>(values) { … }` — a parameterized
+    /// module template.
     /// Stores the body as-is; sema expands `ModuleAlias` references before codegen.
     GenericModule(GenericModuleDef),
-    /// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
+    /// D-CONF-GENSPELL1=A: `module alias :: module_name<types>(values)` — module
+    /// instantiation alias.
     /// Expanded to a `CodeModule` by sema before registration and body-checking.
     ModuleAlias(ModuleAliasDef),
     /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)` — a rule
@@ -182,42 +184,43 @@ pub struct ModuleInstanceApplication {
     pub span: Span,
 }
 
-/// D-GENMOD2=A: one parameter of a generic module — `module lru<K: Hash, capacity: Int>`.
-/// Sema resolves annotated slot kind in the template definition scope. Casing
-/// never decides semantics (D-GENMOD-VALUE1).
+/// D-CONF-GENSPELL1=A: one parameter of a generic module. Type parameters use
+/// `<…>`; value parameters use the following typed `(…)` list. The parser
+/// records that split so sema never guesses a slot from casing or annotation
+/// shape (D-GENMOD-VALUE1).
 #[derive(Debug, Clone)]
 pub enum GenericModuleParam {
-    /// `K` — an unbounded type parameter.
-    Bare {
+    /// `K` or `K: Trait` — a type parameter, optionally bounded.
+    Type {
         name: String,
         name_span: Span,
+        bound: Option<Type>,
     },
-    /// `K: Hash` or `capacity: Int`; sema resolves Hash as a bound and Int as
-    /// a concrete Tier-0 value type.
-    Annotated {
+    /// `capacity: Int` — a Tier-0 value parameter.
+    Value {
         name: String,
         name_span: Span,
-        annotation: Type,
+        ty: Type,
     },
 }
 
 impl GenericModuleParam {
     pub fn name(&self) -> &str {
         match self {
-            GenericModuleParam::Bare { name, .. }
-            | GenericModuleParam::Annotated { name, .. } => name.as_str(),
+            GenericModuleParam::Type { name, .. }
+            | GenericModuleParam::Value { name, .. } => name.as_str(),
         }
     }
 
     pub fn name_span(&self) -> Span {
         match self {
-            GenericModuleParam::Bare { name_span, .. }
-            | GenericModuleParam::Annotated { name_span, .. } => *name_span,
+            GenericModuleParam::Type { name_span, .. }
+            | GenericModuleParam::Value { name_span, .. } => *name_span,
         }
     }
 }
 
-/// D-GENMOD2=A: one argument in `module alias = module_name<String, 32>`.
+/// D-CONF-GENSPELL1=A: one argument in `module alias :: module_name<String>(32)`.
 #[derive(Debug, Clone)]
 pub enum ModuleArg {
     /// A type argument: `String`, `Int`, `MyType`.
@@ -226,7 +229,8 @@ pub enum ModuleArg {
     Value(Expr, Span),
 }
 
-/// D-GENMOD2=A: `module name<params> { body }` — a parameterized module template.
+/// D-CONF-GENSPELL1=A: `module name<types>(values) { body }` — a parameterized
+/// module template.
 /// Stores the body as a template. Sema expands `ModuleAlias` referencing this into
 /// a `CodeModule` before the main checking pass. Never reaches codegen directly.
 #[derive(Debug, Clone)]
@@ -242,7 +246,8 @@ pub struct GenericModuleDef {
     pub span: Span,
 }
 
-/// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
+/// D-CONF-GENSPELL1=A: `module alias :: module_name<types>(values)` — module
+/// instantiation alias.
 /// Expanded to a `CodeModule` by sema before registration and codegen.
 #[derive(Debug, Clone)]
 pub struct ModuleAliasDef {

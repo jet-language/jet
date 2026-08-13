@@ -490,9 +490,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::ProtocolDecl(p) => p.span.start,
         // D-METADERIVE1=A: use the derive block's own span.
         Item::UserDerive(d) => d.span.start,
-        // D-GENMOD2=A: generic module template span.
+        // D-CONF-GENSPELL1=A: generic module template span.
         Item::GenericModule(gm) => gm.span.start,
-        // D-GENMOD2=A: module alias span.
+        // D-CONF-GENSPELL1=A: module alias span.
         Item::ModuleAlias(ma) => ma.span.start,
     }
 }
@@ -566,9 +566,9 @@ fn item_span_end(item: &Item) -> usize {
         Item::ProtocolDecl(p) => p.span.end,
         // D-METADERIVE1=A: use the derive block's own span end.
         Item::UserDerive(d) => d.span.end,
-        // D-GENMOD2=A: generic module template span end.
+        // D-CONF-GENSPELL1=A: generic module template span end.
         Item::GenericModule(gm) => gm.span.end,
-        // D-GENMOD2=A: module alias span end.
+        // D-CONF-GENSPELL1=A: module alias span end.
         Item::ModuleAlias(ma) => ma.span.end,
     }
 }

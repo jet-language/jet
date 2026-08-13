@@ -161,14 +161,10 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             snake(&m.name, m.name_span, "generic module", out);
             for p in &m.params {
                 match p {
-                    GenericModuleParam::Bare { .. } =>
+                    GenericModuleParam::Type { .. } =>
                         pascal(p.name(), p.name_span(), "type parameter", out),
-                    GenericModuleParam::Annotated { annotation, .. } => {
-                        let type_param = matches!(annotation, Type::Named(name)
-                            if traits.contains(name) || crate::Generics::is_builtin_trait(name));
-                        if type_param { pascal(p.name(), p.name_span(), "type parameter", out); }
-                        else { snake(p.name(), p.name_span(), "value parameter", out); }
-                    }
+                    GenericModuleParam::Value { .. } =>
+                        snake(p.name(), p.name_span(), "value parameter", out),
                 }
             }
             for item in &m.body { item_names(item, traits, out); }

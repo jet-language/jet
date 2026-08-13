@@ -230,7 +230,7 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(d.span.end);
             }
-            // D-GENMOD2=A: generic module templates emitted verbatim (non-destructive)
+            // D-CONF-GENSPELL1=A: generic module templates emitted verbatim (non-destructive)
             // apart from the `pub`/`pub(package)` qualifier, which the span excludes
             // (it starts at the `module` keyword) and must be re-added explicitly.
             Item::GenericModule(gm) => {
@@ -240,7 +240,7 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(gm.span.end);
             }
-            // D-GENMOD2=A: module alias declarations emitted verbatim (non-destructive)
+            // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim (non-destructive)
             // apart from the `pub`/`pub(package)` qualifier — see Item::GenericModule.
             Item::ModuleAlias(ma) => {
                 self.fmt_pub_qualifier(ma.is_pub, ma.is_package_pub);

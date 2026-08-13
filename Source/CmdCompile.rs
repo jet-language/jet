@@ -4106,8 +4106,8 @@ mod missing_c_lib_tests {
     #[test]
     fn generic_instance_native_cache_key_invalidates_on_program_dependency_arg_package_and_profile_edits() {
         let project = ScratchProject::new();
-        let main = "use defs.box\nmodule defs\n\nmodule selected = box<Int, 3>\nfn run() { print(selected.value()) }\n";
-        let dependency = "pub module box<T, n: Int> { pub fn value() => Int { return n } }\n";
+        let main = "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n";
+        let dependency = "pub module box<T>(n: Int) { pub fn value() => Int { return n } }\n";
         let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
@@ -4120,7 +4120,7 @@ mod missing_c_lib_tests {
 
         project.write(
             "main.jet",
-            "use defs.box\nmodule defs\n\nmodule selected = box<Int, 3>\nfn run() { print(selected.value() + 1) }\n",
+            "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value() + 1) }\n",
         );
         let program_body = native_cache_key(&project.main(), "default", "run").expect("program body cache key");
         assert_ne!(base, program_body, "entry-body edit must invalidate native cache");
@@ -4128,7 +4128,7 @@ mod missing_c_lib_tests {
         project.write("main.jet", main);
         project.write(
             "defs.jet",
-            "pub module box<T, n: Int> { pub fn value() => Int { return n + 1 } }\n",
+            "pub module box<T>(n: Int) { pub fn value() => Int { return n + 1 } }\n",
         );
         let dependency_body = native_cache_key(&project.main(), "default", "run").expect("dependency cache key");
         assert_ne!(base, dependency_body, "imported template-body edit must invalidate native cache");
@@ -4136,7 +4136,7 @@ mod missing_c_lib_tests {
         project.write("defs.jet", dependency);
         project.write(
             "main.jet",
-            "use defs.box\nmodule defs\n\nmodule selected = box<Int, 4>\nfn run() { print(selected.value()) }\n",
+            "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(4)\nfn run() { print(selected.value()) }\n",
         );
         let argument = native_cache_key(&project.main(), "default", "run").expect("argument cache key");
         assert_ne!(base, argument, "normalized instance-argument edit must invalidate native cache");

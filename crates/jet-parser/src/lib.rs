@@ -16,18 +16,18 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
-        let src="module Weird<UPPER: Int, lower> { fn ready() => Bool { return true } }\nmodule Use = Weird<32, String>";
+        let src="module Weird<lower>(UPPER: Int) { fn ready() => Bool { return true } }\nmodule Use :: Weird<String>(32)";
         let (tokens,lex)=Lexer::lex(src);assert!(lex.is_empty(),"{lex:?}");let program=Parser::parse(&tokens).unwrap();
         let Item::GenericModule(def)=&program.items[0]else{panic!("template")};
-        assert!(matches!(&def.params[0],GenericModuleParam::Annotated{name,..}if name=="UPPER"));
-        assert!(matches!(&def.params[1],GenericModuleParam::Bare{name,..}if name=="lower"));
+        assert!(matches!(&def.params[0],GenericModuleParam::Type{name,bound,..}if name=="lower"&&bound.is_none()));
+        assert!(matches!(&def.params[1],GenericModuleParam::Value{name,..}if name=="UPPER"));
         let Item::ModuleAlias(alias)=&program.items[1]else{panic!("alias")};
-        assert!(matches!(&alias.args[0],ModuleArg::Value(..)));assert!(matches!(&alias.args[1],ModuleArg::Type(..)));
+        assert!(matches!(&alias.args[0],ModuleArg::Type(..)));assert!(matches!(&alias.args[1],ModuleArg::Value(..)));
     }
 
     #[test]
     fn generic_module_value_slots_parse_closed_identifier_led_expressions() {
-        let src = "module retry<count: Int> { fn ready() => Bool { return true } }\nmodule a = retry<limit + 1>\nmodule b = retry<compute()>";
+        let src = "module retry(count: Int) { fn ready() => Bool { return true } }\nmodule a :: retry(limit + 1)\nmodule b :: retry(compute())";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
@@ -38,8 +38,21 @@ mod generic_module_tests {
     }
 
     #[test]
+    fn generic_module_retired_mixed_angle_value_slot_teaches_parentheses() {
+        let src = "module cache<K, capacity: Int> { fn size() => Int = capacity }";
+        let (tokens, lex) = Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("retired mixed parameter spelling");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0003"
+                && diagnostic.what.contains("parentheses")
+                && diagnostic.fix.contains("capacity: Int")
+        }), "{diagnostics:?}");
+    }
+
+    #[test]
     fn generic_module_retains_symbolic_fixed_length_and_nested_modules() {
-        let src = "module buffer<T, capacity: Int> { struct Data { items: [T#capacity] } module stats { fn size() => Int { return capacity } } }";
+        let src = "module buffer<T>(capacity: Int) { struct Data { items: [T#capacity] } module stats { fn size() => Int { return capacity } } }";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();

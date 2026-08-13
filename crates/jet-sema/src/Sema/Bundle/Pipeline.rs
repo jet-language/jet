@@ -245,7 +245,7 @@ fn check_bundle_opts_for_output_inner(
     // D-SPREAD1=A: expand `prefix.[a, b]` to field lists (spliced in list
     // position) before inference sees bodies.
     super::super::desugar_member_spreads(bundle);
-    // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
+    // D-CONF-GENSPELL1=A: expand module aliases into concrete CodeModules before any
     // sibling-call mangling or registration sees the items.
     expand_generic_module_aliases(bundle, &mut diags);
     // D-CHOOSE-HEADS1=A: fold ordered multi-head declarations into one
@@ -2329,8 +2329,8 @@ fn check_bundle_opts_for_output_inner(
                 | Item::StateDecl(_) // D-STATE-DECL: erases
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
-                | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-                | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+                | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+                | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             }
         }
         for item in &mut module.items {

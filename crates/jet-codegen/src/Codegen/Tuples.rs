@@ -537,8 +537,8 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
-            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+            | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
         }
     }
     out

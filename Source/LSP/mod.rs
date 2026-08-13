@@ -397,7 +397,7 @@ alias Count :: Int
 state Door { Open }
 protocol Wire { client: Send(value: Int) }
 module holder<T> { pub struct Box { value: T } }
-module cache = holder<Int>
+module cache :: holder<Int>
 fn run() {}
 "#;
         let (project, _, bundle, facts) = check_test_document(src);

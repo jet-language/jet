@@ -577,11 +577,11 @@ renumbered, and no new `W` code may be allocated.
 | E0801 | sema  | lambda parameter type unknown |
 | E0803 | sema  | calling a value that isn't a function |
 | E0804 | sema  | self-recursive lambda binding |
-| E0850 | sema  | D-GENMOD2=A: module alias target not found in scope |
-| E0851 | sema  | D-GENMOD2=A: wrong number of type/value arguments to module alias |
-| E0852 | sema  | D-GENMOD2=A: type argument does not satisfy bound |
-| E0853 | sema  | D-GENMOD2=A: value argument has wrong type |
-| E0855 | sema  | D-GENMOD2=A: circular module alias instantiation |
+| E0850 | sema  | D-CONF-GENSPELL1=A: module alias target not found in scope |
+| E0851 | sema  | D-CONF-GENSPELL1=A: wrong number of type/value arguments to module alias |
+| E0852 | sema  | D-CONF-GENSPELL1=A: type argument does not satisfy bound |
+| E0853 | sema  | D-CONF-GENSPELL1=A: value argument has wrong type |
+| E0855 | sema  | D-CONF-GENSPELL1=A: circular module alias instantiation |
 | E0856 | sema  | D-GENMOD-VALUE1=A: generic-module value parameter uses a non-Tier-0 type |
 | E0857 | sema  | D-GENMOD-VALUE1=A: generic-module value argument is not a closed compile-time value |
 | E0859 | compiler | D-GENMOD-IDENTITY1=A: distinct generic-module full keys produced one fingerprint (ICE 101) |

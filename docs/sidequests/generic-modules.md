@@ -1,6 +1,7 @@
 # Generic modules
 
 **Card:** c91 / c1jixkit. **Decisions:** D-GENMOD1=A, D-GENMOD2=A,
+D-CONF-GENSPELL1=A,
 D-GENMOD-VALUE1=A, D-GENMOD-BODY1=A, D-GENMOD-IDENTITY1=A. **Status:** open.
 
 ## Goal
@@ -11,16 +12,16 @@ functions, and nested modules.
 
 ## Ratified law
 
-D-GENMOD1=A approves the feature. D-GENMOD2=A fixes one `<…>` parameter list:
-type parameters use bounds (`K: Hash`), value parameters use value types
-(`capacity: Int`), and instantiation mirrors declaration.
+D-GENMOD1=A approves the feature. D-CONF-GENSPELL1=A fixes the surface:
+type parameters and bounds use `<…>`, typed value parameters use `(…)`, and
+instantiation uses `::`.
 
 ```jet
-module ring<T, capacity: Int> {
+module ring<T>(capacity: Int) {
     pub struct Buffer { slots: [T#capacity] }
 }
 
-module packet_ring = ring<Packet, 64>
+module packet_ring :: ring<Packet>(64)
 ```
 
 D-GENMOD-VALUE1=A admits immutable Tier-0 comptime `Bool`, `Int`, `Char`,

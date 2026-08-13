@@ -50,12 +50,17 @@ module.exports = grammar({
     [$.extern_fn, $._expr],
     [$.extern_fn, $.function_def],
     [$.extern_fn],
+    [$.module_path, $.module_def],
   ],
 
   // S6-R: source has no visible semicolons (the lexer inserts synthetic ones).
   // A few examples still write a trailing `;`, so treat it as an ignorable
   // separator rather than threading it through every rule.
   extras: ($) => [/\s/, ";", $.line_comment, $.doc_comment, $.block_comment],
+
+  inline: ($) => [
+    $.module_alias_suffix,
+  ],
 
   rules: {
     source_file: ($) => repeat($._item),
@@ -180,16 +185,30 @@ module.exports = grammar({
 
     module_path: ($) => sep1($.identifier, "."),
 
-    // ── Module (U3, S59) ─────────────────────────────────────────────────────
-    // `module name { … }`, file-scoped `module name`, or a generated-bindings
-    // module `#bindgen module c.lib.__bindgen__ { fn … = "…" }` (the marker is
-    // consumed by the leading `_marker` prefix; the name may be a dotted path).
+    // ── Module (U3, S59, D-CONF-GENSPELL1) ──────────────────────────────────
+    // `module name { … }`, file-scoped `module name`, generic templates such
+    // as `module cache<K>(capacity: Int) { … }`, and aliases such as
+    // `module int_cache :: cache<Int>(32)`.
     module_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
         "module",
-        field("name", $.module_path),
-        optional(seq("{", repeat(choice($._item, $.extern_fn)), "}")),
+        choice(
+          seq(
+            field("name", $.module_path),
+            optional(seq("{", repeat(choice($._item, $.extern_fn)), "}")),
+          ),
+          seq(
+            field("name", $.identifier),
+            optional($.type_params),
+            optional($.param_list),
+            seq("{", repeat(choice($._item, $.extern_fn)), "}"),
+          ),
+          seq(
+            field("name", $.identifier),
+            $.module_alias_suffix,
+          ),
+        ),
       ),
 
     // ── Migration block (D-MIGRATE1/2) ─────────────────────────────────────
@@ -1256,6 +1275,17 @@ module.exports = grammar({
     line_comment: (_) => token(seq("//", /[^/].*/)),
     doc_comment: (_) => token(seq("///", /.*/)),
     block_comment: (_) => token(seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/")),
+
+    // Generic-module-only value parameters and applications. These rules stay
+    // at the end of the grammar so adding the canonical spelling does not
+    // renumber the established editor symbols.
+    module_alias_suffix: ($) =>
+      seq(
+        "::",
+        field("target", $.identifier),
+        optional(seq("<", commaSep1($._type), ">")),
+        optional($.arg_list),
+      ),
   },
 });
 

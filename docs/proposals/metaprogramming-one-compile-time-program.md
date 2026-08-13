@@ -169,7 +169,7 @@ Every compile-time mechanism in Jet is a bundle of three verbs.
 Every current mechanism is one bundle:
 
 - `#Codable` is Read(a type) + Add(code).
-- `module cache<K, capacity: Int>` is Read(parameters) + Add(code).
+- `module cache<K>(capacity: Int)` is Read(parameters) + Add(code).
 - A build policy rule is Read(the program) + Add(a diagnostic).
 - `#Inline` is Add(a fact).
 - `#Known limit :: 1000` is Compute.
@@ -425,14 +425,14 @@ The four checks from `D-MARK-FORM1=A` — vocabulary, site, signature, duplicate
 Today, from `examples/features/modules/generic_modules.jet`:
 
 ```jet
-module three_ints = fixed_buffer<Int, 3>
+module three_ints :: fixed_buffer<Int>(3)
 buffer :: M5Three4IntsBuffer.{items: fixed}     // a real line in a shipped example
 ```
 
 Settled:
 
 ```jet
-module three_ints = fixed_buffer<Int, 3>
+module three_ints :: fixed_buffer<Int>(3)
 buffer :: three_ints.Buffer.{items: fixed}
 ```
 

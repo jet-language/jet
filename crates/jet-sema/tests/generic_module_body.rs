@@ -1,4 +1,4 @@
-use jet_sema::AST::{CFfi, Item, LoadedModule, ProgramBundle, TagMarker, Type};
+use jet_sema::AST::{CFfi, CtValue, Item, LoadedModule, ProgramBundle, TagMarker, Type};
 use jet_sema::Diagnostics::{Diagnostic, Severity};
 use jet_sema::Sema::{check_bundle, CompileMode};
 use jet_sema::{Lexer, Parser, Syntax};
@@ -114,20 +114,22 @@ fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
 #[test]
 fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
-module boxed<T, size: Int> {
+module boxed<T>(size: Int) {
     struct Box { value: T }
     fn identity(value: Box) => Box { return ~value }
 }
-module other<T, size: Int> { struct Box { value: T } }
-module first = boxed<Int, 3>
-module equivalent = boxed<Int, 3>
-module forward = equivalent
-module different_type = boxed<String, 3>
-module different_value = boxed<Int, 4>
-module different_template = other<Int, 3>
+module other<T>(size: Int) { struct Box { value: T } }
+module first :: boxed<Int>(3)
+module equivalent :: boxed<Int>(3)
+module forward :: equivalent
+module different_type :: boxed<String>(3)
+module different_value :: boxed<Int>(4)
+module different_template :: other<Int>(3)
 fn accepts_first(value: M5FirstBox) => M5FirstBox { return ~value }
 fn accepts_projection(value: M10EquivalentBox) => M5FirstBox { return ~value }
 fn accepts_chain(value: M7ForwardBox) => M5FirstBox { return ~value }
+fn accepts_surface(value: first.Box) => first.Box { return ~value }
+fn accepts_forward_surface(value: forward.Box) => first.Box { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -149,14 +151,46 @@ fn run() {}
         assert_eq!(func.params[0].ty, Type::Named("M5FirstBox".into()));
         assert_eq!(func.return_type, Some(Type::Named("M5FirstBox".into())));
     }
+    for name in ["accepts_surface", "accepts_forward_surface"] {
+        let Item::Func(func) = items.iter().find(|item| matches!(item, Item::Func(func) if func.name == name)).unwrap() else { unreachable!() };
+        assert_eq!(func.params[0].ty, Type::Named("M5FirstBox".into()));
+        assert_eq!(func.return_type, Some(Type::Named("M5FirstBox".into())));
+    }
+}
+
+#[test]
+fn generic_module_comptime_bindings_survive_item_registration() {
+    let (bundle, diagnostics) = check(r#"
+module cache<K>(capacity: Int) {
+    @base :: capacity
+    @computed_size :: @base + 1
+    fn size() => Int = @computed_size
+}
+module instance :: cache<Int>(3)
+fn run() {}
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    let items = &bundle.modules[0].items;
+    assert!(items.iter().any(|item| matches!(
+        item,
+        Item::Const(constant)
+            if constant.name == "instance_@base"
+                && constant.ct == Some(CtValue::Int(3))
+    )));
+    assert!(items.iter().any(|item| matches!(
+        item,
+        Item::Const(constant)
+            if constant.name == "instance_@computed_size"
+                && constant.ct == Some(CtValue::Int(4))
+    )));
 }
 
 #[test]
 fn soft_public_aliases_keep_distinct_casing_safe_type_names() {
     let (bundle, diagnostics) = check(r#"
 module holder<T> { struct Item { value: T } }
-module cache = holder<Int>
-module _cache = holder<String>
+module cache :: holder<Int>
+module _cache :: holder<String>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
@@ -171,21 +205,21 @@ fn run() {}
 #[test]
 fn imported_template_is_interned_once_across_consumers() {
     let template = r#"
-pub module boxed<T, size: Int> { pub struct Box { value: T } }
-pub module other<T, size: Int> { pub struct Box { value: T } }
+pub module boxed<T>(size: Int) { pub struct Box { value: T } }
+pub module other<T>(size: Int) { pub struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
 use templates.[boxed]
-pub module first = boxed<Int, 3>
+pub module first :: boxed<Int>(3)
 fn run() {}
 "#;
     let second = r#"
 use "./templates" as templates
 use templates.[boxed, other]
-module second = boxed<Int, 3>
-module different_arg = boxed<Int, 4>
-module different_template = other<Int, 3>
+module second :: boxed<Int>(3)
+module different_arg :: boxed<Int>(4)
+module different_template :: other<Int>(3)
 fn accepts_projection(value: M6SecondBox) => M5FirstBox { return ~value }
 fn run() {}
 "#;
@@ -203,10 +237,10 @@ fn run() {}
 
 #[test]
 fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
-    let base = "module boxed<T, n: Int> { fn value() => Int { return n } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
-    let shifted = "\n\nmodule boxed<T, n: Int> {   fn value() => Int { return n } }\nmodule renamed = boxed<Int, 3>\nfn run() {}";
-    let body = "module boxed<T, n: Int> { fn value() => Int { return n + 1 } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
-    let arg = "module boxed<T, n: Int> { fn value() => Int { return n } }\nmodule instance = boxed<Int, 4>\nfn run() {}";
+    let base = "module boxed<T>(n: Int) { fn value() => Int { return n } }\nmodule instance :: boxed<Int>(3)\nfn run() {}";
+    let shifted = "\n\nmodule boxed<T>(n: Int) {   fn value() => Int { return n } }\nmodule renamed :: boxed<Int>(3)\nfn run() {}";
+    let body = "module boxed<T>(n: Int) { fn value() => Int { return n + 1 } }\nmodule instance :: boxed<Int>(3)\nfn run() {}";
+    let arg = "module boxed<T>(n: Int) { fn value() => Int { return n } }\nmodule instance :: boxed<Int>(4)\nfn run() {}";
     let fp = only_instance_fingerprint(base, "pkg-a");
     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
     assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
@@ -239,7 +273,7 @@ fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspa
     std::fs::write(b.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}").unwrap();
     std::fs::write(a.join(".jet/lock"), "source = a").unwrap();
     std::fs::write(b.join(".jet/lock"), "source = b").unwrap();
-    let src = "module boxed<T> { fn value(v: T) => T { return v } }\nmodule instance = boxed<Int>\nfn run() {}";
+    let src = "module boxed<T> { fn value(v: T) => T { return v } }\nmodule instance :: boxed<Int>\nfn run() {}";
     assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     std::fs::write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap();
     assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
@@ -261,7 +295,7 @@ module laws<T> {
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
 }
-module int_laws = laws<Int>
+module int_laws :: laws<Int>
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -284,7 +318,7 @@ fn tag_method_inside_instance_keeps_e0732() {
     let (tokens, lex) = Lexer::lex(
         r#"
 module bad<T> { tag Marker { fn forbidden(self) => T; } }
-module instance = bad<Int>
+module instance :: bad<Int>
 fn run() {}
 "#,
     );
@@ -304,7 +338,7 @@ module bad<T> {
     #Marker
     struct Value { item: T }
 }
-module instance = bad<Int>
+module instance :: bad<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E0731"]);
@@ -319,7 +353,7 @@ module bad<T> {
     impl Source => Target { return Target.Wrapped(self) }
     impl Source => Target { return Target.Wrapped(self) }
 }
-module instance = bad<Int>
+module instance :: bad<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E2405"]);
@@ -329,7 +363,7 @@ fn run() {}
 fn generic_module_does_not_launder_error_conversion_orphans() {
     let (_, diagnostics) = check(r#"
 module bad<T> { impl Int => String { return "number" } }
-module instance = bad<Int>
+module instance :: bad<Int>
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).contains(&"E2406"), "{diagnostics:#?}");
@@ -338,13 +372,13 @@ fn run() {}
 #[test]
 fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(r#"
-module outer<T, count: Int> {
+module outer<T>(count: Int) {
     module inner<U> { pub fn keep(value: T, other: U) => T { return ~value } }
-    module fixed = inner<Int>
-    module forward = fixed
+    module fixed :: inner<Int>
+    module forward :: fixed
 }
-module text_outer = outer<String, 3>
-module other_outer = outer<String, 4>
+module text_outer :: outer<String>(3)
+module other_outer :: outer<String>(4)
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
@@ -374,15 +408,15 @@ fn run() {}
 #[test]
 fn ordinary_nested_module_recursively_expands_generic_aliases() {
     let (bundle, diagnostics) = check(r#"
-module outer<T, count: Int> {
+module outer<T>(count: Int) {
     module plain {
         module inner<U> { pub fn total(value: U) => Int { return count } }
-        module closed = inner<T>
+        module closed :: inner<T>
         pub fn result(value: T) => Int { return closed.total(value) }
     }
     pub fn result(value: T) => Int { return plain.result(value) }
 }
-module selected = outer<Int, 6>
+module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
@@ -407,10 +441,10 @@ fn ordinary_nested_module_rejects_unknown_generic_target() {
     let (_, diagnostics) = check(r#"
 module outer<T> {
     module plain {
-        module bad = missing<T>
+        module bad :: missing<T>
     }
 }
-module selected = outer<Int>
+module selected :: outer<Int>
 fn run() {}
 "#);
     assert_eq!(error_codes(&diagnostics), vec!["E0850"]);
@@ -419,12 +453,12 @@ fn run() {}
 #[test]
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
-module checks<T, count: Int> {
+module checks<T>(count: Int) {
     #Test fn identity(value: T) { expect(count == count) }
     #Bench("work") { expect(count == count) }
 }
-module int_checks = checks<Int, 2>
-module text_checks = checks<String, 4>
+module int_checks :: checks<Int>(2)
+module text_checks :: checks<String>(4)
 fn run() {}
 "#);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
