@@ -713,7 +713,7 @@ mod tests {
         );
     }
 
-    /// Entry-swap (`jet dev` / `--job`) still runs the hook with `None` facts.
+    /// Entry-swap (`jet dev` / job subcommands) still runs the hook with `None` facts.
     #[test]
     fn compile_entry_swap_crash_guest_fail_closed_e1402() {
         let _guard = ENV_LOCK.lock().unwrap();

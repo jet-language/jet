@@ -613,7 +613,7 @@ renumbered, and no new `W` code may be allocated.
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
-| E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
+| E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | @panic :: user-authored compile error (message verbatim) |
@@ -802,7 +802,7 @@ renumbered, and no new `W` code may be allocated.
 | E1287 | jetpack | `jet os vm run` needs a proved installed disk (D-JOS-VMRUN1) |
 | E1288 | jetpack | the GNOME desktop package is missing (D-JOS-DESKTOP1) |
 | E1289 | jetpack | a NixOS import failed or would overwrite output (D-JOS-NIXIMPORT1) |
-| E1294 | jet / jetpack | `jet run --job <name>` / `jetpack run <name>` names no `#Job fn` in the entry (D-JPK-TASKRUN1, card #476) |
+| E1294 | jet / jetpack | `jet run <entry> -- <name>` / `jetpack run <name>` names no `#Job fn` in the entry (D-JPK-TASKRUN1, D-JOB-SUBCMD1) |
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
@@ -1873,7 +1873,7 @@ front-end `.jet` diagnostics).
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
 | E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `package.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
-| E1294 | no job named `{name}`. | `jet run --job <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared jobs. |
+| E1294 | no job named `{name}`. | `jet run <entry> -- <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1, D-JOB-SUBCMD1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared jobs. |
 | E1295 | git ref `{ref}` not found. | `--affected-since` (D-JPK-SELECTOR1=C) diffs workspace member input hashes against a git baseline; that ref must resolve to a commit. | Pass a real branch, tag, or commit (a did-you-mean is offered when a close match exists). |
 | E1296 | `{flag}` is not a Jet workspace selector. | D-JPK-SELECTOR1=C rejects pnpm-style `--filter` pattern DSLs; Jet scopes workspace commands with exact `-p <member>` and computed `--affected` / `--affected-since <ref>` only. | Use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`. |
 | E1297 | `` `{bin}` is already a job in {path} `` | JPK-TOOL-COLLIDE (D-JPK-TOOLRUN1): `jetpack tool install` would project `{bin}` onto `~/.jet/bin`, but this project already declares `#Job fn {bin}` — the project job wins here, so the global tool would be shadowed. | Install under a different bin name with `jetpack tool install <ref> --as <other>`, or run once with `jetpack tool run <ref>`. |
@@ -2108,7 +2108,7 @@ the marker before its declaration.
 
 `#Every(…)` names when a `#Job fn` runs (D-JPK-TASKRUN1); `#Job` itself
 only marks a top-level function, because a job needs a free-standing name
-`jet run --job <name> <entry>` can invoke.
+`jet run <entry> -- <name>` can invoke.
 
 | What | Why | Fix |
 |------|-----|-----|
@@ -2173,10 +2173,11 @@ pointer to `docs/spec/syntax-decisions.md`.
 |------|-----|-----|
 | `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for Printable, Equatable, or Debug. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
 
-### E0928 — `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1, card #476)
+### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1)
 
 `run`, `dev`, `build`, and `test` already name Jet's built-in entry points.
-A `#Job fn` picks a *user-chosen* verb beside them — reusing a reserved name
+CLI command and flag names are reserved too, and two jobs cannot share one
+name in the same scope. A `#Job fn` picks a *user-chosen* verb beside them — reusing a reserved name
 is a collision, not a task.
 
 | What | Why | Fix |

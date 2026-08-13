@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 /// `jetpack run [<ref>|<job>] [-- cmd…]`
 ///
 /// D-JPK-TASKRUN1: a bare first positional that names a `#Job fn` in the
-/// project entry runs that job (via `jet run --job <name> <entry>`). Package
+/// project entry runs that job (via `jet run <entry> -- <name>`). Package
 /// refs (`source:pkg`, workspace members) keep the existing realize path.
 pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
@@ -202,7 +202,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// D-JPK-TASKRUN1: realize the project env (when present), then shell out to
-/// `jet run --job <name> <entry> -- <job-args>` (D-JPK-DISPATCH1).
+/// `jet run <entry> -- <name> <job-args>` (D-JPK-DISPATCH1).
 pub(super) fn run_project_job(
     theme: &Theme,
     parsed: &Parsed,
@@ -416,16 +416,16 @@ pub(super) fn run_project_job_with_mode(
         theme.gray(&entry.display().to_string())
     ));
 
-    let mut argv = vec![
+    let argv = vec![
         jet_binary,
         "run".to_string(),
-        format!("--job={task}"),
         entry.to_string_lossy().into_owned(),
-    ];
-    if !task_args.is_empty() {
-        argv.push("--".to_string());
-        argv.extend(task_args);
-    }
+        "--".to_string(),
+        task.to_string(),
+    ]
+    .into_iter()
+    .chain(task_args)
+    .collect::<Vec<_>>();
     let access_trace = cache_key
         .as_deref()
         .map(task_access_trace_path);
@@ -1007,7 +1007,7 @@ fn task_environment_hash_with_vars(
     vars: &BTreeMap<String, String>,
 ) -> String {
     let mut identity = Trust::environment_definition_hash(refs, table, secrets, facts);
-    identity.push_str("\n--job-active-environment--\n");
+    identity.push_str("\njob-active-environment\n");
     identity.push_str(facts.active_environment.as_deref().unwrap_or("<none>"));
     identity.push('\n');
     for module in &facts.active_environment_provenance {
@@ -1015,12 +1015,12 @@ fn task_environment_hash_with_vars(
         identity.push_str(module);
         identity.push('\n');
     }
-    identity.push_str("--job-source-files--\n");
+    identity.push_str("job-source-files\n");
     for source in &facts.source_files {
         identity.push_str(source);
         identity.push('\n');
     }
-    identity.push_str("--job-environment-values--\n");
+    identity.push_str("job-environment-values\n");
     for (name, value) in vars {
         identity.push_str(name);
         identity.push('=');
@@ -2799,7 +2799,7 @@ mod tests {
     fn strace_paths_use_file_arguments_and_decode_escapes() {
         assert_eq!(
             strace_paths(
-                r#"123 execve("/project/jet", ["jet", "run", "--job=build"], 0x0) = 0"#
+                r#"123 execve("/project/jet", ["jet", "run", "entry.jet", "--", "build"], 0x0) = 0"#
             ),
             vec![PathBuf::from("/project/jet")]
         );

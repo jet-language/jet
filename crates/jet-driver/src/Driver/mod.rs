@@ -4280,7 +4280,8 @@ pub fn compile_fuzz(
 /// (I3: codegen stays dumb; sema never special-cases any entry name other
 /// than `"run"` — see `Registration.rs`/`Bundle.rs`'s `funcs.get("run")`).
 /// The selected function keeps its source name so callers (D-JPK-TASKRUN1
-/// plain-call task deps) still resolve. Same path serves `jet run --job`.
+/// plain-call job deps) still resolve. The same entry-swap seam serves
+/// `jet dev` and dev-tier job argv.
 /// Native only — never freestanding/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
 /// an ordinary value like `core.web.devserver`, nothing more).
@@ -4349,7 +4350,7 @@ pub fn compile_bundle_path_with_entry(
 /// The wrapper is never `#Job` (avoids E0928 on reserved lifecycle name
 /// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
 /// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
-fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
+pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
     use crate::Diagnostics::Span;
     use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, Item, Stmt};
 

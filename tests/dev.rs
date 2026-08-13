@@ -1237,10 +1237,10 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
         match run_named_job(&bundle, job, false) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout, expected,
-                "interpreter --job={job} differs from golden"
+                "interpreter job `{job}` differs from golden"
             ),
             RunOutcome::Problems(diags) => panic!(
-                "interpreter --job={job} did not run: {:?}",
+                "interpreter job `{job}` did not run: {:?}",
                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
             ),
         }
@@ -1266,7 +1266,7 @@ fn interpreter_matches_expected_golden() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): job_runner's meaningful entries are
         // its `#Job` fns, not the `fn run()` usage hint. Mirror golden.rs's
-        // AOT `--job` battery on the interpreter tier via `run_named_job`,
+        // AOT job battery on the interpreter tier via `run_named_job`,
         // proving the same TIR dispatches each job identically. The bare
         // `fn run()` output is not a golden.
         if stem == "devloop/job_runner" {

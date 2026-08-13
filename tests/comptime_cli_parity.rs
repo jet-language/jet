@@ -1,6 +1,5 @@
 mod common;
 
-use common::add_generated_rust;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -286,6 +285,26 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     assert_eq!(aot_help.stdout, help_expected);
     assert_eq!(default_help.stdout, aot_help.stdout);
 
+    let default_jobs_help = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "job_runner.jet", "--", "--help"])
+        .current_dir(&scratch.path)
+        .env("JET_RUN_CACHE_DIR", cache.join("job-help-run"))
+        .env("JET_CACHE_DIR", cache.join("job-help-build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("show default job subcommand help");
+    let aot_jobs_help = Command::new(scratch.join("build/job_runner"))
+        .arg("--help")
+        .current_dir(&scratch.path)
+        .output()
+        .expect("show AOT job subcommand help");
+    assert!(default_jobs_help.status.success());
+    assert!(aot_jobs_help.status.success());
+    assert!(String::from_utf8_lossy(&default_jobs_help.stdout).contains("greet"));
+    assert!(String::from_utf8_lossy(&aot_jobs_help.stdout).contains("greet"));
+    assert!(!String::from_utf8_lossy(&default_jobs_help.stdout).contains("inspect"));
+    assert!(!String::from_utf8_lossy(&aot_jobs_help.stdout).contains("inspect"));
+
     for (job, golden_name) in [
         ("greet", "job_runner.greet.out"),
         ("seed", "job_runner.seed.out"),
@@ -295,7 +314,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         )
         .unwrap_or_else(|error| panic!("read named job golden `{golden_name}`: {error}"));
         let default_job = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", "--job", job, "job_runner.jet"])
+            .args(["run", "job_runner.jet", "--", job])
             .current_dir(&scratch.path)
             .env("JET_RUN_CACHE_DIR", cache.join(format!("{job}-run")))
             .env("JET_CACHE_DIR", cache.join(format!("{job}-build")))
@@ -309,36 +328,8 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         );
         assert_eq!(default_job.stdout, expected, "default job `{job}` differs from golden");
 
-        let compiled = jet::compile_with_entry(source.to_str().unwrap(), job)
-            .unwrap_or_else(|diags| panic!("compile named job `{job}`: {diags:#?}"));
-        let rust_path = scratch.path.join(format!("job_runner_{job}.rs"));
-        let binary_path = scratch.path.join(format!("job_runner_{job}"));
-        let mut rustc = Command::new("rustc");
-        add_generated_rust(
-            &mut rustc,
-            &rust_path,
-            &compiled.rust,
-            compiled.ffi.is_some(),
-            &[],
-        );
-        rustc.arg("-o").arg(&binary_path);
-        if let Some(link) = &compiled.ffi {
-            rustc
-                .arg("--extern")
-                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-                rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-            }
-        }
-        let compile = rustc
-            .output()
-            .unwrap_or_else(|error| panic!("build AOT named job `{job}`: {error}"));
-        assert!(
-            compile.status.success(),
-            "AOT named job `{job}` build failed:\n{}",
-            String::from_utf8_lossy(&compile.stderr)
-        );
-        let aot_job = Command::new(&binary_path)
+        let aot_job = Command::new(scratch.join("build/job_runner"))
+            .arg(job)
             .current_dir(&scratch.path)
             .output()
             .unwrap_or_else(|error| panic!("run AOT named job `{job}`: {error}"));

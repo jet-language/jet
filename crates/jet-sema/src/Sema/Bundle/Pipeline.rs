@@ -2427,6 +2427,7 @@ fn check_bundle_opts_for_output_inner(
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
     let mut module_pending_diagnostics = Vec::new();
+    diags.extend(check_job_collisions(&bundle.modules));
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
     // `#Inline(Always)` address-taken pass (E0918) runs after the loop, once

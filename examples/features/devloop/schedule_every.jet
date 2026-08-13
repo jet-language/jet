@@ -4,22 +4,22 @@
 // runtime (D-SERVICE1), and a jetos timer projection. `#Every(5min)` takes a
 // duration literal (D-UNITLIT1: `ns`/`us`/`ms`/`s`/`min`); `#Every("03:00")`
 // takes a daily wall-clock time. A `#Job fn` with no `#Every(…)` is a plain
-// manually-invoked job (`jet run --job manual_only <this-file>`).
+// manually-invoked job (`jet run <this-file> -- manual_only`).
 //
 // Calling a `#Job fn` directly — as `run()` does below — behaves exactly
 // like calling an ordinary function; the schedule only changes when a
 // runtime consumer invokes it *automatically*. `jet dev`'s due-job tick is
 // exercised by tests/dev.rs, not by this golden AOT run (I5's ordinary-run
 // convention for dev-loop-only behavior — see devloop/persist.jet).
-#[Job, Every(5min)] fn prune_sessions() {
+#[Job(.Dev), Every(5min)] fn prune_sessions() {
     print("pruning sessions")
 }
 
-#[Job, Every("03:00")] fn nightly_backup() {
+#[Job(.Dev), Every("03:00")] fn nightly_backup() {
     print("running nightly backup")
 }
 
-#Job fn manual_only() {
+#[Job(.Ship)] fn manual_only() {
     print("ran manually")
 }
 

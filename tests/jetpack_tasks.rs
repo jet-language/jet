@@ -33,7 +33,7 @@ fn run() { print("run-entry") }
     );
     let entry = scratch.path.join("main.jet");
     let out = jet()
-        .args(["run", "--job=greet", entry.to_str().unwrap()])
+        .args(["run", entry.to_str().unwrap(), "--", "greet"])
         .output()
         .unwrap();
     assert!(
@@ -48,7 +48,7 @@ fn run() { print("run-entry") }
     );
     assert!(
         !stdout.contains("run-entry"),
-        "must not run fn run when --job is set: {stdout}"
+        "must not run fn run when a job subcommand is set: {stdout}"
     );
 }
 
@@ -129,12 +129,12 @@ fn run() { print("run-entry") }
     let path = entry.to_str().unwrap();
 
     let greet = jet()
-        .args(["run", "--job=greet", path])
+        .args(["run", path, "--", "greet"])
         .output()
         .unwrap();
     assert!(
         greet.status.success(),
-        "leaf --job=greet must not E0102; stderr: {}",
+        "leaf job subcommand must not E0102; stderr: {}",
         String::from_utf8_lossy(&greet.stderr)
     );
     let greet_out = String::from_utf8_lossy(&greet.stdout);
@@ -149,7 +149,7 @@ fn run() { print("run-entry") }
     );
 
     let seed = jet()
-        .args(["run", "--job=seed", path])
+        .args(["run", path, "--", "seed"])
         .output()
         .unwrap();
     assert!(
@@ -185,9 +185,9 @@ fn run() {}
     let out = jet()
         .args([
             "run",
-            "--job=migrate",
             entry.to_str().unwrap(),
             "--",
+            "migrate",
             "--to",
             "004",
         ])

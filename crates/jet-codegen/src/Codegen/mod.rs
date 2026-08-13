@@ -155,6 +155,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FAIL-CARRIER1=A: the one carrier under `T?` and `T ? E`. First, because
     // every other part builds outcomes on top of it.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
+    include_str!("../Prelude/Job.rs"),
     include_str!("../Prelude/Core/Option.rs"),
     include_str!("../Prelude/Core/FixedList.rs"),
     include_str!("../Prelude/Core/FloatProvenance.rs"),
@@ -2370,6 +2371,7 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let outcome =
             std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
+        let job = std::fs::read_to_string(root.join("src/Prelude/Job.rs")).unwrap();
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
@@ -2394,8 +2396,12 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/Duration.rs")).unwrap();
         let measurement =
             std::fs::read_to_string(root.join("src/Prelude/Core/Measurement.rs")).unwrap();
+        let time_monotonic =
+            std::fs::read_to_string(root.join("src/Prelude/Core/TimeMonotonic.rs")).unwrap();
         let time = std::fs::read_to_string(root.join("src/Prelude/Core/Time.rs")).unwrap();
         let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
+        let contracts =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Contracts.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let view_access =
             std::fs::read_to_string(root.join("src/Prelude/Core/ViewAccess.rs")).unwrap();
@@ -2426,6 +2432,7 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
+            ("src/Prelude/Job.rs", job.as_str()),
             ("src/Prelude/Core/Option.rs", option.as_str()),
             ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
             (
@@ -2444,8 +2451,10 @@ mod tests {
             ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
             ("src/Prelude/Core/Duration.rs", duration.as_str()),
             ("src/Prelude/Core/Measurement.rs", measurement.as_str()),
+            ("src/Prelude/Core/TimeMonotonic.rs", time_monotonic.as_str()),
             ("src/Prelude/Core/Time.rs", time.as_str()),
             ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
+            ("src/Prelude/Core/Contracts.rs", contracts.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/ViewAccess.rs", view_access.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
@@ -2489,6 +2498,9 @@ mod tests {
         let outcome_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
             .unwrap();
+        let job_pos = production_codegen
+            .find("include_str!(\"../Prelude/Job.rs\")")
+            .unwrap();
         let option_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Option.rs\")")
             .unwrap();
@@ -2528,8 +2540,14 @@ mod tests {
         let time_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Time.rs\")")
             .unwrap();
+        let time_monotonic_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/TimeMonotonic.rs\")")
+            .unwrap();
         let sketch_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Sketch.rs\")")
+            .unwrap();
+        let contracts_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Contracts.rs\")")
             .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
@@ -2557,6 +2575,8 @@ mod tests {
             .unwrap();
         assert!(
             outcome_pos < unicode_pos
+                && outcome_pos < job_pos
+                && job_pos < option_pos
                 && outcome_pos < option_pos
                 && option_pos < fixed_list_pos
                 && fixed_list_pos < float_provenance_pos
@@ -2569,8 +2589,12 @@ mod tests {
                 && expiring_secret_pos < set_algebra_pos
                 && set_algebra_pos < duration_pos
                 && duration_pos < measurement_pos
+                && measurement_pos < time_monotonic_pos
+                && time_monotonic_pos < time_pos
                 && measurement_pos < time_pos
                 && time_pos < sketch_pos
+                && sketch_pos < contracts_pos
+                && contracts_pos < core_pos
                 && sketch_pos < core_pos
                 && core_pos < view_access_pos
                 && view_access_pos < collections_pos
@@ -2587,6 +2611,7 @@ mod tests {
             PRELUDE_PARTS,
             [
                 outcome.as_str(),
+                job.as_str(),
                 option.as_str(),
                 fixed_list.as_str(),
                 float_provenance.as_str(),
@@ -2599,8 +2624,10 @@ mod tests {
                 set_algebra.as_str(),
                 duration.as_str(),
                 measurement.as_str(),
+                time_monotonic.as_str(),
                 time.as_str(),
                 sketch.as_str(),
+                contracts.as_str(),
                 core.as_str(),
                 view_access.as_str(),
                 power.as_str(),
@@ -2624,6 +2651,7 @@ mod tests {
         push_prelude(&mut emitted);
         let expected = [
             outcome.as_str(),
+            job.as_str(),
             option.as_str(),
             fixed_list.as_str(),
             float_provenance.as_str(),
@@ -2636,8 +2664,10 @@ mod tests {
             set_algebra.as_str(),
             duration.as_str(),
             measurement.as_str(),
+            time_monotonic.as_str(),
             time.as_str(),
             sketch.as_str(),
+            contracts.as_str(),
             core.as_str(),
             view_access.as_str(),
             power.as_str(),
@@ -2659,10 +2689,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 379_181, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 401_284, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "b4f589501d02514e842de2b54b7901f307f90c0d4adde6aaa0cbdb28431877eb",
+            "b2a2b5715dccc72f89f8dd36a03cc8c946cff8a528f2f34a13b741d4d9664909",
             "split changed prelude bytes, order, or boundary newline"
         );
     }

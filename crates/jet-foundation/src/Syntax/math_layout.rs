@@ -676,15 +676,49 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
-/// D-SCHEDULE1, amended by D-MARKER-NAME-HYGIENE1=A: `#Job fn` — a top-level
-/// function Jet can invoke by name with `jet run --job` (D-JPK-TASKRUN1),
-/// living beside `fn run()`. Bare marker, no arguments.
+/// D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can invoke as an
+/// argv subcommand, living beside `fn run()`. Bare marker defaults to `.Dev`.
 pub const KW_JOB: &str = "Job";
+
+/// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
+pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
 /// D-JPK-TASKRUN1=A: lifecycle verbs a `#Job fn` must not reuse — they already
 /// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).
 /// Sema rejects a collision as E0928.
 pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
+
+/// D-JOB-SUBCMD1=C: bare names reserved by Jet's command and flag surface.
+/// Job dispatch claims the first argv word before ordinary CLI parsing.
+pub const JOB_RESERVED_CLI: &[&str] = &[
+    // Commands which users can type after `jet`.
+    "help", "version", "jobs", "check", "build", "run", "dev", "serve", "debug", "test",
+    "bench", "repl", "new", "add", "remove", "fetch", "update", "fmt", "fix",
+    "lint", "emit", "eval", "fuzz", "env", "clean", "trust", "self", "inspect",
+    "registry", "hangar", "project", "diff", "merge", "prove", "notebook", "import",
+    "explain", "cache", "remote", "image", "os", "init", "split", "fold", "lock", "store",
+    "gc", "budget", "perf", "report", "install", "parts", "reserved", "facts", "live",
+    "completions", "man", "devtools", "lsp", "publish", "yank", "keygen", "key", "vendor",
+    "graph", "query", "compiler", "impact", "dossier", "semindex", "expand", "unsafe", "schema",
+    "codemod", "audit", "sbom", "bind", "logs", "search", "info", "outdated", "push", "bridge",
+    "services", "config", "toolchain", "upgrade", "doctor",
+    // Global flags, normalized to the spelling a function name can carry.
+    "attach", "once", "observe", "gc_trace", "structural", "out", "report", "repo",
+    "json", "quiet", "h", "v", "color", "no_color", "restore_role_files", "diff", "changed",
+    "skipped", "stdin_path", "small", "output", "locked", "lock", "p", "annotated",
+    "force", "no_sign", "registry", "pkg", "clang", "ar", "from", "to", "message",
+    "before", "spdx", "cyclonedx", "advisory_db", "vendor_dir", "sbom", "verbose",
+    "online", "dry_run", "edition", "try_anyway", "interpret", "trace_tiers",
+    "restart", "swap", "watch", "project", "pure", "freestanding", "gate", "target",
+    "preset", "explain_partition", "capabilities_json", "update_snapshots",
+    "coverage", "rust", "emit_generated", "u", "release", "profile", "builder", "a11y",
+    "scope", "filter", "shuffle", "serial", "iterations", "time", "seed", "corpus",
+    "lens", "facts", "annotations", "baseline", "bootstrap", "accept_regression", "reason",
+    "yes", "y", "allow_fs", "deny_fs", "allow_net", "deny_net", "allow_io", "deny_io",
+    "allow_db", "deny_db", "allow_time", "deny_time", "allow_rand", "deny_rand",
+    "allow_env", "deny_env", "allow_exec", "deny_exec", "allow_log", "deny_log",
+    "allow_gpu", "deny_gpu",
+];
 
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).

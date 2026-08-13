@@ -5517,16 +5517,27 @@ man pages, and completions advertise only canonical grouped spellings.
 **D-JPK-TASKRUN1=A — named entries are `#Job fn`**: a job is an ordinary Jet
 function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
-function call, no separate DAG syntax. Invoked canonically with `jet run
---job <name> <entry>`; `jetpack run <name>` is the Jetpack engine bridge.
+function call, no separate DAG syntax. Invoked canonically with
+`jet run <entry> -- <name>`; `jetpack run <name>` is the Jetpack engine bridge.
 `run`, `dev`, `build`, `test` remain reserved lifecycle verb names a job
 cannot reuse.
 
 **D-JOB-NAME1=A — one word for named auxiliary entries** *(ratified
 2026-08-05, card #1448)*: the marker and every command use `job`. The
-canonical CLI is `jet run --job <name> <entry>` and `jet jobs`; retired
-spellings have no alias or fallback. Help, completions, diagnostics, docs,
-examples, and tests use the same vocabulary.
+canonical CLI is `jet run <entry> -- <name>` and `jet jobs`; retired spellings
+have no alias or fallback. Help, completions, diagnostics, docs, examples, and
+tests use the same vocabulary.
+
+**D-JOB-SUBCMD1=C — jobs are argv subcommands**: every built binary exposes
+its `#Job` functions through one canonical subcommand table. Bare `#Job` and
+`#Job(.Dev)` jobs are available in the dev tiers; `#Job(.Ship)` jobs are
+available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
+The first program word selects a job before the ordinary `fn run` CLI parser;
+`jet run <entry> -- <name> [args…]` uses the same selection. Job names are
+reserved against built-in lifecycle/CLI names and collisions at one scope.
+`.Internal` jobs remain callable from code and schedulers, never from argv.
+There are no flag aliases, and a release binary reports non-shipped jobs as
+unknown commands.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
@@ -5546,15 +5557,14 @@ dev`'s watch loop runs due jobs on their own schedule (UTC for
 job per this same law).
 
 *Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Job fn
-run|dev|build|test` (E0928); `jet run --job <name> <entry>` dispatches an
+run|dev|build|test` (E0928); `jet run <entry> -- <name>` dispatches an
 `#Job fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
 (D-JPK-DISPATCH1); unknown names list declared jobs (E1294). Typed job
-args reuse D-CLIFLAG1 once the job is the entry. Entry dispatch injects a
-synthetic `fn run { job(…) }` wrapper so the selected `#Job fn` keeps its
-name — a sibling's plain-call dependency (ballot: dependency = plain
-function call) does not die with E0102. D-SERVICE1 still has no typed
-builder/worker/group to carry a schedule into a service runtime — that
-remains a future card, not a corner cut here.
+args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
+the selected function's source name, so a sibling's plain-call dependency
+(ballot: dependency = plain function call) does not die with E0102.
+D-SERVICE1 still has no typed builder/worker/group to carry a schedule into a
+service runtime — that remains a future card, not a corner cut here.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the

@@ -1,9 +1,9 @@
-// D-JPK-TASKRUN1 (card #476) — project jobs are Jet `#Job fn`s.
+// D-JOB-SUBCMD1=C — project jobs are Jet `#Job fn`s with typed visibility.
 // Discover inside a project with `jet jobs`.
-// Invoke: `jet run --job greet <this-file>` / `jet run --job seed <this-file>`.
+// Invoke: `jet run <this-file> -- greet` / `jet run <this-file> -- seed`.
 // Cross-job dependency = a plain call (`seed` calls `greet` below).
-// I5 golden runs both --job paths (see tests/golden.rs).
-#[Job, Doc("Say hello from a project job")] fn greet() {
+// I5 golden runs both job paths (see tests/golden.rs).
+#[Job(.Ship), Doc("Say hello from a shipped project job")] fn greet() {
     print("hello from job")
 }
 
@@ -12,4 +12,6 @@
     print("seeded")
 }
 
-fn run() { print("use jet run --job greet <this-file>") }
+#[Job(.Internal)] fn inspect_job() { print("internal job") }
+
+fn run() { print("use jet run <this-file> -- greet") }

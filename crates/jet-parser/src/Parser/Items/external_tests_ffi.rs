@@ -218,12 +218,26 @@ impl<'a> Parser<'a> {
             }
             let arguments = self.bound_registered_rule_arguments(marker)?;
             let mut metadata = crate::AST::TaskMetadata::default();
-            metadata.packages = Self::task_string_list(arguments.parameter(0), marker.span)?;
-            metadata.cwd = Self::task_optional_string(arguments.parameter(1), marker.span, "cwd")?;
-            metadata.inputs = Self::task_string_list(arguments.parameter(2), marker.span)?;
-            metadata.outputs = Self::task_string_list(arguments.parameter(3), marker.span)?;
-            metadata.skip = Self::task_skip(arguments.parameter(4), marker.span)?;
-            if let Some(cache) = arguments.parameter(5) {
+            if let Some(scope) = arguments.parameter(0) {
+                metadata.scope = match Self::task_word(scope) {
+                    Some("Dev") => crate::AST::JobScope::Dev,
+                    Some("Ship") => crate::AST::JobScope::Ship,
+                    Some("Internal") => crate::AST::JobScope::Internal,
+                    _ => {
+                        return Err(Self::task_metadata_error(
+                            "scope",
+                            ".Dev, .Ship, or .Internal",
+                            scope.span(),
+                        ))
+                    }
+                };
+            }
+            metadata.packages = Self::task_string_list(arguments.parameter(1), marker.span)?;
+            metadata.cwd = Self::task_optional_string(arguments.parameter(2), marker.span, "cwd")?;
+            metadata.inputs = Self::task_string_list(arguments.parameter(3), marker.span)?;
+            metadata.outputs = Self::task_string_list(arguments.parameter(4), marker.span)?;
+            metadata.skip = Self::task_skip(arguments.parameter(5), marker.span)?;
+            if let Some(cache) = arguments.parameter(6) {
                 metadata.cache = match Self::task_word(cache) {
                     Some("Local") => crate::AST::TaskCachePolicy::Local,
                     Some("Shared") => crate::AST::TaskCachePolicy::Shared,
@@ -237,7 +251,7 @@ impl<'a> Parser<'a> {
                     }
                 };
             }
-            if let Some(limits) = arguments.parameter(6) {
+            if let Some(limits) = arguments.parameter(7) {
                 metadata.limits = Self::task_limits(limits, marker.span)?;
             }
             Ok(Some(metadata))

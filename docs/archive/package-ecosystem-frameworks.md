@@ -284,7 +284,7 @@ Headline features other package managers ship, answered from existing law —
 nothing silent:
 
 - **Scripts / job runner** (npm scripts, cargo xtask): ratified — `#Job fn`
-  beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run --job <name> <entry>`,
+  beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run <entry> -- <name>`,
   scheduled with `#Every(…)` (D-SCHEDULE1). No new surface needed.
 - **Feature flags / conditional compilation** (cargo features): ratified —
   `Build.{ features }` in build profiles (D-BUILDPROFILE1) plus comptime

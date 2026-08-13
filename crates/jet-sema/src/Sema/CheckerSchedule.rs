@@ -18,7 +18,7 @@
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
 
-use crate::AST::{EveryScheduleError, Func};
+use crate::AST::{EveryScheduleError, Func, Item, JobScope, LoadedModule};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
@@ -80,6 +80,21 @@ fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
     .with_detail(format!("reserved: {reserved}\n"))
 }
 
+fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
+    let scope = match scope {
+        JobScope::Dev => "Dev",
+        JobScope::Ship => "Ship",
+        JobScope::Internal => "Internal",
+    };
+    Diagnostic::error(
+        "E0928",
+        format!("job `{name}` is declared more than once in scope .{scope}"),
+        "one argv subcommand cannot select two functions at the same job scope".to_string(),
+        "rename the job, or give the declarations different scopes".to_string(),
+        Some(span),
+    )
+}
+
 /// D-JPK-TASKRUN1: reject `#Job fn run|dev|build|test`. Called alongside the
 /// `#Every` value check during registration.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
@@ -90,7 +105,40 @@ pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
         let span = f.task_span.unwrap_or(f.name_span);
         return vec![e0928_reserved_job_name(&f.name, span)];
     }
+    if Syntax::JOB_RESERVED_CLI.contains(&f.name.as_str()) {
+        let span = f.task_span.unwrap_or(f.name_span);
+        return vec![Diagnostic::error(
+            "E0928",
+            format!("`{}` is reserved by Jet's command line", f.name),
+            "job dispatch reserves built-in command and flag names before ordinary CLI parsing".to_string(),
+            "rename the job, or choose a name outside Jet's command and flag vocabulary".to_string(),
+            Some(span),
+        )];
+    }
     Vec::new()
+}
+
+/// D-JOB-SUBCMD1=C: names may repeat across scopes, but not within one.
+pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> {
+    let mut seen: Vec<(String, JobScope)> = Vec::new();
+    let mut diags = Vec::new();
+    for module in modules {
+        for item in &module.items {
+            let Item::Func(function) = item else { continue };
+            if !function.is_task { continue }
+            let scope = function
+                .task_metadata
+                .as_ref()
+                .map(|metadata| metadata.scope)
+                .unwrap_or_default();
+            if !seen.iter().any(|(name, previous)| name == &function.name && *previous == scope) {
+                seen.push((function.name.clone(), scope));
+            } else {
+                diags.push(e0928_job_collision(&function.name, scope, function.name_span));
+            }
+        }
+    }
+    diags
 }
 
 /// D-SCHEDULE1: validate `f`'s `#Every(…)` argument, if it has one. Called

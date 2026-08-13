@@ -668,6 +668,7 @@ pub(crate) fn emit_cli_entry_if_needed(
     cli_items: &[Item],
     out: &mut String,
 ) {
+    let job_dispatch = emit_job_dispatch(cx, items, cli_items, out);
     let run_fn = items.iter().find_map(|i| match i {
         Item::Func(f) if f.name == "run" => Some(f),
         _ => None,
@@ -717,7 +718,11 @@ pub(crate) fn emit_cli_entry_if_needed(
             service_target,
             "    ",
         );
-        out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{invoke}}}\n\n"));
+        let dispatch = job_dispatch
+            .as_deref()
+            .map(|name| format!("    let __argv = jet_std_io_args();\n    if {name}(&__argv) {{ return; }}\n"))
+            .unwrap_or_default();
+        out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{dispatch}{invoke}}}\n\n"));
         return;
     }
     if params.len() != 1 {
@@ -768,10 +773,15 @@ pub(crate) fn emit_cli_entry_if_needed(
                 service_target,
                 "                ",
             );
+            let dispatch = job_dispatch
+                .as_deref()
+                .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}{spec_name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {helper_prefix}{spec_name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 spec_name = spec_name,
                 decode_name = decode_name,
+                dispatch = dispatch,
             ));
         }
         return;
@@ -794,9 +804,220 @@ pub(crate) fn emit_cli_entry_if_needed(
             entry_error,
             serve_app,
             service_target,
+            job_dispatch.as_deref(),
             out,
         );
     }
+}
+
+fn emit_job_dispatch(
+    cx: &Cx,
+    items: &[Item],
+    cli_items: &[Item],
+    out: &mut String,
+) -> Option<String> {
+    let jobs: Vec<&Func> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) if function.is_task => Some(function),
+            _ => None,
+        })
+        .collect();
+    if jobs.is_empty() {
+        return None;
+    }
+    let dispatch = mangle_generated("job_dispatch");
+    let mut entries = String::new();
+    for function in jobs {
+        let wrapper = mangle_generated(&format!("job_{}", function.name));
+        emit_job_wrapper(cx, items, cli_items, function, &wrapper, out);
+        let scope = match function
+            .task_metadata
+            .as_ref()
+            .map(|metadata| metadata.scope)
+            .unwrap_or_default()
+        {
+            crate::AST::JobScope::Dev => "JetJobScope::Dev",
+            crate::AST::JobScope::Ship => "JetJobScope::Ship",
+            crate::AST::JobScope::Internal => "JetJobScope::Internal",
+        };
+        entries.push_str(&format!(
+            "        JetJobEntry {{ name: {name:?}, scope: {scope}, invoke: {wrapper} }},\n",
+            name = function.name,
+        ));
+    }
+    out.push_str(&format!(
+        "fn {dispatch}(__argv: &[String]) -> bool {{\n    let __jobs = [\n{entries}    ];\n    jet_job_dispatch(__argv, &__jobs)\n}}\n\n",
+        dispatch = dispatch,
+        entries = entries,
+    ));
+    Some(dispatch)
+}
+
+fn emit_job_wrapper(
+    cx: &Cx,
+    items: &[Item],
+    cli_items: &[Item],
+    function: &Func,
+    wrapper: &str,
+    out: &mut String,
+) {
+    let params = cx.sigs.get(&function.name).cloned().unwrap_or_else(|| {
+        function
+            .params
+            .iter()
+            .map(|param| (param.convention, param.ty.clone()))
+            .collect()
+    });
+    let callable = mangle(&function.name);
+    let entry_error = function
+        .return_type
+        .as_ref()
+        .and_then(|ty| entry_error(cx, ty));
+    let serve_app = function
+        .return_type
+        .as_ref()
+        .is_some_and(returns_web_app);
+    out.push_str(&format!("fn {wrapper}(__argv: &[String]) {{\n"));
+    if params.is_empty() {
+        out.push_str("    if __argv.get(1).is_some_and(|arg| arg == \"--help\") {\n        println!(\"Usage: {}\", __argv.first().map(String::as_str).unwrap_or(\"\"));\n        return;\n    }\n");
+        out.push_str(&emit_entry_invocation(
+            &callable,
+            None,
+            entry_error,
+            serve_app,
+            false,
+            "    ",
+        ));
+        out.push_str("}\n\n");
+        return;
+    }
+    if params.len() != 1 {
+        out.push_str("    eprintln!(\"job entry accepts zero or one argument\");\n    std::process::exit(2);\n}\n\n");
+        return;
+    }
+    let (conv, param_ty) = params[0].clone();
+    let Type::Named(type_name) = &param_ty else {
+        out.push_str("    eprintln!(\"job entry argument must be a named CLI type\");\n    std::process::exit(2);\n}\n\n");
+        return;
+    };
+    let name = type_name.rsplit('.').next().unwrap_or(type_name);
+    let local_type = !type_name.contains('.')
+        && items.iter().any(|item| match item {
+            Item::Struct(structure) => structure.name == name,
+            Item::Enum(enumeration) => enumeration.name == name,
+            _ => false,
+        });
+    let param_rust = cx.rust_type(&param_ty);
+    let helper_prefix = if local_type {
+        String::new()
+    } else {
+        param_rust
+            .rsplit_once("::")
+            .map(|(module, _)| format!("{module}::"))
+            .unwrap_or_default()
+    };
+    let by_ref = rust_param_type(cx, conv, &param_ty).starts_with('&');
+    let arg_expr = |value: &str| -> String {
+        if by_ref {
+            format!("&{value}")
+        } else {
+            value.to_string()
+        }
+    };
+    if let Some(structure) = cli_items.iter().find_map(|item| match item {
+        Item::Struct(structure) if structure.name == name => Some(structure),
+        _ => None,
+    }) {
+        if structure.derives.iter().any(|(derive, _)| derive == "CLI") {
+            let spec_name = cli_helper_name("spec", name);
+            let decode_name = cli_helper_name("decode", name);
+            let invoke = emit_entry_invocation(
+                &callable,
+                Some(&arg_expr("__args")),
+                entry_error,
+                serve_app,
+                false,
+                "                ",
+            );
+            out.push_str(&format!(
+                "    let __spec = {helper_prefix}{spec_name}();\n    match jet_args_parse(&__spec, __argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                spec_name = spec_name,
+                decode_name = decode_name,
+            ));
+            return;
+        }
+    }
+    if let Some(enumeration) = cli_items.iter().find_map(|item| match item {
+        Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
+        _ => None,
+    }) {
+        let schema = jet_foundation::CLISchema::schema_for_type(cli_items, name)
+            .expect("sema-approved enum job has one checked command schema");
+        emit_cli_subcommand_job_wrapper(
+            enumeration,
+            &schema,
+            &helper_prefix,
+            &param_rust,
+            &callable,
+            &arg_expr,
+            entry_error,
+            serve_app,
+            wrapper,
+            out,
+        );
+        return;
+    }
+    out.push_str("    eprintln!(\"job entry argument has no CLI schema\");\n    std::process::exit(2);\n}\n\n");
+}
+
+fn emit_cli_subcommand_job_wrapper(
+    e: &EnumDef,
+    schema: &jet_foundation::CLISchema::CLICommandSchema,
+    helper_prefix: &str,
+    enum_rust: &str,
+    callable: &str,
+    arg_expr: &dyn Fn(&str) -> String,
+    entry_error: Option<EntryError>,
+    serve_app: bool,
+    wrapper: &str,
+    out: &mut String,
+) {
+    let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
+    let usage_lines = cmd_names
+        .iter()
+        .map(|name| format!("  {name}"))
+        .collect::<Vec<_>>()
+        .join("\\n");
+    let mut arms = String::new();
+    for variant in &e.variants {
+        let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
+            continue;
+        };
+        let tag = mangle_path(&variant.name);
+        let call_arg = arg_expr(&format!("{enum_rust}::{tag}(__payload)"));
+        let invoke = emit_entry_invocation(
+            callable,
+            Some(&call_arg),
+            entry_error,
+            serve_app,
+            false,
+            "                        ",
+        );
+        let spec_name = cli_helper_name("spec", payload_name);
+        let decode_name = cli_helper_name("decode", payload_name);
+        arms.push_str(&format!(
+            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}{spec_name}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            sub = variant.name.to_lowercase(),
+            spec_name = spec_name,
+            decode_name = decode_name,
+        ));
+    }
+    out.push_str(&format!(
+        "    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: {{}} <command> [options]\\n\\nCommands:\\n{usage}\", __argv.first().map(String::as_str).unwrap_or(\"\"));\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        usage = usage_lines,
+        arms = arms,
+    ));
 }
 
 fn emit_entry_invocation(
@@ -899,6 +1120,7 @@ fn emit_cli_subcommand_entry(
     entry_error: Option<EntryError>,
     serve_app: bool,
     service_target: bool,
+    job_dispatch: Option<&str>,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
@@ -965,12 +1187,25 @@ fn emit_cli_subcommand_entry(
         .as_deref()
         .map(|description| format!("{description}\n\n"))
         .unwrap_or_default();
-    out.push_str(&format!(
+    let dispatch = job_dispatch
+        .map(|name| format!("    if {name}(&__argv) {{ return; }}\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n"))
+        .unwrap_or_default();
+    let main = format!(
         "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        let __prog = jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"));\n        let __description = {root_description:?};\n        println!(\"Usage: {{}} <command> [options]\\n\\n{{}}Commands:\\n{usage}\", __prog, __description);\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),
-    ));
+    );
+    let main = if job_dispatch.is_some() {
+        main.replacen(
+            "    if __argv.len() < 2 || __argv[1] == \"--help\" {\n",
+            &dispatch,
+            1,
+        )
+    } else {
+        main
+    };
+    out.push_str(&main);
 }
 
 /// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous

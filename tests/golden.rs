@@ -721,81 +721,55 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// I5 for `examples/features/devloop/job_runner.jet`: compile+run both
-/// `#Job` entries via `compile_with_entry` (same path as `jet run --job`).
+/// I5 for `examples/features/devloop/job_runner.jet`: one generated binary
+/// dispatches every named `#Job` entry through argv.
 fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
     let path = entry.path.to_str().expect("example path is utf8");
+    let compiled = jet::compile_with_path(&src, path).unwrap_or_else(|diags| {
+        panic!(
+            "job_runner subcommand table failed the front end:\n{}",
+            jet::render_diagnostics(&entry.shown, &src, &diags)
+        )
+    });
+    assert!(
+        !strip_vetted_prelude_modules(&compiled.rust).contains("unsafe"),
+        "generated Rust for job_runner contains ungated `unsafe`"
+    );
+    assert!(compiled.rust.contains("fn main()"), "job_runner has no fn main");
+    if !env.have_rustc {
+        return;
+    }
+    let dir = std::env::temp_dir();
+    let rs = dir.join(format!("jet_golden_{}_devloop_job_runner.rs", std::process::id()));
+    let bin = dir.join(format!("jet_golden_{}_devloop_job_runner", std::process::id()));
+    let mut rustc = Command::new("rustc");
+    add_generated_rust(&mut rustc, &rs, &compiled.rust, compiled.ffi.is_some(), &[]);
+    rustc.arg("-o").arg(&bin);
+    if let Some(link) = &compiled.ffi {
+        rustc
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
+    let out = rustc.output().unwrap();
+    assert!(
+        out.status.success(),
+        "I2 violated: rustc rejected job_runner:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     for (job, expected_name) in [("greet", "job_runner.greet"), ("seed", "job_runner.seed")] {
-        let compiled = match jet::compile_with_entry(path, job) {
-            Ok(c) => c,
-            Err(diags) => panic!(
-                "job_runner --job={job} failed the front end:\n{}",
-                jet::render_diagnostics(&entry.shown, &src, &diags)
-            ),
-        };
-        assert!(
-            !strip_vetted_prelude_modules(&compiled.rust).contains("unsafe"),
-            "generated Rust for job_runner --job={job} contains ungated `unsafe`"
-        );
-        assert!(
-            compiled.rust.contains("fn main()"),
-            "generated Rust for job_runner --job={job} has no fn main"
-        );
-        if !env.have_rustc {
-            continue;
-        }
-        let dir = std::env::temp_dir();
-        let rs = dir.join(format!(
-            "jet_golden_{}_{}_{}.rs",
-            std::process::id(),
-            "devloop_job_runner",
-            job
-        ));
-        let bin = dir.join(format!(
-            "jet_golden_{}_{}_{}",
-            std::process::id(),
-            "devloop_job_runner",
-            job
-        ));
-        let mut rustc = Command::new("rustc");
-        add_generated_rust(
-            &mut rustc,
-            &rs,
-            &compiled.rust,
-            compiled.ffi.is_some(),
-            &[],
-        );
-        rustc.arg("-o").arg(&bin);
-        if let Some(link) = &compiled.ffi {
-            rustc
-                .arg("--extern")
-                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-                rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-            }
-        }
-        let out = rustc.output().unwrap();
-        assert!(
-            out.status.success(),
-            "I2 violated: rustc rejected job_runner --job={job}:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let run = Command::new(&bin).output().unwrap();
+        let run = Command::new(&bin).arg(job).output().unwrap();
         assert!(
             run.status.success(),
-            "job_runner --job={job} failed at runtime:\nstdout: {}\nstderr: {}",
+            "job_runner subcommand `{job}` failed at runtime:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );
-        let out_path = env
-            .ex_dir
-            .join("expected")
-            .join(format!("devloop/{expected_name}.out"));
-        assert!(
-            out_path.is_file(),
-            "missing examples/features/expected/devloop/{expected_name}.out"
-        );
+        let out_path = env.ex_dir.join("expected").join(format!("devloop/{expected_name}.out"));
+        assert!(out_path.is_file(), "missing expected output for `{job}`");
         let actual = String::from_utf8_lossy(&run.stdout);
         if env.update_expected {
             fs::write(&out_path, actual.as_bytes()).unwrap();
@@ -803,19 +777,19 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
             let expected = fs::read_to_string(&out_path).unwrap();
             if actual != expected {
                 panic!(
-                    "output mismatch for job_runner --job={job}:\n{}",
+                    "output mismatch for job_runner subcommand `{job}`:\n{}",
                     unified_diff(
                         &format!("examples/features/expected/devloop/{expected_name}.out"),
-                        &format!("examples/features/devloop/job_runner --job={job} stdout"),
+                        &format!("examples/features/devloop/job_runner subcommand `{job}` stdout"),
                         &expected,
                         &actual,
                     )
                 );
             }
         }
-        let _ = fs::remove_file(&rs);
-        let _ = fs::remove_file(&bin);
     }
+    let _ = fs::remove_file(&rs);
+    let _ = fs::remove_file(&bin);
 }
 
 fn check_golden_entry_release_run(entry: &GoldenEntry, env: &GoldenEnv) {

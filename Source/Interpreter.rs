@@ -400,12 +400,41 @@ fn checked_bundle(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    checked_bundle_with_entry(file, gates, None)
+}
+
+fn checked_bundle_with_entry(
+    file: &str,
+    gates: jet_foundation::Policy::GateSet,
+    entry_fn: Option<&str>,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
                 if let Err(diags) = crate::Driver::seed_build_facts(&mut bundle, "dev", false) {
                     return Err(diags);
+                }
+                if let Some(entry_fn) = entry_fn {
+                    let specs = job_specs(&bundle);
+                    if jet_jit::Job::jet_job_has_visible(&specs) {
+                        let argv = vec![String::new(), entry_fn.to_string()];
+                        let selection = jet_jit::Job::jet_job_select(&argv, &specs);
+                        if !matches!(selection, jet_jit::Job::JetJobSelection::Job(_)) {
+                            return Err(vec![Diagnostic::error(
+                                "E1294",
+                                format!("no job named `{entry_fn}`"),
+                                "the first program subcommand must name a function marked `#Job`.".to_string(),
+                                "mark a function `#Job`, or check the subcommand spelling.".to_string(),
+                                None,
+                            )
+                            .with_detail(format!(
+                                "declared jobs: {}\n",
+                                specs.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ")
+                            ))]);
+                        }
+                        jet_driver::Driver::swap_entry_point(&mut bundle, entry_fn);
+                    }
                 }
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle_gates(
@@ -434,6 +463,46 @@ fn checked_bundle(
             Err(diags) => Err(diags),
         }
     })
+}
+
+fn requested_job(program_args: &[&str]) -> Option<&str> {
+    program_args
+        .first()
+        .copied()
+        .filter(|arg| !arg.starts_with('-'))
+}
+
+fn selected_job(bundle: &ProgramBundle, requested: Option<&str>) -> Option<&str> {
+    let name = requested?;
+    let specs = job_specs(bundle);
+    let argv = vec![String::new(), name.to_string()];
+    match jet_jit::Job::jet_job_select(&argv, &specs) {
+        jet_jit::Job::JetJobSelection::Job(_) => Some(name),
+        _ => None,
+    }
+}
+
+fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
+    bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) if function.is_task => {
+                let scope = match function
+                    .task_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.scope)
+                    .unwrap_or_default()
+                {
+                    jet_foundation::AST::JobScope::Dev => jet_jit::Job::JetJobScope::Dev,
+                    jet_foundation::AST::JobScope::Ship => jet_jit::Job::JetJobScope::Ship,
+                    jet_foundation::AST::JobScope::Internal => jet_jit::Job::JetJobScope::Internal,
+                };
+                Some((function.name.as_str(), scope))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
@@ -469,22 +538,37 @@ pub fn run_jit_once_with_args_opts_and_gates(
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
     let entry = std::path::Path::new(file);
-    if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+    if let Some(outcome) = job_help_if_requested(file, program_args, gates) {
         return outcome;
     }
-    match checked_bundle(file, gates) {
+    let requested = requested_job(program_args);
+    // A cached tier-1 module has the ordinary `run` entry. A named job must
+    // pass through entry selection first, so never let a warm artifact skip
+    // the shared job selector.
+    if requested.is_none() {
+        if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+            return outcome;
+        }
+    }
+    match checked_bundle_with_entry(file, gates, requested) {
         Ok(bundle) => {
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
-            let mut args = Vec::with_capacity(program_args.len() + 1);
-            args.push(file.to_string());
-            args.extend(program_args.iter().map(|arg| (*arg).to_string()));
+            let selected = selected_job(&bundle, requested);
+            let runtime_args = if selected.is_some() {
+                &program_args[1..]
+            } else {
+                program_args
+            };
+            let mut args = Vec::with_capacity(runtime_args.len() + 1);
+            args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
+            args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
             let outcome = jet_jit::with_program_args(&args, || {
                 use crate::JitBackend::JitBackend;
                 let mut backend = jet_jit::CraneliftBackend::new();
                 backend.run(&bundle, false)
             });
-            if matches!(outcome, RunOutcome::Ran { .. }) {
+            if selected.is_none() && matches!(outcome, RunOutcome::Ran { .. }) {
                 crate::RunCache::store_after_miss(entry, program_args);
             }
             if !json {
@@ -512,14 +596,24 @@ pub fn run_interpreter_once_with_args_and_gates(
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
     crate::RunCache::reset_phases();
+    if let Some(outcome) = job_help_if_requested(file, program_args, gates) {
+        return outcome;
+    }
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle(file, gates) {
+        let requested = requested_job(program_args);
+        let outcome = match checked_bundle_with_entry(file, gates, requested) {
             Ok(bundle) => {
-                let mut args = Vec::with_capacity(program_args.len() + 1);
-                args.push(file.to_string());
-                args.extend(program_args.iter().map(|arg| (*arg).to_string()));
+                let selected = selected_job(&bundle, requested);
+                let runtime_args = if selected.is_some() {
+                    &program_args[1..]
+                } else {
+                    program_args
+                };
+                let mut args = Vec::with_capacity(runtime_args.len() + 1);
+                args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
+                args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
                 jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true))
             }
             Err(diags) => RunOutcome::Problems(diags),
@@ -562,6 +656,38 @@ pub fn dev_iteration_with_gates(
     jet_jit::merge_jit_trace_flags_for_test(flags);
     jet_jit::publish_trace(rows);
     outcome
+}
+
+fn job_help_if_requested(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+) -> Option<RunOutcome> {
+    if program_args.first().copied() != Some("--help") {
+        return None;
+    }
+    match checked_bundle(file, gates) {
+        Ok(bundle) => {
+            let specs = job_specs(&bundle);
+            if !jet_jit::Job::jet_job_has_visible(&specs) {
+                return None;
+            }
+            let argv = vec![file.to_string(), "--help".to_string()];
+            if matches!(
+                jet_jit::Job::jet_job_select(&argv, &specs),
+                jet_jit::Job::JetJobSelection::Help
+            ) {
+                Some(RunOutcome::Ran {
+                    stdout: jet_jit::Job::jet_job_help_text(&argv, &specs),
+                    stderr: String::new(),
+                    exit_code: 0,
+                })
+            } else {
+                None
+            }
+        }
+        Err(diags) => Some(RunOutcome::Problems(diags)),
+    }
 }
 
 /// Run an already-checked bundle through the dev backend seam.
@@ -622,7 +748,7 @@ mod tests {
 
     #[test]
     fn scheduled_tasks_filter_always_skipped_tasks() {
-        let src = "#Job(skip: \"disabled\") #Every(5min) fn skipped() {}\n#Job(skip: .Unless(.Platform(.MacOS))) #Every(5min) fn mac_only() {}\n#Job #Every(5min) fn active() {}\nfn run() {}\n";
+        let src = "#Job(.Dev, skip: \"disabled\") #Every(5min) fn skipped() {}\n#Job(.Dev, skip: .Unless(.Platform(.MacOS))) #Every(5min) fn mac_only() {}\n#Job #Every(5min) fn active() {}\nfn run() {}\n";
         let bundle = bundle_from(src, "scheduled_skip");
         let mut names = scheduled_tasks(&bundle)
             .into_iter()

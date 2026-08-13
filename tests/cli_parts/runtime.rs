@@ -308,7 +308,8 @@ fn top_level_help_lists_job_vocabulary_only() {
     assert!(out.status.success(), "help failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("jobs"), "help must list `jet jobs`: {stdout}");
-    assert!(stdout.contains("--job"), "help must list `--job`: {stdout}");
+    assert!(stdout.contains("#Job"), "help must list `#Job`: {stdout}");
+    assert!(stdout.contains("<file.jet> --"), "help must show job subcommands: {stdout}");
     assert!(!stdout.contains("tasks"), "retired task CLI vocabulary leaked: {stdout}");
     let retired_flag = format!("--{}", "task");
     assert!(!stdout.contains(&retired_flag), "retired job flag leaked: {stdout}");

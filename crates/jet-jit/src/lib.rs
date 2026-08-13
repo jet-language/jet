@@ -11,6 +11,13 @@
 
 #![allow(non_snake_case)]
 
+/// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
+/// as generated AOT mains. Their only extra work is mapping the selected name
+/// onto the already checked TIR entry.
+pub mod Job {
+    include!("../../jet-codegen/src/Prelude/Job.rs");
+}
+
 /// #1633: one canonical listing per JIT host symbol.
 ///
 /// Each per-module host-symbol table used to write every symbol four times:

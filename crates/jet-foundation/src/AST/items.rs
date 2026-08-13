@@ -1036,8 +1036,8 @@ pub struct Func {
     /// ambient Time/Rand/Net/IO unless routed through deterministic capabilities.
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
-    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Job fn` — a top-level
-    /// function Jet can invoke by name (`jet run --job <name> <entry>`).
+    /// D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can invoke as an
+    /// argv subcommand (`jet run <entry> -- <name>`).
     /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
@@ -1163,6 +1163,8 @@ impl Func {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskMetadata {
+    /// D-JOB-SUBCMD1=C: the build tier in which a named job is exposed.
+    pub scope: JobScope,
     pub packages: Vec<String>,
     pub cwd: Option<String>,
     pub inputs: Vec<String>,
@@ -1170,6 +1172,16 @@ pub struct TaskMetadata {
     pub skip: Option<TaskSkip>,
     pub cache: TaskCachePolicy,
     pub limits: BTreeMap<String, String>,
+}
+
+/// D-JOB-SUBCMD1=C: job visibility is one closed, typed menu shared by sema,
+/// AOT dispatch, and the dev tiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JobScope {
+    #[default]
+    Dev,
+    Ship,
+    Internal,
 }
 
 /// D-TASK-META1=A: a task may be skipped unconditionally with an explicit

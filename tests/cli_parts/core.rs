@@ -260,11 +260,14 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
     );
     assert_eq!(
         String::from_utf8(listed.stdout).unwrap(),
-        "greet  Say hello from a project job\nseed   Seed local data (every 5min)\n"
+        format!(
+            "{:<11}  [ship] Say hello from a shipped project job\n{:<11}  [dev] Seed local data (every 5min)\n{:<11}  [internal]\n",
+            "greet", "seed", "inspect_job"
+        )
     );
 
     let unknown = Command::new(jet())
-        .args(["run", "--job", "missing", "run.jet"])
+        .args(["run", "run.jet", "--", "missing"])
         .current_dir(&project)
         .env("NO_COLOR", "1")
         .output()
@@ -273,9 +276,37 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
     assert!(!unknown.status.success(), "{unknown_stderr}");
     assert!(unknown_stderr.contains("E1294"), "{unknown_stderr}");
     assert!(
-        unknown_stderr.contains("declared jobs: greet, seed"),
+        unknown_stderr.contains("declared jobs: greet, seed, inspect_job"),
         "{unknown_stderr}"
     );
+
+    let release = Command::new(jet())
+        .args(["build", "--release", "run.jet"])
+        .current_dir(&project)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(release.status.success(), "{}", String::from_utf8_lossy(&release.stderr));
+    assert!(
+        String::from_utf8_lossy(&release.stdout)
+            .contains("stripped 2 dev job(s): seed, inspect_job (mark #Job(.Ship) to include)"),
+        "{}",
+        String::from_utf8_lossy(&release.stdout)
+    );
+    let shipped = Command::new(project.join("build/run"))
+        .arg("greet")
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(shipped.status.success(), "{}", String::from_utf8_lossy(&shipped.stderr));
+    assert!(String::from_utf8_lossy(&shipped.stdout).contains("hello from job"));
+    let stripped = Command::new(project.join("build/run"))
+        .arg("seed")
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(!stripped.status.success());
+    assert!(String::from_utf8_lossy(&stripped.stderr).contains("unknown command `seed`"));
 
     let help = Command::new(jet()).arg("help").output().unwrap();
     assert!(help.status.success());

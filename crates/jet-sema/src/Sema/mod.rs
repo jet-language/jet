@@ -2092,7 +2092,7 @@ pub use PolicyFacts::{
 // too, not just the bare enum.
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub(crate) use CheckerMarkers::{check_declared_rule_facts, check_marker_vocabulary};
-pub(crate) use CheckerSchedule::check_every_marker;
+pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
     builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, parse_effect_name,
     resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,

@@ -748,8 +748,6 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--skipped", help: "with project parts: show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: favor a smaller binary" },
-    // D-JPK-TASKRUN1 (card #476): run a `#Job fn` instead of `fn run`.
-    FlagSpec { long: "--job", help: "with run: run a named `#Job fn`" },
     FlagSpec { long: "--output", help: "with run: run a named build output" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.

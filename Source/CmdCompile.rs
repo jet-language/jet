@@ -235,6 +235,7 @@ pub(crate) fn run_compile_cmd(
     } else {
         BuildProfile::Default
     };
+    let release_profile = matches!(&profile, BuildProfile::Release);
 
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -769,6 +770,7 @@ pub(crate) fn run_compile_cmd(
                 mode,
                 native_key.clone(),
             );
+            print_release_job_summary(&src, release_profile, mode);
             // D-PERFBUDGET-INTEGRATION1: every build enforces applicable
             // deterministic Fail budgets through CmdBudget's one canonical
             // evaluator/report path. Cross backends use their semantic target
@@ -823,6 +825,7 @@ pub(crate) fn run_compile_cmd(
                 mode,
                 native_key.clone(),
             );
+            print_release_job_summary(&src, release_profile, mode);
             if cross_target.is_some() {
                 eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
                 exit(ExitCodes::OK);
@@ -960,110 +963,6 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     exit(child_exit_code(status));
 }
 
-/// D-JPK-TASKRUN1 (card #476): `jet run --job <name> <file>` — compile with
-/// the named `#Job fn` as the entry via a synthetic `fn run { job(…) }`
-/// wrapper (same `compile_with_entry` path `fn dev()` uses; the job keeps
-/// its source name so plain-call deps stay resolvable), then run the binary
-/// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
-pub(crate) fn run_job_entry(
-    file: &str,
-    job: &str,
-    program_args: &[&String],
-    mode: OutputMode,
-) {
-    let src = match fs::read_to_string(file) {
-        Ok(s) => s,
-        Err(_) => {
-            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let declared = list_job_names(&src);
-    // Parse failures still flow through `compile_with_entry`, which owns the
-    // full source diagnostic. Successful discovery is the E1294 authority.
-    let is_marked = declared
-        .as_ref()
-        .map(|jobs| jobs.iter().any(|item| item.name == job))
-        .unwrap_or(true);
-    if !is_marked {
-        let declared = declared.expect("successful job discovery");
-        let list = if declared.is_empty() {
-            "(none)".to_string()
-        } else {
-            declared
-                .iter()
-                .map(|item| item.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let diag = jet::Diagnostics::Diagnostic::error(
-            "E1294",
-            format!("no job named `{job}`"),
-            format!("`jet run --job` / `jetpack run` only invoke functions marked `#Job` (D-JPK-TASKRUN1)."),
-            "mark a function `#Job` to make it runnable, or check the spelling.".to_string(),
-            None,
-        )
-        .with_detail(format!("declared jobs: {list}\n"));
-        report_problems(mode, file, &src, &[diag]);
-        exit(ExitCodes::USER_ERROR);
-    }
-    if let Ok(jobs) = &declared {
-        if let Some(reason) = jobs
-            .iter()
-            .find(|item| item.name == job)
-            .and_then(|item| item.metadata.as_ref())
-            .and_then(|metadata| {
-                metadata
-                    .skip
-                    .as_ref()
-                    .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
-            })
-        {
-            println!("skipping job `{job}`: {reason}");
-            return;
-        }
-    }
-    let out = match jet::compile_with_entry(file, job) {
-        Ok(out) => out,
-        Err(diags) => {
-            report_problems(mode, file, &src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let clinks = match jet::resolve_c_links(file) {
-        Ok(args) => args,
-        Err(diags) => {
-            report_problems(mode, file, &src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let bin = bin_path(file);
-    build(
-        file,
-        &out.rust,
-        bin.clone(),
-        BuildProfile::Default,
-        out.ffi.as_ref(),
-        &clinks,
-        false,
-        None,
-        None,
-        None,
-        mode,
-        // Job entry-swap is a one-shot; skip content-cache (same as `run_dev_entry`).
-        None,
-    );
-    let mut run_cmd = Command::new(&bin);
-    for arg in program_args {
-        run_cmd.arg(arg.as_str());
-    }
-    let status = run_cmd.status().unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't run the built program: {}", e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    exit(child_exit_code(status));
-}
-
 #[derive(Debug)]
 struct JobListing {
     name: String,
@@ -1148,6 +1047,16 @@ pub(crate) fn run_jobs(file: &str, mode: OutputMode) {
     }
     let width = jobs.iter().map(|job| job.name.len()).max().unwrap_or(0);
     for job in jobs {
+        let scope = match job
+            .metadata
+            .as_ref()
+            .map(|metadata| metadata.scope)
+            .unwrap_or_default()
+        {
+            jet::AST::JobScope::Dev => "dev",
+            jet::AST::JobScope::Ship => "ship",
+            jet::AST::JobScope::Internal => "internal",
+        };
         let mut detail = job.doc.unwrap_or_default();
         if let Some(schedule) = job.schedule {
             if !detail.is_empty() {
@@ -1156,10 +1065,39 @@ pub(crate) fn run_jobs(file: &str, mode: OutputMode) {
             detail.push_str(&format!("(every {schedule})"));
         }
         if detail.is_empty() {
-            println!("{}", job.name);
+            println!("{:<width$}  [{scope}]", job.name);
         } else {
-            println!("{:<width$}  {}", job.name, detail);
+            println!("{:<width$}  [{scope}] {}", job.name, detail);
         }
+    }
+}
+
+/// D-JOB-SUBCMD1=C: release binaries intentionally expose only `.Ship` jobs.
+/// Keep the dropped development surface visible at the build boundary so a
+/// release cannot silently lose a command the author expected to ship.
+fn print_release_job_summary(src: &str, release: bool, mode: OutputMode) {
+    if !release || mode.quiet {
+        return;
+    }
+    let Ok(jobs) = list_job_names(src) else {
+        return;
+    };
+    let stripped = jobs
+        .iter()
+        .filter(|job| {
+            job.metadata
+                .as_ref()
+                .map(|metadata| metadata.scope != jet::AST::JobScope::Ship)
+                .unwrap_or(true)
+        })
+        .map(|job| job.name.as_str())
+        .collect::<Vec<_>>();
+    if !stripped.is_empty() {
+        println!(
+            "stripped {} dev job(s): {} (mark #Job(.Ship) to include)",
+            stripped.len(),
+            stripped.join(", ")
+        );
     }
 }
 
