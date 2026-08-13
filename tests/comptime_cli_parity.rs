@@ -90,6 +90,87 @@ fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
 }
 
 #[test]
+fn computed_constants_match_aot_default_and_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("computed_constants_parity");
+    let source = scratch.join("computed_constants.jet");
+    fs::copy(
+        root.join("examples/features/comptime/computed_constants.jet"),
+        &source,
+    )
+    .expect("copy computed constants example");
+    let source_text = fs::read_to_string(&source).expect("read computed constants source");
+    let compiled = jet::compile_with_path(&source_text, &source.to_string_lossy())
+        .unwrap_or_else(|diags| panic!("computed constants front end rejected: {diags:#?}"));
+    assert!(
+        compiled.rust.contains("__jet_First = 41"),
+        "computed enum discriminant did not reach generated Rust:\n{}",
+        compiled.rust
+    );
+    let expected = fs::read(root.join("examples/features/expected/comptime/computed_constants.out"))
+        .expect("read computed constants golden");
+    let cache = scratch.join("cache");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "computed_constants.jet"])
+        .current_dir(&scratch.path)
+        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("build computed constants example");
+    assert!(
+        build.status.success(),
+        "AOT computed constants build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let aot = Command::new(scratch.join("build/computed_constants"))
+        .current_dir(&scratch.path)
+        .output()
+        .expect("run AOT computed constants example");
+    assert!(
+        aot.status.success(),
+        "AOT computed constants run failed:\n{}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+
+    let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "computed_constants.jet"])
+        .current_dir(&scratch.path)
+        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_CACHE_DIR", cache.join("default"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run computed constants through default jet run");
+    assert!(
+        default.status.success(),
+        "default computed constants run failed:\n{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--interpret", "computed_constants.jet"])
+        .current_dir(&scratch.path)
+        .env("JET_RUN_CACHE_DIR", cache.join("interpret-run"))
+        .env("JET_CACHE_DIR", cache.join("interpret-build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run computed constants through the interpreter");
+    assert!(
+        interpreted.status.success(),
+        "interpreter computed constants run failed:\n{}",
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+
+    assert_eq!(aot.stdout, expected, "AOT output differs from the golden");
+    assert_eq!(default.stdout, expected, "default `jet run` output differs from the golden");
+    assert_eq!(
+        interpreted.stdout, expected,
+        "interpreter output differs from the golden"
+    );
+}
+
+#[test]
 fn documented_cli_help_matches_aot_and_default_jet_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("cli_docs_parity");

@@ -888,16 +888,15 @@ impl<'a> Checker<'a> {
                     Type::FixedList {
                         elem: want_elem,
                         len: want_len,
-                        len_symbol: want_symbol,
+                        ..
                     },
                     Type::FixedList {
                         elem: got_elem,
                         len: got_len,
-                        len_symbol: got_symbol,
+                        ..
                     },
                 ) => {
                     want_len == got_len
-                        && want_symbol == got_symbol
                         && self.nominal_type_identity(want_elem, got_elem)
                 }
                 (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {

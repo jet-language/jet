@@ -322,6 +322,12 @@ fn check_bundle_opts_for_output_inner(
             &ct_core_imports[idx],
             Some(&mut top_level_embed_inputs),
         );
+        super::super::Registration::resolve_comptime_declaration_values(
+            &mut module.items,
+            &base,
+            &ct_core_imports[idx],
+            &mut diags,
+        );
         super::super::CheckerMarkers::resolve_static_rule_products(
             module,
             &base,

@@ -199,7 +199,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         Type::Apply { .. } if ty.quantity_parts().is_some() => ty.name(),
         Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ")),
         Type::Tuple(fields) => format!("({})", fields.iter().map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions))).collect::<Vec<_>>().join(", ")),
-        Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
+        Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len_expr.as_deref().map(|_| "<computed>".to_string()).unwrap_or_else(|| len.to_string())),
         Type::Tagged { marker, inner }
             if matches!(
                 marker,

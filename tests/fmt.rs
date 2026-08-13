@@ -118,6 +118,16 @@ fn repr_c_enum_surface_is_stable() {
 }
 
 #[test]
+fn computed_declaration_values_format_stably() {
+    let src = "@lanes :: 2\n@base :: 40\nstruct Frame { values: [Int#(@lanes * 2)] }\n#Layout(c, tag: U8) enum Code { First = @base + 1 Second }\n";
+    let once = jet::format_source(src).expect("computed declaration values should format");
+    assert!(once.contains("[Int#(@lanes * 2)]"), "fixed-list expression was lost:\n{once}");
+    assert!(once.contains("First = @base + 1"), "enum expression was lost:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted computed values should re-format");
+    assert_eq!(once, twice, "computed declaration formatting must be idempotent");
+}
+
+#[test]
 fn multi_head_function_surface_round_trips() {
     let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float = r * r\nfn area(Rect(w: Float, h: Float)) => Float = w * h\n";
     let once = jet::format_source(src).expect("multi-head functions should format");

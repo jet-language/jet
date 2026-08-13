@@ -1138,8 +1138,10 @@ pub(crate) fn method_call_in_subset(
     // (not a local), the type is a covered struct/enum, the method is a registered
     // user method (in `method_sigs`) that is NOT an enum *variant* (those emit an enum
     // literal, a different lowering) and NOT a builtin/special intercept.
-    if let Some(type_name) = static_call_type_name(receiver, locals) {
-        return static_method_call_in_subset(&type_name, method, args, cx, locals);
+    if recv_type.is_none() {
+        if let Some(type_name) = static_call_type_name(receiver, locals) {
+            return static_method_call_in_subset(&type_name, method, args, cx, locals);
+        }
     }
     if recv_type.is_none() {
         return false;

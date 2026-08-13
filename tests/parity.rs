@@ -481,7 +481,7 @@ fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::
     use jet::AST::Type;
     let mut out = vec![
         ("List".into(), Type::List(Box::new(Type::Int))),
-        ("FixedList".into(), Type::FixedList { elem: Box::new(Type::Int), len: 4, len_symbol: None }),
+        ("FixedList".into(), Type::FixedList { elem: Box::new(Type::Int), len: 4, len_expr: None }),
         ("Map".into(), Type::Map { key: Box::new(Type::String), key_span: None, value: Box::new(Type::Int) }),
         ("String".into(), Type::String),
         ("Int".into(), Type::Int),

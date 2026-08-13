@@ -1080,7 +1080,10 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
         }
-        if let Some(value) = v.discriminant {
+        if let Some(expr) = &v.discriminant_expr {
+            self.write(" = ");
+            self.fmt_expr(expr, Prec::OrFallback);
+        } else if let Some(value) = v.discriminant {
             self.write(" = ");
             self.write(&value.to_string());
         }

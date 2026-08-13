@@ -487,37 +487,16 @@ impl<'a> Parser<'a> {
                         value: Box::new(value),
                     }
                 } else if matches!(self.peek().kind, TokKind::Hash) {
-                    // S76 (2026-06-16): `[T#N]` fixed-size list.
+                    // S76 / D-META-CONST1: `[T#expr]` fixed-size list. Sema
+                    // evaluates the expression through the ordinary comptime
+                    // evaluator after names and module values are known.
                     self.bump(); // consume `#`
-                    let (len, len_symbol) = match &self.peek().kind {
-                        TokKind::Int(n, _) => {
-                            let n = *n;
-                            self.bump();
-                            (n as u64, None)
-                        }
-                        TokKind::Ident(name) => {
-                            let name = name.clone();
-                            let span = self.peek().span;
-                            self.bump();
-                            (0, Some((name, span)))
-                        }
-                        _ => {
-                            let sp = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0963",
-                                "expected a literal integer size after `#` in `[T#N]`".to_string(),
-                                "the size must be a non-negative integer literal".to_string(),
-                                "write `[T#4]` for a fixed-size list of 4 elements".to_string(),
-                                Some(sp),
-                            ));
-                            (0, None)
-                        }
-                    };
+                    let len_expr = self.expr()?;
                     self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
                     Type::FixedList {
                         elem: Box::new(first),
-                        len,
-                        len_symbol,
+                        len: 0,
+                        len_expr: Some(Box::new(len_expr)),
                     }
                 } else {
                     self.expect(TokKind::RBracket, "after the element type in `[T]`")?;

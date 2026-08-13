@@ -111,7 +111,7 @@ Every row below is a compile-time fact attached to a carrier. No two rows share 
 | 2 | Ranges | `distinct Int(0..10)` (D-RANGETYPE1) | overlaps 3 and 4 |
 | 3 | Invariants | `#Invariant("value >= 0 && value < 4")` string parser (D-REFINE1) | second spelling of 2; prover is interval-only anyway |
 | 4 | Fixed widths | `IntN{signed,bits}` + hand-written `int_range` containment | secretly a range fact plus layout |
-| 5 | Lengths | `FixedList{len: u64, len_symbol}` with sentinel `0` | one of four compile-time-number encodings |
+| 5 | Lengths | `FixedList{len: u64, len_expr}` resolved by the ordinary comptime evaluator | one of four compile-time-number encodings |
 | 6 | Shapes | `\0compute.dimension.N` string-encoded `Named` for `Vec<N>`/`Matrix<M,N>` | second encoding |
 | 7 | Lanes | `"F32x4" => 4` string match | third encoding |
 | 8 | States/tags/effects/taint | `FactRegistry` (D-FACTMODEL1, already unified internally) | dimensions were never invited |

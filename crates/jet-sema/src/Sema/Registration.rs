@@ -16,7 +16,7 @@ mod Serde;
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,
     register_const, register_distinct, register_enum, register_impl_methods, register_struct,
-    register_type_alias, register_type_methods,
+    register_type_alias, register_type_methods, resolve_comptime_declaration_values,
 };
 pub(super) use Derives::expand_builtin_derive_items;
 pub(crate) use Serde::{expand_builtin_serde_items, parse_generated_fragment};

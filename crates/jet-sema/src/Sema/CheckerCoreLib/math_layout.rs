@@ -133,7 +133,7 @@ pub(crate) fn math_array_bridge_ty(name: &str) -> Option<Type> {
     Some(Type::FixedList {
         elem: Box::new(math_scalar_ty(name)),
         len: math_arity(name) as u64,
-        len_symbol: None,
+        len_expr: None,
     })
 }
 

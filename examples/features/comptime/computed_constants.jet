@@ -1,0 +1,27 @@
+// D-META-CONST1: declaration constants use the ordinary comptime evaluator.
+@lanes :: 2
+
+@base :: 40
+
+struct Frame {
+    values: [Float#(@lanes * 2)]
+}
+
+#Layout(c)
+enum Code {
+    First = @base + 1
+    Second
+}
+
+fn code_number(value: Code) => Int {
+    if value == {
+        .First -> { return 41 }
+        .Second -> return 42
+    }
+}
+
+fn run() {
+    frame :: Frame.{values: [Float#4].{1.0, 2.0, 3.0, 4.0}}
+    print(frame.values[3])
+    print(code_number(Code.First))
+}

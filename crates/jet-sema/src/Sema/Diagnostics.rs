@@ -828,10 +828,10 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
                 .map(|(name, ty)| (name, Box::new(core_crypto_nominal(*ty))))
                 .collect(),
         ),
-        Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+        Type::FixedList { elem, len, len_expr } => Type::FixedList {
             elem: Box::new(core_crypto_nominal(*elem)),
             len,
-            len_symbol,
+            len_expr,
         },
         Type::Fn {
             params,
@@ -1657,7 +1657,7 @@ mod tests {
                 Type::FixedList {
                     elem: Box::new(Type::Named("SigningKey".to_string())),
                     len: 1,
-                    len_symbol: None,
+                    len_expr: None,
                 },
                 Type::Tagged {
                     marker: TagMarker::User("Audit".to_string()),

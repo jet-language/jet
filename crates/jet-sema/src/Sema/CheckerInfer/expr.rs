@@ -2732,7 +2732,7 @@ impl<'a> Checker<'a> {
             return Some(Type::FixedList {
                 elem: expected_inner,
                 len,
-                len_symbol: None,
+                len_expr: None,
             });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
