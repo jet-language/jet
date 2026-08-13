@@ -4097,7 +4097,7 @@ impl<'a> Checker<'a> {
                     if name == crate::Syntax::TYPE_CONDITION {
                         *recv_type_out = Some(name.to_string());
                     }
-                    if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") {
+                    if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash" | "Hasher") {
                         *recv_type_out = Some(name.to_string());
                     }
                 }

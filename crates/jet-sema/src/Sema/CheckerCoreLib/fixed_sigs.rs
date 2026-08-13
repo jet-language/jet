@@ -1817,6 +1817,19 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
+        ("core.crypto", "sha1" | "sha224" | "sha384" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::String),
+        )),
+        ("core.crypto", "pbkdf2_hmac") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
         ("core.crypto", "sha512_bytes" | "blake3_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
@@ -2678,6 +2691,38 @@ pub fn core_fixed_sig(
         // Takes [U8] → [U8]. Returns empty list on invalid input.
         ("core.archive", "zip_decompress") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.archive", "crc32" | "adler32") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::Int),
+        )),
+        ("core.archive", "deflate" | "inflate" | "zip_open" | "zip_close") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.archive", "zip_names_json") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::String),
+        )),
+        ("core.archive", "zip_next") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.archive", "zip_read") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.archive", "zip_write") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.archive", "zip_extract" | "unzip") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         // D-DEP-ARCHIVE1=A: tar_add — append/replace a named entry in a tar archive.

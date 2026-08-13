@@ -911,6 +911,58 @@ pub fn apply_core_call_with_type(
         ("core.archive", "zip_decompress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::zip_decompress(&as_bytes(one(0)?, span)?),
         )),
+        ("core.archive", "crc32") => Ok(CtValue::Int(
+            super::super::ArchiveLite::crc32_value(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "adler32") => Ok(CtValue::Int(
+            super::super::ArchiveLite::adler32(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "deflate") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::deflate(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "inflate") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::inflate_bytes(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "zip_names_json") => Ok(CtValue::Str(
+            super::super::ArchiveLite::zip_names_json(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "zip_open") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_open(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "zip_next") => Ok(CtValue::Str(
+            super::super::ArchiveLite::zip_next(
+                &as_bytes(one(0)?, span)?,
+                as_int(one(1)?, span)?,
+            ),
+        )),
+        ("core.archive", "zip_read") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_read(
+                &as_bytes(one(0)?, span)?,
+                &as_string(one(1)?, span)?,
+            ),
+        )),
+        ("core.archive", "zip_write") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_write(
+                &as_bytes(one(0)?, span)?,
+                &as_string(one(1)?, span)?,
+                &as_bytes(one(2)?, span)?,
+            ),
+        )),
+        ("core.archive", "zip_close") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_close(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "zip_extract") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_extract(
+                &as_bytes(one(0)?, span)?,
+                &as_string(one(1)?, span)?,
+            ),
+        )),
+        ("core.archive", "unzip") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::unzip(
+                &as_bytes(one(0)?, span)?,
+                &as_string(one(1)?, span)?,
+            ),
+        )),
         ("core.archive", "tar_add") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::tar_add(
                 &as_bytes(one(0)?, span)?,

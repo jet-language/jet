@@ -263,7 +263,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // are opaque and receive no structural/collection capabilities.
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
         | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash"
-        | "Digest256" | "Digest512" | "CryptoError"
+        | "Digest256" | "Digest512" | "Hasher" | "CryptoError"
         | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
         | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.

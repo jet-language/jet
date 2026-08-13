@@ -713,8 +713,12 @@ fn run() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `sha256(text)` / `sha256_bytes(bytes)` | `String` | SHA-256 hex digest |
+| `sha1(bytes)` / `sha224(bytes)` / `sha384(bytes)` | `String` | SHA-1 or SHA-2 hex digest |
+| `sha3_224(bytes)` / `sha3_256(bytes)` / `sha3_384(bytes)` / `sha3_512(bytes)` | `String` | SHA-3 hex digest |
 | `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
 | `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
+| `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8]` | PBKDF2-HMAC-SHA256 key derivation |
+| `Hasher.new()` / `update(bytes)` / `digest()` | `Hasher` / nothing / `String` | Incremental SHA-256 hashing |
 | `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
 | `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ? CryptoError` / `[U8] ? CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
 | `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ? FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
@@ -737,7 +741,7 @@ Card 302 audit state:
 | Signatures | Shipped: Ed25519 sign/verify with RFC-vector golden |
 | Password hashing | Shipped: Argon2id PHC hash/verify, random salt default, deterministic salted vector helper |
 | KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
-| Hashes / comparison | Shipped: SHA-256, SHA-512, BLAKE3, constant-time equality |
+| Hashes / comparison | Shipped: SHA-1, SHA-2, SHA-3, SHA-256, SHA-512, BLAKE3, PBKDF2-HMAC-SHA256, incremental SHA-256, constant-time equality |
 | File envelope | JETC v2 recipient streaming plus exact expert JETC v1 open/migrate are shipped on Linux. Linux stages plaintext and output in unlinked `O_TMPFILE` inodes under a component-wise no-follow held parent, revalidates parent identity, links the still-open output fd to the final name once with `linkat(AT_EMPTY_PATH)`, and fsyncs the held directory. Exact-maximum sparse input enters bounded streaming; larger input is rejected before staging; hostile framing, short I/O, cancellation, tamper, and publication races leave no output. Other targets currently fail closed and make no JETC filesystem-runtime claim |
 | Entropy | Shipped: one D-CRYPTO-RNG1 provider shared by `random.bytes`, envelope nonces, Ed25519 key generation, Argon2id salts, and file envelopes. Linux glibc `getrandom` has live runtime proof. Source adapters use macOS `SecRandomCopyBytes`, Windows MSVC `BCryptGenRandom`, and WASI preview 1 `random_get`; their runtime execution remains on #526. Unsupported targets fail closed with no fallback. D-CRYPTO-WASI-ALLOC2: every interrupted WASI call's exact-count zeroed `Vec` is volatile-zeroized and dropped before a new ownership generation; allocator address reuse is allowed; no failed bytes escape; at most seventeen calls occur. Package key generation maps provider failure through a closed helper status to E1292, never raw provider/helper text |
 | Reference and tier proof | Expert XChaCha20-Poly1305 matches the CFRG vector and AES-256-GCM matches NIST CAVS. Argon2id matches RFC 9106 section 5.3 through Jet's canonical worker, with a public expert known answer and Argon2i mutation control; Ed25519, X25519, and HKDF retain their RFC vectors. Generated bridge dependencies use exact versions, disabled defaults, and explicit features. The typed crypto golden is byte-identical in AOT and default dev. Resident JIT names its unsupported result-status boundary, and default dev takes the transparent AOT fallback rather than changing behavior |
@@ -747,6 +751,11 @@ Card 302 audit state:
 Examples: `examples/features/crypto/crypto_suite.jet`,
 `examples/features/crypto/crypto_envelope.jet`, and
 `examples/features/crypto/crypto_sign.jet`.
+
+The RSA-shaped `new`, `generate_key`, `private_encrypt`, `private_decrypt`,
+`public_encrypt`, and `public_decrypt` rows remain outside Core. D-CRYPTO-PUBKEY1=D
+keeps X25519 sealed-box as the one Core public-key mechanism; RSA belongs in an
+ordinary Jet package.
 
 ### `core.vault` — repository secrets and typed key generations
 
@@ -3604,11 +3613,17 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 |--------|-----|-----|
 | `core.compress.gzip` | gzip byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
 | `core.compress.zstd` | zstd byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
-| `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `tar_add`, `tar_get`, `tar_names_json` |
+| `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for
 containers such as `tar.gz`: build tar bytes with `core.archive`, then compress
 those bytes with `core.compress.gzip`.
+
+`zip_open` starts a reader or writer state. `zip_write` adds a named entry,
+`zip_close` produces the archive, and `zip_next`/`zip_read` walk and read named
+entries. `zip_names_json` lists entry names. `zip_extract` and `unzip` read one
+named entry directly. `deflate` and `inflate` operate on raw DEFLATE bytes;
+`zip_compress` and `zip_decompress` are the one-entry convenience calls.
 
 ---
 

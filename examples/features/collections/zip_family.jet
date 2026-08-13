@@ -1,3 +1,5 @@
+use core.archive as ar
+
 fn run() {
     print(zip().to_list().len())
     print(zip([1, 2, 3]).to_list())
@@ -24,4 +26,16 @@ fn run() {
     loop row, zip_pad(a: [1, 2, 3], b: [10, 20], fills: (a: 0, b: 9)) {
         print(row.b)
     }
+    payload :: "123456789".bytes()
+    print(ar.crc32(payload) == 3421780262)
+    print(ar.adler32(payload) == 152961502)
+    compressed :: ar.deflate(payload)
+    print(ar.inflate(compressed) == payload)
+    writer0 :: ar.zip_open([U8].{})
+    writer1 :: ar.zip_write(writer0, "payload.bin", payload)
+    archive :: ar.zip_close(writer1)
+    print(ar.zip_names_json(archive) == "[\"payload.bin\"]")
+    reader :: ar.zip_open(archive)
+    print(ar.zip_next(reader, 0) == "payload.bin")
+    print(ar.zip_read(reader, "payload.bin") == payload)
 }

@@ -282,6 +282,54 @@ pub(super) fn zip_decompress(data: &[u8]) -> Vec<u8> {
     jet_foundation::CoreArchive::jet_archive_zip_decompress(data)
 }
 
+pub(super) fn crc32_value(data: &[u8]) -> i64 {
+    jet_foundation::CoreArchive::jet_archive_crc32(data)
+}
+
+pub(super) fn adler32(data: &[u8]) -> i64 {
+    jet_foundation::CoreArchive::jet_archive_adler32(data)
+}
+
+pub(super) fn deflate(data: &[u8]) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_deflate(data)
+}
+
+pub(super) fn inflate_bytes(data: &[u8]) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_inflate(data)
+}
+
+pub(super) fn zip_names_json(data: &[u8]) -> String {
+    jet_foundation::CoreArchive::jet_archive_zip_names_json(data)
+}
+
+pub(super) fn zip_open(data: &[u8]) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_zip_open(data)
+}
+
+pub(super) fn zip_next(reader: &[u8], index: i64) -> String {
+    jet_foundation::CoreArchive::jet_archive_zip_next(reader, index)
+}
+
+pub(super) fn zip_read(reader: &[u8], name: &str) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_zip_read(reader, name)
+}
+
+pub(super) fn zip_write(writer: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_zip_write(writer, name, data)
+}
+
+pub(super) fn zip_close(writer: &[u8]) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_zip_close(writer)
+}
+
+pub(super) fn zip_extract(archive: &[u8], name: &str) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_zip_extract(archive, name)
+}
+
+pub(super) fn unzip(archive: &[u8], name: &str) -> Vec<u8> {
+    jet_foundation::CoreArchive::jet_archive_unzip(archive, name)
+}
+
 pub(super) fn tar_add(archive: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
     jet_foundation::CoreArchive::jet_archive_tar_add(archive, name, data)
 }

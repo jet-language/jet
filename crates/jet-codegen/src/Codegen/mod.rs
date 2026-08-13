@@ -1040,6 +1040,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/Core/EncodingBase.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/SHAFamily.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");

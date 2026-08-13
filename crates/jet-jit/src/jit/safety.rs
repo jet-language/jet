@@ -828,6 +828,13 @@ fn resident_safe_crypto_work_item<'a>(
                 "__signing_public"
                 | "__x25519_public"
                 | "sha256"
+                | "sha1"
+                | "sha224"
+                | "sha384"
+                | "sha3_224"
+                | "sha3_256"
+                | "sha3_384"
+                | "sha3_512"
                 | "sha512_bytes"
                 | "blake3_bytes"
                 | "__digest256_hex"
@@ -845,6 +852,12 @@ fn resident_safe_crypto_work_item<'a>(
                 | "password_hash",
                 [value],
             ) => (true, vec![value]),
+            ("__hasher_new", []) => (true, Vec::new()),
+            ("__hasher_update", [hasher, chunk]) => (true, vec![hasher, chunk]),
+            ("__hasher_digest", [hasher]) => (true, vec![hasher]),
+            ("pbkdf2_hmac", [password, salt, iterations, key_len]) => {
+                (true, vec![password, salt, iterations, key_len])
+            },
             ("sign" | "password_verify", [a, b]) => (true, vec![a, b]),
             ("verify" | "seal" | "open" | "file_open", [a, b, c]) => {
                 (true, vec![a, b, c])
@@ -952,6 +965,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         "__signing_public"
                         | "__x25519_public"
                         | "sha256"
+                        | "sha1"
+                        | "sha224"
+                        | "sha384"
+                        | "sha3_224"
+                        | "sha3_256"
+                        | "sha3_384"
+                        | "sha3_512"
                         | "sha512_bytes"
                         | "blake3_bytes"
                         | "__digest256_hex"
@@ -969,6 +989,18 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         | "password_hash",
                         [value],
                     ) => resident_safe_expr(value, callees),
+                    ("__hasher_new", []) => true,
+                    ("__hasher_update", [hasher, chunk]) => {
+                        resident_safe_expr(hasher, callees)
+                            && resident_safe_expr(chunk, callees)
+                    },
+                    ("__hasher_digest", [hasher]) => resident_safe_expr(hasher, callees),
+                    ("pbkdf2_hmac", [password, salt, iterations, key_len]) => {
+                        resident_safe_expr(password, callees)
+                            && resident_safe_expr(salt, callees)
+                            && resident_safe_expr(iterations, callees)
+                            && resident_safe_expr(key_len, callees)
+                    },
                     ("sign" | "password_verify", [a, b]) => {
                         resident_safe_expr(a, callees) && resident_safe_expr(b, callees)
                     }

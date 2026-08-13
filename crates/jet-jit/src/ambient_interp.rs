@@ -1122,6 +1122,34 @@ fn password_hash_value(text: String) -> CtValue {
     }
 }
 
+fn digest256_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "Digest256".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn hasher_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetCryptoHasher".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn hasher_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    struct_bytes(value, "__JetCryptoHasher", span)
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
 fn path_string(v: &CtValue) -> Option<String> {
     match v {
         CtValue::Str(s) => Some(s.clone()),
@@ -2629,6 +2657,126 @@ pub fn ambient_core_call(
             Some(Ok(CtValue::Str(
                 Crypto::runtime::jet_crypto_uuid_v7(timestamp),
             )))
+        }
+        ("core.crypto", "sha256") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let digest = Crypto::runtime::jet_crypto_sha256_typed_impl(&data);
+            Some(Ok(digest256_value(
+                Crypto::runtime::jet_crypto_digest256_bytes_impl(&digest),
+            )))
+        }
+        ("core.crypto", "sha1") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha1_hex(&data))))
+        }
+        ("core.crypto", "sha224") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha224_hex(&data))))
+        }
+        ("core.crypto", "sha384") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha384_hex(&data))))
+        }
+        ("core.crypto", "sha3_224") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_224_hex(&data))))
+        }
+        ("core.crypto", "sha3_256") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_256_hex(&data))))
+        }
+        ("core.crypto", "sha3_384") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_384_hex(&data))))
+        }
+        ("core.crypto", "sha3_512") => {
+            let data = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_512_hex(&data))))
+        }
+        ("core.crypto", "pbkdf2_hmac") => {
+            let password = match as_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let salt = match as_bytes(args.get(1)?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let iterations = match args.get(2) {
+                Some(CtValue::Int(value)) => *value,
+                _ => return Some(Err(unsupported("pbkdf2_hmac iterations", span))),
+            };
+            let key_len = match args.get(3) {
+                Some(CtValue::Int(value)) => *value,
+                _ => return Some(Err(unsupported("pbkdf2_hmac key length", span))),
+            };
+            Some(Ok(CtValue::Bytes(Crypto::runtime::jet_crypto_pbkdf2_hmac(
+                &password,
+                &salt,
+                iterations,
+                key_len,
+            ))))
+        }
+        ("core.crypto", "__hasher_new") => Some(Ok(hasher_value(Vec::new()))),
+        ("core.crypto", "__hasher_update") => {
+            let mut current = match hasher_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let chunk = match as_bytes(args.get(1)?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            current.extend_from_slice(&chunk);
+            Some(Ok(hasher_value(current)))
+        }
+        ("core.crypto", "__hasher_digest") => {
+            let data = match hasher_bytes(args.first()?, span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            let digest = Crypto::runtime::jet_crypto_sha256_typed_impl(&data);
+            Some(Ok(CtValue::Str(hex_bytes(
+                &Crypto::runtime::jet_crypto_digest256_bytes_impl(&digest),
+            ))))
+        }
+        ("core.crypto", "__digest256_hex") => {
+            let bytes = match struct_bytes(args.first()?, "Digest256", span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Str(hex_bytes(&bytes))))
+        }
+        ("core.crypto", "__digest256_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "Digest256", span) {
+                Ok(b) => b,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(CtValue::Bytes(bytes)))
         }
         ("core.crypto", "sha512_bytes") => {
             let data = match as_bytes(args.first()?, span) {

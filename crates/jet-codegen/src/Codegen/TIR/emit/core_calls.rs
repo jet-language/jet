@@ -2185,6 +2185,14 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto", "__digest256_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_hex_impl"), arg(0)),
         ("core.crypto", "__digest512_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_hex_impl"), arg(0)),
         ("core.crypto", "__password_text") => format!("{}(&({}))", regex_fn("jet_crypto_password_text_impl"), arg(0)),
+        ("core.crypto", "__hasher_new") => format!("{}()", helper("jet_crypto_hasher_new")),
+        ("core.crypto", "__hasher_update") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_crypto_hasher_update"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.crypto", "__hasher_digest") => format!("{}(&({}))", helper("jet_crypto_hasher_digest"), arg(0)),
         // D-CRYPTO-API1=A: exact expert primitives, all checked in one bridge.
         ("core.crypto.expert", "xchacha20poly1305_seal") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_seal_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "xchacha20poly1305_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_open_impl"), arg(0), arg(1), arg(2), arg(3)),
@@ -2667,6 +2675,48 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.archive", "zip_decompress") => {
             format!("{}(&({}))", regex_fn("jet_archive_zip_decompress"), arg(0))
+        }
+        ("core.archive", "crc32") => {
+            format!("{}(&({}))", regex_fn("jet_archive_crc32"), arg(0))
+        }
+        ("core.archive", "adler32") => {
+            format!("{}(&({}))", regex_fn("jet_archive_adler32"), arg(0))
+        }
+        ("core.archive", "deflate") => {
+            format!("{}(&({}))", regex_fn("jet_archive_deflate"), arg(0))
+        }
+        ("core.archive", "inflate") => {
+            format!("{}(&({}))", regex_fn("jet_archive_inflate"), arg(0))
+        }
+        ("core.archive", "zip_names_json") => {
+            format!("{}(&({}))", regex_fn("jet_archive_zip_names_json"), arg(0))
+        }
+        ("core.archive", "zip_open") => {
+            format!("{}(&({}))", regex_fn("jet_archive_zip_open"), arg(0))
+        }
+        ("core.archive", "zip_next") => {
+            format!("{}(&({}), {})", regex_fn("jet_archive_zip_next"), arg(0), arg(1))
+        }
+        ("core.archive", "zip_read") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_archive_zip_read"), arg(0), arg(1))
+        }
+        ("core.archive", "zip_write") => {
+            format!(
+                "{}(&({}), &({}), &({}))",
+                regex_fn("jet_archive_zip_write"),
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
+        ("core.archive", "zip_close") => {
+            format!("{}(&({}))", regex_fn("jet_archive_zip_close"), arg(0))
+        }
+        ("core.archive", "zip_extract") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_archive_zip_extract"), arg(0), arg(1))
+        }
+        ("core.archive", "unzip") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_archive_unzip"), arg(0), arg(1))
         }
         // D-DEP-ARCHIVE1=A: tar_add / tar_get / tar_names_json via the FFI bridge.
         // All three take &[u8] / &str args (non-scalar → borrow); none take scalars.

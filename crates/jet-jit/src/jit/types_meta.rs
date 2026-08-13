@@ -221,7 +221,7 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant"
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant" | "Hasher"
         ))
     {
         return Some(types::I64);

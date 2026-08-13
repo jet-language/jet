@@ -9,10 +9,27 @@ fn run() {
     print(zip_data.len() > 0)
     zip_restored :: ar.zip_decompress(zip_data)
     print(zip_restored == original)
-    // Tar round-trip: build a two-entry archive, extract by name, list names.
+    vector :: "123456789".bytes()
+    print(ar.crc32(vector) == 3421780262)
+    print(ar.adler32(vector) == 152961502)
+    deflated :: ar.deflate(original)
+    print(ar.inflate(deflated) == original)
     empty :: [U8].{}
-    tar1 :: ar.tar_add(empty, "hello.txt", original)
     bye :: [U8].{98, 121, 101}  // ASCII "bye"
+    // The streaming state keeps multiple named entries in one archive.
+    writer0 :: ar.zip_open(empty)
+    writer1 :: ar.zip_write(writer0, "hello.txt", original)
+    writer2 :: ar.zip_write(writer1, "bye.txt", [U8].{98, 121, 101})
+    multi_zip :: ar.zip_close(writer2)
+    print(ar.zip_names_json(multi_zip) == "[\"hello.txt\",\"bye.txt\"]")
+    reader :: ar.zip_open(multi_zip)
+    print(ar.zip_next(reader, 0) == "hello.txt")
+    print(ar.zip_next(reader, 1) == "bye.txt")
+    print(ar.zip_read(reader, "bye.txt") == bye)
+    print(ar.zip_extract(multi_zip, "hello.txt") == original)
+    print(ar.unzip(multi_zip, "bye.txt") == bye)
+    // Tar round-trip: build a two-entry archive, extract by name, list names.
+    tar1 :: ar.tar_add(empty, "hello.txt", original)
     tar2 :: ar.tar_add(tar1, "bye.txt", bye)
     // Archive is non-empty.
     print(tar2.len() > 0)

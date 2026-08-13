@@ -25,6 +25,13 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
+    // D-DEP-ARCHIVE1=A: archive calls use the dependency-free FFI bridge and
+    // their typed emitter, not the generic direct-symbol registry projection.
+    if module == "core.archive"
+        && crate::Sema::core_fixed_sig(module, method).is_some()
+    {
+        return true;
+    }
     // D-CRYPTO-API1=A: expert crypto calls have total fixed signatures and a
     // typed CoreCall emitter, but their registry rows intentionally do not
     // advertise a beginner direct symbol. The expert import and #Unsafe gate
