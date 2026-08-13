@@ -131,6 +131,23 @@ fn unescape_axis(axis: &str) -> Option<String> {
     Some(out)
 }
 
+fn fixed_list_symbol(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn fixed_list_measure(len: &u64, expr: Option<&Expr>) -> String {
+    if let Some(expr) = expr {
+        if let Some(name) = fixed_list_symbol(expr) {
+            return name;
+        }
+        return "<computed>".to_string();
+    }
+    len.to_string()
+}
+
 /// One compile-time number attached to a type. The measure plane owns the
 /// value; the use site gives it meaning through kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -767,8 +784,9 @@ pub enum Type {
     FixedList {
         elem: Box<Type>,
         len: u64,
-        /// Generic-module value parameter retained until specialization.
-        len_symbol: Option<(String, Span)>,
+        /// D-META-CONST1: an arbitrary compile-time expression retained until
+        /// sema evaluates the fixed-list length.
+        len_expr: Option<Box<Expr>>,
     },
     /// D-SG9/S42: explicit fixed-width integer. The default 64-bit *signed*
     /// integer is spelled `Int` (and equivalently `I64`) and lives in
@@ -1138,12 +1156,12 @@ impl Type {
             }
             Type::FixedList {
                 elem,
-                len, len_symbol, ..
+                len,
+                len_expr,
             } => {
                 vector.extend_at(&["element".to_string()], &elem.knowledge_vector());
-                let measure = len_symbol
-                    .as_ref()
-                    .map_or_else(|| Measure::literal("length", *len), |(name, _)| {
+                let measure = len_expr.as_deref().and_then(fixed_list_symbol)
+                    .map_or_else(|| Measure::literal("length", *len), |name| {
                         Measure::symbol("length", name)
                     });
                 vector.push(
@@ -1621,10 +1639,10 @@ impl Type {
             Type::Tuple(fields) => Type::Tuple(
                 fields.iter().map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map)))).collect(),
             ),
-            Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+            Type::FixedList { elem, len, len_expr } => Type::FixedList {
                 elem: Box::new(elem.map_named_types(map)),
                 len: *len,
-                len_symbol: len_symbol.clone(),
+                len_expr: len_expr.clone(),
             },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker: marker.clone(),
@@ -1706,7 +1724,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
+            Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", elem.name(), fixed_list_measure(len, len_expr.as_deref())),
             Type::IntN { signed, bits } => {
                 let (lo, hi) = int_range(*signed, *bits);
                 let article = if *bits == 8 { "an" } else { "a" };
@@ -1786,7 +1804,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
+            Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", elem.name(), fixed_list_measure(len, len_expr.as_deref())),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
             Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.name(),

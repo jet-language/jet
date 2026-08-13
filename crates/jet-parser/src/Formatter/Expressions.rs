@@ -548,10 +548,34 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
-            Type::FixedList { elem, len, len_symbol } => {
+            Type::FixedList { elem, len, len_expr } => {
                 self.write("[");
                 self.fmt_type(elem);
-                self.write(&format!("#{}", len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)));
+                self.write("#");
+                if let Some(expr) = len_expr {
+                    let mut expr = expr.as_ref();
+                    while let Expr::Paren(inner, _) = expr {
+                        expr = inner;
+                    }
+                    let atomic = matches!(
+                        expr,
+                        Expr::Ident(..)
+                            | Expr::ComptimeName { .. }
+                            | Expr::Int(..)
+                            | Expr::Float(..)
+                            | Expr::Bool(..)
+                            | Expr::Char(..)
+                    );
+                    if !atomic {
+                        self.write("(");
+                    }
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    if !atomic {
+                        self.write(")");
+                    }
+                } else {
+                    self.write(&len.to_string());
+                }
                 self.write("]");
             }
             // D-QUAL4=A: `#TagName Type` — prefix value-tag.

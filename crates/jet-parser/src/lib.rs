@@ -45,7 +45,7 @@ mod generic_module_tests {
         let program = Parser::parse(&tokens).unwrap();
         let Item::GenericModule(def) = &program.items[0] else { panic!("template") };
         let Item::Struct(data) = &def.body[0] else { panic!("struct") };
-        assert!(matches!(&data.fields[0].ty, Type::FixedList { len_symbol: Some((name, _)), .. } if name == "capacity"));
+        assert!(matches!(&data.fields[0].ty, Type::FixedList { len_expr: Some(expr), .. } if matches!(expr.as_ref(), super::AST::Expr::Ident(name, _) if name == "capacity")));
         assert!(matches!(&def.body[1], Item::CodeModule(module) if module.name == "stats"));
     }
 

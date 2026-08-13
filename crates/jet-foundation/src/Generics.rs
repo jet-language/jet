@@ -93,10 +93,10 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             args: args.iter().map(|a| substitute_type(a, subst)).collect(),
         },
         Type::List(inner) => Type::List(Box::new(substitute_type(inner, subst))),
-        Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+        Type::FixedList { elem, len, len_expr } => Type::FixedList {
             elem: Box::new(substitute_type(elem, subst)),
             len: *len,
-            len_symbol: len_symbol.clone(),
+            len_expr: len_expr.clone(),
         },
         Type::Map {
             key,

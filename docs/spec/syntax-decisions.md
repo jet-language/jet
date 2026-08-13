@@ -2394,13 +2394,13 @@ empty effect set is Tier 0 and may evaluate without a gate. Recorded,
 hash-checked inputs such as `embed_file(path) => String`,
 `embed_bytes(path) => [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
-`#Impure("reason")` plus `--allow-impure` gate for this ruling. **D-STRPARSE1**:
+`#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
-`--allow-impure`. **D-CTFIND1/2**: `find(glob) => [String]` builtin, sorted,
+`--gate impure=allow`. **D-CTFIND1/2**: `find(glob) => [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
 
@@ -6509,11 +6509,10 @@ lookup, or guard.
 **2026-08-06 — D-META-EFFECT1=A** *(card #1543, same proposal)*. One effect
 model applies at both stages. Tier 0 is an empty effect set; Tier 1 is recorded
 and hashed in `.jet/lock`; Tier 2 requires `#Impure("reason")` and
-`--allow-impure` in this change. The curated pure-Core eligibility list retires:
+`--gate impure=allow`. The curated pure-Core eligibility list retires:
 the shared foundation effect fact decides eligibility, and the shared
 `PurityStage` walk gives both stages one E3401 family (`E0951` redirects to
-E3401). `D-ONCE-GATE1` remains a later policy question; it does not retire
-`--allow-impure` here.
+E3401). `D-ONCE-GATE1` retires the old `--allow-impure` spelling.
 
 **D-META-REG1 = A — one table, four uses.** A marker rule, a knowledge plane, a
 right, and a build fact are rows of the same table, separated only by what they
@@ -6562,6 +6561,15 @@ empty, Tier 1 records an effect, and Tier 2 requires `#Impure` plus permission.
 #1544)*: Any computable compile-time value is legal wherever a constant is legal.
 The literal-only E0963 and E0035 restrictions are retired; S26 remains the
 constant-evaluation law.
+
+**2026-08-13 — cards #1543 and #1544 implementation log.** Compile-time build
+entries accept the runtime effect row syntax. The foundation `Effects` table
+and shared `PurityStage` walker decide both stages; Tier 2 uses
+`--gate impure=allow`. `#Impure` reasons remain the recording point in the AST
+and sema gate handler until the shared gate ledger from #1571 lands. Fixed-list
+lengths and enum discriminants retain their source expressions and use the
+ordinary comptime evaluator before type registration; E0963 and E0035 report
+unknown, noninteger, and range failures.
 
 **D-META-MODNAME1=A — instance members use the instance path** *(ratified
 2026-08-06, card #1541)*: Generated members are reached through the module

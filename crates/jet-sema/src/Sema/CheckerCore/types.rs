@@ -156,10 +156,10 @@ impl<'a> Checker<'a> {
                         .map(|(n, t)| (n, Box::new(self.resolve_type(*t))))
                         .collect(),
                 ),
-                Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+                Type::FixedList { elem, len, len_expr } => Type::FixedList {
                     elem: Box::new(self.resolve_type(*elem)),
                     len,
-                    len_symbol,
+                    len_expr,
                 },
         Type::Fn {
             params,

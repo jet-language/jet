@@ -117,11 +117,11 @@ impl<'a> Checker<'a> {
             Type::FixedList {
                 elem,
                 len,
-                len_symbol,
+                len_expr,
             } => Type::FixedList {
                 elem: Box::new(self.qualify_method_type(owner_mod, elem, generic_names)),
                 len: *len,
-                len_symbol: len_symbol.clone(),
+                len_expr: len_expr.clone(),
             },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker: marker.clone(),

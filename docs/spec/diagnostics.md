@@ -163,7 +163,7 @@ renumbered, and no new `W` code may be allocated.
 | E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
 | E0033 | parse | *retired by D-S14-PAUSE and reserved by D-SHAPE-PIPE1=C* (was: Rust pipe-lambda teaching) |
 | E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
-| E0035 | parse | teaching: `where` clauses → inline bounds |
+| E0035 | sema | enum discriminant is not a computable integer (D-META-CONST1) |
 | E0036 | parse | *retired by D-S14-PAUSE* (was: `dyn`/`Box` teaching) |
 | E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`io.eprint` |
 | E0038 | sema  | *retired by D-S14-PAUSE* (was: file-open teaching) |
@@ -625,7 +625,7 @@ renumbered, and no new `W` code may be allocated.
 | E0959 | tooling | a compiler-owned layout byte fact is unavailable because no canonical target layout engine supplies it (D-LAYOUT-FACTS1=B) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | parse | member spread `.[…]` entry is not a bare identifier (D-SPREAD1) |
-| E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
+| E0963 | sema  | fixed-size list length is not a computable integer (D-META-CONST1/S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
 | E0965 | sema  | compile-time or refinement-proven index out of range on `[T#N]` (S76, D-REFINE1) |
 | E1310 | parse/sema | variadic parameter not last, or variadic param has a default (D-VARIADIC1) |
@@ -1014,7 +1014,7 @@ parse error.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0961 | A member-spread list entry is not a bare name. | `prefix.[a, b]` only expands field or package names off the prefix — calls and expressions are not members. | Write bare names like `default.[cargo, ripgrep]`. |
-| E0963 | A positional destructure pattern has a different count than the fixed-size list's known length. | `[T#N]` has exactly N elements at compile time; the pattern must name exactly N bindings or the binding would leave elements unnamed. | Match the number of names in the pattern to the size N shown in the error. |
+| E0963 | A fixed-size list length must be known at compile time, must be an integer, and must fit the target's array-size representation. | A fixed-size list needs one known number of elements; destructuring must then name exactly that many elements. | Use a literal, a same-file `@` binding, or another comptime expression that produces an in-range integer. |
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change. |
 | E0965 | An index is out of range for a `[T#N]` at compile time. | Literal indexes and `#Invariant`-refined distinct indexes must fit 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, widen to `[T]` for runtime checking, or tighten the refinement invariant. |
 

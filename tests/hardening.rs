@@ -27,7 +27,7 @@ fn deeply_nested_expression_gets_diagnostic() {
         "(".repeat(600),
         ")".repeat(600)
     );
-    expect_error(&src, "E0035");
+    expect_error(&src, "E1403");
 }
 
 #[test]

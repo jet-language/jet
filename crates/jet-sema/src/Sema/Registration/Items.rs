@@ -299,6 +299,530 @@ pub(crate) fn eval_comptime_items(
     }
 }
 
+/// D-META-CONST1: resolve every declaration-side fixed-list length and enum
+/// discriminant after comptime bindings have been evaluated, but before type
+/// registration. Parser values are deliberately not special-cased here: a
+/// literal, a same-file `@` binding, and a computed expression all use the
+/// ordinary comptime evaluator.
+pub(crate) fn resolve_comptime_declaration_values(
+    items: &mut [Item],
+    base_dir: &std::path::Path,
+    core_imports: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let (funcs, externs, globals) = comptime_context_from_items(items);
+    let mut resolver = ComptimeTypeResolver {
+        funcs,
+        externs,
+        globals,
+        base_dir,
+        core_imports,
+        diags,
+    };
+    resolver.resolve_items(items);
+}
+
+struct ComptimeTypeResolver<'a> {
+    funcs: HashMap<String, Func>,
+    externs: HashSet<String>,
+    globals: HashMap<String, crate::Comptime::CtValue>,
+    base_dir: &'a std::path::Path,
+    core_imports: &'a HashMap<String, String>,
+    diags: &'a mut Vec<Diagnostic>,
+}
+
+enum IntegerFailure {
+    Unknown,
+    NonInteger(String),
+    OutOfRange,
+}
+
+impl<'a> ComptimeTypeResolver<'a> {
+    fn resolve_items(&mut self, items: &mut [Item]) {
+        for item in items {
+            self.resolve_item(item);
+        }
+    }
+
+    fn resolve_item(&mut self, item: &mut Item) {
+        match item {
+            Item::Func(function) => self.resolve_func(function),
+            Item::Struct(definition) => {
+                self.resolve_fields(&mut definition.fields);
+                for method in &mut definition.methods {
+                    self.resolve_func(method);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for (_, _, ty) in &mut implementation.assoc_type_impls {
+                        self.resolve_type(ty);
+                    }
+                    for method in &mut implementation.methods {
+                        self.resolve_func(method);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for variant in &mut definition.variants {
+                    match &mut variant.payload {
+                        crate::AST::VariantPayload::Unit => {}
+                        crate::AST::VariantPayload::Single(ty, _) => self.resolve_type(ty),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields {
+                                self.resolve_type(&mut field.ty);
+                            }
+                        }
+                    }
+                    if let Some(mut expression) = variant.discriminant_expr.take() {
+                        let span = expression.span();
+                        self.resolve_expr_types(&mut expression);
+                        match self.evaluate_integer(&expression) {
+                            Ok(value) if (i64::MIN as i128..=i64::MAX as i128).contains(&value) => {
+                                variant.discriminant = Some(value as i64);
+                            }
+                            Ok(_) | Err(IntegerFailure::OutOfRange) => {
+                                self.push_constant_error(
+                                    "E0035",
+                                    "an enum discriminant is outside the signed integer range",
+                                    "enum discriminants are stored as signed 64-bit values",
+                                    "use a compile-time integer between -9223372036854775808 and 9223372036854775807",
+                                    span,
+                                );
+                            }
+                            Err(IntegerFailure::NonInteger(ty)) => self.push_constant_error(
+                                "E0035",
+                                format!("an enum discriminant must be an integer, got {ty}"),
+                                "enum discriminants select a numeric variant value",
+                                "use an integer literal or a compile-time expression that produces Int",
+                                span,
+                            ),
+                            Err(IntegerFailure::Unknown) => self.push_constant_error(
+                                "E0035",
+                                "an enum discriminant must be computable at compile time",
+                                "the enum number is part of the type layout and must be known before code generation",
+                                "use a literal, a same-file `@` binding, or another comptime expression",
+                                span,
+                            ),
+                        }
+                    }
+                }
+                for method in &mut definition.methods {
+                    self.resolve_func(method);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for (_, _, ty) in &mut implementation.assoc_type_impls {
+                        self.resolve_type(ty);
+                    }
+                    for method in &mut implementation.methods {
+                        self.resolve_func(method);
+                    }
+                }
+            }
+            Item::Distinct(definition) => self.resolve_type(&mut definition.base),
+            Item::TypeAlias(definition) => self.resolve_type(&mut definition.target),
+            Item::Trait(definition) => {
+                for method in &mut definition.methods {
+                    for parameter in &mut method.params {
+                        self.resolve_type(&mut parameter.ty);
+                    }
+                    if let Some(return_type) = &mut method.return_type {
+                        self.resolve_type(return_type);
+                    }
+                    for parameter in &mut method.params {
+                        if let Some(default) = &mut parameter.default {
+                            self.resolve_expr_types(default);
+                        }
+                    }
+                    if let Some(body) = &mut method.default_body {
+                        self.resolve_stmts(body);
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                for (_, _, ty) in &mut implementation.assoc_type_impls {
+                    self.resolve_type(ty);
+                }
+                for method in &mut implementation.methods {
+                    self.resolve_func(method);
+                }
+            }
+            Item::Const(constant) => {
+                if let Some(ty) = &mut constant.ty {
+                    self.resolve_type(ty);
+                }
+                self.resolve_expr_types(&mut constant.value);
+            }
+            Item::Test(test) => {
+                for parameter in &mut test.params {
+                    self.resolve_type(&mut parameter.ty);
+                }
+                self.resolve_stmts(&mut test.body);
+            }
+            Item::Bench(bench) => self.resolve_stmts(&mut bench.body),
+            Item::ExternRust(block) => {
+                for function in &mut block.functions {
+                    self.resolve_params(&mut function.params);
+                    if let Some(return_type) = &mut function.return_type {
+                        self.resolve_type(return_type);
+                    }
+                }
+            }
+            Item::CModule(block) => {
+                for function in &mut block.functions {
+                    self.resolve_params(&mut function.params);
+                    if let Some(return_type) = &mut function.return_type {
+                        self.resolve_type(return_type);
+                    }
+                }
+            }
+            Item::ProtocolDecl(protocol) => {
+                for message in &mut protocol.messages {
+                    for (_, ty) in &mut message.fields {
+                        self.resolve_type(ty);
+                    }
+                }
+            }
+            Item::UserDerive(derive) => self.resolve_stmts(&mut derive.body),
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    self.resolve_items(body);
+                }
+            }
+            Item::MarkerDecl(declaration) => {
+                for parameter in &mut declaration.params {
+                    if let Some(ty) = &mut parameter.ty {
+                        self.resolve_type(ty);
+                    }
+                    if let Some(value) = &mut parameter.value {
+                        self.resolve_expr_types(value);
+                    }
+                }
+            }
+            Item::FactDecl(declaration) => {
+                for parameter in &mut declaration.params {
+                    if let Some(ty) = &mut parameter.ty {
+                        self.resolve_type(ty);
+                    }
+                    if let Some(value) = &mut parameter.value {
+                        self.resolve_expr_types(value);
+                    }
+                }
+            }
+            Item::Module(module) => {
+                for expression in &mut module.imports {
+                    self.resolve_expr_types(expression);
+                }
+                for expression in &mut module.members {
+                    self.resolve_expr_types(expression);
+                }
+            }
+            // Generic-module bodies are templates. Their value expressions are
+            // substituted while an alias is expanded, then this pass visits the
+            // generated CodeModule above.
+            Item::GenericModule(_)
+            | Item::ModuleAlias(_)
+            | Item::EffectDecl(_)
+            | Item::Tag(_)
+            | Item::UnitFamily(_)
+            | Item::Migration(_)
+            | Item::StateDecl(_)
+            | Item::ErrorConv(_) => {}
+        }
+    }
+
+    fn resolve_func(&mut self, function: &mut Func) {
+        self.resolve_params(&mut function.params);
+        if let Some(return_type) = &mut function.return_type {
+            self.resolve_type(return_type);
+        }
+        self.resolve_stmts(&mut function.body);
+    }
+
+    fn resolve_params(&mut self, params: &mut [crate::AST::Param]) {
+        for parameter in params {
+            self.resolve_type(&mut parameter.ty);
+            if let Some(default) = &mut parameter.default {
+                self.resolve_expr_types(default);
+            }
+        }
+    }
+
+    fn resolve_fields(&mut self, fields: &mut [crate::AST::Field]) {
+        for field in fields {
+            self.resolve_type(&mut field.ty);
+            if let Some(expression) = &mut field.computed {
+                self.resolve_expr_types(expression);
+            }
+            if let Some(expression) = &mut field.default {
+                self.resolve_expr_types(expression);
+            }
+        }
+    }
+
+    fn resolve_type(&mut self, ty: &mut Type) {
+        match ty {
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                self.resolve_type(inner)
+            }
+            Type::Map { key, value, .. } => {
+                self.resolve_type(key);
+                self.resolve_type(value);
+            }
+            Type::Result { ok, err } => {
+                self.resolve_type(ok);
+                self.resolve_type(err);
+            }
+            Type::Fn {
+                params,
+                ret,
+                call_metadata,
+                ..
+            } => {
+                for parameter in params {
+                    self.resolve_type(parameter);
+                }
+                if let Some(return_type) = ret {
+                    self.resolve_type(return_type);
+                }
+                if let Some(metadata) = call_metadata {
+                    for default in &mut metadata.defaults {
+                        if let Some(expression) = default {
+                            self.resolve_expr_types(expression);
+                        }
+                    }
+                }
+            }
+            Type::Apply { args, .. } | Type::Union(args) => {
+                for argument in args {
+                    self.resolve_type(argument);
+                }
+            }
+            Type::Tuple(fields) => {
+                for (_, field) in fields {
+                    self.resolve_type(field);
+                }
+            }
+            Type::FixedList {
+                elem,
+                len,
+                len_expr,
+            } => {
+                self.resolve_type(elem);
+                let Some(mut expression) = len_expr.take() else {
+                    return;
+                };
+                let span = expression.span();
+                self.resolve_expr_types(&mut expression);
+                match self.evaluate_integer(&expression) {
+                    Ok(value) if (0..=usize::MAX as i128).contains(&value) => {
+                        *len = value as u64;
+                    }
+                    Ok(_) | Err(IntegerFailure::OutOfRange) => {
+                        self.push_constant_error(
+                            "E0963",
+                            "a fixed-size list length is outside the supported range",
+                            "the list length must fit the target's array-size representation",
+                            "use a non-negative comptime integer within the supported range",
+                            span,
+                        );
+                    }
+                    Err(IntegerFailure::NonInteger(ty)) => self.push_constant_error(
+                        "E0963",
+                        format!("a fixed-size list length must be an integer, got {ty}"),
+                        "a fixed-size list needs one known number of elements",
+                        "use an integer literal or a compile-time expression that produces Int",
+                        span,
+                    ),
+                    Err(IntegerFailure::Unknown) => self.push_constant_error(
+                        "E0963",
+                        "a fixed-size list length must be computable at compile time",
+                        "the array layout is fixed before runtime values exist",
+                        "use a literal, a same-file `@` binding, or another comptime expression",
+                        span,
+                    ),
+                }
+            }
+            Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => {
+                self.resolve_type(inner)
+            }
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::Named(_)
+            | Type::TraitObject(_)
+            | Type::IntN { .. }
+            | Type::Float32
+            | Type::ComputeDim(_) => {}
+        }
+    }
+
+    fn resolve_expr_types(&mut self, expression: &mut Expr) {
+        expression.for_each_expr_mut(|nested| match nested {
+            Expr::Call(call) => {
+                for ty in &mut call.type_args {
+                    self.resolve_type(ty);
+                }
+                if let Some(ty) = &mut call.resolved_ret {
+                    self.resolve_type(ty);
+                }
+            }
+            Expr::MethodCall {
+                owner_type_args,
+                type_args,
+                resolved_ret,
+                ..
+            } => {
+                for ty in owner_type_args.iter_mut().chain(type_args.iter_mut()) {
+                    self.resolve_type(ty);
+                }
+                if let Some(ty) = resolved_ret {
+                    self.resolve_type(ty);
+                }
+            }
+            Expr::StructLit {
+                type_args, ..
+            } => {
+                for ty in type_args {
+                    self.resolve_type(ty);
+                }
+            }
+            Expr::TypedLit { head, .. } => {
+                if let Some(ty) = head {
+                    self.resolve_type(ty);
+                }
+            }
+            Expr::TupleLit(_, _, inferred) => {
+                if let Some(ty) = inferred {
+                    self.resolve_type(ty);
+                }
+            }
+            Expr::Lambda(lambda) => {
+                for parameter in &mut lambda.params {
+                    if let Some(ty) = &mut parameter.ty {
+                        self.resolve_type(ty);
+                    }
+                }
+            }
+            Expr::PtrFromAddr { elem, .. } => self.resolve_type(elem),
+            _ => {}
+        });
+    }
+
+    fn resolve_stmts(&mut self, statements: &mut [Stmt]) {
+        for statement in statements {
+            match statement {
+                Stmt::Val(binding) => self.resolve_binding(binding),
+                Stmt::CountedLoop { init, step, body, .. } => {
+                    self.resolve_binding(init);
+                    if let Some(step) = step {
+                        self.resolve_stmts(std::slice::from_mut(step));
+                    }
+                    self.resolve_stmts(body);
+                }
+                Stmt::While { body, .. }
+                | Stmt::For { body, .. }
+                | Stmt::Loop { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Switched { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ComptimeBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::ScopeMember { body, .. } => self.resolve_stmts(body),
+                Stmt::Switch {
+                    arms, else_body, ..
+                }
+                | Stmt::ComptimeSwitch {
+                    arms, else_body, ..
+                } => {
+                    for arm in arms {
+                        self.resolve_stmts(&mut arm.body);
+                    }
+                    if let Some(body) = else_body {
+                        self.resolve_stmts(body);
+                    }
+                }
+                Stmt::ComptimeIf {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    self.resolve_stmts(then_body);
+                    if let Some(body) = else_body {
+                        self.resolve_stmts(body);
+                    }
+                }
+                Stmt::ContextBlock { body, .. } => self.resolve_stmts(body),
+                Stmt::Expr(_)
+                | Stmt::Assign { .. }
+                | Stmt::Return(..)
+                | Stmt::Break(..)
+                | Stmt::BreakValue(..)
+                | Stmt::Continue(..)
+                | Stmt::BreakLabel(..)
+                | Stmt::BreakLabelValue(..)
+                | Stmt::ContinueLabel(..)
+                | Stmt::Yield(..) => {}
+            }
+            statement.for_each_expr_mut(|expression| self.resolve_expr_types(expression));
+        }
+    }
+
+    fn resolve_binding(&mut self, binding: &mut crate::AST::Binding) {
+        if let Some(ty) = &mut binding.ty {
+            self.resolve_type(ty);
+        }
+        self.resolve_expr_types(&mut binding.init);
+    }
+
+    fn evaluate_integer(&self, expression: &Expr) -> Result<i128, IntegerFailure> {
+        let value = crate::Comptime::evaluate_owned_with_imports(
+            expression,
+            &self.funcs,
+            &self.externs,
+            self.base_dir,
+            &self.globals,
+            self.core_imports,
+        )
+        .map_err(|_| IntegerFailure::Unknown)?;
+        match value {
+            crate::Comptime::CtValue::Int(value) => Ok(i128::from(value)),
+            crate::Comptime::CtValue::BigInt(value) => value
+                .to_string_rep()
+                .parse::<i128>()
+                .map_err(|_| IntegerFailure::OutOfRange),
+            other => Err(IntegerFailure::NonInteger(other.jet_type().show())),
+        }
+    }
+
+    fn push_constant_error(
+        &mut self,
+        code: &str,
+        what: impl Into<String>,
+        why: impl Into<String>,
+        fix: impl Into<String>,
+        span: Span,
+    ) {
+        self.diags.push(Diagnostic::error(
+            code,
+            what.into(),
+            why.into(),
+            fix.into(),
+            Some(span),
+        ));
+    }
+}
+
 /// A handful of comptime builtins have a fixed, non-polymorphic return type
 /// regardless of arguments or result size — `find(glob)` always returns
 /// `[String]` (D-CTFIND1/2), even when the glob matches nothing. Naming that

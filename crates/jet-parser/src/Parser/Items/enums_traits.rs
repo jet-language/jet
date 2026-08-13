@@ -121,31 +121,19 @@ impl<'a> Parser<'a> {
             } else {
                 VariantPayload::Unit
             };
-            let discriminant = if matches!(self.peek().kind, TokKind::Eq) {
+            let discriminant_expr = if matches!(self.peek().kind, TokKind::Eq) {
                 self.bump();
-                let negative = if matches!(self.peek().kind, TokKind::Minus) {
-                    self.bump();
-                    true
-                } else { false };
-                let tok = self.bump();
-                let TokKind::Int(raw, _) = tok.kind else {
-                    return Err(Diagnostic::error(
-                        "E0035", "An enum discriminant must be an integer literal.".to_string(),
-                        "C enum values are fixed integers known at compile time.".to_string(),
-                        "Write an integer after `=`, such as `Ok = 0`.".to_string(), Some(tok.span)));
-                };
-                let value = if negative { raw.checked_neg() } else { Some(raw) }.ok_or_else(|| Diagnostic::error(
-                    "E0035", "This enum discriminant is outside the supported integer range.".to_string(),
-                    "C enum discriminants must fit in a signed 64-bit integer.".to_string(),
-                    "Choose a smaller absolute value.".to_string(), Some(tok.span)))?;
-                Some(value)
-            } else { None };
+                Some(self.expr()?)
+            } else {
+                None
+            };
             if !matches!(self.peek().kind, TokKind::LBrace) {
                 variants.push(Variant {
                     name: path,
                     name_span,
                     payload,
-                    discriminant,
+                    discriminant: None,
+                    discriminant_expr,
                     serde_markers,
                 });
                 return Ok(());

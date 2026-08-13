@@ -1846,6 +1846,9 @@ pub struct Variant {
     /// D-REPRC2: explicit C discriminant (`Variant = 7`). Only meaningful on
     /// unit variants; sema rejects it elsewhere.
     pub discriminant: Option<i64>,
+    /// D-META-CONST1: the source expression for an explicit discriminant,
+    /// retained until sema evaluates it.
+    pub discriminant_expr: Option<Expr>,
     /// D-SERDE5: per-variant serde markers (`Rename`). Empty when none.
     pub serde_markers: Vec<Marker>,
 }

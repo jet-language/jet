@@ -360,7 +360,7 @@ fn registered_type_planes_reflect_as_typed_values() {
             Type::FixedList {
                 elem: Box::new(Type::Int),
                 len: 4,
-                len_symbol: None,
+                len_expr: None,
             },
         ),
         (

@@ -1529,7 +1529,7 @@ impl Cx {
             Type::FixedList { elem, len, .. } => Type::FixedList {
                 elem: Box::new(self.expand_type_aliases(elem)),
                 len: *len,
-                len_symbol: None,
+                len_expr: None,
             },
             Type::Union(members) => crate::AST::canonicalize_union(
                 members.iter().map(|m| self.expand_type_aliases(m)).collect(),

@@ -211,15 +211,10 @@ fn specialize_module_type(
     let mut resolved = crate::Generics::substitute_type(ty, types);
     fn lengths(ty: &mut Type, types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) {
         match ty {
-            Type::FixedList { elem, len, len_symbol } => {
+            Type::FixedList { elem, len_expr, .. } => {
                 lengths(elem, types, values);
-                if let Some((name, _)) = len_symbol.as_ref() {
-                    if let Some(crate::AST::CtValue::Int(value)) = values.get(name) {
-                        if *value >= 0 {
-                            *len = *value as u64;
-                            *len_symbol = None;
-                        }
-                    }
+                if let Some(expr) = len_expr.as_mut() {
+                    substitute_expr(expr, types, values);
                 }
             }
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, types, values),
@@ -420,6 +415,10 @@ fn specialize_enum(
                 name_span: variant.name_span,
                 payload,
                 discriminant: variant.discriminant,
+                discriminant_expr: variant.discriminant_expr.clone().map(|mut expr| {
+                    substitute_expr(&mut expr, &types, definition_values);
+                    expr
+                }),
                 serde_markers,
             }
         })

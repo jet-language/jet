@@ -127,11 +127,11 @@ Every row is one job done more than once. File and line proof.
 | 4 | Splice a compile-time value | `Expr::ComptimeSplice`, a real AST node (`crates/jet-foundation/src/AST/expressions.rs:624-633`) | `apply_at_splices` — `@name` inside an `emit()` string, handled as string interpolation | One sigil, two implementations. |
 | 5 | Instantiate code with parameters | Generic modules: real Jet, substituted (`crates/jet-sema/src/Sema/Bundle/GenericModules.rs:1-51`) | Derives: escaped string templates | Same job. Only the first is checkable before use. |
 | 6 | Instantiate code with parameters (again) | Generic functions, specialized in codegen (`crates/jet-codegen/src/Codegen/TIR/mod.rs:816-902`) | Variadic-bound synthesis, a third AST-synthesis pass (`crates/jet-codegen/src/Codegen/VariadicBound.rs:1-30`) | Three instantiation engines in two crates. |
-| 7 | Prove a whole-program property | Effect inference, a worklist fixpoint (`crates/jet-sema/src/Sema/Effects.rs:750-787`); run-time purity, a hand-rolled recursive walk raising E3401 (`crates/jet-sema/src/Sema/Purity.rs:765-1058`) | Comptime purity, a third checker raising E0951 (`crates/jet-comptime/src/Comptime/Purity.rs`, `Comptime/Diagnostics.rs:104-121`) | Three transitive-closure engines, two diagnostic families for one rule. Also flagged by `authority-one-model.md:118`. |
+| 7 | Prove a whole-program property | Effect inference, a worklist fixpoint (`crates/jet-sema/src/Sema/Effects.rs:750-787`); one shared `PurityStage` walk raises E3401 for both stages (`crates/jet-comptime/src/Comptime/Purity.rs:24-190`) | The former separate comptime checker and E0951 family | The split is retired by D-META-EFFECT1; the effect set and one walker now carry the fact. |
 | 8 | Evaluate a compile-time field | Shared comptime evaluator (`crates/jet-env-model/src/ModuleEval/Eval.rs:897-907`) | `packages:` alone, by raw text slicing (`Eval.rs:1239-1300`) | One field carved out, with the carve-out documented inline. |
 | 9 | Hold a diagnostic's text | Inline Rust strings (`Purity.rs:9-42`) | A markdown table parsed at build time (`crates/jet-cli/src/Explain.rs:1-33`) | Two sources, kept in sync by a manual checklist. |
-| 10 | Name a compile-time constant | Comptime interpreter, full expressions | Array size `[T#N]`: literal or bare name only, E0963 otherwise (`crates/jet-parser/src/Parser/Types.rs:447-478`) | `[T#(N*2)]` is illegal. The evaluator exists and is not called. |
-| 11 | Name a compile-time constant (again) | Comptime interpreter | Enum discriminant: literal integer only, E0035 (`crates/jet-parser/src/Parser/Items/enums_traits.rs:124-148`) | Same gap, second site. |
+| 10 | Name a compile-time constant | Comptime interpreter, full expressions | Fixed-list length retains `[T#expr]` and is resolved before registration (`crates/jet-sema/src/Sema/Registration/Items.rs:302-642`) | Resolved by D-META-CONST1; E0963 now reports only unknown, noninteger, or out-of-range values. |
+| 11 | Name a compile-time constant (again) | Comptime interpreter | Enum discriminant retains an expression and is resolved before registration (`crates/jet-sema/src/Sema/Registration/Items.rs:365-406`) | Resolved by D-META-CONST1; E0035 now reports only unknown, noninteger, or out-of-range values. |
 | 12 | Register a fact kind | Marker registry | Type plane registry (`D-TYPE2-PLANE1`), rights tree (`authority-one-model.md:475`), build fact plane (`build-config-one-plane.md:553`) | Four "one table, one law" registries minted within 48 hours, each citing the others. |
 
 Four more defects with no second mechanism, only a closed door:
@@ -461,7 +461,7 @@ write generated code at every rung, and no new kind of value.
 ### S7 — Compile-time expressions where constants are legal (D-META-CONST1=A)
 
 ```jet
-// today: E0963 and E0035
+// formerly: E0963 and E0035 for expressions the evaluator already understood
 @LANES :: 8
 @BASE  :: 100
 
@@ -474,10 +474,10 @@ capability gained by deleting code.
 
 ### S8 — One effect model for compile-time code (D-META-EFFECT1=A; amends D-CTCORE1)
 
-Compile-time purity has its own allowed-call list (`D-CTCORE1`), its own tier
-names, and its own diagnostics (E0951), beside the run-time effect system with
-its own (E3401). Compile-time code declares effects the same way
-run-time code does.
+Compile-time and run-time code use one effect set, one checker walk, and one
+diagnostic family. The curated `D-CTCORE1` allow-list and the separate E0951
+family retire; the shared foundation effect fact decides whether a call is
+eligible. Compile-time code declares effects the same way run-time code does.
 
 ```jet
 fn load_schema() =[FS]=> String { … }     // same syntax at both stages
@@ -813,12 +813,10 @@ compile-time constants, one effect model.
 
 ## Out-of-scope verification notes
 
-Two ledgers disagree and one is wrong. `tests/jit_gaps.txt` marks
-`comptime/embed` and `comptime/find` covered. The tier-parity audit
-(`docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md`) records both
-failing at the default `run` tier with E0956. `jit_gaps.txt` tracks compile
-coverage, not run coverage. This needs its own card; it is not caused by this
-proposal and does not block it.
+The four comptime I/O stems named by the effect decision now pass AOT, default
+`jet run`, and the forced interpreter. Their old E0956 run-tier parking rows
+were removed from `tests/jit_gaps.txt`; the parity test owns the byte-equality
+proof.
 
 Separately: the comptime substrate decisions are missing from the Tower store.
 `D-CTCORE1`, `D-CTEFFECT1`, `D-CTIO1`, `D-CTFIND1`, `D-CTCODEGEN1`, and
