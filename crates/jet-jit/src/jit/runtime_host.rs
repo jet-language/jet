@@ -94,6 +94,9 @@ pub(crate) struct JitCallableSlot {
 
 pub(crate) struct JitRuntime {
     pub(crate) source_file: String,
+    pub(crate) source_text: String,
+    pub(crate) current_function: String,
+    pub(crate) stack_depth: usize,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
@@ -242,7 +245,7 @@ impl JitRuntime {
 
     /// Record a runtime panic. Keeps the first message (the unwind branch may
     /// re-enter trap sites with dummy values before the epilogue is reached).
-    pub(crate) fn set_trap(&mut self, msg: &str) {
+    fn store_trap(&mut self, msg: &str) {
         if Concurrency::in_scheduler_task() {
             Concurrency::set_task_trap(msg);
             return;
@@ -252,10 +255,75 @@ impl JitRuntime {
         }
     }
 
+    /// Legacy host failures still enter the one runtime-stop renderer. The
+    /// caller supplies no source facts for an engine failure, so the report
+    /// keeps the generic E3001 location shape.
+    pub(crate) fn set_trap(&mut self, msg: &str) {
+        self.set_runtime_stop("E3001", 0, msg);
+    }
+
     pub(crate) fn set_deadline(&mut self, rendered: String) {
         if self.deadline_exceeded.is_none() {
             self.deadline_exceeded = Some(rendered);
         }
+    }
+
+    /// Marshal a runtime breach into the Foundation Prelude renderer. JIT
+    /// hosts provide only source facts and keep no user-facing wording.
+    pub(crate) fn set_runtime_stop(&mut self, code: &'static str, line: u32, message: &str) {
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        let src_line = self
+            .source_text
+            .lines()
+            .nth((line as usize).saturating_sub(1))
+            .unwrap_or_default();
+        let (fn_name, src_line) = if code == "E3001" {
+            (&self.current_function, src_line)
+        } else {
+            (&String::new(), "")
+        };
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            code,
+            &self.source_file,
+            line,
+            fn_name,
+            src_line,
+            1,
+            1,
+            message,
+            "",
+        );
+        self.stderr.push_str(&report.rendered);
+        self.exit_code = Some(report.exit_code);
+        self.store_trap(message);
+    }
+
+    pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
+        const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
+        self.stack_depth = self.stack_depth.saturating_add(1);
+        if self.stack_depth > LIMIT {
+            let message = format!("stack overflow in `{fn_name}`");
+            let report = jet_foundation::Outcome::jet_render_runtime_stop(
+                "E3012",
+                file,
+                line,
+                fn_name,
+                src_line,
+                1,
+                1,
+                &message,
+                "",
+            );
+            self.stderr.push_str(&report.rendered);
+            self.exit_code = Some(report.exit_code);
+            self.store_trap(&message);
+        }
+    }
+
+    pub(crate) fn stack_leave(&mut self) {
+        self.stack_depth = self.stack_depth.saturating_sub(1);
     }
 }
 
@@ -292,7 +360,7 @@ fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, 
 /// Record an arithmetic overflow/div-by-zero trap. Returns normally (the
 /// caller yields a dummy `0`); JIT code branches to its epilogue at the next
 /// `emit_trap_check`. Message text is unchanged from the old exit-70 path.
-fn jet_trap_overflow(op: &str) {
+fn jet_trap_overflow(op: &str, line: u32) {
     use jet_codegen::Comptime::MathLayout;
     let msg = match op {
         "add" => "this addition overflows the value's type (the result is outside its range)",
@@ -302,7 +370,7 @@ fn jet_trap_overflow(op: &str) {
         "pow" => MathLayout::INTEGER_POWER_OVERFLOW,
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
-    with_runtime_mut(|rt| rt.set_trap(msg));
+    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, msg));
 }
 
 pub(crate) const INTN_OP_ADD: i64 = 0;
@@ -339,41 +407,55 @@ extern "C" fn jet_jit_is_trapped() -> i64 {
     }
 }
 
-extern "C" fn jet_jit_add_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_stack_enter(file: i64, line: i64, fn_name: i64, src_line: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
+        rt.stack_enter(&file, line.max(0) as u32, &fn_name, &src_line);
+        i64::from(rt.trapped.is_some())
+    })
+}
+
+extern "C" fn jet_jit_stack_leave() {
+    Concurrency::with_runtime_mut(JitRuntime::stack_leave);
+}
+
+extern "C" fn jet_jit_add_i64(a: i64, b: i64, line: u32) -> i64 {
     match a.checked_add(b) {
         Some(v) => v,
         None => {
-            jet_trap_overflow("add");
+            jet_trap_overflow("add", line);
             0
         }
     }
 }
 
-extern "C" fn jet_jit_sub_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_sub_i64(a: i64, b: i64, line: u32) -> i64 {
     match a.checked_sub(b) {
         Some(v) => v,
         None => {
-            jet_trap_overflow("sub");
+            jet_trap_overflow("sub", line);
             0
         }
     }
 }
 
-extern "C" fn jet_jit_mul_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_mul_i64(a: i64, b: i64, line: u32) -> i64 {
     match a.checked_mul(b) {
         Some(v) => v,
         None => {
-            jet_trap_overflow("mul");
+            jet_trap_overflow("mul", line);
             0
         }
     }
 }
 
-extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_div_i64(a: i64, b: i64, line: u32) -> i64 {
     match a.checked_div(b) {
         Some(v) => v,
         None => {
-            jet_trap_overflow("div");
+            jet_trap_overflow("div", line);
             0
         }
     }
@@ -381,16 +463,18 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
 
 /// D-EXPSEM1=A: the same exact, trapping whole-number power the Prelude runs
 /// (`Prelude/Core/Power.rs`). A negative exponent has no whole-number result.
-extern "C" fn jet_jit_pow_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_pow_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if b < 0 {
-        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_POWER_NEGATIVE));
+        with_runtime_mut(|rt| {
+            rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_POWER_NEGATIVE)
+        });
         return 0;
     }
     match u32::try_from(b).ok().and_then(|e| a.checked_pow(e)) {
         Some(value) => value,
         None => {
-            jet_trap_overflow("pow");
+            jet_trap_overflow("pow", line);
             0
         }
     }
@@ -403,16 +487,16 @@ extern "C" fn jet_jit_pow_f64(a: f64, b: f64) -> f64 {
 
 /// D-FLOORDIV1=A: the same rounding-down division the Prelude runs
 /// (`Prelude/Core/Division.rs`), through the one shared rule.
-extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if b == 0 {
-        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
     match MathLayout::floor_div(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
             0
         }
     }
@@ -425,25 +509,25 @@ extern "C" fn jet_jit_floordiv_f64(a: f64, b: f64) -> f64 {
 
 /// D-MODSEM1=A: the floored modulo the Prelude runs
 /// (`Prelude/Core/Division.rs`), through the one shared rule.
-extern "C" fn jet_jit_mod_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_mod_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if b == 0 {
-        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
     match MathLayout::floored_mod(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
             0
         }
     }
 }
 
-extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_rem_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if let Some(message) = MathLayout::integer_remainder_trap(b) {
-        with_runtime_mut(|rt| rt.set_trap(message));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, message));
         return 0;
     }
     // D-MODSEM1=A: `MIN %% -1` is 0, the same answer `%` gives.
@@ -476,7 +560,9 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_FLOOR_DIV => BinOp::FloorDiv,
         INTN_OP_MOD => BinOp::Mod,
         _ => {
-            with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
+            with_runtime_mut(|rt| {
+                rt.set_runtime_stop("E3010", 0, "unknown fixed-width integer operation")
+            });
             return 0;
         }
     };
@@ -485,18 +571,18 @@ extern "C" fn jet_jit_intn_binop(
     let right_signed = right_signed != 0;
     let shift_count = MathLayout::integer_widen(right, right_signed);
     if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
-        with_runtime_mut(|rt| rt.set_trap(&message));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, &message));
         return 0;
     }
     // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
     // into the shared "this division can't be done" wording below.
     if mode == INTN_MODE_TRAP && matches!(op, BinOp::FloorDiv | BinOp::Mod) && right == 0 {
-        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
         if let Some(message) = MathLayout::integer_remainder_trap(right) {
-            with_runtime_mut(|rt| rt.set_trap(message));
+            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, message));
             return 0;
         }
     }
@@ -552,10 +638,10 @@ extern "C" fn jet_jit_intn_binop(
             // here as it does on every other tier.
             match op {
                 BinOp::FloorDiv | BinOp::Mod => {
-                    with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_DIVIDE_OVERFLOW));
                 }
                 BinOp::Pow => {
-                    with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_POWER_OVERFLOW));
+                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", 0, MathLayout::INTEGER_POWER_OVERFLOW));
                 }
                 _ => {
                     let name = match op {
@@ -565,7 +651,7 @@ extern "C" fn jet_jit_intn_binop(
                         BinOp::Div => "div",
                         _ => "shift",
                     };
-                    jet_trap_overflow(name);
+                    jet_trap_overflow(name, 0);
                 }
             }
             0
@@ -1042,24 +1128,34 @@ extern "C" fn jet_jit_rich_panic(
             // and a shared trap would make the parent skip unrelated joins.
             Concurrency::set_local_rich_panic();
         } else {
-            let line_s = line.to_string();
-            let margin = line_s.len();
-            let pad = " ".repeat(margin);
-            let col_offset = (col as u64).saturating_sub(1) as usize;
-            let caret = "^".repeat((caret as usize).max(1));
-            let mut out = String::new();
-            out.push_str(&format!("panic: {msg}\n"));
-            out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
-            out.push_str(&format!("   {pad}|\n"));
-            out.push_str(&format!("{line_s} | {src_line}\n"));
-            out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
-            if !locals.is_empty() {
-                out.push_str(&format!("locals: {locals}\n"));
-            }
-            rt.stderr.push_str(&out);
-            rt.exit_code = Some(70);
+            let report = jet_foundation::Outcome::jet_render_runtime_stop(
+                "E3001",
+                &file,
+                line.max(0) as u32,
+                &fn_name,
+                &src_line,
+                col.max(1) as u32,
+                caret.max(1) as u32,
+                &msg,
+                &locals,
+            );
+            rt.stderr.push_str(&report.rendered);
+            rt.exit_code = Some(report.exit_code);
             rt.set_trap("__jet_rich_panic__");
         }
+        0
+    })
+}
+
+extern "C" fn jet_jit_todo_stop(line: i64, expected_type: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let expected_type = rt.heap.clone_string(expected_type).unwrap_or_default();
+        let message = format!(
+            "#Todo at {}:{} — expected {expected_type}",
+            rt.source_file,
+            line.max(0)
+        );
+        rt.set_runtime_stop("E3011", line.max(0) as u32, &message);
         0
     })
 }
@@ -2113,6 +2209,15 @@ host_fns! {
             sig_rich_panic.params.push(AbiParam::new(types::I64));
         }
         sig_rich_panic.returns.push(AbiParam::new(types::I64));
+        let mut sig_todo_stop = Signature::new(cc);
+        sig_todo_stop.params.push(AbiParam::new(types::I64));
+        sig_todo_stop.params.push(AbiParam::new(types::I64));
+        sig_todo_stop.returns.push(AbiParam::new(types::I64));
+        let mut sig_stack_enter = Signature::new(cc);
+        sig_stack_enter
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_stack_enter.returns.push(AbiParam::new(types::I64));
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::F64));
         let mut sig_i8 = Signature::new(cc);
@@ -2462,6 +2567,7 @@ host_fns! {
     result_get_i32: "jet_jit_result_get_i32" => jet_jit_result_get_i32: sig_result_query_i32;
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
     rich_panic: "jet_jit_rich_panic" => jet_jit_rich_panic: sig_rich_panic;
+    todo_stop: "jet_jit_todo_stop" => jet_jit_todo_stop: sig_todo_stop;
     trace_err: "jet_jit_trace_err" => jet_jit_trace_err: sig_trace_err;
     result_context: "jet_jit_result_context" => jet_jit_result_context: sig_str_binary_i64;
     duration_from_int: "jet_jit_duration_from_int" => jet_jit_duration_from_int: sig_duration_int;
@@ -2476,6 +2582,8 @@ host_fns! {
     perf_override_fidelity: "jet_jit_perf_override_fidelity" => jet_jit_perf_override_fidelity: sig_perf_override;
     perf_reset_fidelity: "jet_jit_perf_reset_fidelity" => jet_jit_perf_reset_fidelity: sig_noarg;
     is_trapped: "jet_jit_is_trapped" => jet_jit_is_trapped: sig_is_trapped;
+    stack_enter: "jet_jit_stack_enter" => jet_jit_stack_enter: sig_stack_enter;
+    stack_leave: "jet_jit_stack_leave" => jet_jit_stack_leave: sig_noarg;
     deopt_call: "jet_deopt_call" => super::deopt::jet_deopt_call: sig_deopt;
     reflect_of_finish: "jet_jit_reflect_of_finish" => jet_jit_reflect_of_finish: sig_reflect_finish;
     reflect_field_new: "jet_jit_reflect_field_new" => jet_jit_reflect_field_new: sig_str_binary_i64;

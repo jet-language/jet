@@ -136,8 +136,11 @@ struct JetParaFailure {
 
 enum JetParaRuntimeFailure {
     Simple {
+        code: String,
         file: String,
         line: u32,
+        fn_name: String,
+        src_line: String,
         msg: String,
     },
     Rich {
@@ -167,7 +170,14 @@ enum JetParaRuntimeFailure {
 impl JetParaRuntimeFailure {
     fn raise(self) -> ! {
         match self {
-            Self::Simple { file, line, msg } => jet_panic(&file, line, &msg),
+            Self::Simple {
+                code,
+                file,
+                line,
+                fn_name,
+                src_line,
+                msg,
+            } => jet_runtime_stop_with_context(&code, &file, line, &fn_name, &src_line, &msg),
             Self::Rich {
                 file,
                 line,
@@ -187,7 +197,7 @@ impl JetParaRuntimeFailure {
                 clause_kw,
                 msg,
             } => jet_contract_fail(&file, line, &clause_kw, &msg),
-            Self::SchedulerFatal { msg } => jet_runtime_diagnostic(format!("panic: {msg}")),
+            Self::SchedulerFatal { msg } => jet_runtime_stop("E3001", "", 0, &msg),
         }
     }
 }
@@ -446,6 +456,67 @@ impl JetShow for JetReservoirSampler {
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static JET_STACK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static JET_TEST_EXPECT_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_TEST_STOP_CODE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// D-FAIL-BREACH1=A: a test can catch a runtime stop and assert its code.
+pub fn jet_test_expect_fail_enter() {
+    JET_TEST_EXPECT_FAIL.with(|active| active.set(true));
+    JET_TEST_STOP_CODE.with(|code| *code.borrow_mut() = None);
+}
+
+pub fn jet_test_expect_fail_leave() {
+    JET_TEST_EXPECT_FAIL.with(|active| active.set(false));
+}
+
+pub fn jet_test_record_stop(code: &str) {
+    JET_TEST_STOP_CODE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(code.to_string());
+        }
+    });
+}
+
+pub fn jet_test_take_stop_code() -> Option<String> {
+    JET_TEST_STOP_CODE.with(|slot| slot.borrow_mut().take())
+}
+
+/// D-FAIL-BREACH1=A: stop before native recursion can exhaust the process
+/// stack. The frame is a small Prelude-owned depth token; every engine either
+/// emits this call or uses the evaluator's equivalent guard.
+struct JetStackFrame;
+
+impl Drop for JetStackFrame {
+    fn drop(&mut self) {
+        JET_STACK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+fn jet_stack_enter(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+) -> JetStackFrame {
+    let overflow = JET_STACK_DEPTH.with(|depth| {
+        let next = depth.get().saturating_add(1);
+        depth.set(next);
+        next > JET_RUNTIME_STACK_LIMIT
+    });
+    if overflow {
+        jet_runtime_stop_with_context(
+            "E3012",
+            file,
+            line,
+            fn_name,
+            src_line,
+            &format!("stack overflow in `{fn_name}`"),
+        );
+    }
+    JetStackFrame
 }
 
 pub fn jet_scheduler_task_panic_enter() {
@@ -469,7 +540,9 @@ pub fn jet_interrupt_handler_panic_leave() {
 }
 
 fn jet_runtime_should_unwind() -> bool {
-    jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()
+    jet_scheduler_in_task()
+        || jet_interrupt_handler_should_unwind()
+        || JET_TEST_EXPECT_FAIL.with(|active| active.get())
 }
 
 fn jet_interrupt_handler_should_unwind() -> bool {
@@ -497,21 +570,88 @@ fn jet_runtime_exit() -> ! {
     std::panic::resume_unwind(Box::new(JetRuntimeExit))
 }
 
-fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+fn jet_runtime_stop(code: &str, file: &str, line: u32, msg: &str) -> ! {
+    jet_runtime_stop_with_context(code, file, line, "", "", msg)
+}
+
+fn jet_scheduler_runtime_stop(msg: &str) -> ! {
+    jet_runtime_stop("E3001", "", 0, msg)
+}
+
+fn jet_runtime_caught_stop(message: &str) {
+    if message.starts_with("Stop [E") {
+        eprint!("{message}");
+        if !message.ends_with('\n') {
+            eprintln!();
+        }
+        return;
+    }
+    let report = jet_render_runtime_stop(
+        "E3001", "", 0, "", "", 1, 1, message, "",
+    );
+    eprint!("{}", report.rendered);
+}
+
+fn jet_runtime_stop_with_context(
+    code: &str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    msg: &str,
+) -> ! {
+    jet_test_record_stop(code);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
+            code: code.to_string(),
             file: file.to_string(),
             line,
+            fn_name: fn_name.to_string(),
+            src_line: src_line.to_string(),
             msg: msg.to_string(),
         }));
     }
-    jet_proof_record(2, 1, "panic", msg, file, line);
+    jet_proof_record(2, 1, code, msg, file, line);
+    let report = jet_render_runtime_stop(
+        match code {
+            "E3001" => "E3001",
+            "E3005" => "E3005",
+            "E3010" => "E3010",
+            "E3011" => "E3011",
+            "E3012" => "E3012",
+            _ => "E3001",
+        },
+        file,
+        line,
+        fn_name,
+        src_line,
+        1,
+        1,
+        msg,
+        "",
+    );
     if jet_runtime_should_unwind() {
-        panic!("{} (at {}:{})", msg, file, line);
+        panic!("{}", report.rendered);
     }
-    eprintln!("panic: {}", msg);
-    eprintln!("  --> {}:{}", file, line);
+    eprint!("{}", report.rendered);
     jet_runtime_exit();
+}
+
+fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    jet_runtime_stop("E3001", file, line, msg)
+}
+
+fn jet_arithmetic_stop(file: &str, line: u32, msg: &str) -> ! {
+    jet_runtime_stop("E3010", file, line, msg)
+}
+
+fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {
+    jet_runtime_stop(
+        "E3011",
+        file,
+        line,
+        &format!("#Todo at {file}:{line} — expected {expected_type}"),
+    )
 }
 
 fn jet_runtime_diagnostic(rendered: String) -> ! {
@@ -537,15 +677,12 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
             msg: msg.to_string(),
         }));
     }
-    if jet_runtime_should_unwind() {
-        panic!(
-            "#{} contract failed: {} (at {}:{})",
-            clause_kw, msg, file, line
-        );
-    }
-    eprintln!("#{} contract failed: {}", clause_kw, msg);
-    eprintln!("  --> {}:{}", file, line);
-    jet_runtime_exit();
+    jet_runtime_stop(
+        "E3005",
+        file,
+        line,
+        &format!("#{} contract failed: {}", clause_kw, msg),
+    )
 }
 
 /// Private structured producer channel used only when `jet prove` launches a
@@ -568,8 +705,8 @@ fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, 
 }
 // D-NUMOPS1: plain integer arithmetic traps on overflow (safe by default) — a
 // silent corruption becomes a caught bug. Each arithmetic operator on a fixed-width
-// integer lowers to one of these, which panic with the source location instead
-// of wrapping. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the use
+// integer lowers to one of these, which reports E3010 with the source location
+// instead of wrapping. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the use
 // site. Floats and `#Numeric` distinct types keep the plain Rust operators.
 trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
@@ -587,32 +724,32 @@ macro_rules! jet_arith_impl {
     ($($t:ty),*) => { $(
         impl JetArith for $t {
             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_add(rhs).unwrap_or_else(|| jet_panic(file, line,
+                self.checked_add(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     &format!("this addition overflows the value's type (the result is outside its range)")))
             }
             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_sub(rhs).unwrap_or_else(|| jet_panic(file, line,
+                self.checked_sub(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     &format!("this subtraction overflows the value's type (the result is outside its range)")))
             }
             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_mul(rhs).unwrap_or_else(|| jet_panic(file, line,
+                self.checked_mul(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     &format!("this multiplication overflows the value's type (the result is outside its range)")))
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_div(rhs).unwrap_or_else(|| jet_panic(file, line,
+                self.checked_div(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     &format!("this division can't be done (dividing by zero, or overflow)")))
             }
             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, "divided by zero");
+                    jet_arithmetic_stop(file, line, "divided by zero");
                 }
-                self.checked_rem(rhs).unwrap_or_else(|| jet_panic(file, line,
+                self.checked_rem(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     "attempt to calculate the remainder with overflow"))
             }
             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
                 let w = (Self::BITS) as i128;
                 if bits < 0 || bits >= w {
-                    jet_panic(file, line, &format!(
+                    jet_arithmetic_stop(file, line, &format!(
                         "shifting left by {} bits is out of range (this type is {} bits wide)", bits, w));
                 }
                 self << (bits as u32)
@@ -620,7 +757,7 @@ macro_rules! jet_arith_impl {
             fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
                 let w = (Self::BITS) as i128;
                 if bits < 0 || bits >= w {
-                    jet_panic(file, line, &format!(
+                    jet_arithmetic_stop(file, line, &format!(
                         "shifting right by {} bits is out of range (this type is {} bits wide)", bits, w));
                 }
                 self >> (bits as u32)
@@ -643,6 +780,7 @@ fn jet_panic_rich(
     msg: &str,
     locals: &str,
 ) -> ! {
+    jet_test_record_stop("E3001");
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
             file: file.to_string(),
@@ -655,23 +793,22 @@ fn jet_panic_rich(
             locals: locals.to_string(),
         }));
     }
-    jet_proof_record(2, 1, "panic", msg, file, line);
+    jet_proof_record(2, 1, "E3001", msg, file, line);
+    let report = jet_render_runtime_stop(
+        "E3001",
+        file,
+        line,
+        fn_name,
+        src_line,
+        col,
+        caret_len,
+        msg,
+        locals,
+    );
     if jet_runtime_should_unwind() {
-        panic!("{} (at {}:{})", msg, file, line);
+        panic!("{}", report.rendered);
     }
-    let line_s = line.to_string();
-    let margin = line_s.len();
-    let pad = " ".repeat(margin);
-    eprintln!("panic: {}", msg);
-    eprintln!("  --> {}:{} in {}", file, line, fn_name);
-    eprintln!("   {}|", pad);
-    eprintln!("{} | {}", line_s, src_line);
-    let col_offset = col.saturating_sub(1) as usize;
-    let caret = "^".repeat(caret_len.max(1) as usize);
-    eprintln!("   {}| {}{}", pad, " ".repeat(col_offset), caret);
-    if !locals.is_empty() {
-        eprintln!("locals: {}", locals);
-    }
+    eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 /// E3002 / D-ERRCTX1=D: `?`-propagation trace in **dev** builds.
@@ -715,7 +852,7 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     jet_fixed_list_index(xs.len(), i, |index| xs[index].clone())
-        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
@@ -724,7 +861,7 @@ fn jet_index_vec_mut<'a, T>(
     line: u32,
 ) -> &'a mut T {
     jet_fixed_list_index(xs.len(), i, |index| &mut xs[index])
-        .unwrap_or_else(|error| jet_panic(file, line, &error.message()))
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
@@ -1047,15 +1184,28 @@ enum JetRemoveBy {
     Slot,
 }
 
-fn jet_index_map<K: Ord + Clone, V: Clone>(
+fn jet_index_map<K: Ord + Clone + JetShow, V: Clone>(
     m: &JetMap<K, V>,
     k: &K,
     file: &str,
     line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
 ) -> V {
     match m.get(k) {
         Some(v) => v.clone(),
-        None => jet_panic(file, line, &format!("the map has no entry for this key")),
+        None => jet_panic_rich(
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &format!("the map has no entry for key {:?}", k.jet_show()),
+            "",
+        ),
     }
 }
 fn jet_map_insert<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>, k: K, v: V) {

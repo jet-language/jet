@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use crate::AST::Type;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
-use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
+use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::{
@@ -517,7 +517,7 @@ impl<'a> EvalCtx<'a> {
                                             0,
                                             self.span(),
                                         )?;
-                                        replacement = eval_binop(
+                                        replacement = self.eval_runtime_binop(
                                             *binop,
                                             current,
                                             replacement,
@@ -564,7 +564,7 @@ impl<'a> EvalCtx<'a> {
                                         }
                                         let mut rhs = rhs;
                                         if let Some(binop) = op {
-                                            rhs = eval_binop(
+                                            rhs = self.eval_runtime_binop(
                                                 *binop,
                                                 items[i].clone(),
                                                 rhs,
@@ -586,7 +586,7 @@ impl<'a> EvalCtx<'a> {
                         let mut rhs = rhs;
                         if let Some(binop) = op {
                             let cur = scope.get(&key).cloned().unwrap_or(CtValue::Unit);
-                            rhs = eval_binop(*binop, cur, rhs, self.span())?;
+                            rhs = self.eval_runtime_binop(*binop, cur, rhs, self.span())?;
                         }
                         scope.insert(key, rhs);
                         Ok(Flow::Normal)
@@ -596,7 +596,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         if let Some(binop) = op {
                             let current = self.eval_expr(place_expr, scope)?;
-                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                            rhs = self.eval_runtime_binop(*binop, current, rhs, self.span())?;
                         }
                         self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
@@ -610,7 +610,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         if let Some(binop) = op {
                             let current = self.eval_expr(place_expr, scope)?;
-                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                            rhs = self.eval_runtime_binop(*binop, current, rhs, self.span())?;
                         }
                         self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
@@ -620,7 +620,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         if let Some(binop) = op {
                             let current = self.eval_expr(place_expr, scope)?;
-                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                            rhs = self.eval_runtime_binop(*binop, current, rhs, self.span())?;
                         }
                         self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
@@ -1530,7 +1530,7 @@ impl<'a> EvalCtx<'a> {
                             ));
                         };
                         if let Some(op) = assign.op {
-                            *slot = eval_binop(op, slot.clone(), rhs, self.span())?;
+                            *slot = self.eval_runtime_binop(op, slot.clone(), rhs, self.span())?;
                         } else {
                             *slot = rhs;
                         }
@@ -1561,7 +1561,7 @@ impl<'a> EvalCtx<'a> {
                 for (name, val) in &mut fields {
                     if name == &assign.field {
                         if let Some(op) = assign.op {
-                            *val = eval_binop(op, val.clone(), rhs, self.span())?;
+                            *val = self.eval_runtime_binop(op, val.clone(), rhs, self.span())?;
                         } else {
                             *val = rhs;
                         }

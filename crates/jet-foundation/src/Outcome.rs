@@ -304,6 +304,106 @@ pub struct JetRuntimeDiagnostic {
     pub exit_code: i32,
 }
 
+/// One recursion budget for every execution tier. The evaluator, AOT Prelude,
+/// and JIT host all stop at the same Jet-defined depth before a native stack
+/// fault can escape as a process crash.
+// The evaluator keeps a larger Rust frame than generated Jet code. Keep the
+// shared limit below the smallest native worker stack so it can report the
+// stop before the host stack aborts.
+pub const JET_RUNTIME_STACK_LIMIT: usize = 6;
+
+/// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.
+///
+/// The source location is data supplied by an execution tier. The code-to-copy
+/// mapping, report shape, and breach exit code live here so AOT, JIT, and TIR
+/// cannot drift into separate panic printers.
+pub fn jet_render_runtime_stop(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    message: &str,
+    locals: &str,
+) -> JetRuntimeDiagnostic {
+    let (what, why, fix) = match code {
+        "E3001" => (
+            format!("panic: {message}"),
+            "the program reached a panic stop and cannot continue".to_string(),
+            "check the source location and handle the failing condition".to_string(),
+        ),
+        "E3005" => (
+            message.to_string(),
+            "a runtime contract condition evaluated false".to_string(),
+            "satisfy the contract or update it".to_string(),
+        ),
+        "E3010" => (
+            message.to_string(),
+            "the operation has no valid result for these operands".to_string(),
+            "check the operands before the operation, or use a checked operation".to_string(),
+        ),
+        "E3011" => (
+            message.to_string(),
+            "a #Todo hole was reached at runtime".to_string(),
+            "implement this code before running it".to_string(),
+        ),
+        "E3012" => (
+            message.to_string(),
+            "the call stack exceeded Jet's safe runtime limit".to_string(),
+            "end the recursion or make progress toward a base case".to_string(),
+        ),
+        _ => (
+            message.to_string(),
+            "the program reached a registered runtime stop".to_string(),
+            "handle the condition at the reported source location".to_string(),
+        ),
+    };
+
+    let mut rendered = format!("Stop [{code}]: {what}\n");
+    if !file.is_empty() {
+        rendered.push_str(&format!(
+            "  --> {}:{}{}\n",
+            file,
+            line,
+            if fn_name.is_empty() {
+                String::new()
+            } else {
+                format!(" in {fn_name}")
+            }
+        ));
+    }
+    if !src_line.is_empty() {
+        let line_s = line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        rendered.push_str(&format!("   {pad}|\n"));
+        rendered.push_str(&format!("{line_s} | {src_line}\n"));
+        let col_offset = col.saturating_sub(1) as usize;
+        let caret = "^".repeat(caret_len.max(1) as usize);
+        rendered.push_str(&format!(
+            "   {pad}| {}{}\n",
+            " ".repeat(col_offset),
+            caret
+        ));
+    }
+    if !locals.is_empty() {
+        rendered.push_str(&format!("locals: {locals}\n"));
+    }
+    rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
+
+    JetRuntimeDiagnostic {
+        code,
+        source: "runtime",
+        what,
+        why,
+        fix,
+        rendered,
+        exit_code: 70,
+    }
+}
+
 pub fn jet_render_registered_diagnostic(
     code: &'static str,
     source: &'static str,

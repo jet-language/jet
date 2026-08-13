@@ -132,6 +132,8 @@ pub enum TJitSpawnBody {
 pub struct JitProgram {
     /// Display path of the entry module (for overflow trap messages).
     pub source_file: String,
+    /// Source text for the one runtime stop renderer's context box.
+    pub source_text: String,
     /// Sema-selected callable name. The JIT compiles this exact function and
     /// never assumes the source spelling `run`.
     pub entry: String,
@@ -1829,6 +1831,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
+        source_text: module.source.clone(),
         entry: entry_name,
         funcs,
         spawn_lambdas,
@@ -2160,10 +2163,9 @@ pub enum ScopeMemberKind {
     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
     /// to the rest of the test), running first.
     Setup,
-    /// `.expect_fail { … }` — the region must fail (a `require` failure or a
-    /// panic). Runs under a panic-catching boundary; if it completes cleanly the
-    /// test fails with "expected this region to fail, but it passed".
-    ExpectFail,
+    /// `.expect_fail { … }` / `.expect_fail(E3010) { … }` — the region must
+    /// fail, optionally with the named runtime stop code.
+    ExpectFail(Option<String>),
     /// `.timeout(dur) { … }` — post-hoc budget in nanoseconds. The region runs to
     /// completion, then its elapsed time is compared against the budget; over
     /// budget fails the test. (v1: post-hoc — does not interrupt a hang.)
@@ -3539,12 +3541,9 @@ pub enum TExprKind {
         else_body: Vec<TStmt>,
         else_value: Box<TExpr>,
     },
-    /// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11). Emits a
-    /// diverging `todo!("#Todo at {file}:{line} — expected {ty}")` (Expression.rs
-    /// `Expr::Todo`). The `expected_type` is the TOTAL sema fact (sema fills it onto
-    /// the AST node); `line` is the source line resolved at lowering. `cx.file` is
-    /// program-level (read at emit, like every other `cx.file` use). `todo!()` is
-    /// diverging in Rust so it type-checks in any expression position (I1: no unsafe).
+    /// D-FAIL-BREACH1=A: a `#Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11)
+    /// emits the registered E3011 Prelude stop. The `expected_type` is the total
+    /// sema fact; `line` is the source line resolved at lowering.
     Todo {
         line: usize,
         expected_type: String,

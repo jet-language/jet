@@ -13,6 +13,12 @@ use jet_foundation::JSON::json_escape;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 
+/// Preserve a child process failure when the OS reports termination by signal
+/// instead of an ordinary numeric exit status.
+fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+    status.code().unwrap_or(ExitCodes::USER_ERROR)
+}
+
 pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode) {
     let (subject, file) = match command {
         "graph" => (None, args.first().map(|s| s.as_str())),
@@ -433,7 +439,9 @@ pub(crate) fn run_compile_cmd(
                     crate::cli_error!("E2105", "couldn't run the built program: {}", e);
                     exit(ExitCodes::USER_ERROR);
                 });
-                exit(status.code().unwrap_or(ExitCodes::OK));
+                // A signal has no numeric exit code. Treat it as a failed
+                // child so a crashed program cannot make `jet run` green.
+                exit(child_exit_code(status));
             }
         }
     }
@@ -817,7 +825,9 @@ pub(crate) fn run_compile_cmd(
                 crate::cli_error!("E2105", "couldn't run the built program: {}", e);
                 exit(ExitCodes::USER_ERROR);
             });
-            exit(status.code().unwrap_or(ExitCodes::OK));
+            // A signal has no numeric exit code. Treat it as a failed child
+            // so a crashed program cannot make `jet run` green.
+            exit(child_exit_code(status));
         }
         other => {
             crate::cli_error!("E2101", "`{}` isn't a {} command", other, jet::Syntax::BINARY_NAME);
@@ -905,7 +915,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
             crate::cli_error!("E2105", "couldn't run the built program: {}", e);
             exit(ExitCodes::USER_ERROR);
         });
-    exit(status.code().unwrap_or(ExitCodes::OK));
+    exit(child_exit_code(status));
 }
 
 /// D-WEBAPP-SERVE1=D: `jet dev` serves a conventional `fn app() => WebApp`
@@ -937,7 +947,7 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
         crate::cli_error!("E2105", "couldn't run the web app: {error}");
         exit(ExitCodes::USER_ERROR);
     });
-    exit(status.code().unwrap_or(ExitCodes::OK));
+    exit(child_exit_code(status));
 }
 
 /// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
@@ -1041,7 +1051,7 @@ pub(crate) fn run_task_entry(
         crate::cli_error!("E2105", "couldn't run the built program: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
-    exit(status.code().unwrap_or(ExitCodes::OK));
+    exit(child_exit_code(status));
 }
 
 #[derive(Debug)]
@@ -3964,7 +3974,7 @@ fn missing_linker(stderr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_key_with_toolchain, native_cache_salt, rustc_crate_name};
+    use super::{child_exit_code, missing_c_lib, missing_linker, native_cache_key, native_cache_key_with_toolchain, native_cache_salt, rustc_crate_name};
 
     struct ScratchProject(std::path::PathBuf);
 
@@ -4002,6 +4012,16 @@ mod missing_c_lib_tests {
     fn rustc_crate_name_sanitizes_user_facing_file_stems() {
         assert_eq!(rustc_crate_name("renderable-varargs.jet"), "renderable_varargs");
         assert_eq!(rustc_crate_name("3d.demo.jet"), "_3d_demo");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signaled_program_is_not_reported_as_success() {
+        let status = std::process::Command::new("sh")
+            .args(["-c", "kill -TERM $$"])
+            .status()
+            .expect("launch signal fixture");
+        assert_eq!(child_exit_code(status), jet::ExitCodes::USER_ERROR);
     }
 
     #[test]

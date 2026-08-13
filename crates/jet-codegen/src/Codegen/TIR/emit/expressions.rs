@@ -2817,7 +2817,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             let i = emit_tir_expr(index, cx);
             if *is_map {
-                format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
+                let fn_name = cx.current_fn.borrow().clone();
+                let src_line = cx
+                    .src
+                    .lines()
+                    .nth((*line as usize).saturating_sub(1))
+                    .unwrap_or_default()
+                    .to_string();
+                format!(
+                    "jet_index_map(&({}), &({}), {:?}, {}, {:?}, {:?}, 1, 1)",
+                    b, i, cx.file, line, fn_name, src_line
+                )
             } else if *uninit_fixed {
                 format!("(({b})[({i}) as usize].clone())")
             } else if is_compute_view_mut(&base.ty) {
@@ -2938,15 +2948,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // payload is the value side; an absence is the clean report.
         TExprKind::Present(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
         TExprKind::Absent => format!("Err({}JetAbsent)", cx.root_prefix),
-        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
-        // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
-        // panic string. `cx.file` is program-level (read here, like every other use).
+        // D-FAIL-BREACH1=A: a `#Todo` is a registered runtime stop, not a Rust
+        // panic. The Prelude owns its wording, report shape, and exit code.
         TExprKind::Todo {
             line,
             expected_type,
         } => format!(
-            "todo!(\"#{} at {}:{} — expected {}\")",
-            crate::Syntax::KW_TODO,
+            "jet_todo_stop({:?}, {}, {:?})",
             cx.file,
             line,
             expected_type

@@ -3167,7 +3167,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let kind = if name == Syntax::SCOPE_TEST_SETUP {
                 ScopeMemberKind::Setup
             } else if name == Syntax::SCOPE_TEST_EXPECT_FAIL {
-                ScopeMemberKind::ExpectFail
+                let expected = args.first().and_then(|arg| match arg {
+                    crate::AST::Expr::Ident(code, _) => Some(code.clone()),
+                    _ => None,
+                });
+                ScopeMemberKind::ExpectFail(expected)
             } else if name == Syntax::SCOPE_TEST_TIMEOUT {
                 ScopeMemberKind::Timeout(timeout_nanos(args))
             } else {

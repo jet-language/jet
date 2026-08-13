@@ -3943,11 +3943,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Option(Box::new(Type::Int)),
             kind: TExprKind::Absent,
         },
-        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. The expected-type
-        // STRING is the total sema fact (gate guarantees `Some`); the source line is
-        // resolved here. The result `ty` is never load-bearing (a `todo!()` diverges and
-        // is never an arithmetic operand), so a placeholder suffices — the emitted Rust
-        // reads only `expected_type`/`line`/`cx.file`, byte-for-byte Expression.rs.
+        // D-FAIL-BREACH1=A: a `#Todo` typed hole becomes the E3011 Prelude stop.
+        // The expected-type STRING is the total sema fact; the source line is
+        // resolved here. The result type is only a lowering placeholder because
+        // the stop diverges.
         Expr::Todo {
             span,
             expected_type,

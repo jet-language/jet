@@ -295,6 +295,7 @@ fn lower_spawn_function(
             reachable_break_exits: HashSet::new(),
             reachable_continue_blocks: HashSet::new(),
             dead: false,
+            stack_guard: false,
             next_var: 0,
             method_struct: None,
             ret_clif: if clif_ty(&lam.ret).is_some() {
@@ -610,6 +611,7 @@ pub(crate) fn lower_shared_transaction_lambda(
             reachable_break_exits: HashSet::new(),
             reachable_continue_blocks: HashSet::new(),
             dead: false,
+            stack_guard: false,
             next_var: 0,
             method_struct: None,
             ret_clif: Some(types::I64),
@@ -863,6 +865,7 @@ fn lower_callable_lambda_with_env(
             reachable_break_exits: HashSet::new(),
             reachable_continue_blocks: HashSet::new(),
             dead: false,
+            stack_guard: false,
             next_var: 0,
             method_struct: None,
             ret_clif,
@@ -1054,6 +1057,7 @@ pub(crate) fn lower_option_lift2_factory(
             compute_retrack_names: HashSet::new(),
             result_option_vars: HashSet::new(),
             dead: false,
+            stack_guard: false,
             next_var: 0,
             method_struct: None,
             ret_clif: meta.clif_ty(&body.ty),
@@ -1170,6 +1174,14 @@ fn lower_function(
             .flatten()
             .map(|layout| runtime.cells.register_guard_layout(layout))
             .unwrap_or(0);
+        let stack_file = runtime.source_file.clone();
+        let stack_src = runtime
+            .source_text
+            .lines()
+            .nth(tir.line.saturating_sub(1))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string();
         let mut lctx = LowerCtx {
             b: &mut b,
             module,
@@ -1189,6 +1201,7 @@ fn lower_function(
             reachable_break_exits: HashSet::new(),
             reachable_continue_blocks: HashSet::new(),
             dead: false,
+            stack_guard: true,
             next_var: 0,
             method_struct,
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
@@ -1214,6 +1227,7 @@ fn lower_function(
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
         };
+        lctx.emit_stack_enter(&stack_file, tir.line, &tir.name, &stack_src)?;
         let enter = lctx
             .module
             .declare_func_in_func(lctx.host.cell.frame_enter, lctx.b.func);
@@ -1386,6 +1400,7 @@ fn lower_generator_body(
             reachable_break_exits: HashSet::new(),
             reachable_continue_blocks: HashSet::new(),
             dead: false,
+            stack_guard: false,
             next_var: 0,
             method_struct: None,
             ret_clif: Some(types::I64),
@@ -1514,6 +1529,8 @@ pub(crate) fn compile_program_tiered(
         super::tier_cache::abort_capture();
     }
     runtime.source_file = program.source_file.clone();
+    runtime.source_text = program.source_text.clone();
+    runtime.current_function = program.entry.clone();
     let meta = JitMeta::from_program(program);
     register_packed_enum_show_table(&meta);
 

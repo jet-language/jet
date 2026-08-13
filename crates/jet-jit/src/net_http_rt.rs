@@ -69,7 +69,7 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
 }
 fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
     // RUNTIME_PANIC (exit 70): user-program panic path for include!d net host, not I2 ICE.
-    eprintln!("panic: {msg}");
+    Concurrency::with_runtime_mut(|rt| rt.set_trap(msg));
     std::process::exit(70);
 }
 fn jet_log_emit(_level: &str, _msg: &str, _fields: &[jet_std::LogField]) {}

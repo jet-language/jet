@@ -155,12 +155,6 @@ where
             }
         }
         JetSchedulerWait::Panicked(message) => {
-            with_runtime_mut(|rt| {
-                let line = format!("panic: {message}\n");
-                if !rt.stderr.ends_with(&line) {
-                    rt.stderr.push_str(&line);
-                }
-            });
             trap_panic(&message);
             JitWaitStatus::Panicked as i64
         }
@@ -211,12 +205,6 @@ where
             }
         }
         JetSchedulerWait::Panicked(message) => {
-            with_runtime_mut(|rt| {
-                let line = format!("panic: {message}\n");
-                if !rt.stderr.ends_with(&line) {
-                    rt.stderr.push_str(&line);
-                }
-            });
             trap_panic(&message);
             JitWaitStatus::Panicked as i64
         }

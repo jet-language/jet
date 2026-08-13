@@ -508,6 +508,9 @@ renumbered, and no new `W` code may be allocated.
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
 | E3004 | runtime | task cancelled at a cooperative wait point (D-CANCELMODEL1) |
 | E3005 | runtime | a `#Pre`/`#Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
+| E3010 | runtime | an arithmetic or bounds operation has no valid result |
+| E3011 | runtime | a `#Todo` hole was reached at runtime |
+| E3012 | runtime | call depth exceeded Jet's safe runtime limit |
 | E3101 | sema  | low-level memory operation used outside an `#Unsafe("…")` block (D-LL1/D-UNSAFE2) |
 | E3102 | sema  | low-level memory vocabulary used without `use core.mem` (D-LL1/D-UNSAFE2) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
@@ -1375,6 +1378,9 @@ span is embedded in the message (Jet file + line + function name).
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result). |
+| E3010 | `{msg}` — with Jet file and line. | The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data. | Check the operands or bounds before the operation, or use a checked operation that returns an outcome. |
+| E3011 | `#Todo at {file}:{line} — expected {type}`. | This code is deliberately incomplete and reached a running program. | Implement this code before running the program. |
+| E3012 | `stack overflow in {fn}` — with Jet file, line, and source context. | The call stack kept growing without reaching a safe return. | End the recursion or make progress toward a base case. |
 
 ## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
 

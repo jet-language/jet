@@ -105,10 +105,7 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
             msg: msg.to_string(),
         }));
     }
-    if jet_scheduler_panic_should_unwind() {
-        panic!("{}", msg);
-    }
-    jet_runtime_diagnostic(format!("panic: {msg}"));
+    jet_scheduler_runtime_stop(msg);
 }
 
 // ── D-CANCELMODEL1=C: preemptive cancellation at wait points ─────────────────
@@ -133,6 +130,17 @@ fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         .cloned()
         .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
         .unwrap_or_else(|| "task panicked".to_string());
+    // A child runtime stop carries its complete report while it crosses the
+    // Rust unwind boundary. The parent task must receive only the stop's
+    // message; it renders the one report at the user-visible call site.
+    let message = message
+        .lines()
+        .next()
+        .and_then(|line| line.split_once("]: ").map(|(_, message)| message))
+        .unwrap_or(&message)
+        .strip_prefix("panic: ")
+        .unwrap_or_else(|| message.lines().next().unwrap_or(&message))
+        .to_string();
     // AOT's rich panic path includes its source location in the Rust unwind
     // payload. That location is an internal diagnostic detail, not the
     // TaskFailure reason; strip only the compiler-shaped suffix so AOT,
@@ -148,9 +156,9 @@ fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
     if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
         eprintln!("{}", deadline.rendered);
     } else if let Some(message) = payload.downcast_ref::<String>() {
-        eprintln!("panic: {message}");
+        jet_runtime_caught_stop(message);
     } else if let Some(message) = payload.downcast_ref::<&'static str>() {
-        eprintln!("panic: {message}");
+        jet_runtime_caught_stop(message);
     }
 }
 

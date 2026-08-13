@@ -10,6 +10,23 @@ use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TStmt;
 
+fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    let source_line = cx
+        .src
+        .lines()
+        .nth(tir.line.saturating_sub(1))
+        .unwrap_or_default()
+        .trim_end();
+    let pad = "    ".repeat(indent);
+    out.push_str(&format!(
+        "{pad}let __jet_stack_frame = jet_stack_enter({}, {}, {}, {});\n",
+        crate::Codegen::escape_rust_str(&cx.file),
+        tir.line,
+        crate::Codegen::escape_rust_str(&tir.name),
+        crate::Codegen::escape_rust_str(source_line),
+    ));
+}
+
 /// Emit a covered function from its TIR, reusing the same pure formatting helpers
 /// as `emit_func` so the output is byte-identical to the AST path (golden parity).
 /// The only difference is that every decision is *read off the TIR* rather than
@@ -146,6 +163,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         ret = ret_clause,
         abi = abi,
     ));
+    emit_stack_guard(tir, cx, out, 1);
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
         out.push_str(&format!("    jet_cov({});\n", tir.line));
@@ -356,6 +374,7 @@ pub(crate) fn emit_tir_method(
         params = params.join(", "),
         ret = ret_clause,
     ));
+    emit_stack_guard(tir, cx, out, indent + 1);
     // D-COV1: probe at the method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
@@ -465,6 +484,7 @@ pub(crate) fn emit_tir_trait_method(
         params = params.join(", "),
         ret = ret_clause,
     ));
+    emit_stack_guard(tir, cx, out, indent + 1);
     // D-COV1: probe at the trait-method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
@@ -495,6 +515,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
             out.push_str(&format!(
                 "{pad}fn jet_encode(&self) -> jet_std::DataTree {{\n"
             ));
+            emit_stack_guard(tir, cx, out, indent + 1);
             if cx.coverage {
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }
@@ -517,6 +538,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
             out.push_str(&format!(
                 "{pad}fn jet_decode({tree}: &jet_std::DataTree) -> {ret} {{\n"
             ));
+            emit_stack_guard(tir, cx, out, indent + 1);
             if cx.coverage {
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }

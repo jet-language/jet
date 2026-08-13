@@ -155,6 +155,31 @@ fn jet_scope_expect_fail_passing_region_fails() {
 }
 
 #[test]
+fn jet_scope_expect_fail_asserts_runtime_code() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/scope_expect_fail_code.jet");
+    let out = Command::new(&jet)
+        .args(["test", fixture.to_str().expect("fixture path")])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "specific expect_fail test failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("expect a specific runtime stop: pass"),
+        "missing passing test output: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
 fn jet_scope_setup_failure_fails_test() {
     // D-DOTSCOPE1: a failure inside `.setup` fails the test on the normal path.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -346,8 +346,9 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     .exit_code
                     .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
             },
-            // Evaluator traps under whole-program deopt are live-program panics
-            // (I9), not comptime build failures — match AOT exit 70 + wording.
+            // Evaluator traps under whole-program deopt are live-program stops;
+            // this adapter keeps the Foundation renderer as the sole wording
+            // owner when an older E0953 boundary reaches it.
             Err(d) if d.code == "E0953" => {
                 let msg = d
                     .why
@@ -355,12 +356,10 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                         "while computing this value at compile time, the program panicked: ",
                     )
                     .unwrap_or(d.why.as_str());
-                if !sink.stderr.is_empty() && !sink.stderr.ends_with('\n') {
-                    sink.stderr.push('\n');
-                }
-                sink.stderr.push_str("panic: ");
-                sink.stderr.push_str(msg);
-                sink.stderr.push('\n');
+                let report = jet_foundation::Outcome::jet_render_runtime_stop(
+                    "E3001", "", 0, "", "", 1, 1, msg, "",
+                );
+                sink.stderr.push_str(&report.rendered);
                 RunOutcome::Ran {
                     stdout: sink.stdout,
                     stderr: sink.stderr,
