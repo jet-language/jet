@@ -428,7 +428,7 @@ pub(crate) fn parse_generated_fragment(
                 Some(trigger_span),
             );
             if let Some(cause) = errors.first() {
-                diags.push(diagnostic.caused_by(cause));
+                push_causal_report(diags, diagnostic, cause.clone());
             } else {
                 diags.push(diagnostic);
             }
@@ -479,9 +479,12 @@ mod serde_source_tests {
             trigger,
             &mut diags,
         ).is_none());
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, "E2710");
-        assert_eq!(diags[0].span, Some(trigger));
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].code, "E0003");
+        assert!(diags[0].cause.is_empty());
+        assert_eq!(diags[1].code, "E2710");
+        assert_eq!(diags[1].span, Some(trigger));
+        assert_eq!(diags[1].cause, vec!["E0003".to_string()]);
     }
 
     #[test]
