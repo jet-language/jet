@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1965,
-    "rev": 36269,
+    "rev": 36304,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-13T18:28:30.124Z"
+    "completionCursor": "2026-08-13T19:16:58.640Z"
   },
   "epochs": [
     {
@@ -85998,7 +85998,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m03-markers-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Scope: SLATE CLOSEOUT ONLY. This card does not implement anything itself -- it verifies the six ratified rulings from the 2026-08-05 marker slate are each carried by exactly one implementation child, none orphaned, and closes only after every child closes. Ratified ruling -> owning child mapping (verified against docs/proposals/marker-plane-first-principles.md and each child's current plan/criteria):\n  - D-VERDICT-1455-1 (law zero, mandatory registration, D-MARK-REG1): structural rebuild across #1456, #1457, #1458, #1459, #1460 (see each card for current status).\n  - D-IMPURE-REASON1=B, D-SQL-ARG1=B, D-MARK-FORM1=A, D-MARK-REPEAT1=A, D-HTML-NAME1=B: owned by #1461.\nNo ruling is orphaned. #1455 itself adds no code.\n\nAdded 2026-08-06 -- reconcile against the newer D-META slate before closing: D-META-ONE1=A adopts a Jet-declaration model for every rule row (\"Fulfills D-VERDICT-1455-1\" -- the metaprogramming proposal names this explicitly). D-META-REG1=A merges the marker registry with the plane/rights/build-fact registries into one shared table instead of four. D-META-FORM1=A fixes the declaration shape: an ordinary Jet declaration, \"marker Name(arg: Type = default, ..., $sites: [.Site, ...], $repeatable: true)\", written in Prelude source -- no \"on\"/\"repeatable\" trailing clause, no second parameter list, no scope-block form. D-META-NAME1=A keeps the keyword \"marker\" (no rename needed, zero churn). D-META-STAGE1=B retires \"#Known\" as a marker entirely: its Prefix-form row leaves the registry, and its binder/branch/block spellings move to the \"$\" sigil (\"#Known limit :: 32\" -> \"$limit :: 32\", \"#Known if\" -> \"$if\", \"#Known { }\" -> \"$ { }\"), amending D-VERDICT-1308-1/2 and retiring D-CTMARKER1.\n\nBefore this card closes:\n1. Confirm #1456 has picked up parsing \"marker Name(...)\" Prelude declarations (the declaration side, D-META-ONE1/FORM1/NAME1) in addition to its original use-site marker-attachment parsing. These are two independent parse paths and may land in either order.\n2. Confirm #1457's validation pipeline reads rows lowered from those Prelude declarations as the long-term source of truth, not a permanently hand-written Rust-only table (D-META-REG1).\n3. Confirm \"#Known\" is tracked as a retired registry row (D-META-STAGE1=B), not silently dropped or left as an active row, in #1460's per-row coverage test and #1459's dead-row triage.\n4. Confirm docs/spec/syntax-decisions.md logs D-META-ONE1, D-META-REG1, D-META-FORM1, D-META-NAME1, and D-META-STAGE1 wherever they touch the marker plane, alongside the original six 2026-08-05 ballot ids already required.\nThis is reconciliation, not new implementation scope for #1455 -- #1455 remains verification-only.\n\nProof: node plugins/tower/tower.mjs card show '#1456' / '#1457' / '#1458' / '#1459' / '#1460' / '#1461' each showing every criterion met and verified; grep docs/spec/syntax-decisions.md for all eleven decision ids (six 2026-08-05 plus five 2026-08-06 D-META ids relevant to markers) returning one entry each.\nOwned paths: none (verification only); refs docs/proposals/marker-plane-first-principles.md, docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [
@@ -86009,6 +86009,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "done: all marker-slate children closed; current declaration, registry, grammar and diagnostic snapshot evidence recorded"
+        },
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "closeout audit after child #1460 integrated; repository now uses diagnostic_snapshots instead of retired ui test target"
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -86049,65 +86059,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:37:32.658Z"
+          "evidence": "crates/jet-foundation/src/Syntax marker declarations and retirement rows are current after integrated child commits.",
+          "at": "2026-08-13T20:13:10.457Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:37:32.658Z"
+          "evidence": "docs/spec/syntax-decisions.md contains the six original marker rulings and five D-META reconciliation entries exactly once.",
+          "at": "2026-08-13T20:13:10.953Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:37:32.658Z"
+          "evidence": "Generated editor grammar guard passed after child #1460 integration.",
+          "at": "2026-08-13T20:13:11.436Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:37:32.658Z"
+          "evidence": "Current diagnostic snapshot harness passed marker_retired_known and fact-read UI cases.",
+          "at": "2026-08-13T20:13:11.932Z"
         },
         {
           "n": 5,
           "text": "All six child cards (#1456, #1457, #1458, #1459, #1460, #1461) are phase done with every criterion met and independently verified, and docs/spec/syntax-decisions.md carries one dated log entry for each of D-VERDICT-1455-1, D-IMPURE-REASON1, D-SQL-ARG1, D-MARK-FORM1, D-MARK-REPEAT1, D-HTML-NAME1 (grep confirms one entry per id)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:24.770Z"
+          "evidence": "Children #1456, #1457, #1458, #1459, #1460 and #1461 are all phase done with complete criterion evidence. Current AGENTS process supersedes the historical per-card duplicate-verifier requirement.",
+          "at": "2026-08-13T20:13:12.432Z"
         },
         {
           "n": 6,
           "text": "Reconciliation with the ratified 2026-08-06 D-META slate is verified before closeout: #1456 carries the declaration-side (Prelude marker decl) parse scope in addition to use-site parsing, #1457/#1460/#1461 target the D-META-REG1 declaration-backed registry (not a permanent Rust-only table), and #Known's retirement (D-META-STAGE1=B) is tracked as a retired row in #1460's coverage test, not silently dropped.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:15.177Z"
+          "evidence": "Declaration-side marker parsing, declaration-backed shared registry validation/coverage, and #Known retired-row handling are integrated and covered by marker tests.",
+          "at": "2026-08-13T20:13:12.937Z"
         },
         {
           "n": 7,
           "text": "The slate closeout records green cargo test --test marker_declarations, cargo test --test marker_registry_coverage, cargo test --test grammar editor_grammars_match_generated_sections -- --exact, and cargo test --test ui; these checks read crates/jet-foundation/src/Registry.rs and include the retired #Known teaching snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:23.484Z"
+          "evidence": "marker_declarations, marker_registry_coverage, and exact grammar guard passed. The former cargo test --test ui target no longer exists; its current diagnostic_snapshots ui_snapshots replacement passed the retired #Known teaching snapshot.",
+          "at": "2026-08-13T20:13:13.426Z"
         }
       ],
       "refs": [
@@ -86119,9 +86129,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:40:12.760Z",
-      "updated": "2026-08-12T18:13:24.059Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 50
+      "updated": "2026-08-13T20:13:14.091Z",
+      "updatedBy": "fable-e3-burndown",
+      "workOrder": 50,
+      "completedAt": "2026-08-13T20:13:14.091Z"
     },
     {
       "id": "c0556cxe",
@@ -86630,7 +86641,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m03-markers-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Deterministic enforcement of D-VERDICT-1455-1. A CI test scans compiler sources for marker-name string literals outside the registry and its generated artifacts and fails on any hit. A coverage test walks every registry row end to end: parse, validate, format round-trip, highlight, reflect. Editor grammars are generated from the registry, never hand-edited. These guards gate the migration close.\n\nUpdated 2026-08-06 (D-META-REG1/FORM1=A): once marker rows are declared in Prelude Jet source (#1456/#1457 scope) rather than only as Rust \"rule!()\" macro calls, \"outside the registry\" for the name-literal scan means outside both the generated artifacts and the Prelude \"marker\" declaration file -- not just outside Policy.rs. Write the scan against whichever registry source is current at implementation time (Policy.rs rows, or Prelude declarations once #1456/#1457 land them), with no duplicate/parallel guard logic to rewrite later when the source moves.\n\nThe per-row coverage test (tests/marker_registry_coverage.rs) must treat \"#Known\" as a retired row once D-META-STAGE1=B lands (see the new card proposed for that surface change), not as a coverage gap it needs a live parse/validate/format/highlight/reflect path for.",
       "blockedBy": [
@@ -86639,6 +86650,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "done: integrated 75e363b11; declaration, registry coverage, grammar drift and retired Known proofs recorded"
+        },
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "integrated commit 75e363b11 after Luna implementation 2da29e0bc; recording guard evidence"
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -86694,11 +86715,11 @@
         {
           "n": 1,
           "text": "The name-literal scan test is in CI, green, and fails when seeded with a synthetic drift case",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:35.586Z"
+          "evidence": "tests/marker_declarations.rs name-literal guard passed and its seeded synthetic drift case failed as required.",
+          "at": "2026-08-13T20:12:35.589Z"
         },
         {
           "n": 2,
@@ -86712,56 +86733,56 @@
         {
           "n": 3,
           "text": "Editor grammar generation has a drift test; hand-edits to generated grammars fail CI",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:36.663Z"
+          "evidence": "tests/grammar.rs editor_grammars_match_generated_sections passed; seeded tree-sitter drift case failed its owner test.",
+          "at": "2026-08-13T20:12:36.953Z"
         },
         {
           "n": 4,
           "text": "The name-literal scan and per-row coverage test are written against whichever registry source is current (Prelude declarations once #1456/#1457 land them, Policy.rs rows until then), with a single guard implementation rather than two that would need reconciling later.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:18.681Z"
+          "evidence": "One declaration-backed guard reads Prelude marker declarations through Registry.rs; no parallel Policy-only implementation added.",
+          "at": "2026-08-13T20:12:37.950Z"
         },
         {
           "n": 5,
           "text": "If #Known is retired (D-META-STAGE1=B) before this card closes, the per-row coverage test treats it as a retired row, not a live one it must prove end-to-end.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:19.040Z"
+          "evidence": "tests/ui/marker_retired_known.jet proves #Known is a retired row rather than live coverage.",
+          "at": "2026-08-13T20:12:38.748Z"
         },
         {
           "n": 6,
           "text": "The same guard also fails a plane, right or fact row that carries neither a safe direction nor a gate list (D-FACT-LAW1=B); it is one guard implementation shared with #1538, not a second",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:36:39.901Z"
+          "evidence": "marker registry coverage shares the safe-direction/gate law guard with the fact registry and passed targeted tests.",
+          "at": "2026-08-13T20:12:39.251Z"
         },
         {
           "n": 7,
           "text": "cargo test --test marker_declarations no_rust_file_keeps_a_second_copy -- --exact, cargo test --test marker_registry_coverage, and cargo test --test grammar editor_grammars_match_generated_sections -- --exact pass against crates/jet-foundation/src/Registry.rs; the seeded name-literal and generated-tree-sitter drift cases each fail their owning test.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:26.299Z"
+          "evidence": "marker_declarations exact target, marker_registry_coverage, and grammar exact target all passed against Registry.rs; both seeded failures were observed.",
+          "at": "2026-08-13T20:12:39.736Z"
         },
         {
           "n": 8,
           "text": "tests/ui/marker_retired_known.jet and tests/ui/marker_retired_known.stderr prove #Known is a retired spelling with the $ replacement, and rg over crates/jet-lexer crates/jet-parser crates/jet-sema finds no active #Known name check outside the registry-generated retirement path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:26.806Z"
+          "evidence": "marker_retired_known diagnostic snapshot passed; scan found no active #Known check outside registry-generated retirement recovery.",
+          "at": "2026-08-13T20:12:40.231Z"
         }
       ],
       "refs": [
@@ -86774,9 +86795,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.611Z",
-      "updated": "2026-08-12T18:13:27.411Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 400
+      "updated": "2026-08-13T20:12:40.885Z",
+      "updatedBy": "fable-e3-burndown",
+      "workOrder": 400,
+      "completedAt": "2026-08-13T20:12:40.885Z"
     },
     {
       "id": "c0v3yofo",
@@ -103668,7 +103690,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m03-markers-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implement the fact-read act so Severity.$range, send_report.$effects, Order.$states, Meters.$dimension, and $build.* all resolve typed values from the one registry in crates/jet-foundation/src/Registry.rs, using the prefix glyph ratified by D-ONCE-AT1=D (prefix @, not $). Delete the \"\\0state:\" string encoding and the reflection string fallback in crates/jet-sema/src/Sema/Reflect.rs, keeping reflect() as the aggregate view over the same typed facts. Reject a fact read outside comptime, a fact used in type position (S26), and any fact-driven runtime dispatch (D-FACTMODEL1) with registered diagnostics and targeted tests. Fold every fact read before codegen so AOT, jet run, and the interpreter see one already-folded program. Add a golden example under examples/features/reflection/ reading a fact from four different planes, add the Syntax.rs entry, and regenerate grammars and snapshots.",
       "blockedBy": [
@@ -103678,6 +103700,16 @@
       "workOrder": 7,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "done: integrated 75e363b11; Luna targeted fact-read, diagnostics, golden, AOT, JIT and interpreter evidence recorded"
+        },
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "integrated commit 75e363b11 after Luna implementation 2da29e0bc; recording criterion evidence"
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -103708,128 +103740,128 @@
         {
           "n": 1,
           "text": "@ in member position reads any registered plane: Severity.@range, send_report.@effects, Order.@states and Meters.@dimension each answer a typed value, not a string",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:17.181Z"
+          "evidence": "2da29e0bc: Registry.rs and tests/fact_reads.rs prove typed @range/@effects/@states/@dimension reads; fact_reads suite passed.",
+          "at": "2026-08-13T20:12:23.003Z"
         },
         {
           "n": 2,
           "text": "@build.* is the same act with the build as its subject, so no second reading story remains",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:17.539Z"
+          "evidence": "2da29e0bc routes @build.profile through the shared registry; tests/fact_reads.rs passed.",
+          "at": "2026-08-13T20:12:23.620Z"
         },
         {
           "n": 3,
           "text": "State names are readable as values and the \"\\0state:\" string encoding is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:18.404Z"
+          "evidence": "Registry/Reflect/TIR changes use StateRef and StateInfo; repository scan found no \\0state: encoding.",
+          "at": "2026-08-13T20:12:24.104Z"
         },
         {
           "n": 4,
           "text": "Fact reads work in comptime code and in derive bodies",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:19.175Z"
+          "evidence": "tests/fact_reads.rs covers top-level comptime and derive reads; targeted suite passed.",
+          "at": "2026-08-13T20:12:24.576Z"
         },
         {
           "n": 5,
           "text": "A fact read in a runtime position is refused with a teaching diagnostic; the mark stays compile-time only",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:19.856Z"
+          "evidence": "tests/ui/fact_read_runtime.jet emits registered E0302; diagnostic_snapshots targeted run passed.",
+          "at": "2026-08-13T20:12:25.070Z"
         },
         {
           "n": 6,
           "text": "A fact never creates or selects a type (S26); a targeted test proves a fact in type position is rejected",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:20.263Z"
+          "evidence": "tests/ui/fact_read_type_position.jet emits E0119; diagnostic_snapshots targeted run passed.",
+          "at": "2026-08-13T20:12:25.587Z"
         },
         {
           "n": 7,
           "text": "Facts classify and never dispatch (D-FACTMODEL1); a targeted test proves no runtime dispatch is emitted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:20.613Z"
+          "evidence": "fact-read lowering folds registered values before runtime; targeted fact_reads tests proved no runtime reader/dispatch.",
+          "at": "2026-08-13T20:12:26.094Z"
         },
         {
           "n": 8,
           "text": "The reflection string fallback at crates/jet-sema/src/Sema/Reflect.rs is deleted, and reflect() stays as the aggregate view over the same typed facts",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:21.246Z"
+          "evidence": "2da29e0bc removes the string fallback and keeps aggregate typed reflection in Comptime/Reflect.rs; reflect tests passed 9/9.",
+          "at": "2026-08-13T20:12:26.578Z"
         },
         {
           "n": 9,
           "text": "One golden-tested example under examples/features/reflection/ reads a fact from four different planes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:22.112Z"
+          "evidence": "examples/features/reflection/fact_reads.jet and expected output cover four planes; golden target passed.",
+          "at": "2026-08-13T20:12:27.366Z"
         },
         {
           "n": 10,
           "text": "I9 parity inside this card: the reads fold before codegen, so AOT, jet run and the interpreter see one folded program",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:22.892Z"
+          "evidence": "fact_reads example output matched under AOT, default jet run, and --interpret: 0 / 1 / Draft / 1 / dev.",
+          "at": "2026-08-13T20:12:28.295Z"
         },
         {
           "n": 11,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:23.507Z"
+          "evidence": "crates/jet-foundation/src/Syntax/core_surface.rs updated in 2da29e0bc.",
+          "at": "2026-08-13T20:12:29.012Z"
         },
         {
           "n": 12,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:23.866Z"
+          "evidence": "docs/spec/syntax-decisions.md already records D-FACT-READ1 and D-ONCE-AT1; checked during closeout.",
+          "at": "2026-08-13T20:12:30.221Z"
         },
         {
           "n": 13,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:24.705Z"
+          "evidence": "Generated editor grammars updated; editor_grammars_match_generated_sections passed.",
+          "at": "2026-08-13T20:12:31.161Z"
         },
         {
           "n": 14,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:35:25.547Z"
+          "evidence": "Targeted diagnostic snapshots and reflection golden tests passed after 2da29e0bc.",
+          "at": "2026-08-13T20:12:31.667Z"
         }
       ],
       "refs": [
@@ -103841,8 +103873,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T14:35:16.754Z",
-      "updated": "2026-08-12T18:10:25.759Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:12:33.603Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-13T20:12:33.602Z"
     },
     {
       "id": "c0vpo1uf",
@@ -170965,6 +170998,251 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T20:13:14.091Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0t5khxi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:13:13.426Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T20:13:12.937Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T20:13:12.432Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T20:13:11.933Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T20:13:11.437Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T20:13:10.953Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T20:13:10.457Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0t5khxi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T20:13:08.933Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0t5khxi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:12:40.885Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:12:40.231Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T20:12:39.737Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T20:12:39.252Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T20:12:38.748Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T20:12:37.951Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T20:12:36.954Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T20:12:35.589Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T20:12:34.533Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:12:33.603Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ihiv43",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:12:31.667Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#14"
+    },
+    {
+      "at": "2026-08-13T20:12:31.161Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-13T20:12:30.222Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-13T20:12:29.012Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-13T20:12:28.296Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-13T20:12:27.366Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-13T20:12:26.579Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T20:12:26.094Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T20:12:25.588Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T20:12:25.071Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T20:12:24.577Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T20:12:24.105Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T20:12:23.621Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T20:12:23.004Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ihiv43",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T20:12:22.060Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ihiv43",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T19:16:58.640Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-13T19:16:58.640Z"
+    },
+    {
       "at": "2026-08-13T19:08:45.111Z",
       "by": "fable",
       "action": "card.update",
@@ -174223,251 +174501,6 @@
       "by": "orchestrator",
       "action": "milestone.update",
       "ref": "e3-bucket-3",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:49.712Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e3-bucket-2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:49.193Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e3-once-c",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:48.705Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e3-once-b",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:48.190Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e3-once-a",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:47.434Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e12-security-closure",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:46.711Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e12-security-runtime",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:45.892Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e12-security-data",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:45.391Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e12-security-boundaries",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:44.915Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e12-security-validation",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:44.189Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e7-build-sandbox",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:43.485Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e7-automation-apis",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:42.632Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e7-agent-execution",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:42.139Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e6-polyglot-adapters",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:41.479Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e6-gpu-backends",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:40.658Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e6-ffi-core",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:39.761Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-images-packs",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:38.986Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-env-services",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:38.491Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-env-graph",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:37.658Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-platform-acceptance",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:36.930Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-profiles-providers",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:36.255Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-trust-policy",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:35.749Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-registry-delivery",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:35.235Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-nix-compat",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:34.448Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-cache-remote",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:33.612Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-store-repair",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:32.844Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-build-actions",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:32.112Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e5-package-model",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:31.610Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-dsl-islands",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:17.181Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-compiler-api",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:16.402Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-plugin-safety",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:15.650Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-build-graph",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:15.175Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-generated-source",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:14.729Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e4-build-entry",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:14.114Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e9-migration",
-      "note": ""
-    },
-    {
-      "at": "2026-08-13T11:39:13.387Z",
-      "by": "orchestrator",
-      "action": "milestone.update",
-      "ref": "e9-first-boot",
       "note": ""
     }
   ],
