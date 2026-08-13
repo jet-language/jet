@@ -2,6 +2,7 @@ use crate::jet_generated_format as jet_format;
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
+use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
@@ -605,11 +606,26 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
     }
 }
 
+fn coverage_if_value_block(block: &str, id: Option<&str>, taken: bool, cx: &Cx) -> String {
+    let Some(id) = id.filter(|_| cx.coverage) else {
+        return block.to_string();
+    };
+    format!(
+        "{{ jet_cov_branch({}, {}); {} }}",
+        escape_rust_str(id),
+        taken,
+        block
+    )
+}
+
 fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
     if let TIfCond::And { left, right } = cond {
         let right = emit_tir_if_expr(right, then_block, else_block, cx);
         return emit_tir_if_expr(left, &format!("{{ {right} }}"), else_block, cx);
     }
+    let branch_id = cx.coverage.then(|| cx.register_coverage_branch());
+    let then_block = coverage_if_value_block(then_block, branch_id.as_deref(), true, cx);
+    let else_block = coverage_if_value_block(else_block, branch_id.as_deref(), false, cx);
     match cond {
         TIfCond::Plain(cond) => format!(
             "if {} {} else {}",

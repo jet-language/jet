@@ -665,9 +665,9 @@ fn jet_doctest_mismatch_fires_e2901() {
 
 #[test]
 fn jet_test_coverage_reports_hit_and_miss() {
-    // D-COV1: `jet test --coverage` reports per-function coverage. The fixture
-    // calls `used` from a test but never `unused`, so the report must mark one
-    // HIT and one MISS.
+    // D-COV1: `jet test --coverage` reports function and branch coverage. The
+    // fixture calls `used` from a test but never `unused`, so the report must
+    // mark one HIT and one MISS for functions.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     let have_rustc = have_rustc();
@@ -698,6 +698,62 @@ fn jet_test_coverage_reports_hit_and_miss() {
         "wrong summary:\n{}",
         stdout
     );
+}
+
+#[test]
+fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
+    // D-COV1: text and JSON must expose the same stable branch ID and outcome
+    // counts, including the uncovered side of the fixture's `if`.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/coverage.jet");
+    let run = |json: bool| {
+        let mut command = Command::new(&jet);
+        command.arg("test").arg("--coverage");
+        if json {
+            command.arg("--json");
+        }
+        command.arg(&fixture).output().unwrap()
+    };
+    let text_output = run(false);
+    assert!(
+        text_output.status.success(),
+        "coverage text run failed:\n{}\n{}",
+        String::from_utf8_lossy(&text_output.stdout),
+        String::from_utf8_lossy(&text_output.stderr)
+    );
+    let fixture_path = fixture.to_string_lossy().into_owned();
+    let text = String::from_utf8_lossy(&text_output.stdout).replace(
+        &fixture_path,
+        "tests/fixtures/coverage.jet",
+    );
+    let compact = |value: &str| value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = compact(&text);
+    let text_golden = fs::read_to_string(root.join("tests/fixtures/coverage.text.golden"))
+        .expect("coverage.text.golden");
+    for row in text_golden.lines().filter(|line| !line.trim().is_empty()) {
+        assert!(text.contains(&compact(row)), "text golden row missing: {row}\n{text}");
+    }
+
+    let json_output = run(true);
+    assert!(
+        json_output.status.success(),
+        "coverage JSON run failed:\n{}\n{}",
+        String::from_utf8_lossy(&json_output.stdout),
+        String::from_utf8_lossy(&json_output.stderr)
+    );
+    let json = String::from_utf8_lossy(&json_output.stdout).replace(
+        &fixture_path,
+        "tests/fixtures/coverage.jet",
+    );
+    let json_golden = fs::read_to_string(root.join("tests/fixtures/coverage.json.golden"))
+        .expect("coverage.json.golden");
+    for row in json_golden.lines().filter(|line| !line.trim().is_empty()) {
+        assert!(json.contains(row.trim()), "JSON golden row missing: {row}\n{json}");
+    }
 }
 
 #[test]

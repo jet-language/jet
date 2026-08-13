@@ -473,14 +473,14 @@ fn checked_bundle_with_entry(
     })
 }
 
-fn requested_job(program_args: &[&str]) -> Option<&str> {
+fn requested_job<'a>(program_args: &[&'a str]) -> Option<&'a str> {
     program_args
         .first()
         .copied()
         .filter(|arg| !arg.starts_with('-'))
 }
 
-fn selected_job(bundle: &ProgramBundle, requested: Option<&str>) -> Option<&str> {
+fn selected_job<'a>(bundle: &ProgramBundle, requested: Option<&'a str>) -> Option<&'a str> {
     let name = requested?;
     let specs = job_specs(bundle);
     let argv = vec![String::new(), name.to_string()];

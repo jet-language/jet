@@ -1,10 +1,13 @@
-// D-COV1 fixture: `used` is exercised by the test; `unused` is not. Coverage
-// reports one HIT and one MISS.
-fn used() => Int = 1
+// D-COV1 fixture: `used(true)` is exercised by the test; `unused` is not.
+// Coverage reports one HIT and one MISS for functions and branch outcomes.
+fn used(flag: Bool) => Int {
+    if flag { return 1 }
+    return 0
+}
 fn unused() => Int = 2
 fn run() {
     print("cov")
 }
 #Test("exercise used") {
-    require_eq(used(), 1)
+    require_eq(used(true), 1)
 }

@@ -80,6 +80,12 @@ fn unit_fact(
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct CoverageBranch {
+    pub(crate) id: String,
+    pub(crate) function: String,
+}
+
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
@@ -168,11 +174,13 @@ pub(crate) struct Cx {
     pub(crate) core_archive_source: bool,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     pub(crate) test_mode: bool,
-    /// D-COV1: `jet test --coverage`. When true, every emitted user function head
-    /// gets a `jet_cov(line)` probe and the harness carries the coverage recorder
-    /// + dump. Never set in normal builds, so codegen output is byte-identical
+    /// D-COV1: `jet test --coverage`. When true, emitted user function heads and
+    /// control-flow decisions get probes and the harness carries the recorder +
+    /// dump. Never set in normal builds, so codegen output is byte-identical
     /// (golden tests never touch this path).
     pub(crate) coverage: bool,
+    pub(crate) coverage_branches: std::cell::RefCell<Vec<CoverageBranch>>,
+    pub(crate) coverage_branch_numbers: std::cell::RefCell<HashMap<String, usize>>,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
     /// Canonical cross-module nominal identity -> Rust module path. The key
@@ -737,6 +745,36 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
+    pub(crate) fn register_coverage_branch(&self) -> String {
+        let function = {
+            let current = self.current_fn.borrow();
+            if current.is_empty() {
+                "<test>".to_string()
+            } else {
+                current.clone()
+            }
+        };
+        let next = {
+            let mut numbers = self.coverage_branch_numbers.borrow_mut();
+            let next = numbers.entry(function.clone()).or_insert(0);
+            *next += 1;
+            *next
+        };
+        let module = if self.module_alias.is_empty() {
+            "main"
+        } else {
+            self.module_alias.as_str()
+        };
+        let id = format!("{module}::{function}#branch{next}");
+        self.coverage_branches
+            .borrow_mut()
+            .push(CoverageBranch {
+                id: id.clone(),
+                function,
+            });
+        id
+    }
+
     pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
         let rust_mod = if alias.is_empty() {
             None
@@ -3433,6 +3471,8 @@ pub(crate) fn build_cx_items(
         core_archive_source: false,
         test_mode: false,
         coverage: false,
+        coverage_branches: std::cell::RefCell::new(Vec::new()),
+        coverage_branch_numbers: std::cell::RefCell::new(HashMap::new()),
         debug_linemap: false,
         import_mods: HashMap::new(),
         foreign_types: HashMap::new(),

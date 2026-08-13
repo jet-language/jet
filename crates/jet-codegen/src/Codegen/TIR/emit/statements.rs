@@ -1,5 +1,6 @@
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::Cx;
+use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
@@ -190,6 +191,42 @@ fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[
         .replace(crate::Codegen::TIR::STREAM_CANCEL_MARKER, &cleanup)
 }
 
+fn coverage_branch_id(cx: &Cx) -> Option<String> {
+    cx.coverage.then(|| cx.register_coverage_branch())
+}
+
+fn coverage_condition(condition: String, cx: &Cx) -> (String, Option<String>) {
+    let Some(id) = coverage_branch_id(cx) else {
+        return (condition, None);
+    };
+    (
+        format!("jet_cov_branch({}, {})", escape_rust_str(&id), condition),
+        Some(id),
+    )
+}
+
+fn emit_coverage_taken(id: Option<&str>, cx: &Cx, out: &mut String, indent: usize) {
+    if let Some(id) = id.filter(|_| cx.coverage) {
+        let pad = "    ".repeat(indent);
+        out.push_str(&format!(
+            "{}jet_cov_branch({}, true);\n",
+            pad,
+            escape_rust_str(id),
+        ));
+    }
+}
+
+fn emit_coverage_not_taken(id: Option<&str>, cx: &Cx, out: &mut String, indent: usize) {
+    if let Some(id) = id.filter(|_| cx.coverage) {
+        let pad = "    ".repeat(indent);
+        out.push_str(&format!(
+            "{}jet_cov_branch({}, false);\n",
+            pad,
+            escape_rust_str(id),
+        ));
+    }
+}
+
 /// Mutable list place for `SplitViews` owners. Nested `grid[i]` must use
 /// `jet_index_vec_mut` so the window is the live inner list, not a clone.
 pub(super) fn emit_mut_list_place(
@@ -278,31 +315,47 @@ fn emit_if_head(
     out: &mut String,
     indent: usize,
     active_cleanups: &[ActiveCleanup],
-) {
+) -> Option<String> {
     let pad = "    ".repeat(indent);
     match cond {
-        TIfCond::Plain(cond) => out.push_str(&format!(
-            "{}if {} {{\n",
-            pad,
-            emit_expr_with_cleanups(cond, cx, active_cleanups)
-        )),
-        TIfCond::IfLet { pattern, subj } => out.push_str(&format!(
-            "{}if let {} = {} {{\n",
-            pad,
-            emit_tir_pattern(pattern, cx),
-            emit_expr_with_cleanups(subj, cx, active_cleanups),
-        )),
-        TIfCond::IsNone { subj } => out.push_str(&format!(
-            "{}if {}.is_none() {{\n",
-            pad,
-            emit_expr_with_cleanups(subj, cx, active_cleanups)
-        )),
-        TIfCond::Matches { pattern, subj } => out.push_str(&format!(
-            "{}if matches!(&({}), {}) {{\n",
-            pad,
-            emit_expr_with_cleanups(subj, cx, active_cleanups),
-            emit_tir_pattern(pattern, cx)
-        )),
+        TIfCond::Plain(cond) => {
+            let id = coverage_branch_id(cx);
+            out.push_str(&format!(
+                "{}if {} {{\n",
+                pad,
+                emit_expr_with_cleanups(cond, cx, active_cleanups)
+            ));
+            id
+        }
+        TIfCond::IfLet { pattern, subj } => {
+            let id = coverage_branch_id(cx);
+            out.push_str(&format!(
+                "{}if let {} = {} {{\n",
+                pad,
+                emit_tir_pattern(pattern, cx),
+                emit_expr_with_cleanups(subj, cx, active_cleanups),
+            ));
+            id
+        }
+        TIfCond::IsNone { subj } => {
+            let id = coverage_branch_id(cx);
+            out.push_str(&format!(
+                "{}if {}.is_none() {{\n",
+                pad,
+                emit_expr_with_cleanups(subj, cx, active_cleanups)
+            ));
+            id
+        }
+        TIfCond::Matches { pattern, subj } => {
+            let id = coverage_branch_id(cx);
+            out.push_str(&format!(
+                "{}if matches!(&({}), {}) {{\n",
+                pad,
+                emit_expr_with_cleanups(subj, cx, active_cleanups),
+                emit_tir_pattern(pattern, cx)
+            ));
+            id
+        }
         TIfCond::And { .. } => unreachable!("conjunction heads are atomic"),
     }
 }
@@ -314,15 +367,22 @@ fn emit_if_else(
     out: &mut String,
     indent: usize,
     active_cleanups: &[ActiveCleanup],
+    branch_id: Option<&str>,
 ) {
     let pad = "    ".repeat(indent);
     match else_body {
-        None => out.push_str(&format!("{}}}\n", pad)),
+        None if branch_id.is_none() => out.push_str(&format!("{}}}\n", pad)),
+        None => {
+            out.push_str(&format!("{}}} else {{\n", pad));
+            emit_coverage_not_taken(branch_id, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // `else if` only when the else-body is exactly one nested `If`.
         // A multi-stmt residual (guard-table final `else`) must stay braced —
         // emitting only body[0] silently drops later statements.
         Some(body)
-            if else_is_elseif
+            if branch_id.is_none()
+                && else_is_elseif
                 && body.len() == 1
                 && matches!(body.first(), Some(TStmt::If { .. })) =>
         {
@@ -332,8 +392,19 @@ fn emit_if_else(
             emit_tir_stmt(&body[0], cx, &mut nested, indent, &mut branch_cleanups);
             out.push_str(nested.trim_start_matches(&pad as &str));
         }
+        Some(body)
+            if else_is_elseif
+                && body.len() == 1
+                && matches!(body.first(), Some(TStmt::If { .. })) =>
+        {
+            out.push_str(&format!("{}}} else {{\n", pad));
+            emit_coverage_not_taken(branch_id, cx, out, indent + 1);
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         Some(body) => {
             out.push_str(&format!("{}}} else {{\n", pad));
+            emit_coverage_not_taken(branch_id, cx, out, indent + 1);
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -351,7 +422,8 @@ fn emit_tir_if(
     active_cleanups: &[ActiveCleanup],
 ) {
     if let TIfCond::And { left, right } = cond {
-        emit_if_head(left, cx, out, indent, active_cleanups);
+        let left_branch = emit_if_head(left, cx, out, indent, active_cleanups);
+        emit_coverage_taken(left_branch.as_deref(), cx, out, indent + 1);
         emit_tir_if(
             right,
             then_body,
@@ -369,10 +441,12 @@ fn emit_tir_if(
             out,
             indent,
             active_cleanups,
+            left_branch.as_deref(),
         );
         return;
     }
-    emit_if_head(cond, cx, out, indent, active_cleanups);
+    let branch_id = emit_if_head(cond, cx, out, indent, active_cleanups);
+    emit_coverage_taken(branch_id.as_deref(), cx, out, indent + 1);
     emit_tir_stmts_nested(then_body, cx, out, indent + 1, active_cleanups);
     emit_if_else(
         else_body,
@@ -381,6 +455,7 @@ fn emit_tir_if(
         out,
         indent,
         active_cleanups,
+        branch_id.as_deref(),
     );
 }
 
@@ -898,11 +973,15 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}}}\n", pad));
         }
         TStmt::While { label, cond, body } => {
+            let (condition, _) = coverage_condition(
+                emit_expr_with_cleanups(cond, cx, active_deferred_closes),
+                cx,
+            );
             out.push_str(&format!(
                 "{}{}while {} {{\n",
                 pad,
                 tir_label_prefix(label),
-                emit_expr_with_cleanups(cond, cx, active_deferred_closes)
+                condition
             ));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
@@ -941,7 +1020,11 @@ fn emit_tir_stmt(
             out.push_str(&format!(
                 "{}if !({}) {{ break; }}\n",
                 body_pad,
-                emit_expr_with_cleanups(cond, cx, active_deferred_closes)
+                coverage_condition(
+                    emit_expr_with_cleanups(cond, cx, active_deferred_closes),
+                    cx,
+                )
+                .0
             ));
             emit_tir_stmts_nested(body, cx, out, indent + 2, &counted_deferred);
             out.push_str(&format!("{}}}\n", inner_pad));

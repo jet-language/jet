@@ -325,6 +325,50 @@ fn test_and_bench_help_keep_shared_runner_flags_paired() {
 }
 
 #[test]
+fn coverage_help_matches_instrumentation() {
+    const COVERAGE_HELP: &str = "function and branch coverage";
+    let help = Command::new(jet())
+        .args(["test", "--help"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        help.status.success(),
+        "jet test --help failed: {}",
+        String::from_utf8_lossy(&help.stderr)
+    );
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("--coverage") && help.contains(COVERAGE_HELP), "{help}");
+    assert!(!help.contains("function and line coverage"), "{help}");
+
+    for shell in ["bash", "fish", "zsh", "powershell"] {
+        let completion = Command::new(jet())
+            .args(["self", "completions", shell])
+            .output()
+            .unwrap();
+        assert!(
+            completion.status.success(),
+            "{shell} completion failed: {}",
+            String::from_utf8_lossy(&completion.stderr)
+        );
+        let script = String::from_utf8_lossy(&completion.stdout);
+        assert!(script.contains("--coverage"), "{shell} omitted --coverage");
+        if matches!(shell, "fish" | "zsh") {
+            assert!(script.contains(COVERAGE_HELP), "{shell}: {script}");
+        }
+        assert!(!script.contains("function and line coverage"), "{shell}: {script}");
+        check_snapshot(&format!("completions_{shell}.txt"), &script);
+    }
+
+    let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    assert!(man.status.success(), "man page failed: {}", String::from_utf8_lossy(&man.stderr));
+    let man = String::from_utf8_lossy(&man.stdout);
+    assert!(man.contains(COVERAGE_HELP), "{man}");
+    assert!(!man.contains("function and line coverage"), "{man}");
+    check_snapshot("man.txt", &man);
+}
+
+#[test]
 fn bare_dev_uses_file_scoped_run() {
     let out = Command::new(jet()).args(["dev", "--no-color"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));

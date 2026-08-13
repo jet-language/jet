@@ -1845,7 +1845,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         ),
     );
     // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes
-    // the executed-line set there, which we diff against the coverable functions.
+    // function and branch records there for the coverage report.
     let cov_out = if coverage {
         Some(bin.with_extension("cov"))
     } else {
@@ -1887,12 +1887,14 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    print!("{}", String::from_utf8_lossy(&out.stdout));
+    if !(coverage && mode.json) {
+        print!("{}", String::from_utf8_lossy(&out.stdout));
+    }
     if !out.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
     }
     if let Some(co) = &cov_out {
-        report_coverage(&shown, co);
+        report_coverage(&shown, co, mode.json);
         let _ = fs::remove_file(co);
     }
     let _ = fs::remove_file(&bin);
@@ -2124,29 +2126,95 @@ fn doc_line_span(src: &str, line: usize) -> Option<jet::Diagnostics::Span> {
     None
 }
 
-/// D-COV1: read the executed-line set and print a per-function coverage table
-/// plus an overall line-coverage figure. Output format is an implementation
-/// choice (the spec scopes coverage as tooling); this prints a stdout summary.
-fn report_coverage(file: &str, cov_out: &Path) {
-    let hits: std::collections::BTreeSet<usize> = fs::read_to_string(cov_out)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| l.trim().parse::<usize>().ok())
-        .collect();
+/// D-COV1: read function and branch records and render the human or JSON report.
+/// Each branch has one row for each outcome so an uncovered side remains visible.
+struct CoverageBranchRow {
+    id: String,
+    function: String,
+    taken: u64,
+    not_taken: u64,
+}
+
+fn report_coverage(file: &str, cov_out: &Path, json: bool) {
+    let mut function_hits = std::collections::BTreeSet::new();
+    let mut branches = Vec::new();
+    for record in fs::read_to_string(cov_out).unwrap_or_default().lines() {
+        let fields: Vec<&str> = record.split('\t').collect();
+        match fields.first().copied() {
+            Some("f") if fields.len() == 2 => {
+                if let Ok(line) = fields[1].parse::<usize>() {
+                    function_hits.insert(line);
+                }
+            }
+            Some("b") if fields.len() == 5 => {
+                if let (Ok(taken), Ok(not_taken)) =
+                    (fields[3].parse::<u64>(), fields[4].parse::<u64>())
+                {
+                    branches.push(CoverageBranchRow {
+                        id: fields[1].to_string(),
+                        function: fields[2].to_string(),
+                        taken,
+                        not_taken,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
     let _ = fs::remove_file(cov_out);
     let funcs = jet::coverable_functions(file);
-    if funcs.is_empty() {
-        println!("\ncoverage: no functions to measure");
+    let mut by_line = funcs.clone();
+    by_line.sort_by_key(|(_, line)| *line);
+    branches.sort_by(|left, right| left.id.cmp(&right.id));
+
+    if json {
+        let functions = by_line
+            .iter()
+            .map(|(name, line)| {
+                format!(
+                    "{{\"name\":\"{}\",\"line\":{},\"covered\":{}}}",
+                    json_escape(name),
+                    line,
+                    function_hits.contains(line)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let branch_rows = branches
+            .iter()
+            .flat_map(|branch| {
+                [
+                    format!(
+                        "{{\"id\":\"{}\",\"function\":\"{}\",\"outcome\":\"taken\",\"hits\":{}}}",
+                        json_escape(&branch.id),
+                        json_escape(&branch.function),
+                        branch.taken
+                    ),
+                    format!(
+                        "{{\"id\":\"{}\",\"function\":\"{}\",\"outcome\":\"not-taken\",\"hits\":{}}}",
+                        json_escape(&branch.id),
+                        json_escape(&branch.function),
+                        branch.not_taken
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema_version\":1,\"file\":\"{}\",\"functions\":[{}],\"branches\":[{}]}}",
+            json_escape(file),
+            functions,
+            branch_rows
+        );
         return;
     }
-    let mut covered = 0usize;
+
     println!("\ncoverage for {}", file);
-    let mut by_line = funcs.clone();
-    by_line.sort_by_key(|(_, l)| *l);
+    let mut covered_functions = 0usize;
     for (name, line) in &by_line {
-        let hit = hits.contains(line);
+        let hit = function_hits.contains(line);
         if hit {
-            covered += 1;
+            covered_functions += 1;
         }
         println!(
             "  {:4}  {}  {}:{}",
@@ -2157,8 +2225,43 @@ fn report_coverage(file: &str, cov_out: &Path) {
         );
     }
     let total = funcs.len();
-    let pct = (covered as f64 / total as f64) * 100.0;
-    println!("  {}/{} functions covered ({:.0}%)", covered, total, pct);
+    let function_pct = if total == 0 {
+        100
+    } else {
+        (covered_functions * 100) / total
+    };
+    println!(
+        "  {}/{} functions covered ({}%)",
+        covered_functions, total, function_pct
+    );
+
+    let mut covered_branches = 0usize;
+    for branch in &branches {
+        for (outcome, hits) in [("taken", branch.taken), ("not-taken", branch.not_taken)] {
+            let hit = hits > 0;
+            if hit {
+                covered_branches += 1;
+            }
+            println!(
+                "  BRANCH {} {:9} {:4} hits={}  {}",
+                branch.id,
+                outcome,
+                if hit { "HIT" } else { "MISS" },
+                hits,
+                branch.function
+            );
+        }
+    }
+    let total_branches = branches.len() * 2;
+    let branch_pct = if total_branches == 0 {
+        100
+    } else {
+        (covered_branches * 100) / total_branches
+    };
+    println!(
+        "  {}/{} branches covered ({}%)",
+        covered_branches, total_branches, branch_pct
+    );
 }
 
 // ─── D-FMTPROJECT1=D: project-level formatter ───────────────────────────────
