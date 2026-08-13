@@ -1,7 +1,7 @@
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item,
     LambdaBody, LValue, OrFallback, Pattern, ProgramBundle, Stmt, StrPart, StructPatField,
-    TraitMethodSig, Type, VariantPayload,
+    TraitMethodSig, VariantPayload,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::{self, NameCase};

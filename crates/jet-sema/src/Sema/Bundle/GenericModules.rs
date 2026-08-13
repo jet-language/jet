@@ -788,11 +788,11 @@ fn expand_nested_generics_in_code_module(
         // as top-level instances (`closed.Item`). Their declarations are
         // generated from this template under the canonical alias prefix.
         for item in &info.def.body {
-            let Some(name) = match item {
+            let Some(name) = (match item {
                 Item::Struct(def) => Some(&def.name),
                 Item::Enum(def) => Some(&def.name),
                 _ => None,
-            } else {
+            }) else {
                 continue;
             };
             let generated = module_type_name(&canonical, name);
