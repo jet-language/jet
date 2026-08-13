@@ -3165,16 +3165,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 },
             );
         }
-        // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
-        // `.skip`). Legality/args were checked in sema; here we pick the lowering
-        // kind and fold `.timeout`'s duration literal to a nanosecond budget.
+        // D-DOTSCOPE1 / D-META-DSL1: a `#Test` scope member
+        // (`.setup`/`.expect_fail`/`.timeout`/`.skip`) or a declared checked
+        // text block. Legality/args were checked in sema; here we pick the
+        // lowering kind and fold `.timeout`'s duration literal to a nanosecond budget.
         // `.setup` emits inline, so its bindings are visible to the rest of the test;
         // the others open their own scope in
         // `emit_tir_stmt`.
         Stmt::ScopeMember {
-            name, args, body, ..
+            name, args, body, dsl, ..
         } => {
-            if crate::Syntax::is_stdlib_dsl_block_marker(name) {
+            if *dsl {
                 let scoped = clone_env(env);
                 return deferred_stmt(
                     vec![LowerBody::scoped(body, scoped)],

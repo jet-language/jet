@@ -385,16 +385,14 @@ pub enum Stmt {
     /// and suspend until the next pull. Legal only in a function whose return
     /// type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 otherwise).
     Yield(Expr, Span),
-    /// D-DOTSCOPE1: a contextual scope-member statement — `.name { … }` /
-    /// `.name(args) { … }` in statement position inside a marker block
-    /// (`#Test { … }`). The member `name` resolves against the enclosing
-    /// marker's declared vocabulary (`Syntax::scope_members`); using one
-    /// outside such a block is E0615, an unknown member E0614. The required
-    /// trailing block separates it from a leading-dot enum value (D-ENUMDOT1)
-    /// and the ident-after-dot separates it from `.{ }` construction (S74).
+    /// D-DOTSCOPE1 / D-META-DSL1: a contextual scope-member statement —
+    /// `.name { … }`, `.name(args) { … }`, or `#Name { … }` in statement
+    /// position. Dot members resolve against the enclosing marker's declared
+    /// vocabulary (`Syntax::scope_members`); checked text blocks resolve their
+    /// name through the bundle marker registry. The required trailing block
+    /// separates both forms from ordinary expressions.
     ScopeMember {
-        /// The member name after the dot (`setup`, `expect_fail`, `timeout`,
-        /// `skip`).
+        /// The member name after the dot, or checked-block name after `#`.
         name: String,
         name_span: Span,
         /// Call-style args, when written (`.timeout(500ms)`, `.skip("why")`).
@@ -403,7 +401,11 @@ pub enum Stmt {
         args_span: Option<Span>,
         /// The required trailing `{ … }` block body.
         body: Vec<Stmt>,
-        /// The leading `.` position, anchoring the outside-scope error.
+        /// D-META-DSL1=A: true when the leading `#Name` opened a library
+        /// checked text block; false for a leading-dot marker member.
+        dsl: bool,
+        /// The leading `.` or `#` position, anchoring the outside-scope or
+        /// undeclared-block error.
         dot_span: Span,
         span: Span,
     },

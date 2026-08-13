@@ -1,0 +1,24 @@
+// D-META-DSL1=A: the library rule owns checking; Jet owns the braces.
+marker Checked($sites: [.Block]) {
+    if !target.contains("inside checked text") {
+        reject(
+            code: "E0927",
+            what: "checked text does not contain the required phrase",
+            why: "this small block language requires its greeting",
+            fix: "add `inside checked text` to the block"
+        )
+    }
+    emit("""
+fn checked_value() => String {{
+    return "checked block"
+}}
+""")
+}
+
+fn run() {
+    #Checked {
+        print("inside checked text")
+    }
+    print("outside block")
+    print(checked_value())
+}

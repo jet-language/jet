@@ -38,6 +38,7 @@ impl<'a> Parser<'a> {
             args,
             args_span,
             body,
+            dsl: false,
             dot_span,
             span: Span::new(dot_span.start, end),
         })

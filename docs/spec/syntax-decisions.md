@@ -6795,3 +6795,11 @@ finite-source finding form above. This section records the other outcomes.
   named thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, parameter defaults, field defaults, and enum discriminants
   keep `=`.
+
+**2026-08-13 — D-META-USER1=A / D-META-DSL1=A implementation log** *(cards
+#1540, #1542)*: a `marker` declaration may have an ordinary checked body;
+without one it records facts, and with one it may reject or emit additive
+items. A checked text block uses the closed `#Name { … }` boundary and resolves
+the name through the declaration registry; `#SQL<Row>` and `#HTML { … }` now
+use their declared `.Block` rows. The old marker-only DSL whitelist is retired
+by the syntax-chore lane.
