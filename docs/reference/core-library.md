@@ -1884,6 +1884,7 @@ they do not inherit the host Rust, OS, locale, or terminal Unicode version.
 | `trim/trim_start/trim_end(text)` | `String` | Unicode-whitespace trim |
 | `pad_start/pad_end/center(text, width, fill)` | `String` | Display-width padding |
 | `starts_any/ends_any(text, parts)` | `Bool` | Prefix/suffix combinators |
+| `inspect(text)` | `[String]` | One `U+hex Unicode name` row per scalar |
 | `char_indices(text)` | `[String]` | `"byte:scalar"` debug view |
 
 The units are intentionally separate: `byte_count` counts UTF-8 bytes,

@@ -17,6 +17,17 @@ fn jet_text_unicode_upper(s: &String) -> String {
 fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
     s.chars().map(|c| c.to_string()).collect()
 }
+fn jet_text_unicode_name(cp: u32) -> &'static str {
+    UNICODE_NAME_INDEX
+        .binary_search_by_key(&cp, |&(source, _)| source)
+        .map(|at| UNICODE_NAME_INDEX[at].1)
+        .unwrap_or("UNASSIGNED")
+}
+fn jet_text_inspect(s: &String) -> Vec<String> {
+    s.chars()
+        .map(|c| format!("U+{:04X} {}", c as u32, jet_text_unicode_name(c as u32)))
+        .collect()
+}
 
 // ── card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding ──────────
 // Real Unicode 16.0.0 algorithms over the generated tables in

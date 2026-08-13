@@ -700,6 +700,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.text", "center", "jet_text_center", true, &[true, false, true]),
     CoreCallRecord::new("core.text", "starts_any", "jet_text_starts_any", true, &[true, true]),
     CoreCallRecord::new("core.text", "ends_any", "jet_text_ends_any", true, &[true, true]),
+    CoreCallRecord::new("core.text", "inspect", "jet_text_inspect", true, &[true]),
     CoreCallRecord::new("core.text", "char_indices", "jet_text_char_indices", true, &[true]),
     CoreCallRecord::new("core.log", "info", "jet_ring_log_info", true, &[true]), // E2-M9: first-party ring packages.
     CoreCallRecord::new("core.log", "warn", "jet_ring_log_warn", true, &[true]),

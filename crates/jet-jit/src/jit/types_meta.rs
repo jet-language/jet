@@ -165,7 +165,7 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
                     return Ok(types::I8);
                 }
                 "byte_count" | "scalar_count" | "display_width" | "graphemes" | "words"
-                | "sentences" | "char_indices" | "lower" | "upper" | "nfc" | "nfkc" | "nfd"
+                | "sentences" | "inspect" | "char_indices" | "lower" | "upper" | "nfc" | "nfkc" | "nfd"
                 | "nfkd" | "pad_start" | "center" | "trim" => {
                     // Int / String / List / Result handles all use I64 ABI.
                     let _ = args;

@@ -1717,7 +1717,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::Bool),
         )),
-        ("core.text", "graphemes" | "words" | "sentences" | "scalars") => Some((
+        ("core.text", "graphemes" | "words" | "sentences" | "scalars" | "inspect") => Some((
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),

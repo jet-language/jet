@@ -3326,7 +3326,8 @@ index, not a substitute for that law.
   contexts. Epoch 3 ships `core.text` helpers for NFC/NFD/NFKC/NFKD, casefold
   and caseless compare, grapheme/word/sentence slices, terminal display width,
   Unicode classification, scalar/byte counts, split/trim/pad/center,
-  prefix/suffix combinators, and char-index views. Locale collation is an i18n
+  prefix/suffix combinators, char-index views, and named scalar inspection.
+  Locale collation is an i18n
   data problem and is not part of v1 core.
 - **D-HUMANFMT1=A**: `core.fmt` owns human-readable formatting as ordinary
   library calls, with no interpolation sublanguage. Epoch 3 ships thousands

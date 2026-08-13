@@ -656,6 +656,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "center",
             "starts_any",
             "ends_any",
+            "inspect",
             "char_indices",
         ],
         "core.fmt" => &[

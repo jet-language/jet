@@ -1077,7 +1077,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return match method.as_str() {
                     "lower" | "upper" | "trim" | "scalar_count" | "byte_count" | "graphemes"
                     | "words" | "sentences" | "nfc" | "nfkc" | "nfd" | "nfkd"
-                    | "display_width" | "is_alphabetic" | "is_numeric" | "char_indices"
+                    | "display_width" | "is_alphabetic" | "is_numeric" | "inspect" | "char_indices"
                         if args.len() == 1 =>
                     {
                         matches!(&args[0].ty, Type::String) && resident_safe_expr(&args[0], callees)

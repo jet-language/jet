@@ -76,6 +76,7 @@ const compatDecomp = new Map(); // cp -> [u32...] (any decomposition, tag or not
 const simpleLower = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const simpleUpper = new Map(); // cp -> [u32...], overridden by SpecialCasing
 const simpleTitle = new Map(); // cp -> [u32...], overridden by SpecialCasing
+const unicodeNames = new Map(); // cp -> Unicode name; controls use their legacy names
 const generalCategory = []; // [start,end,gcTagIndex]
 const letterRanges = []; // General_Category L*
 const numericRanges = []; // General_Category Nd/Nl/No
@@ -93,6 +94,10 @@ for (const raw of unicodeData.split("\n")) {
   const cp = parseInt(f[0], 16);
   const name = f[1];
   const gc = f[2];
+  const unicodeName = name === "<control>" ? f[10].trim() : name;
+  if (unicodeName && !unicodeName.startsWith("<") && !name.endsWith(", First>") && !name.endsWith(", Last>")) {
+    unicodeNames.set(cp, unicodeName);
+  }
   if (name.endsWith(", First>")) {
     pendingRange = [cp, gc];
     continue;
@@ -372,6 +377,11 @@ function fmtU32Triples(rows) {
 function fmtU32Pairs(rows) {
   return rows.map(([a, b]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()})`).join(",");
 }
+function fmtU32StringPairs(rows) {
+  return rows
+    .map(([cp, name]) => `(0x${cp.toString(16).toUpperCase()},${JSON.stringify(name)})`)
+    .join(",");
+}
 
 // decomposition pool: flatten canon+compat into one u32 pool with (cp,start,len,is_canon)
 const pool = [];
@@ -408,6 +418,7 @@ function mappingPool(map) {
 const lower = mappingPool(simpleLower);
 const upper = mappingPool(simpleUpper);
 const title = mappingPool(simpleTitle);
+const unicodeNameIndex = [...unicodeNames.entries()].sort((a, b) => a[0] - b[0]);
 
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
@@ -537,6 +548,11 @@ pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
+pub fn jet_unicode_last_index_of(s: &String, needle: &String) -> Option<i64> {
+    s.rfind(needle)
+        .map(|byte| s[..byte].chars().count() as i64)
+}
+
 pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
     if needle.is_empty() {
         return 0;
@@ -560,6 +576,9 @@ pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, Strin
 
 const tablesBody = `
 pub const UNICODE_VERSION: &str = "16.0.0";
+
+// (codepoint, Unicode name; control rows use their Unicode 1.0 names)
+pub static UNICODE_NAME_INDEX: &[(u32, &str)] = &[${fmtU32StringPairs(unicodeNameIndex)}];
 
 pub static UNICODE_DECOMP_POOL: &[u32] = &[${pool.join(",")}];
 // (codepoint, pool_start, pool_len, is_canonical: 1/0)

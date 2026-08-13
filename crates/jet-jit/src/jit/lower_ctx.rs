@@ -1063,7 +1063,7 @@ impl LowerCtx<'_, '_> {
                 }
                 "lower" | "upper" | "nfc" | "nfkc" | "nfd" | "nfkd" | "pad_start"
                 | "center" | "trim" => Some(Type::String),
-                "graphemes" | "words" | "sentences" | "char_indices" => {
+                "graphemes" | "words" | "sentences" | "inspect" | "char_indices" => {
                     Some(Type::List(Box::new(Type::String)))
                 }
                 _ => None,
@@ -14372,6 +14372,10 @@ impl LowerCtx<'_, '_> {
                         "starts_any" if args.len() == 2 => (
                             self.host.text.starts_any,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "inspect" if args.len() == 1 => (
+                            self.host.text.inspect,
+                            vec![self.lower_expr(&args[0])?],
                         ),
                         "char_indices" if args.len() == 1 => (
                             self.host.text.char_indices,

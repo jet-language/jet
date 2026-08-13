@@ -691,7 +691,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.text.ends_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
   | `core.text.starts_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
   | `core.text.unicode` | Copied | Move Unicode rules from `TextLite` to Prelude kernels. |
-  | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules; `TextLite` marshals values. |
+  | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules, including scalar names; `TextLite` marshals values. |
   | `core.text.unicode` | Kernel | The same `Text.rs`/Unicode tables own scalar count, case, ASCII, and scalar iteration rules. |
   | `core.time` | Mixed | Civil and duration rules live in `Prelude/Core/Time.rs` and `Duration.rs`; ambient clock reads remain host effects. |
   | `core.time.date` | Mixed | `Prelude/Core/Time.rs` owns calendar rules; `today` reads the host clock. |

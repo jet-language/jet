@@ -308,3 +308,71 @@ fn run() {
         "strassei̇σ|strassei̇σ\nος|ος\nSSԵՒ|SSԵՒ\ntrue\ntrue\njet|jet\n2|2\n2|2\n0|0\ntrue|true\ntrue|true\ntrue\n"
     );
 }
+
+#[test]
+fn scalar_inspector_names_invisible_codepoints() {
+    if !common::have_rustc() {
+        eprintln!("note: rustc not found; skipping scalar inspector proof");
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
+    let start = text.find("// ── core.text.unicode helpers").expect("Unicode AOT block start");
+    let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
+    let unicode_block = &text[start..end];
+    let root_text = root.to_string_lossy().replace('\\', "\\\\");
+    let suffix = r#"
+fn main() {
+    let mut checked = 0usize;
+    for raw in include_str!("__ROOT__/tests/data/unicode/ucd/UnicodeData.txt").lines() {
+        let fields: Vec<_> = raw.split(';').collect();
+        if fields.len() < 14 { continue; }
+        let cp = u32::from_str_radix(fields[0], 16).unwrap();
+        let name = fields[1];
+        if name.ends_with(", First>") || name.ends_with(", Last>") { continue; }
+        let name = if name == "<control>" { fields[10] } else { name };
+        if name.is_empty() || name.starts_with('<') { continue; }
+        let Some(ch) = char::from_u32(cp) else { continue; };
+        let expected = format!("U+{:04X} {}", cp, name);
+        let got = jet_text_inspect(&ch.to_string()).into_iter().next().unwrap();
+        assert_eq!(got, expected, "name mismatch for U+{cp:04X}");
+        checked += 1;
+    }
+    assert!(checked > 30000, "pinned UnicodeData name rows unexpectedly low: {checked}");
+    let family = "👨‍👩‍👦".to_string();
+    assert_eq!(jet_text_inspect(&family)[1], "U+200D ZERO WIDTH JOINER");
+    println!("{checked}");
+}
+"#
+    .replace("__ROOT__", &root_text);
+    let mut harness = format!(
+        "include!(r#\"{0}/crates/jet-codegen/src/Prelude/Core/UnicodeString.rs\"#);\n\
+         include!(r#\"{0}/crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs\"#);\n",
+        root_text,
+    );
+    harness.push_str(
+        "mod jet_std {\n#[derive(Clone,Copy)] pub enum TextWidthAmbiguous { Narrow, Wide }\n\
+         #[derive(Clone,Copy)] pub enum TextWidthControls { Zero, Reject }\n\
+         pub struct TextWidth { pub ambiguous: TextWidthAmbiguous, pub controls: TextWidthControls }\n\
+         pub struct TextError { pub message: String }\n}\n",
+    );
+    harness.push_str(unicode_block);
+    harness.push_str(&suffix);
+    let dir = common::unique_tmp("jet_scalar_inspector");
+    fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("scalar_inspector.rs");
+    let binary = dir.join("scalar_inspector");
+    fs::write(&source, harness).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition=2021", "-O"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(compiled.status.success(), "scalar inspector harness rejected:\n{}", String::from_utf8_lossy(&compiled.stderr));
+    let ran = Command::new(&binary).output().unwrap();
+    assert!(ran.status.success(), "scalar inspector proof failed:\n{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "40074\n");
+    let _ = fs::remove_dir_all(dir);
+}

@@ -244,6 +244,9 @@ pub(crate) mod text_rt {
     pub(crate) fn char_indices(s: &str) -> Vec<String> {
         jet_text_char_indices(&s.to_string())
     }
+    pub(crate) fn inspect(s: &str) -> Vec<String> {
+        jet_text_inspect(&s.to_string())
+    }
 }
 
 fn list_from_strings(items: Vec<String>) -> i64 {
@@ -432,6 +435,10 @@ extern "C" fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
 
 extern "C" fn jet_jit_text_char_indices(s: i64) -> i64 {
     list_from_strings(text_rt::char_indices(&clone_string(s)))
+}
+
+extern "C" fn jet_jit_text_inspect(s: i64) -> i64 {
+    list_from_strings(text_rt::inspect(&clone_string(s)))
 }
 
 
@@ -728,6 +735,7 @@ host_fns! {
     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
+    inspect: "jet_jit_text_inspect" => jet_jit_text_inspect: unary;
     char_indices: "jet_jit_text_char_indices" => jet_jit_text_char_indices: unary;
     regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
     regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
@@ -750,7 +758,6 @@ host_fns! {
             q
         };
 }
-
 
 
 

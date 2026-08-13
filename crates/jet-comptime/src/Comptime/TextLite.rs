@@ -242,6 +242,9 @@ mod text_kernel {
     pub(super) fn char_indices(s: &str) -> Vec<String> {
         jet_text_char_indices(&s.to_string())
     }
+    pub(super) fn inspect(s: &str) -> Vec<String> {
+        jet_text_inspect(&s.to_string())
+    }
     pub(super) fn unicode_scalar_count(s: &str) -> i64 {
         jet_text_unicode_scalar_count(&s.to_string())
     }
@@ -395,6 +398,7 @@ pub(super) fn ends_any(s: &str, suffixes: &[String]) -> bool {
     text_kernel::ends_any(s, suffixes)
 }
 pub(super) fn char_indices(s: &str) -> Vec<String> { text_kernel::char_indices(s) }
+pub(super) fn inspect(s: &str) -> Vec<String> { text_kernel::inspect(s) }
 pub(super) fn unicode_scalar_count(s: &str) -> i64 { text_kernel::unicode_scalar_count(s) }
 pub(super) fn unicode_byte_count(s: &str) -> i64 { text_kernel::unicode_byte_count(s) }
 pub(super) fn unicode_is_ascii(s: &str) -> bool { text_kernel::unicode_is_ascii(s) }

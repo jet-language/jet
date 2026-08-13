@@ -1513,6 +1513,12 @@ pub fn apply_core_call_with_type(
                 .map(|c| CtValue::Str(c.to_string()))
                 .collect(),
         )),
+        ("core.text", "inspect") => Ok(CtValue::List(
+            super::super::TextLite::inspect(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
+                .collect(),
+        )),
         // D-TEXTWIDTH1=B: 1-arg call uses the portable default policy and
         // returns a bare `Int`; the 2-arg (`policy:`) call can reject a
         // control character under `.Reject`, so it returns `Int ? TextError`.
