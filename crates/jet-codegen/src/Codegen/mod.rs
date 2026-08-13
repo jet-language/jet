@@ -845,6 +845,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str("\nmod jet_regex_syntax {\n");
     out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
     out.push_str("\n}\n");
+    out.push_str("\nmod jet_encoding_errors {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/EncodingErrors.rs"));
+    out.push_str("\n}\n");
     let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
     let needs_base = core_usage_matches(
         used_core,

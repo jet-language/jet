@@ -34,7 +34,15 @@
                 return Ok(DataTree::Null);
             }
             let base = p.indent(p.pos);
-            p.parse_node(base)
+            let value = p.parse_node(base)?;
+            p.skip_ignorable();
+            if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
+                return Err(ParseError {
+                    line: p.pos + 1,
+                    message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
+                });
+            }
+            Ok(value)
         }
 
         struct Parser {
@@ -144,7 +152,7 @@
                     let line_no = self.pos + 1;
                     let (key, rest) = split_key(&content).ok_or_else(|| ParseError {
                         line: line_no,
-                        message: "expected `key: value`".into(),
+                        message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
                     })?;
                     self.pos += 1;
                     let rest = rest.trim();
@@ -655,4 +663,3 @@
         }
     }
 }
-

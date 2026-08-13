@@ -20,7 +20,7 @@
         let v = p.value()?;
         p.ws();
         if p.pos != p.chars.len() {
-            return Err(p.err("extra text after JSON value"));
+            return Err(p.err(crate::jet_encoding_errors::JSON_EXTRA_TEXT));
         }
         Ok(v)
     }
@@ -137,7 +137,7 @@
                 Some('[') => self.array(),
                 Some('{') => self.object(),
                 Some('-') | Some('0'..='9') => self.number(),
-                _ => Err(self.err("expected a JSON value")),
+                _ => Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_VALUE)),
             }
         }
 
@@ -148,7 +148,7 @@
         fn word(&mut self, w: &str, v: JSON) -> Result<JSON, JSONError> {
             for ch in w.chars() {
                 if self.peek() != Some(ch) {
-                    return Err(self.err("expected a JSON word"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_WORD));
                 }
                 self.pos += 1;
             }
@@ -157,7 +157,7 @@
 
         fn string(&mut self) -> Result<String, JSONError> {
             if self.peek() != Some('"') {
-                return Err(self.err("expected quoted text"));
+                return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_QUOTED_TEXT));
             }
             self.pos += 1;
             let mut out = String::new();
@@ -167,7 +167,7 @@
                     '"' => return Ok(out),
                     '\\' => {
                         let Some(e) = self.peek() else {
-                            return Err(self.err("unfinished escape"));
+                            return Err(self.err(crate::jet_encoding_errors::JSON_UNFINISHED_ESCAPE));
                         };
                         self.pos += 1;
                         match e {
@@ -180,14 +180,16 @@
                             'r' => out.push('\r'),
                             't' => out.push('\t'),
                             'u' => self.unicode_escape(&mut out)?,
-                            _ => return Err(self.err("invalid escape in string")),
+                            _ => return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_ESCAPE)),
                         }
                     }
-                    c if (c as u32) < 0x20 => return Err(self.err("control character in string")),
+                    c if (c as u32) < 0x20 => {
+                        return Err(self.err(crate::jet_encoding_errors::JSON_CONTROL_CHARACTER))
+                    }
                     other => out.push(other),
                 }
             }
-            Err(self.err("missing closing quote"))
+            Err(self.err(crate::jet_encoding_errors::JSON_MISSING_CLOSING_QUOTE))
         }
 
         // A `\uXXXX` escape, already past the `u`. Combines a high+low surrogate
@@ -196,28 +198,28 @@
             let cp = self.hex4()?;
             if (0xD800..=0xDBFF).contains(&cp) {
                 if self.peek() != Some('\\') {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 self.pos += 1;
                 if self.peek() != Some('u') {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 self.pos += 1;
                 let lo = self.hex4()?;
                 if !(0xDC00..=0xDFFF).contains(&lo) {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 let combined = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                 match char::from_u32(combined) {
                     Some(ch) => out.push(ch),
-                    None => return Err(self.err("invalid unicode escape")),
+                    None => return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE)),
                 }
             } else if (0xDC00..=0xDFFF).contains(&cp) {
-                return Err(self.err("unpaired surrogate in string"));
+                return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
             } else {
                 match char::from_u32(cp) {
                     Some(ch) => out.push(ch),
-                    None => return Err(self.err("invalid unicode escape")),
+                    None => return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE)),
                 }
             }
             Ok(())
@@ -227,11 +229,11 @@
             let mut v = 0u32;
             for _ in 0..4 {
                 let Some(c) = self.peek() else {
-                    return Err(self.err("truncated unicode escape"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_TRUNCATED_UNICODE_ESCAPE));
                 };
                 let d = c
                     .to_digit(16)
-                    .ok_or_else(|| self.err("invalid unicode escape"))?;
+                    .ok_or_else(|| self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE))?;
                 v = v * 16 + d;
                 self.pos += 1;
             }
@@ -252,13 +254,13 @@
                         self.pos += 1;
                     }
                 }
-                _ => return Err(self.err("bad number")),
+                _ => return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER)),
             }
             // Fraction: a `.` must be followed by at least one digit.
             if self.peek() == Some('.') {
                 self.pos += 1;
                 if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err("bad number"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
                 }
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.pos += 1;
@@ -271,7 +273,7 @@
                     self.pos += 1;
                 }
                 if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err("bad number"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
                 }
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.pos += 1;
@@ -285,7 +287,7 @@
             }
             match s.parse::<f64>() {
                 Ok(n) => Ok(JSON::Number(n)),
-                Err(_) => Err(self.err("bad number")),
+                Err(_) => Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER)),
             }
         }
 
@@ -303,7 +305,7 @@
                 match self.peek() {
                     Some(',') => self.pos += 1,
                     Some(']') => {}
-                    _ => return Err(self.err("expected `,` or `]`")),
+                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR)),
                 }
             }
         }
@@ -320,19 +322,19 @@
                 let key = self.string()?;
                 self.ws();
                 if self.peek() != Some(':') {
-                    return Err(self.err("expected `:` after object key"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
                 }
                 self.pos += 1;
                 let value = self.value()?;
                 if self.reject_duplicate_keys && out.contains_key(&key) {
-                    return Err(self.err("duplicate JSON object key"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY));
                 }
                 out.insert(key, value);
                 self.ws();
                 match self.peek() {
                     Some(',') => self.pos += 1,
                     Some('}') => {}
-                    _ => return Err(self.err("expected `,` or `}`")),
+                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR)),
                 }
             }
         }

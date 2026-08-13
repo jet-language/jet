@@ -395,6 +395,82 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
 }
 
 #[test]
+fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter() {
+    on_encoding_stack(malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner);
+}
+
+fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping malformed text codec parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+
+#Codable
+struct Row {
+    value: Int
+}
+
+fn json_parse_error() => String {
+    result :: json.parse("{oops")
+    if result == {
+        .Err(error) -> return error.message
+        else -> return "accepted"
+    }
+}
+
+fn json_decode_error() => String {
+    result :: json.decode<Row>("{oops")
+    if result == {
+        .Err(errors) -> return errors[0].reason
+        else -> return "accepted"
+    }
+}
+
+fn toml_parse_error() => String {
+    result :: toml.parse("value = ")
+    if result == {
+        .Err(error) -> return error.message
+        else -> return "accepted"
+    }
+}
+
+fn yaml_parse_error() => String {
+    result :: yaml.parse("key: value\nbad")
+    if result == {
+        .Err(error) -> return error.message
+        else -> return "accepted"
+    }
+}
+
+fn run() {
+    print(json_parse_error())
+    print(json_decode_error())
+    print(toml_parse_error())
+    print(yaml_parse_error())
+}
+"#;
+    let scratch = Scratch::new("malformed_text_codecs");
+    let path = scratch.write_project("2026", source);
+    let expected = concat!(
+        "expected quoted text\n",
+        "invalid JSON (line 1): expected quoted text\n",
+        "expected a value\n",
+        "expected `key: value`\n",
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "malformed text codec AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "forced interpreter diverged");
+}
+
+#[test]
 fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
     on_encoding_stack(cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner);
 }

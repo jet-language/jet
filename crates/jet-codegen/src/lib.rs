@@ -5,6 +5,8 @@ pub use jet_sema::{
     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema,
     Syntax, TargetMachine, Traits, AST, SHA256,
 };
+#[allow(unused_imports)]
+pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
 pub mod Codegen;
 mod BrowserHost;
 /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the

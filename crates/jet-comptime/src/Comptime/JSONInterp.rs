@@ -57,14 +57,14 @@ impl Parser {
             Some('[') => self.array(),
             Some('{') => self.object(),
             Some('-') | Some('0'..='9') => self.number(),
-            _ => Err(self.err("expected a JSON value")),
+            _ => Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_VALUE)),
         }
     }
 
     fn word(&mut self, w: &str, v: CtValue) -> Result<CtValue, JSONError> {
         for ch in w.chars() {
             if self.peek() != Some(ch) {
-                return Err(self.err("expected a JSON word"));
+                return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_WORD));
             }
             self.pos += 1;
         }
@@ -73,7 +73,7 @@ impl Parser {
 
     fn string(&mut self) -> Result<String, JSONError> {
         if self.peek() != Some('"') {
-            return Err(self.err("expected quoted text"));
+            return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_QUOTED_TEXT));
         }
         self.pos += 1;
         let mut out = String::new();
@@ -83,7 +83,7 @@ impl Parser {
                 '"' => return Ok(out),
                 '\\' => {
                     let Some(e) = self.peek() else {
-                        return Err(self.err("unfinished escape"));
+                        return Err(self.err(jet_foundation::EncodingErrors::JSON_UNFINISHED_ESCAPE));
                     };
                     self.pos += 1;
                     match e {
@@ -96,21 +96,23 @@ impl Parser {
                         'r' => out.push('\r'),
                         't' => out.push('\t'),
                         'u' => self.unicode_escape(&mut out)?,
-                        _ => return Err(self.err("invalid escape in string")),
+                        _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_INVALID_ESCAPE)),
                     }
                 }
-                c if (c as u32) < 0x20 => return Err(self.err("control character in string")),
+                c if (c as u32) < 0x20 => {
+                    return Err(self.err(jet_foundation::EncodingErrors::JSON_CONTROL_CHARACTER))
+                }
                 other => out.push(other),
             }
         }
-        Err(self.err("missing closing quote"))
+        Err(self.err(jet_foundation::EncodingErrors::JSON_MISSING_CLOSING_QUOTE))
     }
 
     fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
         let cp = self.hex4()?;
         match char::from_u32(cp) {
             Some(ch) => out.push(ch),
-            None => return Err(self.err("invalid unicode escape")),
+            None => return Err(self.err(jet_foundation::EncodingErrors::JSON_INVALID_UNICODE_ESCAPE)),
         }
         Ok(())
     }
@@ -119,11 +121,11 @@ impl Parser {
         let mut v = 0u32;
         for _ in 0..4 {
             let Some(c) = self.peek() else {
-                return Err(self.err("truncated unicode escape"));
+                return Err(self.err(jet_foundation::EncodingErrors::JSON_TRUNCATED_UNICODE_ESCAPE));
             };
             let d = c
                 .to_digit(16)
-                .ok_or_else(|| self.err("invalid unicode escape"))?;
+                .ok_or_else(|| self.err(jet_foundation::EncodingErrors::JSON_INVALID_UNICODE_ESCAPE))?;
             v = v * 16 + d;
             self.pos += 1;
         }
@@ -143,12 +145,12 @@ impl Parser {
                     self.pos += 1;
                 }
             }
-            _ => return Err(self.err("bad number")),
+            _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER)),
         }
         if self.peek() == Some('.') {
             self.pos += 1;
             if !matches!(self.peek(), Some('0'..='9')) {
-                return Err(self.err("bad number"));
+                return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER));
             }
             while matches!(self.peek(), Some('0'..='9')) {
                 self.pos += 1;
@@ -160,7 +162,7 @@ impl Parser {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some('0'..='9')) {
-                return Err(self.err("bad number"));
+                return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER));
             }
             while matches!(self.peek(), Some('0'..='9')) {
                 self.pos += 1;
@@ -170,11 +172,11 @@ impl Parser {
         if s.contains('.') || s.contains('e') || s.contains('E') {
             s.parse::<f64>()
                 .map(|value| json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))))
-                .map_err(|_| self.err("bad number"))
+                .map_err(|_| self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER))
         } else {
             s.parse::<i64>()
                 .map(|n| json_variant("Int", Some(CtValue::Int(n))))
-                .map_err(|_| self.err("bad number"))
+                .map_err(|_| self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER))
         }
     }
 
@@ -198,7 +200,7 @@ impl Parser {
                     self.pos += 1;
                     break;
                 }
-                _ => return Err(self.err("expected `,` or `]` in array")),
+                _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_ARRAY_SEPARATOR)),
             }
         }
         Ok(json_variant("Array", Some(CtValue::List(items))))
@@ -219,13 +221,10 @@ impl Parser {
         }
         loop {
             self.ws();
-            if self.peek() != Some('"') {
-                return Err(self.err("expected object key"));
-            }
             let key = self.string()?;
             self.ws();
             if self.peek() != Some(':') {
-                return Err(self.err("expected `:` after object key"));
+                return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_OBJECT_COLON));
             }
             self.pos += 1;
             let val = self.parse_value()?;
@@ -248,7 +247,7 @@ impl Parser {
                     self.pos += 1;
                     break;
                 }
-                _ => return Err(self.err("expected `,` or `}` in object")),
+                _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_OBJECT_SEPARATOR)),
             }
         }
         Ok(if self.ordered {
@@ -316,7 +315,7 @@ fn parse_json_with_order(text: &str, ordered: bool) -> Result<CtValue, JSONError
     let v = p.parse_value()?;
     p.ws();
     if p.pos != p.chars.len() {
-        return Err(p.err("extra text after JSON value"));
+        return Err(p.err(jet_foundation::EncodingErrors::JSON_EXTRA_TEXT));
     }
     Ok(v)
 }

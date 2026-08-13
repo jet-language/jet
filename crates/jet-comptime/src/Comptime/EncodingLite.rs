@@ -519,7 +519,7 @@ impl TOMLParser {
         }
         match self.peek() {
             None | Some('\n') | Some('\r') => Ok(()),
-            Some(c) => Err(self.err(format!("unexpected `{c}` after value"))),
+            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_unexpected_after_value(c))),
         }
     }
     fn statement(&mut self) -> Result<Option<TOMLItem>, TOMLParseError> {
@@ -538,17 +538,17 @@ impl TOMLParser {
         let path = self.key_path()?;
         self.skip_inline_ws();
         if self.peek() != Some(']') {
-            return Err(self.err("expected `]` to close a table header"));
+            return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_TABLE_CLOSE));
         }
         self.bump();
         if array {
             if self.peek() != Some(']') {
-                return Err(self.err("expected `]]` to close an array-of-tables header"));
+                return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_ARRAY_TABLE_CLOSE));
             }
             self.bump();
         }
         if path.is_empty() {
-            return Err(self.err("a table header must name a table"));
+            return Err(self.err(jet_foundation::EncodingErrors::TOML_TABLE_NAME_REQUIRED));
         }
         self.finish_line()?;
         Ok(TOMLItem::Header { path, array })
@@ -556,11 +556,13 @@ impl TOMLParser {
     fn key_value(&mut self) -> Result<TOMLItem, TOMLParseError> {
         let path = self.key_path()?;
         if path.is_empty() {
-            return Err(self.err("expected a key"));
+            return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY));
         }
         self.skip_inline_ws();
         if self.peek() != Some('=') {
-            return Err(self.err(format!("expected `=` after key `{}`", path.join("."))));
+            return Err(self.err(jet_foundation::EncodingErrors::toml_expected_equals_after_key(
+                &path.join("."),
+            )));
         }
         self.bump();
         self.skip_inline_ws();
@@ -598,8 +600,8 @@ impl TOMLParser {
                 }
                 Ok(s)
             }
-            Some(c) => Err(self.err(format!("`{c}` is not a valid key character"))),
-            None => Err(self.err("expected a key")),
+            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_key_character(c))),
+            None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY)),
         }
     }
     fn value(&mut self) -> Result<TOMLValue, TOMLParseError> {
@@ -612,8 +614,8 @@ impl TOMLParser {
             Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => {
                 self.number_or_datetime()
             }
-            Some(c) => Err(self.err(format!("`{c}` does not start a valid value"))),
-            None => Err(self.err("expected a value")),
+            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_value_start(c))),
+            None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_VALUE)),
         }
     }
     fn boolean(&mut self) -> Result<TOMLValue, TOMLParseError> {
@@ -622,7 +624,7 @@ impl TOMLParser {
         } else if self.try_keyword("false") {
             Ok(TOMLValue::Boolean(false))
         } else {
-            Err(self.err("expected `true` or `false`"))
+            Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_BOOLEAN))
         }
     }
     fn try_keyword(&mut self, kw: &str) -> bool {
@@ -651,11 +653,13 @@ impl TOMLParser {
         let mut out = String::new();
         loop {
             match self.bump() {
-                None | Some('\n') => return Err(self.err("unterminated string")),
+                None | Some('\n') => {
+                    return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_STRING))
+                }
                 Some('"') => return Ok(out),
                 Some('\\') => out.push(self.string_escape()?),
                 Some(c) if (c as u32) < 0x20 => {
-                    return Err(self.err("control character in string"))
+                    return Err(self.err(jet_foundation::EncodingErrors::TOML_CONTROL_CHARACTER))
                 }
                 Some(c) => out.push(c),
             }
@@ -681,7 +685,11 @@ impl TOMLParser {
                 return Ok(out);
             }
             match self.bump() {
-                None => return Err(self.err("unterminated multi-line string")),
+                None => {
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_STRING,
+                    ))
+                }
                 Some('\\') => {
                     if matches!(self.peek(), Some('\n') | Some('\r') | Some(' ') | Some('\t')) {
                         let mut sawline = false;
@@ -717,23 +725,23 @@ impl TOMLParser {
             Some('t') => Ok('\t'),
             Some('u') => self.unicode_escape(4),
             Some('U') => self.unicode_escape(8),
-            Some(c) => Err(self.err(format!("invalid escape `\\{c}`"))),
-            None => Err(self.err("unterminated escape")),
+            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_escape(c))),
+            None => Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ESCAPE)),
         }
     }
     fn unicode_escape(&mut self, n: usize) -> Result<char, TOMLParseError> {
         let mut v = 0u32;
         for _ in 0..n {
             let Some(c) = self.peek() else {
-                return Err(self.err("truncated unicode escape"));
+                return Err(self.err(jet_foundation::EncodingErrors::TOML_TRUNCATED_UNICODE_ESCAPE));
             };
             let Some(d) = c.to_digit(16) else {
-                return Err(self.err("invalid unicode escape"));
+                return Err(self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_ESCAPE));
             };
             v = v * 16 + d;
             self.pos += 1;
         }
-        char::from_u32(v).ok_or_else(|| self.err("invalid unicode scalar value"))
+        char::from_u32(v).ok_or_else(|| self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_SCALAR))
     }
     fn literal_string(&mut self) -> Result<String, TOMLParseError> {
         if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'')
@@ -744,7 +752,11 @@ impl TOMLParser {
         let mut out = String::new();
         loop {
             match self.bump() {
-                None | Some('\n') => return Err(self.err("unterminated literal string")),
+                None | Some('\n') => {
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_LITERAL_STRING,
+                    ))
+                }
                 Some('\'') => return Ok(out),
                 Some(c) => out.push(c),
             }
@@ -770,7 +782,11 @@ impl TOMLParser {
                 return Ok(out);
             }
             match self.bump() {
-                None => return Err(self.err("unterminated multi-line literal string")),
+                None => {
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_LITERAL_STRING,
+                    ))
+                }
                 Some(c) => out.push(c),
             }
         }
@@ -785,7 +801,7 @@ impl TOMLParser {
                     self.bump();
                     return Ok(TOMLValue::Array(items));
                 }
-                None => return Err(self.err("unterminated array")),
+                None => return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY)),
                 _ => {}
             }
             items.push(self.value()?);
@@ -799,9 +815,11 @@ impl TOMLParser {
                     return Ok(TOMLValue::Array(items));
                 }
                 Some(c) => {
-                    return Err(self.err(format!("expected `,` or `]` in array, found `{c}`")))
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::toml_expected_array_separator(c),
+                    ))
                 }
-                None => return Err(self.err("unterminated array")),
+                None => return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY)),
             }
         }
     }
@@ -829,7 +847,7 @@ impl TOMLParser {
             let path = self.key_path()?;
             self.skip_inline_ws();
             if self.bump() != Some('=') {
-                return Err(self.err("expected `=` in inline table"));
+                return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_INLINE_EQUALS));
             }
             self.skip_inline_ws();
             let value = self.value()?;
@@ -839,9 +857,15 @@ impl TOMLParser {
                 Some(',') => continue,
                 Some('}') => return Ok(TOMLValue::InlineTable(entries)),
                 Some(c) => {
-                    return Err(self.err(format!("expected `,` or `}}` in inline table, found `{c}`")))
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::toml_expected_inline_separator(c),
+                    ))
                 }
-                None => return Err(self.err("unterminated inline table")),
+                None => {
+                    return Err(self.err(
+                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_INLINE_TABLE,
+                    ))
+                }
             }
         }
     }
@@ -935,12 +959,12 @@ impl TOMLParser {
             clean
                 .parse::<f64>()
                 .map(TOMLValue::Float)
-                .map_err(|_| self.err(format!("invalid number `{tok}`")))
+                .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
         } else {
             clean
                 .parse::<i64>()
                 .map(TOMLValue::Integer)
-                .map_err(|_| self.err(format!("invalid number `{tok}`")))
+                .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
         }
     }
     fn radix_integer(&mut self) -> Result<TOMLValue, TOMLParseError> {
@@ -964,11 +988,11 @@ impl TOMLParser {
             }
         }
         if tok.is_empty() {
-            return Err(self.err("expected digits after numeric base prefix"));
+            return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_RADIX_DIGITS));
         }
         i64::from_str_radix(&tok, radix)
             .map(TOMLValue::Integer)
-            .map_err(|_| self.err(format!("invalid base-{radix} integer `{tok}`")))
+            .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_radix_integer(radix, &tok)))
     }
 }
 fn toml_is_bare_key_char(c: char) -> bool {
@@ -1020,8 +1044,17 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
         return Ok(json_variant("Null", None));
     }
     let base = p.indent(p.pos);
-    p.parse_node(base)
-        .map_err(|e| json_error_struct(e.line as i64, e.message))
+    let value = p
+        .parse_node(base)
+        .map_err(|e| json_error_struct(e.line as i64, e.message))?;
+    p.skip_ignorable();
+    if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
+        return Err(json_error_struct(
+            (p.pos + 1) as i64,
+            jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.to_string(),
+        ));
+    }
+    Ok(value)
 }
 
 struct YAMLParser {
@@ -1128,7 +1161,7 @@ impl YAMLParser {
             let line_no = self.pos + 1;
             let (key, rest) = yaml_split_key(&content).ok_or_else(|| YAMLParseError {
                 line: line_no,
-                message: "expected `key: value`".into(),
+                message: jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.into(),
             })?;
             self.pos += 1;
             let rest = rest.trim();

@@ -119,7 +119,7 @@
         let value = parser.value()?;
         parser.ws();
         if parser.pos != parser.chars.len() {
-            return Err(parser.err("extra text after JSON value"));
+            return Err(parser.err(crate::jet_encoding_errors::JSON_EXTRA_TEXT));
         }
         Ok(value)
     }
@@ -164,14 +164,14 @@
                 Some('[') => self.array(),
                 Some('{') => self.object(),
                 Some('-') | Some('0'..='9') => self.number(),
-                _ => Err(self.err("expected a JSON value")),
+                _ => Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_VALUE)),
             }
         }
 
         fn word(&mut self, word: &str, value: DataTree) -> Result<DataTree, JSONError> {
             for ch in word.chars() {
                 if self.peek() != Some(ch) {
-                    return Err(self.err("expected a JSON word"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_WORD));
                 }
                 self.pos += 1;
             }
@@ -180,7 +180,7 @@
 
         fn string(&mut self) -> Result<String, JSONError> {
             if self.peek() != Some('"') {
-                return Err(self.err("expected quoted text"));
+                return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_QUOTED_TEXT));
             }
             self.pos += 1;
             let mut out = String::new();
@@ -190,7 +190,7 @@
                     '"' => return Ok(out),
                     '\\' => {
                         let Some(escape) = self.peek() else {
-                            return Err(self.err("unfinished escape"));
+                            return Err(self.err(crate::jet_encoding_errors::JSON_UNFINISHED_ESCAPE));
                         };
                         self.pos += 1;
                         match escape {
@@ -203,43 +203,43 @@
                             'r' => out.push('\r'),
                             't' => out.push('\t'),
                             'u' => self.unicode_escape(&mut out)?,
-                            _ => return Err(self.err("invalid escape in string")),
+                            _ => return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_ESCAPE)),
                         }
                     }
                     c if (c as u32) < 0x20 => {
-                        return Err(self.err("control character in string"));
+                        return Err(self.err(crate::jet_encoding_errors::JSON_CONTROL_CHARACTER));
                     }
                     other => out.push(other),
                 }
             }
-            Err(self.err("missing closing quote"))
+            Err(self.err(crate::jet_encoding_errors::JSON_MISSING_CLOSING_QUOTE))
         }
 
         fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
             let cp = self.hex4()?;
             if (0xD800..=0xDBFF).contains(&cp) {
                 if self.peek() != Some('\\') {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 self.pos += 1;
                 if self.peek() != Some('u') {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 self.pos += 1;
                 let low = self.hex4()?;
                 if !(0xDC00..=0xDFFF).contains(&low) {
-                    return Err(self.err("unpaired surrogate in string"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
                 }
                 let combined = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
                 let Some(ch) = char::from_u32(combined) else {
-                    return Err(self.err("invalid unicode escape"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
                 };
                 out.push(ch);
             } else if (0xDC00..=0xDFFF).contains(&cp) {
-                return Err(self.err("unpaired surrogate in string"));
+                return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
             } else {
                 let Some(ch) = char::from_u32(cp) else {
-                    return Err(self.err("invalid unicode escape"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
                 };
                 out.push(ch);
             }
@@ -250,11 +250,11 @@
             let mut value = 0u32;
             for _ in 0..4 {
                 let Some(ch) = self.peek() else {
-                    return Err(self.err("truncated unicode escape"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_TRUNCATED_UNICODE_ESCAPE));
                 };
                 let digit = ch
                     .to_digit(16)
-                    .ok_or_else(|| self.err("invalid unicode escape"))?;
+                    .ok_or_else(|| self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE))?;
                 value = value * 16 + digit;
                 self.pos += 1;
             }
@@ -274,12 +274,12 @@
                         self.pos += 1;
                     }
                 }
-                _ => return Err(self.err("bad number")),
+                _ => return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER)),
             }
             if self.peek() == Some('.') {
                 self.pos += 1;
                 if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err("bad number"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
                 }
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.pos += 1;
@@ -291,7 +291,7 @@
                     self.pos += 1;
                 }
                 if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err("bad number"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
                 }
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.pos += 1;
@@ -305,7 +305,7 @@
             }
             text.parse::<f64>()
                 .map(DataTree::Float)
-                .map_err(|_| self.err("bad number"))
+                .map_err(|_| self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER))
         }
 
         fn array(&mut self) -> Result<DataTree, JSONError> {
@@ -322,7 +322,7 @@
                 match self.peek() {
                     Some(',') => self.pos += 1,
                     Some(']') => {}
-                    _ => return Err(self.err("expected `,` or `]`")),
+                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR)),
                 }
             }
         }
@@ -339,7 +339,7 @@
                 let key = self.string()?;
                 self.ws();
                 if self.peek() != Some(':') {
-                    return Err(self.err("expected `:` after object key"));
+                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
                 }
                 self.pos += 1;
                 let value = self.value()?;
@@ -352,7 +352,7 @@
                 match self.peek() {
                     Some(',') => self.pos += 1,
                     Some('}') => {}
-                    _ => return Err(self.err("expected `,` or `}`")),
+                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR)),
                 }
             }
         }
