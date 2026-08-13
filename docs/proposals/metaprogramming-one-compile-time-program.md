@@ -474,10 +474,10 @@ capability gained by deleting code.
 
 ### S8 — One effect model for compile-time code (D-META-EFFECT1=A; amends D-CTCORE1)
 
-Compile-time purity has its own allowed-call list (`D-CTCORE1`), its own tier
-names, and its own diagnostics (E0951), beside the run-time effect system with
-its own (E3401). Compile-time code declares effects the same way
-run-time code does.
+Compile-time and run-time code use one effect set, one checker walk, and one
+diagnostic family. The curated `D-CTCORE1` allow-list and the separate E0951
+family retire; the shared foundation effect fact decides whether a call is
+eligible. Compile-time code declares effects the same way run-time code does.
 
 ```jet
 fn load_schema() =[FS]=> String { … }     // same syntax at both stages
@@ -813,12 +813,10 @@ compile-time constants, one effect model.
 
 ## Out-of-scope verification notes
 
-Two ledgers disagree and one is wrong. `tests/jit_gaps.txt` marks
-`comptime/embed` and `comptime/find` covered. The tier-parity audit
-(`docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md`) records both
-failing at the default `run` tier with E0956. `jit_gaps.txt` tracks compile
-coverage, not run coverage. This needs its own card; it is not caused by this
-proposal and does not block it.
+The four comptime I/O stems named by the effect decision now pass AOT, default
+`jet run`, and the forced interpreter. Their old E0956 run-tier parking rows
+were removed from `tests/jit_gaps.txt`; the parity test owns the byte-equality
+proof.
 
 Separately: the comptime substrate decisions are missing from the Tower store.
 `D-CTCORE1`, `D-CTEFFECT1`, `D-CTIO1`, `D-CTFIND1`, `D-CTCODEGEN1`, and

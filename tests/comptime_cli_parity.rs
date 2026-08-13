@@ -56,6 +56,35 @@ fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
             "default `jet run` output differs from the checked-in golden for `{stem}`"
         );
 
+        let interpreted_cache = cache.join("interpret");
+        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", "--interpret", &file, "--trace-tiers"])
+            .current_dir(&root)
+            .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
+            .env("JET_CACHE_DIR", interpreted_cache.join("build"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}"));
+        let interpreted_trace = String::from_utf8_lossy(&interpreted.stderr);
+
+        assert!(
+            interpreted.status.success(),
+            "interpreted `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{interpreted_trace}",
+            String::from_utf8_lossy(&interpreted.stdout)
+        );
+        assert!(
+            interpreted_trace.contains("tier0 interp"),
+            "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}"
+        );
+        assert!(
+            !interpreted_trace.contains("E2201"),
+            "forced interpreter deopted for `{stem}`:\n{interpreted_trace}"
+        );
+        assert_eq!(
+            interpreted.stdout, expected,
+            "interpreter output differs from the checked-in golden for `{stem}`"
+        );
+
         let _ = fs::remove_dir_all(cache);
     }
 }

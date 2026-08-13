@@ -8231,7 +8231,8 @@ fn ledger_cross_check_fires_on_a_conflict() {
     );
 
     // Parked with a reason: tolerated, and the healthy stem never trips it.
-    let parked = vec!["comptime/embed: owed to #1543 (D-META-EFFECT1)".to_string()];
+    // Synthetic parked row: the real comptime rows are no longer parked.
+    let parked = vec!["comptime/embed: synthetic negative-control row".to_string()];
     assert!(ledger_conflicts(&compile_covered, &parked, &gate).is_empty());
 
     // A bare deopt row is a tier choice, not a failure.
