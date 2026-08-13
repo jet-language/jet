@@ -161,6 +161,7 @@ const post = async (route, body) => {
   const r = await fetch(url('/api/' + route), { method: 'POST', body: JSON.stringify(body) });
   return { status: r.status, json: await r.json() };
 };
+const fullCard = async (ref) => (await (await fetch(url(`/api/card?id=${encodeURIComponent(ref)}`))).json()).card;
 
 const ownerSession = async () => {
   const page = await fetch(url('/'), { headers: { accept: 'text/html' } });
@@ -252,14 +253,14 @@ test('dedicated owner UI action accepts atomically with immutable provenance', a
   assert.equal(r.status, 200);
   assert.equal(r.json.result.status, 'ratified');
   const state = await (await fetch(url('/api/state'))).json();
-  const card = state.cards.find(c => c.num === 1);
+  const card = await fullCard('#1');
   assert.equal(card.phase, 'done');
   assert.match(card.completedAt, /^\d{4}-\d{2}-\d{2}T/, 'owner acceptance records a stable completion timestamp');
   const ratifyEvent = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-1');
   assert.ok(ratifyEvent, 'ratification must be in the event log');
   assert.equal(ratifyEvent.by, 'owner');
   assert.match(ratifyEvent.note, /owner-ui session=.* challenge=.* outcome=accept/);
-  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').provenance.kind, 'owner-ui');
+  assert.equal(card.decisions.find(d => d.id === 'D-ACCEPT-1').provenance.kind, 'owner-ui');
 });
 
 test('dedicated owner UI action bounces with the comment logged', async () => {
@@ -271,7 +272,7 @@ test('dedicated owner UI action bounces with the comment logged', async () => {
   const r = await ownerResolve(cookie, 'D-ACCEPT-2', 'bounce', 'missing the edge case');
   assert.equal(r.status, 200);
   const state = await (await fetch(url('/api/state'))).json();
-  const card = state.cards.find(c => c.num === 2);
+  const card = await fullCard('#2');
   assert.equal(card.phase, 'building');
   assert.match(card.log[0].text, /Bounced back to building: missing the edge case/);
   const ratifyEvent = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-2');
@@ -335,7 +336,7 @@ test('double-click: two independently-challenged accept attempts on the same bal
   const loserBody = await losers[0].json();
   assert.ok(loserBody.error && loserBody.message, 'loser gets a structured error, not a crash/empty body');
   const state = await (await fetch(url('/api/state'))).json();
-  assert.equal(state.cards.find(c => c.num === 4).phase, 'done', 'card closes exactly once');
+  assert.equal((await fullCard('#4')).phase, 'done', 'card closes exactly once');
 });
 
 // Owner order 2026-07-12: no loopback/token restriction on owner
@@ -376,7 +377,8 @@ test('remote device: accepted without any auth.token — restriction removed by 
     });
     assert.equal(resolved.status, 200);
     const state = await (await fetch(rurl('/api/state'))).json();
-    assert.equal(state.cards.find(c => c.num === 1).phase, 'done', 'remote no-token accept round-trips to a closed card');
+    const closed = await (await fetch(rurl('/api/card?id=%231'))).json();
+    assert.equal(closed.card.phase, 'done', 'remote no-token accept round-trips to a closed card');
   } finally {
     rserver.close();
   }

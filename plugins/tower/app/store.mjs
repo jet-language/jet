@@ -536,14 +536,40 @@ export function radarData(s, historyCards = []) {
   });
 }
 
+function projectCardRecord(c, decisions, cards, questions) {
+  const clearance = clearanceOf(c, decisions);
+  const linkedDecisions = decisions.filter(d => d.cardId === c.id);
+  const linkedQuestions = questions.filter(q => q.cardId === c.id);
+  const openQ = linkedQuestions.filter(q => q.kind !== 'message' && q.status === 'open').length;
+  return { ...c, clearance, decisions: linkedDecisions, questions: linkedQuestions, openQ, lane: laneOf(c, decisions, cards) };
+}
+
+function projectCardSummary(c) {
+  const summary = {
+    id: c.id, num: c.num, title: c.title, kind: c.kind, track: c.track,
+    epoch: c.epoch, milestoneId: c.milestoneId, phase: c.phase,
+    priority: c.priority, workOrder: c.workOrder, assignee: c.assignee,
+    needsAcceptance: c.needsAcceptance, updated: c.updated, created: c.created,
+    completedAt: c.completedAt, blockedBy: c.blockedBy, refs: c.refs,
+    lane: c.lane, openQ: c.openQ, questions: c.questions,
+  };
+  // The Now view needs only the small owner-verification ballot slice before
+  // it can fetch the full card detail on demand.
+  const acceptance = (c.decisions || []).filter(d => (d.group === 'acceptance' || d.id?.startsWith('D-ACCEPT-')) && d.status !== 'ratified')
+    .map(d => ({ id: d.id, status: d.status, created: d.created, gist: d.gist, detail: d.detail, checkInstructions: d.checkInstructions }));
+  if (acceptance.length) summary.decisions = acceptance;
+  if (c.needsAcceptance && c.phase === 'verify') summary.criteria = c.criteria || [];
+  return summary;
+}
+
+const cardSummary = (c) => ({
+  id: c.id, num: c.num, title: c.title, phase: c.phase, epoch: c.epoch,
+  track: c.track, milestoneId: c.milestoneId, completedAt: c.completedAt,
+  updated: c.updated, archived: !!c.archived,
+});
+
 export function project(s, config = null, history = null) {
-  const cards = s.cards.map(c => {
-    const clearance = clearanceOf(c, s.decisions);
-    const decisions = s.decisions.filter(d => d.cardId === c.id);
-    const questions = s.questions.filter(q => q.cardId === c.id);
-    const openQ = questions.filter(q => q.kind !== 'message' && q.status === 'open').length;
-    return { ...c, clearance, decisions, questions, openQ, lane: laneOf(c, s.decisions, s.cards) };
-  });
+  const cards = s.cards.map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
   const historyCards = history?.cards || [];
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
@@ -572,6 +598,75 @@ export function project(s, config = null, history = null) {
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, papercuts: s.papercuts,
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
+}
+
+// Board HTTP reads use this projection. Keep the initial payload useful for
+// navigation, but leave descriptions, logs, criteria, and ratified decisions
+// for the card detail endpoint. Closed-card content is in projectClosed().
+export function projectBoard(s, config = null, history = null) {
+  const historyCards = history?.cards || [];
+  const active = s.cards.filter(c => c.phase !== 'done');
+  const activeIds = new Set(active.map(c => c.id));
+  const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions)));
+  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
+  const inLane = (lane) => cards.filter(c => c.lane.lane === lane);
+  const openDecisions = s.decisions.filter(d => isBlocking(d) && !d.draft);
+  const genericDecisions = openDecisions.filter(d => d.group !== 'acceptance');
+  const bufferDays = (config && config.retireAfterDays) ?? 3;
+  const recentlyDecided = s.decisions.filter(d => d.status === 'ratified' && !d.draft && !isOlderThanDays(d.ratifiedAt, bufferDays))
+    .map(d => ({ id: d.id, title: d.title, outcome: d.outcome, comment: d.comment || '', ratifiedAt: d.ratifiedAt, cardId: d.cardId }))
+    .sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''));
+  const counts = {
+    byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, s.cards.filter(c => c.phase === p).length])),
+    forYou: genericDecisions.length,
+    decide: genericDecisions.length,
+    agentReady: inLane('plan').length + inLane('implement').length + inLane('building').length + inLane('verify').length,
+    sidequests: s.cards.filter(c => c.track === 'sidequest' && ACTIVE.includes(c.phase)).length,
+    frozen: s.cards.filter(c => c.phase === 'frozen').length,
+    ideas: s.ideas.filter(b => b.status !== 'tagged').length,
+    openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
+  };
+  const closedIds = new Set([...s.cards.filter(c => c.phase === 'done'), ...historyCards].map(c => c.id));
+  const closedMessages = [
+    ...s.questions.filter(q => closedIds.has(q.cardId) && q.kind === 'message' && q.status === 'open'),
+    ...historyCards.flatMap(c => (c.questions || []).filter(q => q.kind === 'message' && q.status === 'open')),
+  ];
+  return {
+    meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones,
+    phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
+    questions: s.questions.filter(q => activeIds.has(q.cardId)), ideas: s.ideas,
+    papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
+    radar: radarData(s, historyCards),
+    closed: {
+      rev: s.meta.rev,
+      counts: { done: s.cards.filter(c => c.phase === 'done').length, archived: historyCards.length },
+      cards: [...s.cards.filter(c => c.phase === 'done').map(cardSummary), ...historyCards.map(c => cardSummary({ ...c, archived: true }))],
+      messages: closedMessages,
+    },
+  };
+}
+
+export function projectClosed(s, config = null, history = null) {
+  const h = history || emptyHistory();
+  const liveDone = s.cards.filter(c => c.phase === 'done')
+    .map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
+  const archived = h.cards.map(c => ({
+    // Keep archive origin explicit for client cache/debugging. It is not used
+    // for lane or board semantics.
+    ...projectCardRecord(c, h.decisions, h.cards, c.questions || []), archived: true,
+  }));
+  return { rev: s.meta.rev, cards: [...liveDone, ...archived], counts: { done: liveDone.length, archived: archived.length } };
+}
+
+// Return one full card for the detail modal without building the full board.
+export function projectCard(s, ref, history = null) {
+  const live = findCard(s, ref);
+  if (live) return projectCardRecord(live, s.decisions, s.cards, s.questions);
+  const h = history || emptyHistory();
+  const str = String(ref ?? '');
+  const num = Number(str.replace(/^#/, ''));
+  const archived = h.cards.find(c => c.id === str || (Number.isInteger(num) && c.num === num));
+  return archived ? { ...projectCardRecord(archived, h.decisions, h.cards, archived.questions || []), archived: true } : null;
 }
 
 const timestamp = (value) => {
