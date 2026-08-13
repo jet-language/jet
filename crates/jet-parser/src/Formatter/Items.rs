@@ -2,7 +2,7 @@ use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
     Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern,
-    StructDef, StructLayout, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
+    StructDef, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -496,6 +496,12 @@ impl<'a> Fmt<'a> {
         if markers.is_empty() {
             return;
         }
+        if markers.len() == 1 && !lone_hash_ok {
+            self.write(Syntax::RULE_PREFIX);
+            self.fmt_marker(&markers[0]);
+            self.write(" ");
+            return;
+        }
         let rules: Vec<&Marker> = markers.iter().collect();
         self.fmt_marker_group(&rules, Syntax::RULE_PREFIX, lone_hash_ok);
     }
@@ -523,18 +529,6 @@ impl<'a> Fmt<'a> {
         self.newline();
     }
 
-    /// D-REPRC1/D-SOA1: `#Layout(c)` / `#Layout(columnar)` on its own line.
-    fn fmt_layout(&mut self, layout: &Option<StructLayout>) {
-        if let Some(l) = layout {
-            let variant = match l {
-                StructLayout::C => Syntax::LAYOUT_C,
-                StructLayout::Columnar => Syntax::LAYOUT_COLUMNAR,
-            };
-            self.write(&format!("#{}({})", Syntax::MARKER_LAYOUT, variant));
-            self.newline();
-        }
-    }
-
     fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
         self.write("impl ");
         self.write(&block.trait_name);
@@ -554,25 +548,13 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
-        let ordered_rules = self
-            .applied_rules
-            .iter()
-            .filter(|application| application.target == Some(f.span))
-            .map(|application| application.marker.clone())
-            .collect::<Vec<_>>();
+        let ordered_rules = f.markers.clone();
         if !ordered_rules.is_empty() {
             let rules = ordered_rules.iter().collect::<Vec<_>>();
             if rules.len() == 1 {
                 self.write(Syntax::RULE_PREFIX);
                 self.fmt_marker(rules[0]);
-                if matches!(
-                    rules[0].name.as_str(),
-                    Syntax::MARKER_META
-                        | Syntax::KW_UNSAFE
-                        | Syntax::MARKER_FFI
-                        | Syntax::MARKER_TARGET
-                        | Syntax::MARKER_WASM_EXPORT
-                ) {
+                if jet_foundation::Registry::callable_marker_needs_line_break(&rules[0].name) {
                     self.newline();
                 } else {
                     self.write(" ");
@@ -894,32 +876,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
-        // D-SHAPE2: the leading `#[…]` applied-rule list, verbatim.
+        // D-VERDICT-1455-1: the retained registry marker nodes are the sole
+        // formatter input. Typed flags remain for sema/codegen only.
         let lone_hash_ok =
             s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
-        // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
-        if s.is_single_use {
-            self.write(&format!("#{} ", Syntax::MARKER_SINGLE_USE));
-        }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`struct`, on the same line.
-        if s.is_must_use {
-            self.write(&format!("#{} ", Syntax::MARKER_MUST_USE));
-        }
-        // D-MIGRATE1: `#PublishedSchema` precedes `pub`/`struct`, on the same line.
-        // A bracket marker list keeps PublishedSchema in `type_markers` while
-        // also setting the semantic flag. Emit the dedicated inline spelling
-        // only for the standalone `#PublishedSchema struct` parse path.
-        if s.is_published_schema
-            && !s
-                .type_markers
-                .iter()
-                .any(|marker| marker.name == Syntax::MARKER_PUBLISHED_SCHEMA)
-        {
-            self.write(&format!("#{} ", Syntax::MARKER_PUBLISHED_SCHEMA));
-        }
-        // D-REPRC1/D-SOA1: `#Layout(…)` sits on its own line before the struct.
-        self.fmt_layout(&s.layout);
         if top_level {
             self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
         }
@@ -984,17 +945,10 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
-        // D-SHAPE2: leading `#[…]` applied-rule list, verbatim.
+        // D-VERDICT-1455-1: type markers are retained nodes, not flag
+        // reconstruction. The flags below remain semantic data only.
         let lone_hash_ok = !e.is_single_use && !e.is_must_use;
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
-        // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
-        if e.is_single_use {
-            self.write(&format!("#{} ", Syntax::MARKER_SINGLE_USE));
-        }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`enum`, on the same line.
-        if e.is_must_use {
-            self.write(&format!("#{} ", Syntax::MARKER_MUST_USE));
-        }
         if top_level {
             self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
         }

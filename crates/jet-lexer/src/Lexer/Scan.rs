@@ -3,7 +3,6 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-
 use super::Tokens::{TokKind, Token};
 use super::{keyword, Lexer};
 
@@ -56,7 +55,7 @@ impl<'a> Lexer<'a> {
             .collect::<Vec<_>>();
         let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
         let is_ffi = |token: &&Token| {
-            matches!(&token.kind, TokKind::Ident(name) if name == Syntax::MARKER_FFI)
+            matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name))
         };
         let mut cursor = significant.len();
         let mut saw_ffi = false;

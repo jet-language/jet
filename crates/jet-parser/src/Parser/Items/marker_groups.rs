@@ -737,12 +737,17 @@ impl<'a> Parser<'a> {
                 // standalone marker. Let the top-level parser issue its
                 // ordinary unknown-marker diagnostic instead of classifying
                 // this spelling as an attached function marker.
-                || matches!(self.marker_name_at(self.pos), Some(name)
-                    if name == Syntax::MARKER_EXPERIMENTAL
-                        || name == Syntax::MARKER_TESTED
-                        || name == Syntax::MARKER_HARDENED)
-                || matches!(self.marker_name_at(self.pos), Some(name)
-                    if name == Syntax::MARKER_POLICY && self.policy_is_file_decl())
+                || self.marker_name_at(self.pos).is_some_and(|name| {
+                    crate::Policy::rule_arg_declaration("Maturity")
+                        .is_some_and(|declaration| declaration.variants.contains(&name))
+                })
+                || self.marker_name_at(self.pos).is_some_and(|name| {
+                    crate::Policy::applied_rule(name).is_some_and(|rule| {
+                        rule.policy_scopes
+                            .contains(&crate::Policy::PolicyScope::Module)
+                            && self.policy_is_file_decl()
+                    })
+                })
             {
                 return false;
             }
@@ -955,19 +960,6 @@ impl<'a> Parser<'a> {
                         &marker.name,
                         &crate::Policy::active_rule_names(),
                         marker.name_span,
-                    ));
-                }
-                if !Self::function_marker_has_applicator(&marker.name) {
-                    return Err(Diagnostic::error(
-                        "E0355",
-                        format!(
-                            "`#{}` cannot attach through this function marker list",
-                            marker.name
-                        ),
-                        "the marker registry gives every marker exact sites and a typed signature"
-                            .to_string(),
-                        "remove the marker or move it to its registered site".to_string(),
-                        Some(marker.span),
                     ));
                 }
                 if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
@@ -1275,33 +1267,6 @@ impl<'a> Parser<'a> {
                     }),
             );
             Ok(function)
-        }
-
-        pub(in crate::Parser) fn function_marker_has_applicator(name: &str) -> bool {
-            matches!(
-                name,
-                Syntax::MARKER_POLICY
-                    | Syntax::KW_UNSAFE
-                    | Syntax::KW_SCRUB
-                    | Syntax::MARKER_PRE
-                    | Syntax::MARKER_POST
-                    | Syntax::MARKER_INLINE
-                    | Syntax::MARKER_KERNEL
-                    | Syntax::MARKER_DOC
-                    | Syntax::KW_JOB
-                    | Syntax::MARKER_EVERY
-                    | Syntax::MARKER_REPLAYABLE
-                    | Syntax::MARKER_WASM_EXPORT
-                    | Syntax::KW_STATE
-                    | Syntax::KW_TRANSITION
-                    | Syntax::MARKER_FFI
-                    | Syntax::MARKER_UNDO
-                    | Syntax::MARKER_ABI
-                    | Syntax::MARKER_MUST_USE
-                    | Syntax::MARKER_META
-                    | Syntax::KW_REACTIVE
-                    | Syntax::MARKER_TARGET
-            )
         }
 
         pub(in crate::Parser) fn apply_unsafe_function_marker(

@@ -836,21 +836,7 @@ impl<'a> Parser<'a> {
                         "Use `#Layout(c)` on this enum.".to_string(), Some(variant_span)));
                 }
                 let mut def = self.enum_def_after_pub(is_pub, false)?;
-                let mut args = vec![crate::AST::Expr::Ident("c".to_string(), variant_span)];
-                let mut arg_labels = vec![None];
-                if let Some((width, span)) = tag_width {
-                    args.push(crate::AST::Expr::Ident(width, span));
-                    arg_labels.push(Some(("tag".to_string(), variant_span)));
-                }
-                def.type_markers.push(crate::AST::Marker {
-                    name: Syntax::MARKER_LAYOUT.to_string(),
-                    negated: false,
-                    name_span: marker.name_span,
-                    args,
-                    arg_labels,
-                    span: attr_span,
-                    ct: None,
-                });
+                def.type_markers.push(marker);
                 Ok(crate::AST::Item::Enum(def))
             } else {
                 if tag_width.is_some() {
@@ -861,6 +847,7 @@ impl<'a> Parser<'a> {
                 let mut def = self.struct_def_after_pub(is_pub)?;
                 def.layout = layout;
                 def.layout_span = Some(attr_span);
+                def.type_markers.push(marker);
                 Ok(crate::AST::Item::Struct(def))
             }
         }
@@ -925,6 +912,15 @@ impl<'a> Parser<'a> {
             let (attr, attr_name_span) = self.expect_ident("after `@`")?;
             debug_assert_eq!(attr, Syntax::MARKER_SINGLE_USE);
             let attr_span = Span::new(attr_start.start, attr_name_span.end);
+            let marker = crate::AST::Marker {
+                name: attr,
+                negated: false,
+                name_span: attr_name_span,
+                args: Vec::new(),
+                arg_labels: Vec::new(),
+                span: attr_span,
+                ct: None,
+            };
             // The lexer may insert a `Semi` after the marker identifier when the type
             // keyword is on the next line. Consume it so the next token is the keyword.
             while matches!(&self.peek().kind, TokKind::Semi) {
@@ -940,12 +936,14 @@ impl<'a> Parser<'a> {
                     let mut def = self.struct_def_after_pub(want_pub)?;
                     def.is_single_use = true;
                     def.single_use_span = Some(attr_span);
+                    def.type_markers.push(marker);
                     Ok(crate::AST::Item::Struct(def))
                 }
                 TokKind::KwEnum => {
                     let mut def = self.enum_def_after_pub(want_pub, false)?;
                     def.is_single_use = true;
                     def.single_use_span = Some(attr_span);
+                    def.type_markers.push(marker);
                     Ok(crate::AST::Item::Enum(def))
                 }
                 _ => Err(Diagnostic::error(
@@ -986,6 +984,15 @@ impl<'a> Parser<'a> {
             let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
             debug_assert_eq!(attr, Syntax::MARKER_MUST_USE);
             let attr_span = Span::new(attr_start.start, attr_name_span.end);
+            let marker = crate::AST::Marker {
+                name: attr,
+                negated: false,
+                name_span: attr_name_span,
+                args: Vec::new(),
+                arg_labels: Vec::new(),
+                span: attr_span,
+                ct: None,
+            };
             while matches!(&self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -998,12 +1005,14 @@ impl<'a> Parser<'a> {
                     let mut def = self.struct_def_after_pub(want_pub)?;
                     def.is_must_use = true;
                     def.must_use_span = Some(attr_span);
+                    def.type_markers.push(marker);
                     Ok(crate::AST::Item::Struct(def))
                 }
                 TokKind::KwEnum => {
                     let mut def = self.enum_def_after_pub(want_pub, false)?;
                     def.is_must_use = true;
                     def.must_use_span = Some(attr_span);
+                    def.type_markers.push(marker);
                     Ok(crate::AST::Item::Enum(def))
                 }
                 _ => Err(Diagnostic::error(
@@ -1047,6 +1056,15 @@ impl<'a> Parser<'a> {
                 ));
             }
             let attr_span = Span::new(attr_start.start, attr_name_span.end);
+            let marker = crate::AST::Marker {
+                name: attr,
+                negated: false,
+                name_span: attr_name_span,
+                args: Vec::new(),
+                arg_labels: Vec::new(),
+                span: attr_span,
+                ct: None,
+            };
             // The lexer may insert a `Semi` after the marker identifier when `struct` is
             // on the next line. Consume it so the next token is `struct` or `pub`.
             while matches!(&self.peek().kind, TokKind::Semi) {
@@ -1063,6 +1081,7 @@ impl<'a> Parser<'a> {
             let mut def = self.struct_def_after_pub(is_pub)?;
             def.is_published_schema = true;
             def.published_schema_span = Some(attr_span);
+            def.type_markers.push(marker);
             Ok(def)
         }
     
