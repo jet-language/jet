@@ -1,5 +1,7 @@
 # Surface research: split callable and control arrows
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Status
 
 Research baseline accepted and ratified on 2026-07-26 through
@@ -566,7 +568,7 @@ loop item; items inspect(item)
 
 The user must consume or deliberately discard that result.
 
-## Yielding loops
+## Collecting loops
 
 Only finite loops accept a yield arrow.
 
@@ -633,7 +635,7 @@ rows :: loop team; teams,
 Source clauses nest left to right.
 One header yields one flat list.
 
-An inner yielding loop preserves nesting:
+An inner collecting loop preserves nesting:
 
 ```jet
 groups :: loop team; teams ->
@@ -648,7 +650,7 @@ pairs :: loop pair; lefts.zip(rights) -> pair
 
 ### Other collectors
 
-The yielding loop returns a list.
+The collecting loop returns a list.
 Use collection APIs for other shapes:
 
 ```jet
@@ -1093,7 +1095,7 @@ Arrow branches must:
 Pattern arrows select arms.
 Arm results can be `Void` or a unified value type.
 
-### Yielding loops
+### Collecting loops
 
 A finite loop with `->`:
 
@@ -1159,7 +1161,7 @@ if cond -> effect           → if cond effect
 if cond -> { effects }      → if cond { effects }
 if cond { effects }         → unchanged
 loop header { effects }     → unchanged
-loop header -> value        → yielding loop
+loop header -> value        → collecting loop
 ```
 
 Current block-form effect control remains close to source-compatible.
@@ -1193,7 +1195,7 @@ Use current implicit capture ownership and capture-time copies.
 - Effect control has no arrow noise.
 - Existing multiline `if` and `loop` blocks stay clean.
 - One-line effect control becomes minimal.
-- Yielding loops are visible before type inference.
+- Collecting loops are visible before type inference.
 - A `Void` body cannot silently become a collection.
 - Named exits keep the control keyword first.
 - Protocol direction loses unrelated arrow use.
@@ -1208,7 +1210,7 @@ Use current implicit capture ownership and capture-time copies.
 - `=[Effects]=>` is a dense glyph cluster.
 - Adjacent one-line effect bodies need careful parsing and diagnostics.
 - `break(name, value)` gives named and unnamed exits different payload shapes.
-- Yielding loops still need substantial sema, TIR, JIT, and codegen work.
+- Collecting loops still need substantial sema, TIR, JIT, and codegen work.
 - Protocol migration assumes two endpoints.
 
 ## Risks

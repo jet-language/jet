@@ -2,6 +2,8 @@
 
 Audit of FFI, external dependencies, strings/literals/text, and data at boundaries. 2026-08-07. Card #1655. Ballot slate D-BOUND-*.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Executive summary
 
 Jet has already ratified every piece of one boundary law — as five separate laws that stop at their own borders. Typed heads check literal SQL and HTML but not URLs or paths. Codable decodes wire data but drops what it does not recognize. The FFI arrow names a foreign call but `#Transact` trusts every foreign runtime to roll back. jetpack locks a hash but nobody can read where the bytes came from. The fact ledger is ratified to hold taint and provenance rows, and nothing at any boundary writes one.
@@ -14,7 +16,7 @@ What the ballots ask, in one breath: finish the typed-head row (URL, Path, DateT
 
 What does not change: `DataTree` stays the one dynamic tree (D-SERDE-ACCESS=B). `Type.{"…"}` stays the one literal spelling (D-UNIFYLIT1=A). The fact ledger stays the one ledger (D-FACT-LAW1=B). The declined String surface stays declined (D-STR-DECLINE1=C). No invisible imports return (D-NAME-FILES1=C — `jet inspect bind` writes a file you can read). **Zero new mechanisms.** Every element is an instance of a rail the owner already ratified; the score is mechanisms deleted (sink registration as a concept, the FFI/data-schema divide, six hand-rolled JSON escapers, a duplicate JSON parser) and capabilities gained.
 
-Below the surface, the audit also found the compiler not eating its own law: at least eight hand-written JSON escapers (two produce invalid or mangled JSON), a second full JSON parser in `jet-pkg-model`, the streaming format enum hand-copied into the JIT instead of `include!`d, and the Codable derive built by `format!`-ing source text. Those are defect cards, not ballots — they fall out of the law for free.
+Below the surface, the audit also found the compiler not eating its own law: at least eight hand-written JSON escapers (two produce invalid or mangled JSON), a second full JSON parser in `jet-pkg-model`, the reader/writer format enum hand-copied into the JIT instead of `include!`d, and the Codable derive built by `format!`-ing source text. Those are defect cards, not ballots — they fall out of the law for free.
 
 ## The problem, briefly
 

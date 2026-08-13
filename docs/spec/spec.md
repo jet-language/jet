@@ -6,6 +6,8 @@ docs/spec/syntax-decisions.md (enforced by `tests/decisions.rs` on every
 ratified. The examples/ directory is the executable form of this spec: if
 the spec and a passing example disagree, the spec is wrong — fix the spec.
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 ## M1 — what exists today (values, expressions, control flow)
 
 ### Lexical rules
@@ -219,12 +221,12 @@ keep code readable from top to bottom. See
 - A finite source or C-style loop may use `-> expression` or `-> { ... }`.
   Each accepted iteration yields one non-unit value. The result is an eager
   List in iteration order. A header guard or `next` omits items. Multiple
-  source clauses yield one flat List; an explicitly nested yielding loop
+  source clauses yield one flat List; an explicitly nested collecting loop
   preserves nesting. Maps and Sets use explicit terminals. Lazy work uses the
   existing iterator adapters.
 - A bare or condition-only loop does not accept `->`. It returns one final
   value only through `break value` or `break(name, value)`. All payload exits
-  unify. In a yielding loop, `break` returns the partial List and payload
+  unify. In a collecting loop, `break` returns the partial List and payload
   breaks are rejected.
 - `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
   heads top to bottom. Bare values and ranges compare against the subject;

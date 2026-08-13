@@ -1,5 +1,7 @@
 # Arrow syntax consistency audit
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Date: 2026-07-27
 
 Scope: Tower cards #1207, #1204, #1211, and #1212.
@@ -10,10 +12,10 @@ The repository now follows the ratified decisions:
 
 - D-ARROW-CONTROL1: `=>` defines callable results. `=[Effects]=>` defines
   effectful callable results. `->` selects branch values and finite loop items.
-- D-LOOPEVAL1: effect loops have no arrow. Finite yielding loops use `->`.
+- D-LOOPEVAL1: effect loops have no arrow. Finite collecting loops use `->`.
 - D-LOOPSTATE1: ordinary result loops return through `break value`.
   Named exits use `break(name)`, `break(name, value)`, and `next(name)`.
-- D-COMPREHENSION1: a finite yielding loop eagerly returns `List<T>`.
+- D-COMPREHENSION1: a finite collecting loop eagerly returns `List<T>`.
   Maps use ordinary explicit construction, Sets use `Set.from`, and lazy work
   uses existing iterator adapters.
 
@@ -90,7 +92,7 @@ Passed:
 - focused formatter, AOT, interpreter, native JIT, golden, LSP hover, and LSP
   transcript tests;
 - focused LSP signature help for callable and effect arrows;
-- focused comptime/runtime parity for a yielding loop;
+- focused comptime/runtime parity for a collecting loop;
 - focused UI snapshots for E0072, E0073, E0074, E0075, and E0076;
 - focused refreshed `crypto_secret_name_collisions` snapshot;
 - focused E2405 and E2406 conversion snapshots;
@@ -116,7 +118,7 @@ build, then stopped in the root library suite because
 `Interpreter::tests::resident_jit_safe_task_examples` exhausted the default test
 thread stack. The exact test reproduces with the default stack and passes with
 `RUST_MIN_STACK=16777216`. It checks the separately owned concurrency examples;
-it does not exercise yielding loops, collection materialization, or retired
+it does not exercise collecting loops, collection materialization, or retired
 syntax acceptance.
 
 The four focused Tower cards contain the scoped evidence and independent

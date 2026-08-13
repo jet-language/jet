@@ -2,6 +2,8 @@
 
 Proposal, 2026-08-07, revision 3. Rev 2 swung too far toward compression: pattern-left binds read backwards, the loop-head forms hid their meaning, and several spellings collided with planned law. This revision was rebuilt from an adversarial syntax audit (inference load, garden-path parses, left-to-right verbalization, parser collisions) and a full cross-reference against ratified-but-unbuilt and planned cards. Every code block is labeled: **A — today** compiles now or is ratified law, **B — proposed** needs a ballot. Withdrawn rev-2 forms are shown struck through with the reason, so nothing disappears silently.
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Executive summary
 
 The ideas stand; the spellings changed. The ceremony-shortening for breaking down a result or optional stays, but every proposed form now reads subject-first, left to right, with the failure word written on the line. The adversarial audit's core finding: rev 2's forms all moved the pattern in front of the subject and deleted the word for a miss — every parser collision and misreading followed from that one move. The fix is one already-parsing shape: `subject == pattern ?? route`.
@@ -242,7 +244,7 @@ The full sweep ran against every ratified-but-unbuilt decision and planning/read
 | TEST1 statement test-bind | S31 (pattern `==` binds in conditions) — scope extension to statements is new law, stated in the ballot; E0405 (`??` needs a fallible left side) gains one named exception: a pattern-test left side with a diverging route | Named amendment |
 | TEST1 replaces the pattern-left refutable bind | S74's `Val(n) :: maybe_port() ?? return` — ratified, zero code (card #1652) | Amends S74: the unbuilt pattern-left form is retired before it is ever built; #1652 re-points to TEST1 |
 | `...rest` in list patterns | Two-dot discard (S74 struct `..`), three-dot capture (`{rest:...}` D-PARSESTR1/D-BINPAT1, `...xs` D-VARIADIC1) | Meshes — rev 2's `..rest` collided and is withdrawn |
-| FIND1 value loops | D-LOOPSTATE1 (labeled search loop ships today), S23/E0075 (payload breaks illegal in yielding loops), D-LOOP-STMT-ARROW1 (arrow statement loops), D-LOOP-SUBJECT1 (bindingless arrow loops) | Cited; FIND1 is brace-form only, arrow forms unchanged; the bindingless arrow form cannot host `break v` (E0075) and the ballot says so |
+| FIND1 value loops | D-LOOPSTATE1 (labeled search loop ships today), S23/E0075 (payload breaks illegal in collecting loops), D-LOOP-STMT-ARROW1 (arrow statement loops), D-LOOP-SUBJECT1 (bindingless arrow loops) | Cited; FIND1 is brace-form only, arrow forms unchanged; the bindingless arrow form cannot host `break v` (E0075) and the ballot says so |
 | FNBODY1 | D-ARROW-CONTROL1=A (fn `= expr`), D-ALIAS-OP1=B (aliases to `::`; its rationale kept fn `=`), D-CONF-GENSPELL1=A (modules to `::`), S61/D-FIELDDEF1/D-META-CONST1 (defaults and discriminants keep `=`) | Named amendment; the fill-vs-define split leaves every `=` fill-site untouched |
 | Refinement types as patterns (`Int(0..100)` in a test) | D-TYPE2-SPELL1=A gives type-position refinements and `.from_int` conversion only | Deferred, named in What stays out — not folded in silently |
 | Wait table | D-CONC-CHAN2=D, card #1560 | Unchanged, wall restated |

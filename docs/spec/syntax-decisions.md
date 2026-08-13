@@ -18,6 +18,8 @@ git history of this file. Canonical truth = `Syntax.rs` + this file
 (D-CANON-SOURCE1); old-spelling teaching is paused until post-Epoch 6
 (D-S14-PAUSE) — retired forms get ordinary syntax errors.
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 ## Ratified
 
 ### Names & conventions
@@ -350,7 +352,7 @@ is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range ste
 A finite source loop may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items. Multiple source
-clauses nest left to right and yield one flat List. An inner yielding loop
+clauses nest left to right and yield one flat List. An inner collecting loop
 preserves nesting. `next` omits the current item. Maps, Sets, and lazy
 iteration use ordinary Map construction, `Set.from(...)`, and the existing
 iterator adapters.
@@ -391,9 +393,9 @@ loop's payload. Loop names share the ordinary namespace but are not runtime
 values. Dot exits and the older `@` spellings are retired.
 
 An ordinary loop returns one final value only through break payloads. Every
-payload exit must unify. A yielding loop's bare or targeted `break` returns
+payload exit must unify. A collecting loop's bare or targeted `break` returns
 the accumulated List, and its `next` omits the current item. Payload breaks
-are rejected in yielding loops because their result is already `[T]`.
+are rejected in collecting loops because their result is already `[T]`.
 **D-CHOOSE-FIND1=A**: a finite source loop in value position uses a braced
 body with `break value` exits and must be followed by a written exhaustion
 route: `loop item, source { if found(item) { break item } } ?? fallback`.
@@ -3181,8 +3183,8 @@ index, not a substitute for that law.
   `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. Multiple
   identities use separate named Mailers; there is no per-message override.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
-  whole-value and reader/writer stream modes over the shared `DataTree`
-  and `Codable` machinery. Streaming is a mode of that adapter, never a second
+  whole-value and reader/writer modes over the shared `DataTree`
+  and `Codable` machinery. Reader/writer access is a mode of that adapter, never a second
   codec library.
 
   **D-ENCSTREAM-SURFACE1=A** fixes codec-native, synchronous pull handles.
@@ -6650,6 +6652,21 @@ call form. The grant maps declared effects to normalized path sets and is
 checked before mapping. Native export produces static and shared libraries,
 the C header, and generated bindings for named languages. No new lexer token,
 keyword, or Jet-to-Jet ABI promise enters the surface.
+
+**2026-08-13 — D-MATRIX-MUL1=F / D-MATRIX-LIT1=E /
+D-MATRIX-BCAST1=E / D-MATRIX-INDEX1=E / D-MATRIX-SOLVE1=B /
+D-MATRIX-HOME1=D** *(card #1437)*: `Matrix<M,N>` and `Vec<N>` use the
+ratified D-TYPE2-MEASURE1 substrate. `Matrix * Matrix` composes maps, and a
+leading dot selects cell arithmetic only on `Matrix`; `Grid` and lane vectors
+already use `*` cell by cell. A matrix row ends at a source line break or `;`.
+Extent one broadcasts along its stated axis, and vectors use `.as_row()` or
+`.as_column()` before a matrix operation. Brackets read cells, bands, and
+windows; `.row(i)` and `.col(j)` name whole axes, a scalar index drops its axis,
+and a range keeps it. `.solve(y)` answers square systems and
+`.least_squares(y)` answers tall systems. Types, literals, indexing, transpose,
+`+ - *`, and reductions need no import; solving, determinants, decompositions,
+and transforms use `core.linalg`. The proposal and all illustrative examples
+live in `docs/proposals/matrix-surface.md`; implementation is a later card.
 
 ## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
 

@@ -1,5 +1,7 @@
 # Jet example quality audit
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Date: 2026-07-26
 
 ## Decision
@@ -347,7 +349,7 @@ Passed:
 - focused `jet check` on every semantically rewritten example;
 - standalone corpus sweep: 395 passed, 20 known product gaps;
 - focused AOT golden tests for the basic branch, resource cleanup, hostile data,
-  encoding stream types, XML stream, and headless game examples.
+  encoding reader/writer types, XML reader, and headless game examples.
 
 Also run:
 

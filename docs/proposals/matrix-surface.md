@@ -1,443 +1,410 @@
 # Matrix and linear algebra surface
 
-Status: proposal for owner decision. Card #1437. No code lands from this document.
+Status: design record for card #1437. The surface decisions are ratified. This card
+adds no implementation.
 
 Foundation: **D-TYPE2-MEASURE1=A** (ratified 2026-08-06) and
-`docs/proposals/type-system-v2-carriers-and-knowledge.md`. That decision gives Jet one
-substrate for every compile-time number that rides inside a type: fixed-list lengths,
-SIMD lane counts, dimension exponents, and matrix sides. Every archetype below writes
-its shapes as `Matrix<M, N>` and `Vec<N>` on that one substrate. None of them proposes a
-second shape-encoding mechanism. The measure decision states in its own text that it
-"hands the matrix card its foundation... without deciding its syntax". Deciding that
-syntax is this document's only job.
+[`type-system-v2-carriers-and-knowledge.md`](type-system-v2-carriers-and-knowledge.md).
+That decision gives Jet one substrate for every compile-time number in a type. It
+covers list lengths, lane counts, dimension exponents, and matrix sides. Every
+archetype in this document uses `Matrix<M, N>` and `Vec<N>` on that substrate. No
+second shape-encoding mechanism appears here. The measure proposal states that this
+substrate gives card #1437 its foundation without deciding its syntax.
+
+All Jet snippets in this proposal are illustrative. They are not tested until the
+implementation cards land.
+
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
 ## Executive summary
 
-Jet has no matrix surface today. `core.compute` exposes ranked `Tensor<T>` storage through
-functions — `compute.matrix(2, 3, 2.0)`, `compute.matmul(a, b)`, `compute.set(&t, [0, 1], 4.0)`
-— and `core.linalg` ships a closed family of fixed sizes (`Vec2/3/4`, `Mat3/Mat4`). There
-is no shape-typed matrix value, no literal, and no operator arithmetic beyond the small
-closed family. A least-squares fit today is a chain of fallible function calls.
+Jet has no general matrix value or matrix literal today. `core.compute` exposes
+ranked `Tensor<T>` storage through functions, and `core.linalg` has a small fixed
+family such as `Vec2/3/4` and `Mat3/Mat4`. This proposal supplies the missing surface:
+shape-checked `Matrix<M, N>` and `Vec<N>`, grid literals, matrix and cell arithmetic,
+broadcasting, indexing, windows, and named system solves.
 
-Four archetypes below write the same fit end to end. They are four different user
-experiences, not one design in four coats:
+The owner has ratified six surface decisions:
 
-| | How you multiply matrices | How you multiply cell by cell | How you solve |
-|---|---|---|---|
-| **A — Textbook** | `a * b` | `a .* b` | `x \ y` |
-| **B — One glyph, one meaning** | `a.matmul(b)` | `a * b` | `x.solve(y)` |
-| **C — One new sigil** | `a @ b` | `a * b` | `x.solve(y)` |
-| **D — The type says what it is** | `a * b` on `Matrix` | `a * b` on `Grid` | `x.solve(y)` |
+| Area | Decision | Result |
+|---|---|---|
+| Matrix multiplication | `D-MATRIX-MUL1=F` | `Matrix * Matrix` composes maps; `Matrix .* Matrix` selects cell arithmetic. |
+| Literals | `D-MATRIX-LIT1=E` | A line break or `;` ends a row. |
+| Broadcasting | `D-MATRIX-BCAST1=E` | Extent `1` repeats along that axis. |
+| Indexing | `D-MATRIX-INDEX1=E` | Brackets handle cells, bands, and windows; `.row` and `.col` name axes. |
+| Solving | `D-MATRIX-SOLVE1=B` | `.solve` answers square systems; `.least_squares` answers tall systems. |
+| Availability | `D-MATRIX-HOME1=D` | Basic matrix use is in the Prelude; advanced linear algebra is in `core.linalg`. |
 
-Six owner choices come out of the design. They are minted as ballots on card #1437:
-the multiply spelling, the literal spelling, the broadcasting rule, the indexing
-spelling, the solve spelling, and where the types live.
+No owner choice remains open in this proposal. The decision table at the end is the
+ballot slate already ratified for card #1437. No Tower write is part of this worktree.
 
-## What is already settled
+## Worked example
 
-Do not re-decide these. Every archetype below obeys all of them.
-
-- **Shapes ride the measure substrate** — `Matrix<M, N>`, `Vec<N>`, dimension arithmetic
-  (D-TYPE2-MEASURE1=A). A side mismatch is a compile error, not a runtime check.
-- **`Tensor<T>` owns ranked storage; `Vec<N>` and `Matrix<M, N>` share that substrate and
-  cross it with no copy** (D-COMPUTE-TYPE1=D).
-- **Views are a place rule, not a method** — a bare place projection is a read window,
-  `&place` is the exclusive write window, `~place` is an independent owned copy
-  (D-SHAPE-PLACE1=A). A method call is not part of a place, so an in-place edit must be
-  written on a bracket place.
-- **Stored element order is column-major, and the small fixed family carries `F64`
-  components** (D-LINALG1).
-- **Operators dispatch through ordinary trait hooks** (D-OPDEF1=A). The built-in math
-  family is closed today (E2511), but the dispatch mechanism is the ordinary one.
-- **The operator slate**: `^` raises to a power and groups to the right (D-EXPOP1=A,
-  D-EXPSEM1=A); `/%` divides and rounds down (D-FLOORDIV1=A); `%` is the floored modulo
-  and `%%` the truncated remainder (D-MODSEM1=A); `Int / Int` gives a Float (D-INTDIV1=A);
-  `Int` is arbitrary precision (D-INTBIG1=A); exclusive-or is `~|` (D-XORSPELL1=A).
-- **`==` on a math value answers one `Bool`**, not a grid of them (D-LINALG1). Cell-by-cell
-  comparison is a named method in every archetype, so `if a == b` never means "a grid
-  of yes and no".
-
-## The worked example
-
-Eight stopping-distance measurements, taken from Ezekiel's 1930 study and shipped in R
-as the first eight rows of the `cars` data set. Speed is in miles per hour, stopping
-distance in feet.
+The example is a least-squares fit over the first eight rows of R's `cars` data:
 
 | speed | 4 | 4 | 7 | 7 | 8 | 9 | 10 | 10 |
 |---|---|---|---|---|---|---|---|---|
-| **distance** | 2 | 10 | 4 | 22 | 16 | 10 | 18 | 26 |
+| distance | 2 | 10 | 4 | 22 | 16 | 10 | 18 | 26 |
 
-The task: fit `distance = intercept + slope * speed` by least squares, report the mean
-squared error, and predict the stopping distance at 12 mph.
+The task is `distance = intercept + slope * speed`. Every archetype builds `x` as
+`Matrix<8, 2>`, `y` as `Matrix<8, 1>`, solves the fit, reports mean squared error,
+and predicts distance at 12 mph. The expected values are intercept `-3.4232`, slope
+`2.2947`, mean squared error `36.5047`, and prediction `24.1129` feet.
 
-The answer, to four places: intercept `-3.4232`, slope `2.2947`, mean squared error
-`36.5047`, prediction at 12 mph `24.1129` feet.
+## Ratified surface
 
-Every program below prints those four numbers. Each one builds the design matrix `x`
-(a column of ones beside the speeds, shape 8 by 2) and the observed column `y`
-(shape 8 by 1), then solves the normal equations.
+### Shape types and storage
 
----
+`Matrix<M, N>` is a shape-typed matrix with `M` rows and `N` columns. `Vec<N>` is the
+public shape type for a vector. Their `M`, `N`, and `N` values are measures under
+D-TYPE2-MEASURE1.
+The checker rejects a matrix product when its inner sides differ and computes the
+outer sides when they match:
 
-## Archetype A — Textbook
+~~~
+a :: Matrix<3, 4>
+b :: Matrix<4, 2>
+c :: a * b                         // Matrix<3, 2>
+bad :: a * Matrix<3, 2>             // rejected: 4 does not match 3
+~~~
 
-**The idea.** The formula on the page is the line you type. `*` between two matrices is
-matrix multiplication, because that is what `*` means in every mathematics textbook and
-in every mathematics tool. Cell-by-cell work asks for itself with a leading dot: `.*`,
-`./`, `.^`. Solving is `\`, exactly as MATLAB and Julia spell it.
+`Tensor<T>` owns ranked storage. `Vec<N>` and `Matrix<M, N>` share that substrate and
+cross it without a copy (D-COMPUTE-TYPE1=D). Stored elements use the ratified
+column-major layout. The fixed graphics family remains an alias family over the
+general substrate.
 
-**Shapes.** `Matrix<M, N>` and `Vec<N>` on the D-TYPE2-MEASURE1 measure substrate. The
-inner sides of a product must match, and the checker composes the outer sides.
+### Literals
 
-**Literals.** A line break ends a row, so the source looks like the grid.
+A row ends at a source line break or at `;`. The type carries the expected shape, so
+the reader does not count a flat list by eye.
 
-**Broadcasting.** A value whose axis has extent 1 stretches along that axis.
+~~~
+tall :: Matrix<3, 2>.{
+    1, 4
+    1, 7
+    1, 10
+}
 
-**Indexing.** `m[i, j]`. A range in a slot keeps that axis; a bare `..` means the whole
-axis.
+small :: Matrix<1, 2>.{ 1, 12 }
+same :: Matrix<2, 2>.{ 1, 0; 0, 1 }
+~~~
 
-```jet
+The grid form works in a tall declaration. The one-line form works inside a call.
+Both forms carry one shape and one literal idea.
+
+### Matrix multiplication and cell arithmetic
+
+`Matrix * Matrix` is matrix multiplication. It matches inner measures and composes
+outer measures. A leading dot selects cell arithmetic on a `Matrix`; it is legal only
+there:
+
+~~~
+pose :: Matrix<3, 3>
+spin :: Matrix<3, 3>
+map :: pose * spin                   // Matrix<3, 3>, map composition
+cells :: pose .* spin                // Matrix<3, 3>, cell by cell
+~~~
+
+`Grid` and lane vectors already multiply cell by cell under `*` (D-VECARITH1). A dot
+on a surface that is already cell by cell is refused, so one operation has one
+spelling. Matrix power uses `^`; repeated matrix multiplication is the meaning of
+`m ^ 3`. A leading dot selects cell power where the Matrix surface permits it.
+
+The other scalar operators keep their ratified meanings. `/` follows Float division;
+`Int / Int` gives a Float; `Int` is arbitrary precision. `/%` rounds division down,
+`%` is floored modulo, and `%%` is truncated remainder. Lifting those operations to
+cells never changes the scalar rule. `==` returns one `Bool` for a math value; a
+cell-by-cell comparison is a named operation.
+
+### Broadcasting
+
+An axis of extent `1` repeats silently. The value must state its direction before it
+meets a matrix:
+
+~~~
+table :: Matrix<8, 2>
+mean :: Matrix<1, 2>.{ 6.0, 1.0 }       // row broadcast
+centred :: table - mean                 // Matrix<8, 2>
+
+speed :: Vec<8>
+column :: speed.as_column()             // Matrix<8, 1>
+row :: speed.as_row()                   // Matrix<1, 8>
+~~~
+
+An operation that would repeat both operands into a larger result is rejected. Its
+diagnostic names `.as_row()` or `.as_column()` as the explicit spelling that resolves
+the direction.
+
+### Indexing, slicing, and windows
+
+Brackets handle precise access. `.row(i)` and `.col(j)` are the readable names for
+whole axes. A scalar index drops its axis; a range keeps its axis.
+
+~~~
+cell :: table[2, 1]                    // Float
+row :: table.row(2)                    // row view
+column :: table.col(1)                 // column view
+band :: table[0..<4, ..]               // Matrix<4, 2> window
+one_row :: table[2, ..]                // one axis dropped
+~~~
+
+The existing place rule controls ownership. A bare place is a read window, `&place`
+is an exclusive write window, and `~place` is an owned copy (D-SHAPE-PLACE1=A):
+
+~~~
+speeds :: table[.., 1]                 // read window; no copy
+&table[.., 1] *= 2.0                   // write window; in place
+kept :: ~table[0..<4, ..]              // owned Matrix<4, 2>
+~~~
+
+Layout stays column-major by default. An expert can select the existing layout
+marker for a storage-boundary type. Views and in-place edits do not introduce a
+second matrix mechanism.
+
+### Solving and the home boundary
+
+`x.solve(y)` answers a square system. `x.least_squares(y)` answers a tall system and
+returns the closest fit. The method says which question was asked; a reader does not
+need to infer it from the shape.
+
+Types, literals, indexing, transpose, `+`, `-`, `*`, and reductions need no import.
+Solving, determinants, decompositions, and transforms live in `core.linalg`, in the
+same way that `sqrt` lives in `core.math`.
+
+## Archetype 1 — Beginner table fit
+
+The beginner starts with two vectors. The library builds the design matrix, and the
+named solve states the fit question. The shape comments show the measure carried by
+each step.
+
+~~~
 use core.linalg as la
 
 fn run() {
     speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
-    stop  :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
+    distance :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
 
-    // The design matrix: a column of ones beside the speeds.
-    x :: Matrix.columns(la.ones<8>(), speed)     // Matrix<8, 2>
-    y :: stop.as_column()                        // Matrix<8, 1>
+    x :: Matrix.columns(la.ones<8>(), speed)       // Matrix<8, 2>
+    y :: distance.as_column()                      // Matrix<8, 1>
+    beta :: x.least_squares(y) ?? panic("no fit")  // Matrix<2, 1>
 
-    // `\` solves. Square system: the exact answer. Tall system: least squares.
-    beta :: x \ y ?? panic("no fit")             // Matrix<2, 1>
-    print("intercept {beta[0, 0]}  slope {beta[1, 0]}")
-    // intercept -3.4232…  slope 2.2947…
+    residual :: y - x * beta                       // Matrix<8, 1>
+    mse :: (residual .* residual).mean()           // Float: 36.5047
+    query :: Matrix<1, 2>.{ 1, 12 }
+    prediction :: query * beta                     // Matrix<1, 1>: 24.1129
 
-    // The normal-equation spelling gives the same answer:
-    //   beta :: (x.t * x) \ (x.t * y) ?? panic("singular")
+    print("intercept {beta[0, 0]} slope {beta[1, 0]}")
+    print("mse {mse}")
+    print("at 12 mph {prediction[0, 0]}")
+}
+~~~
 
-    residual :: y - x * beta                     // Matrix<8, 1>
-    print("mean squared error {(residual .* residual).mean()}")
-    // mean squared error 36.5047…
+Output: intercept `-3.4232`, slope `2.2947`, mean squared error `36.5047`, and
+prediction `24.1129` feet.
 
-    ask :: Matrix<1, 2>.{
-        1, 12
+## Archetype 2 — Analyst with the formula in view
+
+The analyst writes the same data as two shape-typed matrices. The normal equations
+make the square solve visible. This is longer than the beginner path but matches the
+formula used in a notebook or a textbook.
+
+~~~
+use core.linalg
+
+fn run() {
+    x :: Matrix<8, 2>.{
+        1, 4
+        1, 4
+        1, 7
+        1, 7
+        1, 8
+        1, 9
+        1, 10
+        1, 10
     }
-    print("12 mph stops in {(ask * beta)[0, 0]} feet")
-    // 12 mph stops in 24.1129… feet
-}
-```
-
-**The beginner sees** the textbook formula and nothing else. Shapes are inferred from the
-data, so no shape is ever written by hand in this program.
-
-**The expert reaches for** windows, in-place edits, and layout, all through rules the
-language already has:
-
-```jet
-    speeds :: x[.., 1]        // read window over the second column — no copy
-    &x[.., 1] *= 2.0          // write window: doubles that column in place
-    kept :: ~x[0..<4, ..]     // an owned copy that can outlive `x`
-
-    #Layout(row_major)
-    struct Frame { pixels: Matrix<1080, 1920> }   // column-major is the default
-```
-
-**Against the operator slate.** `^` on a square matrix is the matrix power — `m ^ 3` is
-`m * m * m` — and `.^` raises every cell. `/` divides cell by cell and never solves, so
-`\` is the one solve spelling. `/%` and `%` apply cell by cell under the scalar rule.
-`==` answers one `Bool`; `.eq_cells(b)` answers a grid.
-
-**What this costs.** `*` reads two ways depending on what sits beside it. Two square
-matrices multiply as maps under `*` and cell by cell under `.*`, and both are
-well-shaped, so a person who meant the other one gets a wrong answer with no error.
-
----
-
-## Archetype B — One glyph, one meaning
-
-**The idea.** No operator ever changes meaning. Every arithmetic operator is cell by
-cell on every math value, everywhere, including matrices. Linear algebra is named:
-`.matmul(b)`, `.t`, `.solve(y)`, `.det()`, `.inverse()`. No new sigils enter the
-language.
-
-**Shapes.** As above, on the measure substrate. `.matmul` composes the outer sides and
-requires the inner sides to match.
-
-**Literals.** Each row is an ordinary list, so nothing new is learned.
-
-**Broadcasting.** Same rule as A.
-
-**Indexing.** `m[i, j]`, with `m.row(i)` and `m.col(j)` for whole axes.
-
-```jet
-use core.linalg as la
-
-fn run() {
-    speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
-    stop  :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
-
-    x :: Matrix.columns(la.ones<8>(), speed)     // Matrix<8, 2>
-    y :: stop.as_column()                        // Matrix<8, 1>
-
-    xt :: x.t                                    // Matrix<2, 8>, a view
-    beta :: xt.matmul(x).solve(xt.matmul(y)) ?? panic("singular")
-    print("intercept {beta[0, 0]}  slope {beta[1, 0]}")
-    // intercept -3.4232…  slope 2.2947…
-
-    residual :: y - x.matmul(beta)               // Matrix<8, 1>
-    print("mean squared error {(residual * residual).mean()}")
-    // mean squared error 36.5047…
-
-    ask :: Matrix<1, 2>.{ [1, 12] }
-    print("12 mph stops in {ask.matmul(beta)[0, 0]} feet")
-    // 12 mph stops in 24.1129… feet
-}
-```
-
-**The beginner sees** one meaning per symbol. `a * b` multiplies cell by cell whether
-`a` is a number, a lane vector, or a matrix. Nothing is guessed from the shapes.
-
-**The expert reaches for** the same window rules, plus an accumulating multiply that
-writes into storage that already exists:
-
-```jet
-    out := Matrix<2, 2>.zeros()
-    xt.matmul_into(&out, x)   // no new storage
-    &x[.., 1] *= 2.0
-```
-
-**Against the operator slate.** `^` raises every cell to a power; the matrix power is
-`m.power(3)`. `/` divides cell by cell. `/%` and `%` apply cell by cell. `==` answers one
-`Bool`.
-
-**What this costs.** The textbook line disappears. `(XᵀX)⁻¹Xᵀy` becomes a chain of method
-calls, and long algebra reads as a pipeline instead of a formula. The audience Jet is
-courting — the people who already write `^` for powers — write matrix products constantly.
-
----
-
-## Archetype C — One new sigil
-
-**The idea.** Cell-by-cell arithmetic keeps every existing operator, and matrix
-multiplication gets one new infix symbol of its own: `@`. Python added exactly this in
-2014 after twenty years of overloading `*`. The two multiplications are visibly
-different in the source, and neither one changes meaning by type.
-
-**Shapes.** As above. `@` matches the inner sides and composes the outer sides.
-
-**Literals, broadcasting, indexing.** As B.
-
-```jet
-use core.linalg as la
-
-fn run() {
-    speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
-    stop  :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
-
-    x :: Matrix.columns(la.ones<8>(), speed)     // Matrix<8, 2>
-    y :: stop.as_column()                        // Matrix<8, 1>
-
-    beta :: (x.t @ x).solve(x.t @ y) ?? panic("singular")
-    print("intercept {beta[0, 0]}  slope {beta[1, 0]}")
-    // intercept -3.4232…  slope 2.2947…
-
-    residual :: y - x @ beta                     // Matrix<8, 1>
-    print("mean squared error {(residual * residual).mean()}")
-    // mean squared error 36.5047…
-
-    ask :: Matrix<1, 2>.{ [1, 12] }
-    print("12 mph stops in {(ask @ beta)[0, 0]} feet")
-    // 12 mph stops in 24.1129… feet
-}
-```
-
-**The beginner sees** two multiply symbols and must learn which is which once. After
-that, no line is ambiguous and no shape decides a meaning.
-
-**The expert reaches for** the same windows and the same in-place multiply as B.
-
-**Against the operator slate.** `@` sits at the same precedence as `*`, so `a @ b * c`
-groups left to right. `^` raises every cell. `/`, `/%`, and `%` are cell by cell.
-`==` answers one `Bool`.
-
-**What this costs.** One more symbol in a language that has just spent three decisions
-tidying its operator set. `@` is not a mathematical symbol; it has to be taught. Ported
-MATLAB and Julia code needs every `*` rewritten.
-
----
-
-## Archetype D — The type says what it is
-
-**The idea.** Two shape-typed values sit on one storage substrate. `Matrix<M, N>` is a
-**linear map** and multiplies by composition. `Grid<M, N>` is a **table of numbers** and
-multiplies cell by cell. No operator is overloaded and no new symbol is minted: `*` asks
-the type what multiplication means, which is the ordinary rule the whole language
-already uses (D-OPDEF1). You say which thing you have once, when you build it, and the
-rest of the file reads without ambiguity.
-
-Crossing between them is one written word and costs nothing: `m.cells()` is a `Grid`
-view of the same storage, and `g.as_map()` is a `Matrix` view of it.
-
-**Shapes.** Both types carry `<M, N>` on the measure substrate. A `Matrix` product
-matches inner sides; a `Grid` product requires equal shapes.
-
-**Literals.** A line break ends a row, for both types.
-
-**Broadcasting and indexing.** As A.
-
-```jet
-use core.linalg as la
-
-fn run() {
-    speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
-    stop  :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
-
-    x :: Matrix.columns(la.ones<8>(), speed)     // Matrix<8, 2> — a linear map
-    y :: stop.as_column()                        // Matrix<8, 1>
-
-    beta :: (x.t * x).solve(x.t * y) ?? panic("singular")
-    print("intercept {beta[0, 0]}  slope {beta[1, 0]}")
-    // intercept -3.4232…  slope 2.2947…
-
-    // Squaring residuals is cell-by-cell work, so ask for the cells.
-    residual :: (y - x * beta).cells()           // Grid<8, 1>, a view
-    print("mean squared error {(residual * residual).mean()}")
-    // mean squared error 36.5047…
-
-    ask :: Matrix<1, 2>.{
-        1, 12
+    y :: Matrix<8, 1>.{
+        2
+        10
+        4
+        22
+        16
+        10
+        18
+        26
     }
-    print("12 mph stops in {(ask * beta)[0, 0]} feet")
-    // 12 mph stops in 24.1129… feet
+
+    xt :: x.t                                    // Matrix<2, 8>
+    normal :: xt * x                              // Matrix<2, 2>
+    rhs :: xt * y                                 // Matrix<2, 1>
+    beta :: normal.solve(rhs) ?? panic("singular") // Matrix<2, 1>
+
+    residual :: y - x * beta                      // Matrix<8, 1>
+    mse :: (residual .* residual).mean()          // Float: 36.5047
+    query :: Matrix<1, 2>.{ 1, 12 }
+    prediction :: query * beta                    // Matrix<1, 1>: 24.1129
+
+    print("intercept {beta[0, 0]} slope {beta[1, 0]}")
+    print("mse {mse}")
+    print("at 12 mph {prediction[0, 0]}")
 }
-```
+~~~
 
-**The beginner sees** one multiply symbol that always means "multiply these two things
-the way these things multiply" — the same rule as `+` on text and `+` on numbers. The
-first line of the program says which world it is in.
+The output is the same: intercept `-3.4232`, slope `2.2947`, mean squared error
+`36.5047`, and prediction `24.1129` feet.
 
-**The expert reaches for** the same window rules, and for the free crossing between the
-two readings:
+## Archetype 3 — Data analyst with broadcast and labels
 
-```jet
-    normalized :: (x.cells() / x.cells().max_of_column()).as_map()
-    &x[.., 1] *= 2.0          // write window, in place
-    kept :: ~x[0..<4, ..]
-```
+The data analyst keeps table operations visible. The row-shaped offset broadcasts
+over the eight observations. The analyst reads the speed column by name before
+solving the same fit.
 
-**Against the operator slate.** `^` on a `Matrix` is the matrix power; `^` on a `Grid`
-raises every cell. `/` on a `Grid` divides cell by cell; `/` between two `Matrix` values
-is refused with a diagnostic that names `.solve` and `.cells()`. `/%` and `%` are `Grid`
-operators only. `==` answers one `Bool` on both types.
+~~~
+use core.linalg as la
 
-**What this costs.** Two type names instead of one, and library authors must choose which
-they accept. Code that mixes both readings in one expression writes `.cells()` or
-`.as_map()` at the crossing point.
+fn run() {
+    speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
+    distance :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
 
----
+    raw :: Matrix.columns(la.ones<8>(), speed)       // Matrix<8, 2>
+    offset :: Matrix<1, 2>.{ 0, 0 }                 // Matrix<1, 2>
+    x :: raw + offset                                // Matrix<8, 2>, broadcast
+    speed_column :: x.col(1)                         // column view of Matrix<8, 2>
+    y :: distance.as_column()                        // Matrix<8, 1>
 
-## The same fit in MATLAB, Julia, NumPy, and R
+    beta :: x.least_squares(y) ?? panic("no fit")    // Matrix<2, 1>
+    residual :: y - x * beta                         // Matrix<8, 1>
+    mse :: (residual .* residual).mean()             // Float: 36.5047
+    query :: Matrix<1, 2>.{ 1, 12 }
+    prediction :: query * beta                       // Matrix<1, 1>: 24.1129
 
-**MATLAB.** `*` is matrix multiply, `.*` is cell by cell, `\` solves and falls back to
-least squares for a tall system, `'` transposes.
+    print("intercept {beta[0, 0]} slope {beta[1, 0]}")
+    print("first speed {speed_column[0]}")
+    print("mse {mse}")
+    print("at 12 mph {prediction[0, 0]}")
+}
+~~~
 
-```matlab
+The added column read does not change the fit. Output remains intercept `-3.4232`,
+slope `2.2947`, mean squared error `36.5047`, and prediction `24.1129` feet.
+
+## Archetype 4 — Systems engineer with views
+
+The systems engineer keeps the same typed calculation but controls storage. The
+window edit is explicit, and the detached sample window owns its data. The layout
+marker remains an expert storage choice, not a new matrix type.
+
+~~~
+use core.linalg as la
+
+fn run() {
+    speed :: Vec<8>.{ 4, 4, 7, 7, 8, 9, 10, 10 }
+    distance :: Vec<8>.{ 2, 10, 4, 22, 16, 10, 18, 26 }
+
+    x :: Matrix.columns(la.ones<8>(), speed)       // Matrix<8, 2>
+    y :: distance.as_column()                      // Matrix<8, 1>
+    speed_view :: x[.., 1]                         // Matrix<8, 1> read view
+    sample :: ~x[0..<4, ..]                        // Matrix<4, 2> owned copy
+    &x[.., 1] *= 1.0                               // write view; same values
+
+    beta :: x.least_squares(y) ?? panic("no fit")  // Matrix<2, 1>
+    residual :: y - x * beta                       // Matrix<8, 1>
+    mse :: (residual .* residual).mean()           // Float: 36.5047
+    query :: Matrix<1, 2>.{ 1, 12 }
+    prediction :: query * beta                     // Matrix<1, 1>: 24.1129
+
+    print("intercept {beta[0, 0]} slope {beta[1, 0]}")
+    print("first speed {speed_view[0]} sample rows {sample.rows}")
+    print("mse {mse}")
+    print("at 12 mph {prediction[0, 0]}")
+}
+~~~
+
+The storage controls do not change the result: intercept `-3.4232`, slope `2.2947`,
+mean squared error `36.5047`, and prediction `24.1129` feet.
+
+## Comparisons
+
+The data and task are the same in every language: fit `distance` from `speed`, report
+the coefficients and mean squared error, then predict at 12 mph.
+
+## MATLAB
+
+`*` is matrix multiplication, `.*` is cell arithmetic, and `\` solves or fits a tall
+system.
+
+~~~
 speed = [4 4 7 7 8 9 10 10]';
-dist  = [2 10 4 22 16 10 18 26]';
+distance = [2 10 4 22 16 10 18 26]';
 X = [ones(8,1) speed];
-beta = X \ dist;
-fprintf('intercept %.4f slope %.4f\n', beta(1), beta(2));
-res = dist - X*beta;
-fprintf('mse %.4f\n', mean(res.*res));
-fprintf('at 12 mph: %.4f\n', [1 12]*beta);
-```
+beta = X \ distance;
+residual = distance - X * beta;
+fprintf('intercept %.4f slope %.4f mse %.4f at12 %.4f\n', ...
+    beta(1), beta(2), mean(residual .* residual), [1 12] * beta);
+~~~
 
-**Julia.** The same operator family as MATLAB, plus a general rule: a leading dot on any
-operator or function call means "do this to every element", so `sqrt.(v)` and `a .* b`
-are one idea.
+## Julia
 
-```julia
+Julia uses the same textbook `*` and `\` forms and adds dotted broadcasting.
+
+~~~
 speed = [4.0, 4, 7, 7, 8, 9, 10, 10]
-dist  = [2.0, 10, 4, 22, 16, 10, 18, 26]
+distance = [2.0, 10, 4, 22, 16, 10, 18, 26]
 X = hcat(ones(8), speed)
-beta = X \ dist
-println("intercept ", beta[1], " slope ", beta[2])
-res = dist - X*beta
-println("mse ", sum(res .* res) / 8)
-println("at 12 mph: ", ([1.0 12.0] * beta)[1])
-```
+beta = X \ distance
+residual = distance - X * beta
+println(beta[1], " ", beta[2], " ", mean(residual .* residual), " ", ([1.0 12.0] * beta)[1])
+~~~
 
-**NumPy.** `*` is cell by cell, `@` is matrix multiply, `.T` transposes, and the fit is a
-named function.
+## NumPy
 
-```python
+NumPy keeps `*` cell by cell and uses `@` for matrix multiplication.
+
+~~~
 import numpy as np
+
 speed = np.array([4, 4, 7, 7, 8, 9, 10, 10], dtype=float)
-dist  = np.array([2, 10, 4, 22, 16, 10, 18, 26], dtype=float)
+distance = np.array([2, 10, 4, 22, 16, 10, 18, 26], dtype=float)
 X = np.column_stack([np.ones(8), speed])
-beta, *_ = np.linalg.lstsq(X, dist, rcond=None)
-print(f"intercept {beta[0]:.4f} slope {beta[1]:.4f}")
-res = dist - X @ beta
-print(f"mse {np.mean(res * res):.4f}")
-print(f"at 12 mph: {np.array([1.0, 12.0]) @ beta:.4f}")
-```
+beta, *_ = np.linalg.lstsq(X, distance, rcond=None)
+residual = distance - X @ beta
+print(beta[0], beta[1], np.mean(residual * residual), np.array([1.0, 12.0]) @ beta)
+~~~
 
-**R.** `*` is cell by cell, `%*%` is matrix multiply, `t()` transposes, and the everyday
-answer is a model-fitting function rather than matrix algebra at all.
+## R
 
-```r
+R uses `*` for cell arithmetic and `%*%` for matrix multiplication. For this task,
+`lm` is the short beginner answer.
+
+~~~
 speed <- c(4, 4, 7, 7, 8, 9, 10, 10)
-dist  <- c(2, 10, 4, 22, 16, 10, 18, 26)
+distance <- c(2, 10, 4, 22, 16, 10, 18, 26)
+fit <- lm(distance ~ speed)
+beta <- coef(fit)
+residual <- residuals(fit)
+print(c(beta[1], beta[2], mean(residual * residual), predict(fit, data.frame(speed = 12))))
+~~~
 
-fit <- lm(dist ~ speed)
-coef(fit)                                  # (Intercept) -3.4232   speed 2.2947
-mean(residuals(fit)^2)                     # 36.5047
-predict(fit, data.frame(speed = 12))       # 24.1129
+The field comparison gives three useful lessons. MATLAB and Julia make the textbook
+formula short. NumPy separates matrix multiplication with `@`. R puts the common fit
+behind `lm`. Jet keeps the beginner fit named and shape-checked, while the expert can
+write the matrix formula and control views.
 
-# the matrix spelling, for comparison
-X <- cbind(1, speed)
-beta <- solve(t(X) %*% X, t(X) %*% dist)
-```
+## Ratified decision slate
 
-**What the field shows.** Three of the four give matrix multiplication its own visible
-form (`*` in MATLAB and Julia, `%*%` in R, `@` in NumPy). Only NumPy took the "`*` is
-always cell by cell" road, and it did so after retiring an earlier `matrix` type whose
-`*` meant matrix multiply — the two readings of one glyph in one library are what forced
-`@` into the language. R's answer to this exact task is not matrix algebra at all: it is
-`lm()`. That is a real signal about the beginner surface, and it sits behind the solve
-ballot.
+The following six IDs are the complete owner-choice slate for this proposal. Each is
+ratified and recorded for card #1437. They are not open ballots.
 
-## The ballot slate
+| Decision | Ratified option | Rule carried by this proposal |
+|---|---|---|
+| `D-MATRIX-MUL1` | F | `*` composes `Matrix`; `.*` is the only Matrix cell override; `Grid` and lane vectors use `*` cell by cell. |
+| `D-MATRIX-LIT1` | E | A row ends at a line break or `;`; tall and compact forms share one literal. |
+| `D-MATRIX-BCAST1` | E | Extent `1` repeats on one stated axis; vectors declare row or column orientation. |
+| `D-MATRIX-INDEX1` | E | Brackets read cells, bands, and windows; `.row(i)` and `.col(j)` name whole axes. |
+| `D-MATRIX-SOLVE1` | B | `.solve(y)` is for square systems; `.least_squares(y)` is for tall systems. |
+| `D-MATRIX-HOME1` | D | Basic matrix operations need no import; advanced linear algebra uses `core.linalg`. |
 
-| Ballot | Question |
-|---|---|
-| `D-MATRIX-MUL1` | What `*` means between two matrices, and how the other multiplication is spelled |
-| `D-MATRIX-LIT1` | How you write a matrix down |
-| `D-MATRIX-BCAST1` | When two different shapes may combine |
-| `D-MATRIX-INDEX1` | How you read one cell, one row, and one window |
-| `D-MATRIX-SOLVE1` | How you solve a system and fit a line |
-| `D-MATRIX-HOME1` | Whether `Matrix` and `Vec` are always there or asked for |
-
-The six are close to independent. The multiply ballot picks the archetype; the other five
-apply to whichever archetype wins, except where an option names a dependency.
-
-## What is deliberately not balloted
-
-- **How shapes are encoded.** Settled by D-TYPE2-MEASURE1=A. Every archetype uses it.
-- **Views and in-place editing.** Settled by D-SHAPE-PLACE1=A: a bare place is a read
-  window, `&place` is the write window, `~place` copies. A matrix window is that rule
-  applied to a bracket place, not a new mechanism. One consequence is stated in the
-  indexing ballot: a method call is not a place, so an in-place column edit must be
-  written on brackets.
-- **Stored element order.** Settled column-major by D-LINALG1. Expert control uses the
-  existing marker family (`#Layout(row_major)`), which is a new member of a ratified
-  family rather than a new mechanism.
-- **Element type.** `Matrix<M, N>` carries `Float` cells; the general form is
-  `Matrix<T, M, N>` over the `Tensor<T>` substrate (D-COMPUTE-TYPE1=D). With arbitrary
-  precision `Int` (D-INTBIG1), a whole-number matrix has an exact determinant.
-- **What `==` answers.** One `Bool`, per D-LINALG1. Cell-by-cell comparison is a named
-  method under every archetype, so a matrix can never appear where an `if` expects a
-  yes-or-no.
-- **The small fixed family.** `Vec2/3/4` and `Mat3/Mat4` stay as the graphics-facing
-  aliases over the general substrate (D-LINALG1). The home ballot asks where the general
-  types live, not whether the aliases survive.
+The shape substrate is not an owner choice here. **D-TYPE2-MEASURE1=A** already
+settles it, and `type-system-v2-carriers-and-knowledge.md` is its source proposal.
+Views, ownership, and layout also reuse their ratified mechanisms. Implementation cards
+must carry this surface through parser, sema, TIR, AOT, JIT, interpreter, and web tiers
+where the feature applies.

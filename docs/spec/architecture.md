@@ -1,5 +1,7 @@
 # Architecture
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 ## Pipeline
 
 ```
@@ -637,7 +639,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
   | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
   | `core.encoding.cbor` | Copied | Owed: typed CBOR needs a shared DataTree/codec kernel without changing `EncodingStream.rs` drain semantics. |
-  | `core.encoding.csv` | Copied | Owed: typed CSV still crosses the package/stream adapter boundary. |
+  | `core.encoding.csv` | Copied | Owed: typed CSV still crosses the package reader/writer adapter boundary. |
   | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime/JIT marshal values. |
   | `core.encoding.json` | Copied | Owed: typed JSON still depends on the larger DataTree/codec adapter seam. |
   | `core.encoding.jsonl` | Copied | Owed: JSONL needs the shared typed JSON kernel first. |

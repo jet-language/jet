@@ -1,4 +1,6 @@
-# Surface research: yielding loops, comprehensions, and typed task groups
+# Surface research: collecting loops, comprehensions, and typed task groups
+
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
 ## Revision 3: arrow means return
 

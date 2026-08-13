@@ -1,5 +1,7 @@
 # Surface frequency audit — 2026-08-04
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Executive summary
 
 This audit measured what programmers actually write. It parsed 98 public projects across five
