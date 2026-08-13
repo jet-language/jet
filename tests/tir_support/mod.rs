@@ -111,7 +111,7 @@ pub fn jit_run_with_env_args(
     )
 }
 
-fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
+pub fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
     let dir = unique_tmp("jet_interpreter_run");
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.jet"));

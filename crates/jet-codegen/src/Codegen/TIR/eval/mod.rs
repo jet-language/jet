@@ -1,6 +1,5 @@
 //! Canonical TIR evaluator — reference semantics (D-ONECORE1=A / #777).
 
-use crate::Codegen::mangle_generated;
 mod builtins;
 mod browser;
 mod closure_ops;
@@ -15,6 +14,10 @@ mod services_calls;
 mod stmts;
 mod stream;
 mod webapp;
+
+mod contract_semantics {
+    include!("../../../Prelude/Core/Contracts.rs");
+}
 
 mod range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
@@ -2181,10 +2184,12 @@ impl<'a> EvalCtx<'a> {
     fn check_contracts(
         &mut self,
         contracts: &'a [TIR::TContract],
-        keyword: &str,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         for contract in contracts {
+            if contract.disposition != TIR::TContractDisposition::Check {
+                continue;
+            }
             let previous_span = self.current_span;
             self.current_span = contract.span;
             let condition = match self.eval_expr(&contract.condition, scope) {
@@ -2198,7 +2203,7 @@ impl<'a> EvalCtx<'a> {
                     return Err(error);
                 }
             };
-            if condition {
+            if contract_semantics::jet_contract_check(condition) {
                 self.current_span = previous_span;
                 continue;
             }
@@ -2210,12 +2215,20 @@ impl<'a> EvalCtx<'a> {
                 }
             };
             self.current_span = previous_span;
+            let keyword = match contract.kind {
+                TIR::TContractKind::Pre => "Pre",
+                TIR::TContractKind::Post => "Post",
+            };
+            let report = contract_semantics::jet_contract_report(
+                keyword,
+                &message,
+                &contract.file,
+                contract.line,
+            );
             if let Some(sink) = self.sink.as_ref() {
                 let mut sink = sink.lock().expect("evaluator sink poisoned");
-                sink.stderr.push_str(&format!(
-                    "#{} contract failed: {}\n  --> {}:{}\n",
-                    keyword, message, contract.file, contract.line
-                ));
+                sink.stderr.push_str(&report);
+                sink.stderr.push('\n');
                 sink.exit_code = Some(70);
                 return Err(crate::Sema::Diagnostics::soft_exit(
                     "70".to_string(),
@@ -2300,8 +2313,7 @@ impl<'a> EvalCtx<'a> {
                 scope.insert(name.clone(), value);
             }
         }
-        let result = match self.check_contracts(&func.pre_contracts, "Pre", scope) {
-            Ok(()) => match self.exec_stmts(&func.body, scope) {
+        let result = match self.exec_stmts(&func.body, scope) {
                 Ok(Flow::Return(v)) => Ok(v),
                 Ok(Flow::Normal) => Ok(CtValue::Unit),
                 Ok(other) => Err(unsupported(
@@ -2309,8 +2321,6 @@ impl<'a> EvalCtx<'a> {
                         self.span(),
                     )),
                 Err(error) => Err(error),
-            },
-            Err(error) => Err(error),
         };
         // Run scope.guard cleanups LIFO, matching Drop order in AOT/JIT.
         let guards: Vec<_> = self.scope_guards.drain(guard_mark..).rev().collect();
@@ -2326,20 +2336,11 @@ impl<'a> EvalCtx<'a> {
         self.call_depth -= 1;
         self.source_nesting = previous_source_nesting;
         self.current_span = previous_span;
-        let post_result = match (&result, &cleanup_result) {
-            (Ok(value), Ok(())) if !func.post_contracts.is_empty() => {
-                scope.insert(mangle_generated("result"), value.clone());
-                let checked = self.check_contracts(&func.post_contracts, "Post", scope);
-                scope.remove(&mangle_generated("result"));
-                checked
-            }
-            _ => Ok(()),
-        };
-        match (result, cleanup_result, post_result) {
-            (Err(error), _, _) | (Ok(_), Err(error), _) | (Ok(_), Ok(()), Err(error)) => {
+        match (result, cleanup_result) {
+            (Err(error), _) | (Ok(_), Err(error)) => {
                 Err(error)
             }
-            (Ok(value), Ok(()), Ok(())) => Ok(value),
+            (Ok(value), Ok(())) => Ok(value),
         }
     }
 

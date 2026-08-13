@@ -318,6 +318,22 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
     for stmt in stmts {
         out.push(format!("TStmt::{}", jit_stmt_tag(stmt)));
         match stmt {
+            TStmt::Contract { contract } => {
+                collect_expr_ops(&contract.condition, out);
+                collect_expr_ops(&contract.message, out);
+            }
+            TStmt::ContractScope {
+                pre,
+                body,
+                post,
+                ..
+            } => {
+                for contract in pre.iter().chain(post) {
+                    collect_expr_ops(&contract.condition, out);
+                    collect_expr_ops(&contract.message, out);
+                }
+                collect_stmt_ops(body, out);
+            }
             TStmt::SplitViews {
                 owner: Some(owner),
                 ..
@@ -674,6 +690,8 @@ pub fn jit_expr_tag(expr: &TExpr) -> &'static str {
 #[doc(hidden)]
 pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
     match stmt {
+        TStmt::Contract { .. } => "Contract",
+        TStmt::ContractScope { .. } => "ContractScope",
         TStmt::Let { .. } => "Let",
         TStmt::SplitViews { .. } => "SplitViews",
         TStmt::Assign { .. } => "Assign",

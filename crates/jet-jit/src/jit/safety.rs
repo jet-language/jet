@@ -3233,6 +3233,27 @@ fn resident_safe_builtin_op(
 
 pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
+        TStmt::Contract { contract } => {
+            matches!(
+                contract.disposition,
+                TIR::TContractDisposition::Proven | TIR::TContractDisposition::Stripped
+            ) || (resident_safe_expr(&contract.condition, callees)
+                && resident_safe_expr(&contract.message, callees))
+        }
+        TStmt::ContractScope {
+            pre,
+            body,
+            post,
+            ..
+        } => {
+            pre.iter().chain(post).all(|contract| {
+                matches!(
+                    contract.disposition,
+                    TIR::TContractDisposition::Proven | TIR::TContractDisposition::Stripped
+                ) || (resident_safe_expr(&contract.condition, callees)
+                    && resident_safe_expr(&contract.message, callees))
+            }) && body.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+        }
         TStmt::LineMarker(_) | TStmt::SourceSpan(_) => true,
         TStmt::Let { init, gc_promotion: _, gc_transferred: _, .. } => {
             // Promotion/transfer only wraps the same payload handle for the
@@ -3775,9 +3796,6 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     ) {
         return Some("not top-level".into());
     }
-    if !tir.pre_contracts.is_empty() || !tir.post_contracts.is_empty() {
-        return Some("contracts run in interpreter".into());
-    }
     if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {
         return Some("func attrs unsupported".into());
     }
@@ -3881,6 +3899,8 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
 
 fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
     match stmt {
+        TStmt::Contract { .. } => "Contract",
+        TStmt::ContractScope { .. } => "ContractScope",
         TStmt::Let { .. } => "Let",
         TStmt::Assign { .. } => "Assign",
         TStmt::IndexAssign { .. } => "IndexAssign",
@@ -4054,6 +4074,22 @@ pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
 fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
     for s in stmts {
         match s {
+            TStmt::Contract { contract } => {
+                count_spawn_sites_expr(&contract.condition, n);
+                count_spawn_sites_expr(&contract.message, n);
+            }
+            TStmt::ContractScope {
+                pre,
+                body,
+                post,
+                ..
+            } => {
+                for contract in pre.iter().chain(post) {
+                    count_spawn_sites_expr(&contract.condition, n);
+                    count_spawn_sites_expr(&contract.message, n);
+                }
+                count_spawn_sites_stmts(body, n);
+            }
             TStmt::Let { init, .. }
             | TStmt::Assign { value: init, .. }
             | TStmt::Return(Some(init))

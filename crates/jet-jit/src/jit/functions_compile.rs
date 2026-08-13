@@ -322,6 +322,8 @@ fn lower_spawn_function(
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: Vec::new(),
+            contract_posts: Vec::new(),
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -632,6 +634,8 @@ pub(crate) fn lower_shared_transaction_lambda(
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: Vec::new(),
+            contract_posts: Vec::new(),
         };
 
         let env = values[0];
@@ -885,6 +889,8 @@ fn lower_callable_lambda_with_env(
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: Vec::new(),
+            contract_posts: Vec::new(),
         };
         let mut arg_i = 0usize;
         if capturing {
@@ -1052,6 +1058,8 @@ pub(crate) fn lower_option_lift2_factory(
             reachable_continue_blocks: HashSet::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: Vec::new(),
+            contract_posts: Vec::new(),
             result_option_vars: HashSet::new(),
             dead: false,
             next_var: 0,
@@ -1213,6 +1221,15 @@ fn lower_function(
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: tir
+                .body
+                .iter()
+                .flat_map(|stmt| match stmt {
+                    TStmt::ContractScope { post, .. } => post.iter().collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                })
+                .collect(),
+            contract_posts: Vec::new(),
         };
         let enter = lctx
             .module
@@ -1408,6 +1425,15 @@ fn lower_generator_body(
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
+            contract_pool: tir
+                .body
+                .iter()
+                .flat_map(|stmt| match stmt {
+                    TStmt::ContractScope { post, .. } => post.iter().collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                })
+                .collect(),
+            contract_posts: Vec::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
             let var = lctx.fresh_var(types::I64);
