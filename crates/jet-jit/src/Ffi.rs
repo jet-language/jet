@@ -27,13 +27,13 @@ const RTLD_NOW: c_int = 2;
 
 extern "C" fn jit_ffi_reporter(message: *const u8, len: usize) {
     let message = if message.is_null() {
-        "panic: a foreign function panicked".into()
+        "a foreign function panicked".into()
     } else {
         // JET_VETTED_UNSAFE_BEGIN: ffi_reporter
         String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(message, len) }).into_owned()
         // JET_VETTED_UNSAFE_END: ffi_reporter
     };
-    eprintln!("{message}");
+    Concurrency::with_runtime_mut(|rt| rt.set_trap(&message));
 }
 
 #[derive(Clone, Copy)]

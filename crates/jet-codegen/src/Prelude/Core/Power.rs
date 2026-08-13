@@ -2,8 +2,7 @@
 //
 // Every tier that runs generated Rust — the native build and the wasm module —
 // includes this same file, so a power means the same thing everywhere. The
-// only tier-local part is `jet_panic`, which reports the trap in the way that
-// tier reports every other trap.
+// the Prelude's shared arithmetic stop carries the report code and wording.
 //
 // `^` on whole numbers is exact. A result outside the type's range traps the
 // way a multiplication does. A negative exponent has no whole-number answer,
@@ -24,13 +23,13 @@ macro_rules! jet_pow_impl {
         impl JetPow for $t {
             fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self {
                 if exponent < 0 {
-                    jet_panic(file, line, JET_POW_NEGATIVE);
+                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
                 }
                 if exponent > u32::MAX as i128 {
-                    jet_panic(file, line, JET_POW_OVERFLOW);
+                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
                 }
                 self.checked_pow(exponent as u32)
-                    .unwrap_or_else(|| jet_panic(file, line, JET_POW_OVERFLOW))
+                    .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_POW_OVERFLOW))
             }
         }
     )* };

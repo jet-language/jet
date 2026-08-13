@@ -1670,8 +1670,9 @@ fn emit_tir_stmt(
                 // `.expect_fail` — the region MUST fail. Run it under a panic
                 // boundary with a silenced hook; if it completes cleanly the test
                 // fails. A failure lets execution continue past the region.
-                ScopeMemberKind::ExpectFail => {
+                ScopeMemberKind::ExpectFail(expected_code) => {
                     out.push_str(&format!("{}{{\n", pad));
+                    out.push_str(&format!("{}jet_test_expect_fail_enter();\n", ip));
                     out.push_str(&format!(
                         "{}let __prev_hook = std::panic::take_hook();\n",
                         ip
@@ -1693,7 +1694,18 @@ fn emit_tir_stmt(
                     );
                     out.push_str(&format!("{}Ok(())\n", ip2));
                     out.push_str(&format!("{}}}));\n", ip));
+                    out.push_str(&format!(
+                        "{}let __ef_code = jet_test_take_stop_code().or_else(|| matches!(__ef, Ok(Err(_))).then(|| \"E3001\".to_string()));\n",
+                        ip
+                    ));
+                    out.push_str(&format!("{}jet_test_expect_fail_leave();\n", ip));
                     out.push_str(&format!("{}std::panic::set_hook(__prev_hook);\n", ip));
+                    if let Some(expected_code) = expected_code {
+                        out.push_str(&format!(
+                            "{}if __ef_code.as_deref() != Some({expected_code:?}) {{ return Err(format!(\"expected stop {expected_code}, got {{}}\", __ef_code.as_deref().unwrap_or(\"no stop\"))); }}\n",
+                            ip
+                        ));
+                    }
                     out.push_str(&format!("{}if matches!(__ef, Ok(Ok(()))) {{\n", ip));
                     out.push_str(&format!(
                         "{}return Err(\"expected this region to fail, but it passed\".to_string());\n",

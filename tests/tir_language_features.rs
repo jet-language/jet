@@ -190,8 +190,8 @@ fn run() {
     assert_eq!(stdout, "42\nhi, jet\n");
 }
 
-/// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`) emits a diverging
-/// `todo!("#Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
+/// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`) emits the E3011 Prelude
+/// stop. The fn compiles + routes; the hole is never
 /// reached at runtime here (only the implemented fn is called).
 #[test]
 fn todo_hole() {

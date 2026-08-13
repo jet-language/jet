@@ -209,11 +209,11 @@ fn run() {
             "{name}: jet run must exit 70 (I9), got {jit_code}: {jit_out}{jit_err}"
         );
         assert!(
-            jit_err.contains("panic:")
+            jit_err.contains("Stop [E3010]")
                 && (jit_err.contains("this division can't be done")
                     || jit_err.contains("dividing by zero")
                     || jit_err.contains("divided by zero")),
-            "{name}: jet run expected Prelude panic wording, got: {jit_err}"
+            "{name}: jet run expected the E3010 Prelude stop, got: {jit_err}"
         );
         assert!(
             !jit_err.contains("E0953") && !jit_err.contains("attempt to divide by zero"),

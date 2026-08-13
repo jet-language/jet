@@ -356,10 +356,10 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("            {m}: self.{m}[__i].clone(),\n"));
     }
     out.push_str("        }\n    }\n");
-    // gather_at(i) — bounds-checked index-read producing a logical S. Mirrors the
-    // `jet_index_vec` panic message so `xs[i]` reports identically AoS vs columnar.
+    // gather_at(i) — bounds-checked index-read producing a logical S. Reuses the
+    // shared list stop so `xs[i]` reports identically AoS vs columnar.
     out.push_str(&format!(
-        "    pub fn gather_at(&self, __i: i64, __file: &str, __line: u32) -> {rust_name} {{\n        let __len = self.len() as i64;\n        if __i < 0 || __i >= __len {{ jet_panic(__file, __line, &format!(\"the list has {{}} items, so position {{}} doesn't exist\", __len, __i)); }}\n        self.gather(__i as usize)\n    }}\n",
+        "    pub fn gather_at(&self, __i: i64, __file: &str, __line: u32) -> {rust_name} {{\n        let __len = self.len() as i64;\n        if __i < 0 || __i >= __len {{ jet_arithmetic_stop(__file, __line, &jet_list_bounds_message(__len, __i)); }}\n        self.gather(__i as usize)\n    }}\n",
         rust_name = rust_name
     ));
     // from_aos(Vec<S>) — build columns from an array-of-structs (list literals).

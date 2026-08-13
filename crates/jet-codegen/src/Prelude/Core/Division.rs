@@ -1,9 +1,8 @@
 // D-FLOORDIV1=A: the one floor-division surface for `/%` and `/%=`.
 //
 // Every tier that runs generated Rust — the native build and the wasm module —
-// includes this same file, so `/%` means the same thing everywhere. The only
-// tier-local part is `jet_panic`, which reports the trap in the way that tier
-// reports every other trap.
+// includes this same file, so `/%` means the same thing everywhere. The
+// Prelude's shared arithmetic stop carries the report code and wording.
 //
 // `/%` rounds the answer down, toward negative infinity: `7 /% 2` is 3 and
 // `-7 /% 2` is -4. Rust's `/` rounds toward zero instead, so a signed answer
@@ -24,11 +23,11 @@ macro_rules! jet_floordiv_signed {
         impl JetFloorDiv for $t {
             fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                    jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
                 }
                 let quotient = match self.checked_div(rhs) {
                     Some(quotient) => quotient,
-                    None => jet_panic(file, line, JET_FLOORDIV_OVERFLOW),
+                    None => jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW),
                 };
                 let remainder = self.wrapping_rem(rhs);
                 if remainder != 0 && (remainder < 0) != (rhs < 0) {
@@ -46,7 +45,7 @@ macro_rules! jet_floordiv_unsigned {
         impl JetFloorDiv for $t {
             fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                    jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
                 }
                 self / rhs
             }
@@ -70,7 +69,7 @@ macro_rules! jet_mod_signed {
         impl JetMod for $t {
             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                    jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
                 }
                 // `MIN % -1` is 0 and fits, so it must answer rather than trap —
                 // `%%` answers 0 there too, and D-MODSEM1 says the two agree
@@ -91,7 +90,7 @@ macro_rules! jet_mod_unsigned {
         impl JetMod for $t {
             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                    jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
                 }
                 self % rhs
             }
@@ -112,7 +111,7 @@ macro_rules! jet_trunc_rem_impl {
         impl JetTruncRem for $t {
             fn jet_trunc_rem(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                    jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
                 }
                 // `MIN %% -1` is 0 and fits, so it answers rather than trapping —
                 // the same value `%` gives, which is what D-MODSEM1 asks for.

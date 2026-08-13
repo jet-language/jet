@@ -917,6 +917,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) funcs: HashMap<String, &'a TFunc>,
     #[allow(dead_code)]
     pub(super) base_dir: PathBuf,
+    pub(super) source_file: String,
+    pub(super) source_text: String,
     pub(super) fuel: u64,
     pub(super) sink: Option<Arc<Mutex<DevSink>>>,
     #[allow(dead_code)]
@@ -948,6 +950,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) call_depth: usize,
     pub(super) source_nesting: usize,
     pub(super) current_span: Span,
+    pub(super) current_fn: String,
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
@@ -1263,6 +1266,8 @@ fn select_eval_tasks(
 struct EvalTaskConfig<'a> {
     funcs: HashMap<String, &'a TFunc>,
     base_dir: PathBuf,
+    source_file: String,
+    source_text: String,
     sink: Option<Arc<Mutex<DevSink>>>,
     core_imports: &'a HashMap<String, String>,
     globals: HashMap<String, CtValue>,
@@ -1443,6 +1448,8 @@ impl<'a> EvalCtx<'a> {
         EvalTaskConfig {
             funcs: self.funcs.clone(),
             base_dir: self.base_dir.clone(),
+            source_file: self.source_file.clone(),
+            source_text: self.source_text.clone(),
             sink: self.sink.clone(),
             core_imports: self.core_imports,
             globals: self.globals.clone(),
@@ -1508,6 +1515,8 @@ impl<'a> EvalCtx<'a> {
         let mut ctx = EvalCtx {
             funcs: config.funcs,
             base_dir: config.base_dir,
+            source_file: config.source_file,
+            source_text: config.source_text,
             fuel: DEV_FUEL,
             sink: config.sink,
             core_imports: config.core_imports,
@@ -1526,6 +1535,7 @@ impl<'a> EvalCtx<'a> {
             call_depth: 0,
             source_nesting: 0,
             current_span: Span::new(0, 0),
+            current_fn: String::new(),
             emitted_fragments: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
@@ -2181,6 +2191,100 @@ impl<'a> EvalCtx<'a> {
         self.current_span
     }
 
+    pub(super) fn runtime_stop(
+        &mut self,
+        code: &'static str,
+        line: u32,
+        message: &str,
+    ) -> Diagnostic {
+        let source_line = self
+            .source_text
+            .lines()
+            .nth((line as usize).saturating_sub(1))
+            .unwrap_or_default();
+        let rich = matches!(code, "E3001" | "E3012");
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            code,
+            &self.source_file,
+            line,
+            if rich { &self.current_fn } else { "" },
+            if rich { source_line } else { "" },
+            1,
+            1,
+            message,
+            "",
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&report.rendered);
+            sink.exit_code = Some(report.exit_code);
+            Diagnostic::soft_exit(
+                "70".to_string(),
+                format!("runtime stop {code}"),
+                Some(self.span()),
+            )
+        } else {
+            crate::Sema::Diagnostics::render_registered(
+                code,
+                report.what,
+                report.why,
+                report.fix,
+                Some(self.span()),
+            )
+        }
+    }
+
+    pub(super) fn eval_runtime_binop(
+        &mut self,
+        op: crate::AST::BinOp,
+        left: CtValue,
+        right: CtValue,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        self.route_runtime_arithmetic(
+            crate::Comptime::Builtins::eval_binop(op, left, right, span),
+            span,
+        )
+    }
+
+    pub(super) fn route_runtime_arithmetic(
+        &mut self,
+        result: Result<CtValue, Diagnostic>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        match result {
+            Err(diagnostic) if self.runtime_execution && diagnostic.code == "E0953" => {
+                let message = diagnostic
+                    .why
+                    .strip_prefix(
+                        "while computing this value at compile time, the program panicked: ",
+                    )
+                    .unwrap_or(diagnostic.what.as_str())
+                    .to_string();
+                let line = self
+                    .source_text
+                    .get(..span.start.min(self.source_text.len()))
+                    .map(|prefix| prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1)
+                    .unwrap_or(1);
+                Err(self.runtime_stop("E3010", line, &message))
+            }
+            result => result,
+        }
+    }
+
+    pub(super) fn runtime_index_stop(
+        &mut self,
+        code: &'static str,
+        line: u32,
+        message: &str,
+    ) -> Diagnostic {
+        if self.runtime_execution {
+            self.runtime_stop(code, line, message)
+        } else {
+            unsupported(message, self.span())
+        }
+    }
+
     fn check_contracts(
         &mut self,
         contracts: &'a [TIR::TContract],
@@ -2295,7 +2399,14 @@ impl<'a> EvalCtx<'a> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        if self.call_depth > 64 {
+        if self.call_depth >= jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT {
+            if self.runtime_execution {
+                return Err(self.runtime_stop(
+                    "E3012",
+                    func.line as u32,
+                    &jet_foundation::Outcome::jet_stack_overflow_message(&func.name),
+                ));
+            }
             self.fuel = 0;
             self.burn()?;
             unreachable!("burn with fuel 0 always errors");
@@ -2303,6 +2414,7 @@ impl<'a> EvalCtx<'a> {
         self.call_depth += 1;
         let previous_source_nesting = std::mem::replace(&mut self.source_nesting, 0);
         let previous_span = std::mem::replace(&mut self.current_span, func.source_span);
+        let previous_fn = std::mem::replace(&mut self.current_fn, func.name.clone());
         let guard_mark = self.scope_guards.len();
         self.local_cells.enter_frame();
         for (i, (name, _, _)) in func.params.iter().enumerate() {
@@ -2336,6 +2448,7 @@ impl<'a> EvalCtx<'a> {
         self.call_depth -= 1;
         self.source_nesting = previous_source_nesting;
         self.current_span = previous_span;
+        self.current_fn = previous_fn;
         match (result, cleanup_result) {
             (Err(error), _) | (Ok(_), Err(error)) => {
                 Err(error)
@@ -3200,6 +3313,8 @@ fn run_program_with_structs_on_stack(
     let mut ctx = EvalCtx {
         funcs,
         base_dir: base_dir.to_path_buf(),
+        source_file: program.source_file.clone(),
+        source_text: program.source_text.clone(),
         fuel: DEV_FUEL,
         sink: Some(shared_sink.clone()),
         core_imports,
@@ -3224,6 +3339,7 @@ fn run_program_with_structs_on_stack(
         call_depth: 0,
         source_nesting: 0,
         current_span: entry.source_span,
+        current_fn: entry.name.clone(),
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields,
@@ -3280,6 +3396,8 @@ pub fn run_named_func(
     let mut ctx = EvalCtx {
         funcs,
         base_dir: PathBuf::from("."),
+        source_file: program.source_file.clone(),
+        source_text: program.source_text.clone(),
         fuel: DEV_FUEL,
         sink: Some(shared_sink.clone()),
         core_imports: &core_imports,
@@ -3301,6 +3419,7 @@ pub fn run_named_func(
         call_depth: 0,
         source_nesting: 0,
         current_span: func.source_span,
+        current_fn: func.name.clone(),
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
@@ -3507,6 +3626,8 @@ fn eval_expr_hook(
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
+        source_file: String::new(),
+        source_text: String::new(),
         fuel,
         sink,
         core_imports,
@@ -3525,6 +3646,7 @@ fn eval_expr_hook(
         call_depth: 0,
         source_nesting: 0,
         current_span: source_span,
+        current_fn: String::new(),
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),
@@ -3629,6 +3751,8 @@ fn eval_block_hook(
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
+        source_file: String::new(),
+        source_text: String::new(),
         fuel,
         sink,
         core_imports,
@@ -3647,6 +3771,7 @@ fn eval_block_hook(
         call_depth: 0,
         source_nesting: 0,
         current_span: source_span,
+        current_fn: String::new(),
         emitted_fragments,
         embed_inputs,
         struct_fields: HashMap::new(),

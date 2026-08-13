@@ -98,8 +98,8 @@ mod collection_semantics {
         }
     }
 
-    fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
-        super::Concurrency::with_runtime_mut(|rt| rt.set_trap(msg));
+    fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
+        super::Concurrency::with_runtime_mut(|rt| rt.set_runtime_stop("E3001", line, msg));
         std::process::exit(70)
     }
 
@@ -408,9 +408,13 @@ fn option_packed(value: Option<i64>) -> i64 {
 /// Record an out-of-bounds trap. Returns normally; JIT code branches to its
 /// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
 /// through a JIT frame; cranelift-jit emits no unwind tables for them).
-fn trap_index() {
+fn trap_index(len: i64, index: i64, line: u32) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.set_trap("index out of bounds: the index is outside the list");
+        rt.set_runtime_stop(
+            "E3010",
+            line,
+            &jet_foundation::Outcome::jet_list_bounds_message(len, index),
+        );
     });
 }
 
@@ -551,20 +555,27 @@ extern "C" fn jet_jit_loop_stride_check(stride: i64) -> i64 {
     stride
 }
 
-extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_int(list, idx) {
         Some(value) => value,
         None => {
             if rt.heap.list_len(list).is_none() {
                 jet_foundation::ice!(None, "jit list get: bad handle");
             }
-            rt.set_trap("index out of bounds: the index is outside the list");
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(
+                    rt.heap.list_len(list).unwrap_or_default(),
+                    idx,
+                ),
+            );
             0
         }
     })
 }
 
-extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
             return value;
@@ -575,14 +586,21 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
                 if rt.heap.list_len(list).is_none() {
                     jet_foundation::ice!(None, "jit list get f64: bad handle");
                 }
-                rt.set_trap("index out of bounds: the index is outside the list");
+                rt.set_runtime_stop(
+                    "E3010",
+                    line,
+                    &jet_foundation::Outcome::jet_list_bounds_message(
+                        rt.heap.list_len(list).unwrap_or_default(),
+                        idx,
+                    ),
+                );
                 0.0
             }
         }
     })
 }
 
-extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt
             .heap
@@ -593,14 +611,14 @@ extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
         }) {
             Ok(value) => value,
             Err(error) => {
-                rt.set_trap(&error.message());
+                rt.set_runtime_stop("E3010", line, &error.message());
                 0
             }
         }
     })
 }
 
-extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt
             .heap
@@ -613,36 +631,43 @@ extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64
         }) {
             Ok(value) => value,
             Err(error) => {
-                rt.set_trap(&error.message());
+                rt.set_runtime_stop("E3010", line, &error.message());
                 0.0
             }
         }
     })
 }
 
-fn jet_jit_list_get_range(list: i64, idx: i64) -> (i64, i64, bool) {
+fn jet_jit_list_get_range(list: i64, idx: i64, line: u32) -> (i64, i64, bool) {
     Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_range(list, idx) {
         Some(value) => value,
         None => {
             if rt.heap.list_len(list).is_none() {
                 jet_foundation::ice!(None, "jit list get Range: bad handle");
             }
-            rt.set_trap("index out of bounds: the index is outside the list");
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(
+                    rt.heap.list_len(list).unwrap_or_default(),
+                    idx,
+                ),
+            );
             (0, 0, false)
         }
     })
 }
 
-extern "C" fn jet_jit_list_get_range_start(list: i64, idx: i64, _line: u32) -> i64 {
-    jet_jit_list_get_range(list, idx).0
+extern "C" fn jet_jit_list_get_range_start(list: i64, idx: i64, line: u32) -> i64 {
+    jet_jit_list_get_range(list, idx, line).0
 }
 
-extern "C" fn jet_jit_list_get_range_end(list: i64, idx: i64, _line: u32) -> i64 {
-    jet_jit_list_get_range(list, idx).1
+extern "C" fn jet_jit_list_get_range_end(list: i64, idx: i64, line: u32) -> i64 {
+    jet_jit_list_get_range(list, idx, line).1
 }
 
-extern "C" fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, _line: u32) -> i8 {
-    i8::from(jet_jit_list_get_range(list, idx).2)
+extern "C" fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -> i8 {
+    i8::from(jet_jit_list_get_range(list, idx, line).2)
 }
 
 /// `0` = absent; otherwise `value + 1`.
@@ -655,18 +680,18 @@ extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
+extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
             jet_foundation::ice!(None, "jit list set: bad handle");
         }
         if rt.heap.list_set_int(list, idx, v).is_none() {
-            trap_index();
+            trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
         }
     });
 }
 
-extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
+extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         if crate::Compute::try_set_list_f64(rt, list, idx, v) {
             return;
@@ -675,7 +700,7 @@ extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
             jet_foundation::ice!(None, "jit list set f64: bad handle");
         }
         if rt.heap.list_set_float(list, idx, v).is_none() {
-            trap_index();
+            trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
         }
     });
 }
@@ -1039,21 +1064,29 @@ extern "C" fn jet_jit_map_increment(map: i64, key: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let current = rt.heap.map_get(map, key).unwrap_or(0);
         let Some(next) = current.checked_add(1) else {
-            rt.set_trap("integer overflow");
+            rt.set_runtime_stop(
+                "E3010",
+                0,
+                "this addition overflows the value's type (the result is outside its range)",
+            );
             return;
         };
         let _ = rt.heap.map_insert(map, key, next);
     });
 }
 
-extern "C" fn jet_jit_map_get(map: i64, key: i64, _line: u32) -> i64 {
+extern "C" fn jet_jit_map_get(map: i64, key: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.map_get(map, key) {
         Some(value) => value,
         None => {
             if rt.heap.map_len(map).is_none() {
                 jet_foundation::ice!(None, "jit map get: bad handle");
             }
-            rt.set_trap("the map has no entry for this key");
+            let key_text = match rt.heap.clone_string(key) {
+                Some(key) => jet_foundation::Outcome::jet_missing_map_key_value(key),
+                None => jet_foundation::Outcome::jet_missing_map_key_message(None),
+            };
+            rt.set_runtime_stop("E3001", line, &key_text);
             0
         }
     })
@@ -1975,9 +2008,11 @@ extern "C" fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
         };
         let len = xs.len() as i64;
         if idx < 0 || idx > len {
-            rt.set_trap(&format!(
-                "the list has {len} items, so position {idx} doesn't exist"
-            ));
+            rt.set_runtime_stop(
+                "E3010",
+                0,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
             return;
         }
         xs.insert(idx as usize, jet_rt::JetVal::Int(v));
@@ -1998,9 +2033,11 @@ extern "C" fn jet_jit_list_remove(list: i64, idx: i64) -> i64 {
         };
         let len = xs.len() as i64;
         if idx < 0 || idx >= len {
-            rt.set_trap(&format!(
-                "the list has {len} items, so position {idx} doesn't exist"
-            ));
+            rt.set_runtime_stop(
+                "E3010",
+                0,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
             return 0;
         }
         match xs.remove(idx as usize) {

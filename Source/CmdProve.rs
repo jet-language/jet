@@ -2780,16 +2780,19 @@ fn source_paths_match(left: &str, right: &str) -> bool {
 
 fn runtime_contract_diagnostic(path: &str, item: &TestItem) -> String {
     let message = format!("#{} contract failed: {}", item.name, item.message);
-    let why = "Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. The clause's own message string is included. Checked in every build (not a debug/release split).";
-    let fix = "Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).";
+    let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "E3005", path, item.line, "", "", 1, 1, &message, "",
+    );
+    let why = format!("Why: {}", report.why);
+    let fix = format!("Fix: {}", report.fix);
     let source_line = source_line_for(path, item.line);
     let source_line_json = source_line.as_deref().map(json).unwrap_or_else(|| "null".to_string());
     let width = source_line.as_deref().map_or(1, |line| line.chars().count().max(1));
     format!(
         "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
         json(&message),
-        json(why),
-        json(fix),
+        json(&why),
+        json(&fix),
         width + 1,
         item.line,
         json(path),

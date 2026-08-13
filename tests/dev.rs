@@ -6336,7 +6336,7 @@ fn run() {
         let outcome = run_cranelift_outcome_without_fallback(source, &format!("1216_{case}"));
         match case.as_str() {
             "oob" | "sum_overflow" => {
-                // AOT jet_panic shape for live traps: exit 70 + panic: wording (#1483).
+                // Live arithmetic and bounds traps use the registered E3010 stop.
                 let RunOutcome::Ran {
                     stdout: _,
                     stderr,
@@ -6350,8 +6350,8 @@ fn run() {
                     "`{case}` must exit 70: err={stderr}"
                 );
                 assert!(
-                    stderr.contains("panic:"),
-                    "`{case}` must use panic: wording, got: {stderr}"
+                    stderr.contains("Stop [E3010]"),
+                    "`{case}` must use the E3010 stop, got: {stderr}"
                 );
                 assert!(
                     !stderr.contains("E0953") && !stderr.contains("comptime"),
@@ -6359,7 +6359,7 @@ fn run() {
                 );
                 if case == "oob" {
                     assert!(
-                        stderr.contains("index") || stderr.contains("bounds"),
+                        stderr.contains("the list has 1 items, so position 4 doesn't exist"),
                         "`oob` trap wording: {stderr}"
                     );
                 } else {
@@ -6539,7 +6539,9 @@ fn run() {
         } => {
             assert_eq!(exit_code, 70, "dynamic OOB must exit 70: out={stdout} err={stderr}");
             assert!(
-                stderr.contains("panic:") && stderr.contains("index out of bounds"),
+                stderr.contains("Stop [E3010]")
+                    && stderr.contains("the list has 2 items")
+                    && stderr.contains("doesn't exist"),
                 "dynamic OOB trap wording: {stderr}"
             );
             assert!(
@@ -7111,7 +7113,7 @@ fn run() {
                     "{tag} interpreter must exit 70: out={stdout} err={stderr}"
                 );
                 assert!(
-                    stderr.contains("panic:") && stderr.contains("divided by zero"),
+                    stderr.contains("Stop [E3010]") && stderr.contains("divided by zero"),
                     "{tag} interpreter trap wording: {stderr}"
                 );
                 assert!(
@@ -7134,7 +7136,7 @@ fn run() {
                     "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
                 );
                 assert!(
-                    stderr.contains("panic:") && stderr.contains("divided by zero"),
+                    stderr.contains("Stop [E3010]") && stderr.contains("divided by zero"),
                     "{tag} resident trap wording: {stderr}"
                 );
                 assert!(
@@ -7165,7 +7167,7 @@ fn run() {
         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
         assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
         assert!(
-            aot.stderr.contains("panic:") && aot.stderr.contains("divided by zero"),
+            aot.stderr.contains("Stop [E3010]") && aot.stderr.contains("divided by zero"),
             "{tag} AOT remainder-zero presentation drift: {}",
             aot.stderr
         );
@@ -7255,7 +7257,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
                     "{tag} interpreter must exit 70: out={stdout} err={stderr}"
                 );
                 assert!(
-                    stderr.contains("panic:") && stderr.contains(trap),
+                    stderr.contains("Stop [E3010]") && stderr.contains(trap),
                     "{tag} interpreter trap wording: {stderr}"
                 );
                 assert!(
@@ -7278,7 +7280,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
                     "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
                 );
                 assert!(
-                    stderr.contains("panic:") && stderr.contains(trap),
+                    stderr.contains("Stop [E3010]") && stderr.contains(trap),
                     "{tag} resident trap wording: {stderr}"
                 );
                 assert!(
@@ -7302,7 +7304,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
         assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
         assert!(
-            aot.stderr.contains("panic:") && aot.stderr.contains(trap),
+            aot.stderr.contains("Stop [E3010]") && aot.stderr.contains(trap),
             "{tag} AOT shift trap presentation drift: {}",
             aot.stderr
         );

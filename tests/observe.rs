@@ -209,7 +209,7 @@ fn run() {
     let (code, _stdout, stderr) = build_and_run_debug("rich_panic", src);
     assert_eq!(code, 70, "expected exit 70");
     assert!(
-        stderr.contains("panic: must be positive"),
+        stderr.contains("Stop [E3001]: panic: must be positive"),
         "wrong panic header: {}",
         stderr
     );
@@ -224,6 +224,17 @@ fn run() {
         stderr
     );
     assert!(stderr.contains('^'), "caret missing: {}", stderr);
+    assert!(
+        stderr.contains("Why: the program reached a panic stop")
+            && stderr.contains("Fix: check the source location"),
+        "shared stop guidance missing: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("thread 'main' panicked") && !stderr.contains("panicked at"),
+        "raw Rust panic banner leaked: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -242,7 +253,9 @@ fn run() {
     capture(3, true, "test")
 }
 "#;
-    let (_code, _stdout, stderr) = build_and_run_debug("safe_locals", src);
+    let (code, _stdout, stderr) = build_and_run_debug("safe_locals", src);
+    assert_eq!(code, 70, "expected exit 70");
+    assert!(stderr.contains("Stop [E3001]"), "missing E3001 stop: {}", stderr);
     // Scalars appear.
     assert!(
         stderr.contains("count = 3"),

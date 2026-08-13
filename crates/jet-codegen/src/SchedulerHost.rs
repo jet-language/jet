@@ -46,6 +46,30 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
     std::process::exit(70);
 }
 
+fn jet_scheduler_runtime_stop(msg: &str) -> ! {
+    let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "E3001", "", 0, "", "", 1, 1, msg, "",
+    );
+    if jet_scheduler_panic_should_unwind() {
+        panic!("{}", report.rendered);
+    }
+    jet_runtime_diagnostic(report.rendered);
+}
+
+fn jet_runtime_caught_stop(message: &str) {
+    if message.starts_with("Stop [E") {
+        eprint!("{message}");
+        if !message.ends_with('\n') {
+            eprintln!();
+        }
+        return;
+    }
+    let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "E3001", "", 0, "", "", 1, 1, message, "",
+    );
+    eprint!("{}", report.rendered);
+}
+
 // ---------------------------------------------------------------------------
 // `#Para` deferred failure. AOT source: Prelude/Core.rs.
 // Inside a `#Para` region a failure is carried to the collection point instead

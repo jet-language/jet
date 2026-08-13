@@ -10,10 +10,7 @@ pub struct JetFixedListIndexError {
 
 impl JetFixedListIndexError {
     pub fn message(self) -> String {
-        format!(
-            "the list has {} items, so position {} doesn't exist",
-            self.len, self.index
-        )
+        jet_list_bounds_message(self.len, self.index)
     }
 }
 

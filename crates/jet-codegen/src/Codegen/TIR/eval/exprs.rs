@@ -10,7 +10,7 @@ use crate::Codegen::TIR::{
     THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
     TStmt,
 };
-use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
+use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::{
     apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
     apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
@@ -3077,7 +3077,7 @@ impl<'a> EvalCtx<'a> {
                         let right = eval_expr_cache_take(rhs).ok_or_else(|| {
                             unreachable!("binary right value missing from evaluator worklist")
                         })?;
-                        let value = eval_binop(op, left, right, self.span())?;
+                        let value = self.eval_runtime_binop(op, left, right, self.span())?;
                         eval_expr_cache_put(original, value);
                     }
                     EvalExprWork::IfStart(state) => {
@@ -3259,7 +3259,7 @@ impl<'a> EvalCtx<'a> {
                         let message = eval_expr_cache_take(message).ok_or_else(|| {
                             unreachable!("fallback panic message missing from evaluator worklist")
                         })?;
-                        self.eval_or_fallback_panic(message, loc)?;
+                        self.eval_or_fallback_panic(message, loc, scope)?;
                         eval_expr_cache_put(original, CtValue::Unit);
                         restore_ambient_err(scope, previous_ambient_err);
                     }
@@ -3282,7 +3282,7 @@ impl<'a> EvalCtx<'a> {
                                         "panic always-stop must carry its message"
                                     ),
                                 };
-                                self.eval_require_failure(state.loc, fallback)?;
+                                self.eval_require_failure(state.loc, fallback, scope)?;
                                 eval_expr_cache_put(state.original, CtValue::Unit);
                             }
                             continue;
@@ -3319,7 +3319,7 @@ impl<'a> EvalCtx<'a> {
                             work.push(EvalExprWork::RequireAfterMessage(state));
                             work.push(EvalExprWork::Enter(msg));
                         } else {
-                            self.eval_require_failure(state.loc, "requirement failed")?;
+                            self.eval_require_failure(state.loc, "requirement failed", scope)?;
                             eval_expr_cache_put(state.original, CtValue::Unit);
                         }
                     }
@@ -3340,7 +3340,7 @@ impl<'a> EvalCtx<'a> {
                         if left == right {
                             eval_expr_cache_put(state.original, CtValue::Unit);
                         } else {
-                            self.eval_require_failure(state.loc, "values are not equal")?;
+                            self.eval_require_failure(state.loc, "values are not equal", scope)?;
                             eval_expr_cache_put(state.original, CtValue::Unit);
                         }
                     }
@@ -3353,7 +3353,7 @@ impl<'a> EvalCtx<'a> {
                         let message = eval_expr_cache_take(message).ok_or_else(|| {
                             unreachable!("require message missing from evaluator worklist")
                         })?;
-                        self.eval_require_failure(state.loc, &message.jet_show())?;
+                        self.eval_require_failure(state.loc, &message.jet_show(), scope)?;
                         eval_expr_cache_put(state.original, CtValue::Unit);
                     }
                     EvalExprWork::Leave(count) => {
@@ -3479,69 +3479,95 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         message: CtValue,
         loc: &crate::Codegen::TIR::TPanicLoc,
+        scope: &HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         let message = message.jet_show();
         if self.task_cancel.is_some() {
             return Err(super::task_child_panic(message, self.span()));
         }
-        let file = loc.file.trim_matches('"');
-        let fn_name = loc.fn_name.trim_matches('"');
-        let src_line = loc.src_line.trim_matches('"');
-        let line_s = loc.line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        let col_offset = loc.col.saturating_sub(1) as usize;
-        let caret = "^".repeat(loc.caret.max(1) as usize);
-        let rendered = format!(
-            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-            loc.line,
-            " ".repeat(col_offset)
-        );
+        if !self.runtime_execution {
+            return Err(unsupported("or-fallback panic", self.span()));
+        }
+        let report = self.runtime_panic_report(loc, &message, scope);
         if let Some(sink) = self.sink.as_ref() {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
-            sink.stderr.push_str(&rendered);
-            sink.exit_code = Some(70);
+            sink.stderr.push_str(&report.rendered);
+            sink.exit_code = Some(report.exit_code);
             return Err(crate::Sema::Diagnostics::soft_exit(
                 "70".to_string(),
                 "or-fallback panic stop".to_string(),
                 Some(self.span()),
             ));
         }
-        Err(unsupported("or-fallback panic", self.span()))
+        Err(crate::Sema::Diagnostics::render_registered(
+            report.code,
+            report.what,
+            report.why,
+            report.fix,
+            Some(self.span()),
+        ))
     }
 
     fn eval_require_failure(
         &mut self,
         loc: &crate::Codegen::TIR::TPanicLoc,
         message: &str,
+        scope: &HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         if self.task_cancel.is_some() {
             return Err(super::task_child_panic(message.to_string(), self.span()));
         }
-        let file = loc.file.trim_matches('"');
-        let fn_name = loc.fn_name.trim_matches('"');
-        let src_line = loc.src_line.trim_matches('"');
-        let line_s = loc.line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        let col_offset = loc.col.saturating_sub(1) as usize;
-        let caret = "^".repeat(loc.caret.max(1) as usize);
-        let rendered = format!(
-            "panic: {message}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
-            loc.line,
-            " ".repeat(col_offset)
-        );
+        if !self.runtime_execution {
+            return Err(unsupported("require/panic stop", self.span()));
+        }
+        let report = self.runtime_panic_report(loc, message, scope);
         if let Some(sink) = self.sink.as_ref() {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
-            sink.stderr.push_str(&rendered);
-            sink.exit_code = Some(70);
+            sink.stderr.push_str(&report.rendered);
+            sink.exit_code = Some(report.exit_code);
             return Err(crate::Sema::Diagnostics::soft_exit(
                 "70".to_string(),
                 "require/panic stop".to_string(),
                 Some(self.span()),
             ));
         }
-        Err(unsupported("require/panic stop", self.span()))
+        Err(crate::Sema::Diagnostics::render_registered(
+            report.code,
+            report.what,
+            report.why,
+            report.fix,
+            Some(self.span()),
+        ))
+    }
+
+    fn runtime_panic_report(
+        &self,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+        message: &str,
+        scope: &HashMap<String, CtValue>,
+    ) -> jet_foundation::Outcome::JetRuntimeDiagnostic {
+        let locals = loc
+            .locals
+            .iter()
+            .filter_map(|(name, place)| {
+                scope
+                    .get(name)
+                    .or_else(|| scope.get(&place.name))
+                    .map(|value| format!("{name} = {}", value.jet_show()))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        jet_foundation::Outcome::jet_render_runtime_stop(
+            "E3001",
+            loc.file.trim_matches('"'),
+            loc.line,
+            loc.fn_name.trim_matches('"'),
+            loc.src_line.trim_matches('"'),
+            loc.col,
+            loc.caret,
+            message,
+            &locals,
+        )
     }
 
     fn eval_list_lit_expr(
@@ -4506,17 +4532,20 @@ impl<'a> EvalCtx<'a> {
                         crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
                             .map(|(signed, _)| signed)
                             .unwrap_or(true);
-                    return crate::Comptime::MathLayout::integer_binop(
-                        *op,
-                        a,
-                        b,
-                        *signed,
-                        *bits,
-                        right_signed,
+                    return self.route_runtime_arithmetic(
+                        crate::Comptime::MathLayout::integer_binop(
+                            *op,
+                            a,
+                            b,
+                            *signed,
+                            *bits,
+                            right_signed,
+                            self.span(),
+                        ),
                         self.span(),
                     );
                 }
-                eval_binop(*op, l, r, self.span())
+                self.eval_runtime_binop(*op, l, r, self.span())
             }
             TExprKind::Unary { op, operand } => {
                 let v = self.eval_expr_child(operand, scope)?;
@@ -4569,17 +4598,20 @@ impl<'a> EvalCtx<'a> {
                             crate::Comptime::MathLayout::integer_type_layout(&operands[i + 1].ty)
                                 .map(|(signed, _)| signed)
                                 .unwrap_or(true);
-                        crate::Comptime::MathLayout::integer_binop(
-                            *op,
-                            as_int(&vals[i], self.span())?,
-                            as_int(&vals[i + 1], self.span())?,
-                            *signed,
-                            *bits,
-                            right_signed,
+                        self.route_runtime_arithmetic(
+                            crate::Comptime::MathLayout::integer_binop(
+                                *op,
+                                as_int(&vals[i], self.span())?,
+                                as_int(&vals[i + 1], self.span())?,
+                                *signed,
+                                *bits,
+                                right_signed,
+                                self.span(),
+                            ),
                             self.span(),
                         )?
                     } else {
-                        eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?
+                        self.eval_runtime_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?
                     };
                     if !as_bool(&part, self.span())? {
                         return Ok(CtValue::Bool(false));
@@ -5358,6 +5390,7 @@ impl<'a> EvalCtx<'a> {
                 base,
                 index,
                 is_map,
+                line,
                 ..
             } => {
                 let b = match self.eval_expr_child(base, scope)? {
@@ -5372,7 +5405,15 @@ impl<'a> EvalCtx<'a> {
                         CtValue::Map(m) => m
                             .get(&key)
                             .cloned()
-                            .ok_or_else(|| unsupported("missing map key", self.span())),
+                            .ok_or_else(|| {
+                                self.runtime_index_stop(
+                                    "E3001",
+                                    *line as u32,
+                                    &jet_foundation::Outcome::jet_missing_map_key_value(
+                                        key.to_value().jet_show(),
+                                    ),
+                                )
+                            }),
                         _ => Err(unsupported("map index recv", self.span())),
                     }
                 } else {
@@ -5401,7 +5442,13 @@ impl<'a> EvalCtx<'a> {
                                 return Err(unsupported("view-mut window", self.span()));
                             };
                             if idx < 0 || idx as usize >= xs.len() {
-                                return Err(unsupported("list index oob", self.span()));
+                                return Err(self.runtime_index_stop(
+                                    "E3010",
+                                    *line as u32,
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        xs.len(), idx,
+                                    ),
+                                ));
                             }
                             return Ok(xs[idx as usize].clone());
                         }
@@ -5422,14 +5469,26 @@ impl<'a> EvalCtx<'a> {
                         }
                         CtValue::List(xs) => {
                             if idx < 0 || idx as usize >= xs.len() {
-                                Err(unsupported("list index oob", self.span()))
+                                Err(self.runtime_index_stop(
+                                    "E3010",
+                                    *line as u32,
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        xs.len(), idx,
+                                    ),
+                                ))
                             } else {
                                 Ok(xs[idx as usize].clone())
                             }
                         }
                         CtValue::Bytes(bs) => {
                             if idx < 0 || idx as usize >= bs.len() {
-                                Err(unsupported("bytes index oob", self.span()))
+                                Err(self.runtime_index_stop(
+                                    "E3010",
+                                    *line as u32,
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        bs.len(), idx,
+                                    ),
+                                ))
                             } else {
                                 Ok(CtValue::Int(bs[idx as usize] as i64))
                             }
@@ -5438,7 +5497,16 @@ impl<'a> EvalCtx<'a> {
                             let ch = s
                                 .chars()
                                 .nth(idx as usize)
-                                .ok_or_else(|| unsupported("string index oob", self.span()))?;
+                                .ok_or_else(|| {
+                                    self.runtime_index_stop(
+                                        "E3010",
+                                        *line as u32,
+                                        &format!(
+                                            "the string has {} characters, so position {} doesn't exist",
+                                            s.chars().count(), idx
+                                        ),
+                                    )
+                                })?;
                             Ok(CtValue::Char(ch))
                         }
                         other => {
@@ -5568,7 +5636,7 @@ impl<'a> EvalCtx<'a> {
                         "div" => BinOp::Div,
                         _ => return Err(unsupported("numeric operator", self.span())),
                     };
-                    return eval_binop(op, r, rhs, self.span());
+                    return self.eval_runtime_binop(op, r, rhs, self.span());
                 }
                 if method.name == "apply" {
                     if let (
@@ -7153,7 +7221,27 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
             }
-            TExprKind::Todo { expected_type, .. } => Err(unsupported(&format!("expr Todo ({expected_type})"), self.span())),
+            TExprKind::Todo {
+                line,
+                expected_type,
+            } => {
+                if self.runtime_execution {
+                    Err(self.runtime_stop(
+                        "E3011",
+                        *line as u32,
+                        &jet_foundation::Outcome::jet_todo_message(
+                            &self.source_file,
+                            *line as u32,
+                            expected_type,
+                        ),
+                    ))
+                } else {
+                    Err(unsupported(
+                        &format!("expr Todo ({expected_type})"),
+                        self.span(),
+                    ))
+                }
+            }
             // Card #1440: sema proved this arm dead (E0307) — reaching it in
             // the interpreter is a compiler bug, reported as an internal error.
             TExprKind::Unreachable { line } => Err(unsupported(

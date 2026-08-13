@@ -155,8 +155,9 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                 .exit_code
                 .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
         },
-        // Whole-program interpret traps are live-program panics (I9 / #1483),
-        // not comptime build failures — match AOT exit 70 + `panic:` wording.
+        // Whole-program interpret traps are live-program stops. The fallback
+        // still enters the Foundation renderer when an older E0953 boundary
+        // reaches this adapter.
         Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     };
@@ -176,12 +177,10 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
         .why
         .strip_prefix("while computing this value at compile time, the program panicked: ")
         .unwrap_or(d.why.as_str());
-    if !sink.stderr.is_empty() && !sink.stderr.ends_with('\n') {
-        sink.stderr.push('\n');
-    }
-    sink.stderr.push_str("panic: ");
-    sink.stderr.push_str(msg);
-    sink.stderr.push('\n');
+    let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "E3001", "", 0, "", "", 1, 1, msg, "",
+    );
+    sink.stderr.push_str(&report.rendered);
     RunOutcome::Ran {
         stdout: sink.stdout,
         stderr: sink.stderr,

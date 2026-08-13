@@ -1685,7 +1685,7 @@ fn consume(ch: Receiver<Int>) => Int {
 
     #[test]
     fn covers_todo_hole() {
-        // c109 Phase 23: a `#Todo` hole is covered (diverging `todo!`). The build_cx-only
+        // c109 Phase 23: a `#Todo` hole is covered (registered E3011 stop). The build_cx-only
         // helper leaves `expected_type` unset (sema fills it), but the gate admits a
         // None-typed hole too (it lowers to the `(unknown)` fallback — never reached here
         // since this is a structural gate test). Reproduce the sema fact: a hole with an

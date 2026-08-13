@@ -360,8 +360,8 @@ fn run() {{
             "`{op}` by zero must exit 70 under `jet run`: out={out} err={err}"
         );
         assert!(
-            err.contains("panic:") && err.contains("divided by zero"),
-            "`{op}` by zero on `jet run`: expected runtime panic wording, got: {err}"
+            err.contains("Stop [E3010]") && err.contains("divided by zero"),
+            "`{op}` by zero on `jet run`: expected the E3010 runtime stop, got: {err}"
         );
         assert!(
             !err.contains("E0953") && !err.contains("comptime"),

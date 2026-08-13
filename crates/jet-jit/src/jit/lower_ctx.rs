@@ -101,6 +101,7 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) reachable_break_exits: HashSet<Block>,
     pub(crate) reachable_continue_blocks: HashSet<Block>,
     pub(crate) dead: bool,
+    pub(crate) stack_guard: bool,
     pub(crate) next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
     pub(crate) method_struct: Option<String>,
@@ -305,6 +306,34 @@ impl LowerCtx<'_, '_> {
         Ok(Some(env))
     }
 
+    pub(crate) fn emit_stack_enter(
+        &mut self,
+        file: &str,
+        line: usize,
+        fn_name: &str,
+        src_line: &str,
+    ) -> Result<(), String> {
+        let file = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(file));
+        let fn_name = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(fn_name));
+        let src_line = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(src_line));
+        let args = [
+            self.b.ins().iconst(types::I64, file as i64),
+            self.b.ins().iconst(types::I64, line as i64),
+            self.b.ins().iconst(types::I64, fn_name as i64),
+            self.b.ins().iconst(types::I64, src_line as i64),
+        ];
+        let _ = self.call_host(self.host.stack_enter, &args);
+        self.emit_trap_check()
+    }
     /// Lower a plain Core row through the resident host symbol derived from
     /// the same foundation record used by AOT. Special calls keep their
     /// existing typed lowering below; a missing host candidate is therefore a
@@ -2858,6 +2887,13 @@ impl LowerCtx<'_, '_> {
                 .module
                 .declare_func_in_func(self.host.cell.frame_leave, self.b.func);
             self.b.ins().call(leave, &[layout, returned]);
+        }
+
+        if self.stack_guard {
+            let stack_leave = self
+                .module
+                .declare_func_in_func(self.host.stack_leave, self.b.func);
+            self.b.ins().call(stack_leave, &[]);
         }
 
         let trapped = self.call_host(self.host.is_trapped, &[]);
@@ -16868,21 +16904,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I64, 0))
             }
             TExprKind::Todo { line, expected_type } => {
-                let msg = format!("#Todo at ?:{line} — expected {expected_type}");
-                let msg_h = self.runtime.heap.alloc_string(msg);
-                let msg_v = self.b.ins().iconst(types::I64, msg_h);
-                let empty = self.runtime.heap.alloc_string(String::new());
-                let empty_v = self.b.ins().iconst(types::I64, empty);
+                let expected_h = self.runtime.heap.alloc_string(expected_type.clone());
                 let host = self
                     .module
-                    .declare_func_in_func(self.host.rich_panic, self.b.func);
+                    .declare_func_in_func(self.host.todo_stop, self.b.func);
                 let line_v = self.b.ins().iconst(types::I64, *line as i64);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let caret = self.b.ins().iconst(types::I64, 5);
-                self.b.ins().call(
-                    host,
-                    &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
-                );
+                let expected_v = self.b.ins().iconst(types::I64, expected_h);
+                self.b.ins().call(host, &[line_v, expected_v]);
                 self.emit_trap_check()?;
                 Ok(self.b.ins().iconst(types::I64, 0))
             }

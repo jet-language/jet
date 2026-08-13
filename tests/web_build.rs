@@ -1468,6 +1468,50 @@ fn run() {
     let _ = fs::remove_dir_all(dir);
 }
 
+/// D-FAIL-BREACH1 / I9: a JS runtime stop must use the shared report door and
+/// carry the Jet source location into the thrown error.
+#[test]
+fn web_js_runtime_stop_uses_shared_report() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS runtime-stop test (need rustc + node)");
+        return;
+    }
+    let src = r#"#Target(JS)
+fn run() {
+    n := 1
+    xs := [n]
+    print(xs[9])
+}
+"#;
+    let dir = build_web_fixture(
+        "js_runtime_stop",
+        src,
+        "tests/fixtures/web_js_runtime_stop.jet",
+    );
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("app.js")
+        .output()
+        .unwrap();
+    assert!(!node.status.success(), "a reached stop must fail the JS process");
+    let stderr = String::from_utf8_lossy(&node.stderr);
+    assert!(
+        stderr.contains("Stop [E3010]: the list has 1 items, so position 9 doesn't exist"),
+        "missing shared stop text:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--> tests/fixtures/web_js_runtime_stop.jet:5"),
+        "missing Jet source location:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Why: the operation has no valid result for these operands")
+            && stderr.contains("Fix: check the operands before the operation, or use a checked operation"),
+        "missing shared why/fix:\n{stderr}"
+    );
+    assert!(!stderr.contains("thread 'main' panicked"), "raw host panic leaked:\n{stderr}");
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn web_js_enum_match_break_targets_the_enclosing_loop() {
     if !have_tool("rustc") || !have_tool("node") {

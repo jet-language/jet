@@ -11,7 +11,8 @@
 //! - E0615 — a member statement outside any member-declaring marker block.
 //! - E0616 — `.setup` is not the first statement.
 //! - E0617 — wrong argument shape (`.timeout` needs one duration; `.setup` /
-//!   `.expect_fail` take none; `.skip` takes an optional reason string).
+//!   `.expect_fail` takes an optional stop code; `.skip` takes an optional reason
+//!   string).
 //! - E0618 — a member nested inside another member or a control block (they must
 //!   stay flat, at the top level of the marker body).
 //!
@@ -637,13 +638,31 @@ fn validate_args(
 ) {
     let at = args_span.unwrap_or(span);
     match name {
-        n if n == Syntax::SCOPE_TEST_SETUP || n == Syntax::SCOPE_TEST_EXPECT_FAIL => {
+        n if n == Syntax::SCOPE_TEST_SETUP => {
             if !args.is_empty() {
                 diags.push(Diagnostic::error(
                     "E0617",
                     format!("`.{}` takes no arguments", name),
                     format!("`.{}` marks a region; it has nothing to configure", name),
                     format!("write `.{} {{ … }}`", name),
+                    Some(at),
+                ));
+            }
+        }
+        n if n == Syntax::SCOPE_TEST_EXPECT_FAIL => {
+            let ok = args.is_empty()
+                || (args.len() == 1
+                    && matches!(
+                        &args[0],
+                        Expr::Ident(code, _) if code.starts_with("E30")
+                            && jet_foundation::Registry::diagnostic(code).is_some()
+                    ));
+            if !ok {
+                diags.push(Diagnostic::error(
+                    "E0617",
+                    "`.expect_fail` takes one optional runtime stop code".to_string(),
+                    "the code names the E30xx stop the region must produce".to_string(),
+                    "write `.expect_fail { … }` or `.expect_fail(E3010) { … }`".to_string(),
                     Some(at),
                 ));
             }

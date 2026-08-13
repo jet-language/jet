@@ -24,6 +24,9 @@ fn main_returns_default_err(program: &JitProgram) -> bool {
 pub(crate) fn fresh_runtime() -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
+        source_text: String::new(),
+        current_function: String::new(),
+        stack_depth: 0,
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
@@ -132,6 +135,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     drop(stream_consumers);
     rt.next_stream_channel = -1;
     rt.next_stream_sender = -1;
+    rt.stack_depth = 0;
     rt.jit_callables.clear();
     rt.channels.clear();
     rt.senders.clear();
@@ -318,22 +322,25 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 });
             }
 
-            // Runtime arithmetic / host traps: same exit 70 + `panic:` wording
-            // as AOT `jet_panic` (I2 / I9). Never reclassify a live-program trap
-            // as E0953 "comptime stopped the build" (#1483).
-            let mut stderr = runtime.stderr.clone();
-            if !stderr.is_empty() && !stderr.ends_with('\n') {
-                stderr.push('\n');
-            }
-            stderr.push_str("panic: ");
-            stderr.push_str(&msg);
-            stderr.push('\n');
+            // The host has already marshalled this stop through the shared
+            // Foundation renderer. Never invent a second engine-local report.
+            let stderr = runtime.stderr.clone();
             let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);
             return Ok(RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code: 70,
+            });
+        }
+        if let Some(code) = runtime.exit_code.take() {
+            let stdout = runtime.stdout.clone();
+            let stderr = runtime.stderr.clone();
+            reset_run_heap(runtime);
+            return Ok(RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code: code,
             });
         }
         if let Some(handle) = entry_result {
