@@ -462,7 +462,7 @@ impl<'a> Fmt<'a> {
                 let site_mode = self.policy_declarations.iter().find(|declaration|
                     declaration.key == crate::Policy::PolicyKey::Unsafe
                         && declaration.target == Some(*span)
-                        && matches!(declaration.value, crate::Policy::PolicyValue::UnsafeTrack | crate::Policy::PolicyValue::UnsafeSkip)).map(|declaration| declaration.value);
+                        && matches!(declaration.value, crate::Policy::PolicyValue::Track | crate::Policy::PolicyValue::Skip)).map(|declaration| declaration.value);
                 if let Some(argument) = audit_expr {
                     self.write(&format!("#{}(", Syntax::KW_UNSAFE));
                     self.fmt_expr(argument, Prec::OrFallback);

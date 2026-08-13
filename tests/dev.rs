@@ -693,7 +693,7 @@ fn print_jit_op_report() {
 ///     the program legitimately failing, not a silent skip.
 ///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
 ///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
-///     `--allow-impure` not passed — an honest, named boundary (the golden
+///     `--gate impure=allow` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
 ///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
 ///     same comptime/interpreter evaluation path — unconditionally denied

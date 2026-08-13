@@ -40,7 +40,7 @@ pub(super) fn check_bundle_opts_for_output(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
@@ -48,7 +48,7 @@ pub(super) fn check_bundle_opts_for_output(
         bundle,
         mode,
         freestanding,
-        allow_impure,
+        gates,
         explicit_output,
         incremental,
         false,
@@ -59,7 +59,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
@@ -70,7 +70,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
             bundle,
             mode,
             freestanding,
-            allow_impure,
+            gates,
             explicit_output,
             incremental,
             allow_compiler_api,
@@ -82,7 +82,7 @@ fn check_bundle_opts_for_output_inner(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     freestanding: bool,
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     mut incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
@@ -127,7 +127,7 @@ fn check_bundle_opts_for_output_inner(
     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
     // module expansion, but before registration/TIR. Assertions are checked and
     // erased here so no generated or untaken body bypasses the policy.
-    diags.extend(super::super::UnsafeObligations::check_and_strip(bundle));
+    diags.extend(super::super::UnsafeObligations::check_and_strip_with_gates(bundle, gates));
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
@@ -1918,7 +1918,7 @@ fn check_bundle_opts_for_output_inner(
             &declared_effect_facts,
             mode,
             freestanding,
-            allow_impure,
+            gates,
             &mut local_summaries,
             &mut embed_inputs,
             &mut global_addr_taken,

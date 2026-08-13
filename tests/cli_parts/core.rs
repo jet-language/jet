@@ -171,6 +171,41 @@ fn configured_organization_unsafe_policy_fails_closed_and_keeps_path() {
 }
 
 #[test]
+fn organization_gate_policy_refuses_each_audited_invocation_gate() {
+    let dir = isolated_cwd("organization_gate_ladder");
+    fs::write(
+        dir.join("main.jet"),
+        "fn run() {\n    #Unsafe(\"org refusal\") {}\n    #Impure(\"org refusal\") {}\n    #Nondeterministic(\"org refusal\") {}\n}\n",
+    )
+    .unwrap();
+    let configured = dir.join("org-policy.jet");
+    fs::write(
+        &configured,
+        "policy: .{ unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args([
+            "run",
+            "--gate",
+            "unsafe=allow",
+            "--gate",
+            "impure=allow",
+            "--gate",
+            "nondeterministic=allow",
+            "main.jet",
+        ])
+        .current_dir(&dir)
+        .env(jet::Syntax::ENV_ORG_UNSAFE_POLICY, &configured)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    check_snapshot("audited_gate_policy.txt", &scrub(&stderr, &dir.join("main.jet")));
+}
+
+#[test]
 fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     if Command::new("lua").arg("-v").output().is_err() { return }
     let dir=isolated_cwd("lua_bind_e2e");let root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));let example=root.join("examples/interop/lua");

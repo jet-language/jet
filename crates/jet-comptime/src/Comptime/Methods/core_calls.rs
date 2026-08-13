@@ -2587,7 +2587,7 @@ pub fn apply_core_call_with_type(
                 .to_string(),
             format!(
                 "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
-                         pass `--allow-impure` to the build"
+                         pass `--gate impure=allow` to the build"
             ),
             Some(span),
         )),

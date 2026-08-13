@@ -387,7 +387,7 @@ pub const KW_UNSAFE: &str = "Unsafe";
 pub const KW_SHIELD: &str = "Shield";
 
 /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
-/// Tier-2 comptime effect gate. Both this block AND `--allow-impure` at build
+/// Tier-2 comptime effect gate. Both this block AND `--gate impure=allow` at build
 /// are required to execute ambient comptime I/O (FS/Env/Exec/IO). PascalCase
 /// per D-CASING1 (consistent with `Unsafe`).
 pub const KW_IMPURE: &str = "Impure";

@@ -286,7 +286,7 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
         || match Comptime::TirBridge::run_bundle_at_stage(
             bundle,
             &mut sink,
-            true,
+            jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
             Comptime::PurityStage::RunTime,
         ) {
             Ok(CtValue::Failed(CtReport::Told(error))) => {

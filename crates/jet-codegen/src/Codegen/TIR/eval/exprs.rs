@@ -1878,7 +1878,7 @@ impl<'a> EvalCtx<'a> {
                     "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
                 ),
                 "effectful Core APIs are not allowed in pure comptime evaluation".to_string(),
-                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime".to_string(),
                 Some(span),
             ));
         }
@@ -4002,7 +4002,13 @@ impl<'a> EvalCtx<'a> {
                 reborrow_repl_authorizer(&mut self.repl_authorizer),
                 Some(&expr.ty),
             )
-        } else if self.impure_depth > 0 && self.allow_impure {
+        } else if self.impure_depth > 0
+            && jet_foundation::Policy::resolve_invocation(
+                jet_foundation::Policy::PolicyKey::Impure,
+                &self.gates,
+            )
+            .unwrap_or(false)
+        {
             let mut sink = self
                 .sink
                 .as_ref()
@@ -4027,7 +4033,7 @@ impl<'a> EvalCtx<'a> {
                 ),
                 "ambient I/O and storeful Core APIs are not allowed in pure comptime evaluation"
                     .to_string(),
-                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime"
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime"
                     .to_string(),
                 Some(source_span),
             ));
@@ -4035,10 +4041,10 @@ impl<'a> EvalCtx<'a> {
             return Err(crate::Sema::Diagnostics::render_registered(
                 "E3411",
                 format!(
-                    "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
+                    "`{module}.{method}()` inside `#Impure` gate, but `--gate impure=allow` was not passed"
                 ),
                 "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
-                "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                "add `--gate impure=allow` to your `jet build` / `jet run` invocation".to_string(),
                 Some(source_span),
             ));
         }?;

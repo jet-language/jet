@@ -484,7 +484,7 @@ fn eval_members_expr(
         base_dir,
         globals,
         &HashMap::new(),
-        false,
+        jet_pkg_model::Policy::GateSet::default(),
         0,
         None,
     )?;

@@ -733,7 +733,7 @@ fn build(b: BuildContext) =[FS]=> BuildPlan ? {        // Tier-1 effect declarat
 }
 ```
 CLI: `jet build --profile=ci --locked` is hermetic by default — Tier 2 opens
-only via an explicit grant (today's ratified blanket is `--allow-impure`,
+only via an explicit grant (today's ratified blanket is `--gate impure=allow`,
 D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
 `jet inspect audit-effects` (static, executes nothing).
 

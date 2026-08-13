@@ -34,7 +34,7 @@ pub enum PurityStage {
     /// jet-comptime's own build-time evaluation check (`check_purity`,
     /// `check_purity_stmts`): checks what runs while the compiler itself
     /// evaluates the expression. `#Impure(...)` bodies are gated by
-    /// `--allow-impure`/E3411 at the point they would actually execute
+    /// `--gate impure=allow`/E3411 at the point they would actually execute
     /// (unchanged prior behavior), so the build-time walk skips them here.
     /// A nested `@ { ... }` block runs for real during build-time
     /// evaluation too, so it stays in the walk.
@@ -692,7 +692,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
             // See PurityStage: run-time descends (an `=[]=>` fn's declared
             // empty effect set must still reject an ambient call fenced only
             // by `#Impure`), build-time skips (the ambient call is checked
-            // by --allow-impure/E3411 at the point it would actually run).
+            // by --gate impure=allow/E3411 at the point it would actually run).
             if opts.descend_impure {
                 if let Some(reason) = reason_expr {
                     walk!(reason);

@@ -303,7 +303,7 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
     assert_contains_all(
         bridge_bundle,
         "TIR bundle bridge",
-        &["(hooks().run_bundle)(bundle, sink, allow_impure)"],
+        &["(hooks().run_bundle)(bundle, sink, gates)"],
     );
     assert_contains_all(
         bridge_expr,

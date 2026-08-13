@@ -882,8 +882,8 @@ impl<'a> Parser<'a> {
                 _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
             };
             obligation_mode = Some(match mode.as_str() {
-                    "Track" => crate::Policy::PolicyValue::UnsafeTrack,
-                    "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                    "Track" => crate::Policy::PolicyValue::Track,
+                    "Skip" => crate::Policy::PolicyValue::Skip,
                     _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(*mode_span))),
                 });
         }

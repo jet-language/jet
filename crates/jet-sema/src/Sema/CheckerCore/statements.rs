@@ -2248,6 +2248,7 @@ impl<'a> Checker<'a> {
                 Stmt::Impure {
                     reason, body, span, ..
                 } => {
+                    let policy_allowed = self.audited_gate_allowed(crate::Policy::PolicyKey::Impure, *span);
                     if reason.is_none() {
                         self.diags.push(Diagnostic::lint(
                             "L3102",
@@ -2257,9 +2258,13 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
-                    self.ct_impure_depth += 1;
+                    if policy_allowed {
+                        self.ct_impure_depth += 1;
+                    }
                     self.check_block(body, true);
-                    self.ct_impure_depth -= 1;
+                    if policy_allowed {
+                        self.ct_impure_depth -= 1;
+                    }
                 }
                 // D-SHIELDNAME1=A: `#Shield { … }` — a cancellation-shield region.
                 // Legal anywhere ordinary statements are; a no-op outside a task.
@@ -2738,10 +2743,15 @@ impl<'a> Checker<'a> {
                 // Core call / E3401 impure Core call) are suspended for the body. This
                 // does NOT relax memory/type safety — only the determinism check. A
                 // lexical scope; erased in codegen (I3 — a plain Rust block).
-                Stmt::AssumeDet { body, .. } => {
-                    self.det_suppress += 1;
+                Stmt::AssumeDet { body, span, .. } => {
+                    let policy_allowed = self.audited_gate_allowed(crate::Policy::PolicyKey::Nondeterministic, *span);
+                    if policy_allowed {
+                        self.det_suppress += 1;
+                    }
                     self.check_block(body, true);
-                    self.det_suppress -= 1;
+                    if policy_allowed {
+                        self.det_suppress -= 1;
+                    }
                 }
                 // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }`.
                 // Bind the user-chosen handle `name` (typed `Transaction`) so

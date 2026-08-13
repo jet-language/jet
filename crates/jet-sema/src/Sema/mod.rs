@@ -1503,9 +1503,9 @@ pub(crate) struct Checker<'a> {
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
-    /// D-CTEFFECT1: `--allow-impure` was passed — `#Impure` blocks may execute
+    /// D-CTEFFECT1: `--gate impure=allow` was passed — `#Impure` blocks may execute
     /// Tier-2 ambient comptime effects (FS/Env/Exec/IO) at compile time.
-    allow_impure: bool,
+    gates: crate::Policy::GateSet,
     /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
     /// Passed as `initial_impure_depth` to comptime evaluation of bindings
     /// inside, so the interpreter starts with the gate already open.
@@ -1835,6 +1835,49 @@ impl<'a> Checker<'a> {
         })
     }
 
+    pub(crate) fn audited_gate_allowed(&mut self, key: crate::Policy::PolicyKey, span: Span) -> bool {
+        let declarations = self
+            .policy_declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.key == key
+                    && (matches!(
+                        declaration.scope,
+                        crate::Policy::PolicyScope::Organization
+                            | crate::Policy::PolicyScope::Package
+                            | crate::Policy::PolicyScope::Module
+                    )
+                        || declaration.target == Some(self.current_function_span)
+                        || declaration.target == Some(span))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        match crate::Policy::resolve_with_gates(key, declarations, &self.gates) {
+            Ok(Some(policy)) if policy.value == crate::Policy::PolicyValue::Forbid => {
+                self.diags.push(Diagnostic::error(
+                    if key == crate::Policy::PolicyKey::Unsafe { "E3105" } else { "E3415" },
+                    format!("the `{}` gate is denied by effective policy", key.name()),
+                    "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(),
+                    format!("remove the `{}` escape or change the owning policy", key.name()),
+                    Some(span),
+                ));
+                false
+            }
+            Ok(_) => true,
+            Err(_error) => {
+                let code = if self.gates.allows(key) { "E3415" } else { "E0355" };
+                self.diags.push(Diagnostic::error(
+                    code,
+                    format!("the `{}` gate is denied by effective policy", key.name()),
+                    "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(),
+                    format!("remove `--gate {}=allow` or change the owning policy", key.name()),
+                    Some(span),
+                ));
+                false
+            }
+        }
+    }
+
     pub(crate) fn explicit_units_diagnostic(
         &self,
         destination_name: &str,
@@ -2043,8 +2086,9 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
-    bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
+    bundle_has_comptime_evaluation, check_bundle, check_bundle_gates, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
+    check_bundle_freestanding_with_gates,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
     specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,

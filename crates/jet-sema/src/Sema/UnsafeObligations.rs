@@ -38,6 +38,10 @@ pub struct UnsafeOperationInspection {
 }
 
 pub fn inspect(bundle: &ProgramBundle) -> UnsafeInspection {
+    inspect_with_gates(bundle, Policy::GateSet::default())
+}
+
+pub fn inspect_with_gates(bundle: &ProgramBundle, gates: Policy::GateSet) -> UnsafeInspection {
     let mut result = UnsafeInspection { gates: Vec::new(), diagnostics: Vec::new() };
     for module in &bundle.modules {
         for item in &module.items {
@@ -46,6 +50,7 @@ pub fn inspect(bundle: &ProgramBundle) -> UnsafeInspection {
                 &module.display,
                 &module.policy_declarations,
                 &module.rule_facts,
+                gates,
                 &mut result,
             );
         }
@@ -54,8 +59,8 @@ pub fn inspect(bundle: &ProgramBundle) -> UnsafeInspection {
     result
 }
 
-pub(crate) fn check_and_strip(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-    let result = inspect(bundle);
+pub(crate) fn check_and_strip_with_gates(bundle: &mut ProgramBundle, gates: Policy::GateSet) -> Vec<Diagnostic> {
+    let result = inspect_with_gates(bundle, gates);
     for module in &mut bundle.modules {
         for item in &mut module.items { strip_item(item); }
     }
@@ -71,28 +76,29 @@ fn visit_item(
     source: &str,
     declarations: &[PolicyDeclaration],
     rule_facts: &[crate::AST::AppliedRuleApplication],
+    gates: Policy::GateSet,
     result: &mut UnsafeInspection,
 ) {
     match item {
-        Item::Func(function) => visit_function(function, source, declarations, rule_facts, result),
+        Item::Func(function) => visit_function(function, source, declarations, rule_facts, gates, result),
         Item::Struct(definition) => {
-            for function in &definition.methods { visit_function(function, source, declarations, rule_facts, result); }
+            for function in &definition.methods { visit_function(function, source, declarations, rule_facts, gates, result); }
             for implementation in &definition.trait_impls {
-                for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, result); }
+                for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, gates, result); }
             }
         }
         Item::Enum(definition) => {
-            for function in &definition.methods { visit_function(function, source, declarations, rule_facts, result); }
+            for function in &definition.methods { visit_function(function, source, declarations, rule_facts, gates, result); }
             for implementation in &definition.trait_impls {
-                for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, result); }
+                for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, gates, result); }
             }
         }
-        Item::Impl(implementation) => for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, result); },
-        Item::Test(test) => visit_plain_body(&test.body, source, declarations, result),
-        Item::Bench(bench) => visit_plain_body(&bench.body, source, declarations, result),
+        Item::Impl(implementation) => for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, gates, result); },
+        Item::Test(test) => visit_plain_body(&test.body, source, declarations, gates, result),
+        Item::Bench(bench) => visit_plain_body(&bench.body, source, declarations, gates, result),
         Item::CodeModule(module) => {
             if let Some(items) = &module.body {
-                for item in items { visit_item(item, source, declarations, rule_facts, result); }
+                for item in items { visit_item(item, source, declarations, rule_facts, gates, result); }
             }
         }
         _ => {}
@@ -104,6 +110,7 @@ fn visit_function(
     source: &str,
     declarations: &[PolicyDeclaration],
     rule_facts: &[crate::AST::AppliedRuleApplication],
+    gates: Policy::GateSet,
     result: &mut UnsafeInspection,
 ) {
     if function.is_unsafe {
@@ -121,19 +128,20 @@ fn visit_function(
             &function.body,
             source,
             declarations,
+            gates,
             result,
         );
     } else {
-        visit_plain_body(&function.body, source, declarations, result);
+        visit_plain_body(&function.body, source, declarations, gates, result);
     }
 }
 
-fn visit_plain_body(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], result: &mut UnsafeInspection) {
-    visit_nested_gates(body, source, declarations, result);
+fn visit_plain_body(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], gates: Policy::GateSet, result: &mut UnsafeInspection) {
+    visit_nested_gates(body, source, declarations, gates, result);
     reject_assertions_outside_gate(body, source, result);
 }
 
-fn visit_nested_gates(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], result: &mut UnsafeInspection) {
+fn visit_nested_gates(body: &[Stmt], source: &str, declarations: &[PolicyDeclaration], gates: Policy::GateSet, result: &mut UnsafeInspection) {
     for statement in body {
         match statement {
             Stmt::Unsafe {
@@ -150,9 +158,10 @@ fn visit_nested_gates(body: &[Stmt], source: &str, declarations: &[PolicyDeclara
                 body,
                 source,
                 declarations,
+                gates,
                 result,
             ),
-            _ => for nested in nested_bodies(statement) { visit_nested_gates(nested, source, declarations, result); },
+            _ => for nested in nested_bodies(statement) { visit_nested_gates(nested, source, declarations, gates, result); },
         }
     }
 }
@@ -166,36 +175,38 @@ fn visit_gate(
     body: &[Stmt],
     source: &str,
     declarations: &[PolicyDeclaration],
+    gates: Policy::GateSet,
     result: &mut UnsafeInspection,
 ) {
     let outer = declarations.iter().filter(|declaration| {
-        declaration.key == PolicyKey::Unsafe && matches!(declaration.scope, PolicyScope::Organization | PolicyScope::Package)
+        declaration.key == PolicyKey::Unsafe && matches!(declaration.scope, PolicyScope::Organization | PolicyScope::Package | PolicyScope::Module)
     }).cloned().collect::<Vec<_>>();
     let site = declarations.iter().filter(|declaration| declaration.key == PolicyKey::Unsafe && declaration.target == Some(target)).cloned().collect::<Vec<_>>();
-    let outer_policy = Policy::resolve(PolicyKey::Unsafe, outer.clone()).ok().flatten();
+    let outer_policy = Policy::resolve_with_gates(PolicyKey::Unsafe, outer.clone(), &gates).ok().flatten();
     let mut chain = outer;
     chain.extend(site.clone());
-    let effective = match Policy::resolve(PolicyKey::Unsafe, chain) {
+    let effective = match Policy::resolve_with_gates(PolicyKey::Unsafe, chain, &gates) {
         Ok(policy) => policy,
-        Err(error) => {
-            push_diagnostic(result, source, Diagnostic::error("E0355", "invalid effective `unsafe` policy".to_string(), format!("the organization, package, and gate declarations do not form a valid tightening chain: {error:?}"), "remove the weaker declaration or track the required obligations".to_string(), Some(gate_span)));
+        Err(_error) => {
+            let code = if gates.allows(PolicyKey::Unsafe) { "E3415" } else { "E0355" };
+            push_diagnostic(result, source, Diagnostic::error(code, "audited gate denied by effective policy".to_string(), "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(), "remove `--gate unsafe=allow` or change the owning policy".to_string(), Some(gate_span)));
             None
         }
     };
-    let mut value = effective.as_ref().map(|policy| policy.value).unwrap_or(PolicyValue::UnsafeDefault);
-    if matches!(value, PolicyValue::UnsafePerSite) {
+    let mut value = effective.as_ref().map(|policy| policy.value).unwrap_or(Policy::default_gate_value(PolicyKey::Unsafe));
+    if matches!(value, PolicyValue::PerSite) {
         push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate must choose an obligation mode".to_string(), "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`".to_string(), "add `obligations: .Track` (or `.Skip` when organization policy permits it)".to_string(), Some(gate_span)));
-        value = PolicyValue::UnsafeTrack;
+        value = PolicyValue::Track;
     }
-    if site.iter().any(|declaration| declaration.value == PolicyValue::UnsafeSkip)
-        && !matches!(outer_policy.as_ref().map(|policy| policy.value), Some(PolicyValue::UnsafePerSite))
+    if site.iter().any(|declaration| declaration.value == PolicyValue::Skip)
+        && !matches!(outer_policy.as_ref().map(|policy| policy.value), Some(PolicyValue::PerSite))
     {
         push_diagnostic(result, source, Diagnostic::error("E3106", "this unsafe gate cannot skip obligations".to_string(), "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization".to_string(), "set package policy to `.PerSite`, or remove `.Skip`".to_string(), Some(gate_span)));
-        value = PolicyValue::UnsafeTrack;
+        value = PolicyValue::Track;
     }
-    if value == PolicyValue::UnsafeForbid {
+    if value == PolicyValue::Forbid {
         push_diagnostic(result, source, Diagnostic::error("E3105", "organization or package policy forbids unsafe code".to_string(), "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(), "remove the low-level operation or change the outer policy through its owner".to_string(), Some(gate_span)));
-    } else if reason.is_none() && !source_has_reason && value != PolicyValue::UnsafeRelaxed {
+    } else if reason.is_none() && !source_has_reason && value != PolicyValue::Relaxed {
         let (what, why, fix) = if is_function {
             ("this `#Unsafe` function has no reason", "every gated function records why callers can rely on its unsafe contract", "add the reason: `#Unsafe(\"why this is safe\") fn ...`")
         } else {
@@ -212,21 +223,21 @@ fn visit_gate(
     };
     scan_sequence(body, requires_obligations(value), &mut gate, source, &mut result.diagnostics);
     result.gates.push(gate);
-    visit_nested_gates(body, source, declarations, result);
+    visit_nested_gates(body, source, declarations, gates, result);
 }
 
 fn mode_name(value: PolicyValue) -> &'static str {
     match value {
-        PolicyValue::UnsafeObligations | PolicyValue::UnsafeTrack => "Obligations",
-        PolicyValue::UnsafeRelaxed => "Relaxed",
-        PolicyValue::UnsafePerSite => "PerSite",
-        PolicyValue::UnsafeSkip | PolicyValue::UnsafeDefault | PolicyValue::UnsafeGateOnly => "GateOnly",
-        PolicyValue::UnsafeForbid => "Forbid",
+        PolicyValue::Obligations | PolicyValue::Track => "Obligations",
+        PolicyValue::Relaxed => "Relaxed",
+        PolicyValue::PerSite => "PerSite",
+        PolicyValue::Skip | PolicyValue::Default | PolicyValue::GateOnly => "GateOnly",
+        PolicyValue::Forbid => "Forbid",
         _ => "GateOnly",
     }
 }
 
-fn requires_obligations(value: PolicyValue) -> bool { matches!(value, PolicyValue::UnsafeObligations | PolicyValue::UnsafeTrack) }
+fn requires_obligations(value: PolicyValue) -> bool { matches!(value, PolicyValue::Obligations | PolicyValue::Track) }
 
 fn scan_sequence(body: &[Stmt], track: bool, gate: &mut UnsafeGateInspection, source: &str, diagnostics: &mut Vec<UnsafeDiagnostic>) {
     let mut pending_operations = Vec::new();

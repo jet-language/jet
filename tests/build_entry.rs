@@ -28,7 +28,7 @@ fn opts() -> BuildRunOptions {
         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::FS]),
         policy: BuildPolicy::allow_all(),
         execute: true,
-        allow_impure: true,
+        gates: jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         inspect_only: false,
         emit_generated: false,
         locked: false,
@@ -44,7 +44,7 @@ fn ci_opts() -> BuildRunOptions {
     BuildRunOptions {
         policy: BuildPolicy::ci_default(),
         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::FS]),
-        allow_impure: true,
+        gates: jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         ..opts()
     }
 }
@@ -437,7 +437,7 @@ version: "0.1.0"
         root.join("workspace.jet").to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -485,7 +485,7 @@ fn run() {}
         root.join("workspace.jet").to_str().unwrap(),
         &["exec".to_string()],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1272,7 +1272,7 @@ fn run() {{ print(exported_generated()) }}
         entry.to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1309,7 +1309,7 @@ fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
 fn run() {}
 "#,
     );
-    jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap();
+    jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap();
     assert_eq!(fs::read_to_string(root.join("stamp")).unwrap(), "ok");
 
     fs::remove_file(root.join("stamp")).unwrap();
@@ -1318,7 +1318,7 @@ fn run() {}
         entry.to_str().unwrap(),
         &["exec".to_string()],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1358,7 +1358,7 @@ fn run() {}
         entry.to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1384,13 +1384,13 @@ fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
 fn run() {}
 "#);
     write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: Exec }\n");
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E1221"), "{errors:#?}");
     assert!(!root.join("stamp").exists());
 
     write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
     write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: Exec } }\n");
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| {
         diagnostic.code == "E3503"
             && diagnostic.what == "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
@@ -1401,7 +1401,7 @@ fn run() {}
 
     fs::remove_file(root.join("workspace.jet")).unwrap();
     fs::create_dir(root.join("workspace.jet")).unwrap();
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| {
         diagnostic.code == "E3503" && diagnostic.why.contains("present but unavailable")
     }), "{errors:#?}");
@@ -1434,7 +1434,7 @@ fn run() {}
         entry.to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1529,7 +1529,7 @@ fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
 }
 fn run() {}
 "#);
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
     assert!(!child.join("stamp").exists());
 }
@@ -1567,7 +1567,7 @@ fn run() {}
         entry.to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1615,7 +1615,7 @@ fn run() {}
         entry.to_str().unwrap(),
         &[],
         false,
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
         false,
         false,
         false,
@@ -1759,21 +1759,21 @@ fn run() {{}}
 }
 
 #[test]
-fn pure_core_call_inside_impure_does_not_require_allow_impure() {
+fn pure_core_call_inside_impure_does_not_require_gates() {
     // Programmable-build frames exceed the default test thread stack under
     // full-suite parallelism. Same pattern as distinct-conversion /
     // program-identities (ddd6dca7f).
     let worker = std::thread::Builder::new()
         .name("build-entry-pure-inside-impure".into())
         .stack_size(32 * 1024 * 1024)
-        .spawn(run_pure_core_call_inside_impure_does_not_require_allow_impure)
+        .spawn(run_pure_core_call_inside_impure_does_not_require_gates)
         .expect("start build_entry pure-inside-impure worker");
     if let Err(payload) = worker.join() {
         std::panic::resume_unwind(payload);
     }
 }
 
-fn run_pure_core_call_inside_impure_does_not_require_allow_impure() {
+fn run_pure_core_call_inside_impure_does_not_require_gates() {
     let root = project("pure-inside-impure");
     let entry = root.join("main.jet");
     write(
@@ -1794,7 +1794,7 @@ fn run() {}
     );
 
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .expect_err("pure Core call should execute without --allow-impure");
+        .expect_err("pure Core call should execute without --gate impure=allow");
     assert!(
         errors.iter().any(|diagnostic| diagnostic.code == "PURE"),
         "{errors:#?}"

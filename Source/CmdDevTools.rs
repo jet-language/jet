@@ -24,6 +24,7 @@ pub(crate) fn run_dev(
     file: &str,
     try_anyway: bool,
     policy: WatchPolicy,
+    gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
 ) {
@@ -35,7 +36,7 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
+        let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
         render_dev_outcome(&outcome, file, mode);
         exit_dev_outcome(outcome);
     }
@@ -46,7 +47,7 @@ pub(crate) fn run_dev(
 
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
-    let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
+    let mut prev_bundle = render_dev_iteration(file, try_anyway, gates, mode, use_interpreter);
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
     let mut watch = match jet_devserver::WatchSession::open(path) {
         Ok(watch) => watch,
@@ -83,6 +84,7 @@ pub(crate) fn run_dev(
                 try_anyway,
                 policy,
                 prev_bundle.as_ref(),
+                gates,
                 mode,
                 use_interpreter,
             );
@@ -261,13 +263,14 @@ fn render_dev_change(
     try_anyway: bool,
     policy: WatchPolicy,
     prev: Option<&jet::AST::ProgramBundle>,
+    gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
 ) -> Option<jet::AST::ProgramBundle> {
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
-            let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+            let diags = jet::Sema::check_bundle_gates(&mut b, jet::Sema::CompileMode::Run, gates);
             let errs: Vec<_> = diags
                 .iter()
                 .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -359,7 +362,7 @@ fn render_dev_change(
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
+        let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
         render_dev_outcome(&outcome, file, mode);
     }
 
@@ -440,16 +443,17 @@ pub(crate) fn run_repl(
 fn render_dev_iteration(
     file: &str,
     try_anyway: bool,
+    gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
+    let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
     let bundle = if ran_ok {
         jet::Loader::load_entry(file).ok().map(|mut bundle| {
-            let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            let diagnostics = jet::Sema::check_bundle_gates(&mut bundle, jet::Sema::CompileMode::Run, gates);
             render_dev_lints(file, mode, &diagnostics);
             bundle
         })

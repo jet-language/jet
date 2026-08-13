@@ -143,6 +143,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         since: "2026-08-07",
         code: None,
     },
+    Retirement {
+        id: "allow-impure",
+        retired: "--allow-impure",
+        canonical: "--gate impure=allow",
+        kind: RetirementKind::Semantic,
+        decision: "D-ONCE-GATE1=A",
+        since: "2026-08-07",
+        code: Some("E1343"),
+    },
 ];
 
 /// The known package providers, in the order a ref may not put them.

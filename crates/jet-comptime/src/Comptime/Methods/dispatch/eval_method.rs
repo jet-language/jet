@@ -686,7 +686,7 @@ impl<'a> Interp<'a> {
                 }
                 // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
                 // unconditionally — unlike the Tier-2 effects below, there is no
-                // `#Impure`/`--allow-impure` escape hatch, because a build artifact
+                // `#Impure`/`--gate impure=allow` escape hatch, because a build artifact
                 // must never bake in a decrypted secret (I1).
                 if module == "core.vault" {
                     return Err(vault_comptime_denied(&module, method, span));
@@ -711,7 +711,7 @@ impl<'a> Interp<'a> {
                         ),
                         "effectful Core APIs are not allowed in pure comptime evaluation"
                             .to_string(),
-                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--allow-impure` to the build, or keep the call at runtime".to_string(),
+                        "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime".to_string(),
                         Some(span),
                     ));
                 }
@@ -738,18 +738,23 @@ impl<'a> Interp<'a> {
                             "ambient I/O (filesystem, environment, process) is not allowed in \
                              pure comptime evaluation".to_string(),
                             "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
-                             pass `--allow-impure` to the build".to_string(),
+                             pass `--gate impure=allow` to the build".to_string(),
                             Some(span),
                         ));
                     }
-                    // Gate present (impure_depth > 0) but check --allow-impure flag too.
-                    if !self.allow_impure {
+                    // Gate present (impure_depth > 0) but check --gate impure=allow flag too.
+                    if !jet_foundation::Policy::resolve_invocation(
+                        jet_foundation::Policy::PolicyKey::Impure,
+                        &self.gates,
+                    )
+                    .unwrap_or(false)
+                    {
                         return Err(Diagnostic::error(
                             "E3411",
-                            format!("`{}.{}()` inside `#Impure` gate, but `--allow-impure` was not passed", module, method),
+                            format!("`{}.{}()` inside `#Impure` gate, but `--gate impure=allow` was not passed", module, method),
                             "the `#Impure` block opts in to ambient comptime I/O, but the build \
                              flag is required so CI can audit builds that touch the host".to_string(),
-                            "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                            "add `--gate impure=allow` to your `jet build` / `jet run` invocation".to_string(),
                             Some(span),
                         ));
                     }

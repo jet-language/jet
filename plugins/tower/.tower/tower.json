@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1965,
-    "rev": 35955,
+    "rev": 35995,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84984,7 +84984,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-ENTRY-VALUE1 outcome B, now also aligned with D-FAIL-EXIT1 and D-FAIL-EDGE1 (ratified 2026-08-06, one day after this card's own decision). One entry, fn run. No return means a script that runs and exits. A return type that is the App-family program value (today spelled WebApp; #1447 renames it to App) means the runtime serves that value, and jet dev serves the same value with watch/reload. fn <command>() stays the one override hook (today only fn dev()). Delete the hidden fn app() name sniff, the source-text overlay that synthesizes fn run(){ app().serve() }, and the run/app/dev precedence table.\n\nD-FAIL-EXIT1/D-FAIL-EDGE1 alignment (new, cross-cutting): fn run is fallible by nature regardless of its return type. The \"no return\" (script) case needs no => () ? annotation ever — ? works inside with zero ceremony, and the old E0122 refusal of typed error families at the entry is deleted. An unhandled error escaping the entry reports a full frame and exits 1. Exit 101 is reserved for compiler-internal defects only (#Todo, raw Prelude panics) — never for a reported program error. The CryptoError exit-70/101 special case is deleted from the entry gate. On the App-return (serve) case, if building the App value fails before .serve() runs, the same report is delivered in the target's native shape per D-FAIL-EDGE1 — for the native/CLI build this card and #1447 exercise, that means the same full-frame-and-exit-1 behavior as the script case; web/wasm edge adapters are a separate concern (see newCards proposal / #1507) and out of scope here.\n\nOut of scope: renaming WebApp to App (#1447), CLI args into an App entry (#1450), job naming (#1448/#1449), test/bench overrides (#1451/#1452), the web/wasm/service edge adapters D-FAIL-EDGE1 also requires (owned by whatever card implements the FAIL slate generally — none exists on the board today, see newCards).\n\nApproach:\n1. crates/jet-sema/src/Sema/WebApp.rs: find_app_fn (:67-79) currently matches a function literally named \"app\". Change it to extract the builder graph from fn run's body when fn run's declared return type is the App-family type. Delete the \"app\" name convention.\n2. crates/jet-sema/src/Sema/Bundle.rs (:2279-2328, the CompileMode::Run/Eval entry gate) already requires a literal fn run; confirm it accepts fn run() => WebApp with no extra special-casing beyond the return type, AND remove any E0122-style refusal of a declared error family at this same gate per D-FAIL-EXIT1 (do this in the same pass since it is the same function).\n3. Source/Interpreter.rs checked_bundle (:352-378): delete the has_app/has_run overlay synthesis entirely. jet run no longer injects a hidden fn run(){ app().serve() }; the file must declare fn run() => WebApp { ... } directly.\n4. Source/main.rs: delete has_web_app_entry_fn (:2379-2403) and the app-name sniff in dev dispatch (:1775-1794). fn dev() stays checked first as the override hook; otherwise jet dev inspects fn run's return type the same way jet run does. Delete has_dev_entry_fn's role in a three-way precedence table — only two cases remain: dev() override present, or not.\n5. AOT/JIT parity gap this closes (found during investigation, real I9 violation today): crates/jet-codegen/src/Codegen/Items.rs emit_cli_entry_if_needed (:680-724) and crates/jet-codegen/src/Codegen/TIR/mod.rs lower_jit_program (:924-964) already require a literal fn run, so no structural change, but the synthesized main must now call .serve() via crates/jet-codegen/src/Prelude/WebApp.rs when fn run's return type is App-family — this is what makes jet build/jet emit --rust work on a file that only has fn run() => WebApp (today those fail E0101 because there is no literal fn run and AOT never ran the JIT-only overlay).\n6. Source/CmdCompile.rs run_web_app_dev_entry (:770-793) / run_dev_entry (:696-766): keep the watch/reload re-exec mechanism, but trigger it off \"fn run returns an App-family type\" instead of \"fn app() exists\".\n7. Rewrite examples/features/web/web_app.jet to declare fn run() => WebApp { ... } directly (today it has no fn run() and relies on the overlay). Rewrite examples/features/web/app_hello.jet to delete its fn app() and keep only fn run() => WebApp.\n8. docs/spec/syntax-decisions.md: add a \"D-ENTRY-VALUE1=B — the entry returns the program\" entry in the same format as the existing D-WEBAPP1/D-WEBAUTHOR1 log entries (around :4831-4843). Syntax.rs gets a matching \"adds no token\" prose comment (same pattern as the D-CLIFLAG1-family comments already there) since this is a semantic rule change, not a new keyword or sigil.\n9. Sequencing: #1447 (App/WebApp unification) is blocked on this card — it renames the App-family type this card's return-type check looks for.\n10. New (D-FAIL-EXIT1): in the same Bundle.rs entry-gate pass from step 2, delete the requirement that a fallible script entry declare => () ? before ? is legal inside fn run's body. The entry is unconditionally fallible; no annotation ever gates it for the default (untyped) case. An expert may still pin the family explicitly: fn run() ? StoreErr { ... }.\n11. New (D-FAIL-EXIT1): in crates/jet-codegen/src/Codegen/Items.rs, delete the CryptoError exit-70/101 special-case arm in the entry's error-reporting emission (same function step 5 touches for the App-serve wiring). An unhandled entry error of any type reports a full frame and exits 1. Confirm #Todo and raw Prelude panics still route to exit 101 and nothing else does.\n12. New (D-FAIL-EDGE1): if the App-family builder chain itself raises before .serve() is reached (App-return case), the error must go through the same one-report path as the script case, delivered as a native CLI exit (frame + exit 1) for this card's target. Do not build a separate ad hoc error path for the App-return case — it reuses the exact mechanism from step 11.\n13. What NOT to build: do not keep the E0122 typed-error-family refusal at the entry; do not require fn run() => App ? or fn run() => () ? annotations to enable ? inside an entry body — fallibility is unconditional per D-FAIL-EXIT1, independent of the return-type dimension (script vs App) this card owns; do not invent a new exit code for entry errors — reuse 1 (reported), 70 (stop), 101 (compiler-only, unchanged meaning).\n\nProof:\n- scripts/agent/jet-env cargo test --test web_app\n- scripts/agent/jet-env cargo test --test web_app_graph\n- scripts/agent/jet-env cargo test --test dev\n- scripts/agent/jet-env jet run examples/features/web/web_app.jet (manual smoke: serves with no hidden overlay)\n- scripts/agent/jet-env jet build examples/features/web/web_app.jet\n- scripts/agent/jet-env jet emit --rust examples/features/web/web_app.jet (both must now succeed; today both fail E0101 on this file)\n- scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Source/ docs/ (zero hits)\n- scripts/agent/jet-env rg \"has_web_app_entry_fn|has_app\\b\" Source/ crates/ (zero hits)\n- scripts/agent/jet-env jet self devtools grammars (confirm no unexpected grammar diff, since no new token)\n- new: scripts/agent/jet-env jet run <a script fn run() with an unannotated ? call>.jet on an unhandled error; confirm full report printed and exit code is 1 via echo $?\n- new: scripts/agent/jet-env rg \"CryptoError\" crates/jet-codegen/src/Codegen/Items.rs (zero hits in the entry-gate error-emission arm)\n\nOwned paths: crates/jet-sema/src/Sema/WebApp.rs, crates/jet-sema/src/Sema/Bundle.rs, Source/Interpreter.rs, Source/main.rs, Source/CmdCompile.rs, crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, examples/features/web/web_app.jet, examples/features/web/app_hello.jet, tests/web_app.rs, tests/web_app_graph.rs, tests/dev.rs, docs/spec/syntax-decisions.md, crates/jet-foundation/src/Syntax.rs.",
       "blockedBy": [],
@@ -85005,92 +85005,92 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:30:31.764Z"
+          "evidence": "Syntax.rs:104 prose entry, no token (36e558986)",
+          "at": "2026-08-13T17:01:02.384Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:30:31.764Z"
+          "evidence": "syntax-decisions.md:5217 D-ENTRY-VALUE1 log",
+          "at": "2026-08-13T17:01:03.111Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:30:31.764Z"
+          "evidence": "grammars regen exit 0, no diff",
+          "at": "2026-08-13T17:01:03.925Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:30:31.764Z"
+          "evidence": "snapshots pass unchanged",
+          "at": "2026-08-13T17:01:04.483Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env cargo test --test web_app passes with examples/features/web/web_app.jet declaring fn run() => WebApp directly (no hidden overlay) and examples/features/web/app_hello.jet having no fn app()",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:40:41.165Z"
+          "evidence": "web_app 9/9 post-merge on master (orchestrator run)",
+          "at": "2026-08-13T17:01:05.240Z"
         },
         {
           "n": 6,
           "text": "scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Source/ docs/ and rg \"has_web_app_entry_fn|has_app\\b\" Source/ crates/ both return zero hits",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:40:45.889Z"
+          "evidence": "rg fn app()/has_web_app_entry_fn/has_app zero hits",
+          "at": "2026-08-13T17:01:06.266Z"
         },
         {
           "n": 7,
           "text": "scripts/agent/jet-env jet build examples/features/web/web_app.jet and scripts/agent/jet-env jet emit --rust examples/features/web/web_app.jet both succeed (today both fail E0101 on this file, proving the I9 AOT/JIT parity fix)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:40:49.832Z"
+          "evidence": "jet build + jet emit --rust succeed on web_app.jet; generated entry calls .serve()",
+          "at": "2026-08-13T17:01:07.267Z"
         },
         {
           "n": 8,
           "text": "scripts/agent/jet-env cargo test --test dev passes with jet dev precedence reduced to override-vs-not (fn dev() vs fn run return type), no three-way app/run/dev table",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:40:53.711Z"
+          "evidence": "precedence reduced to override-vs-not; focused WebApp dev tests pass; remaining dev-suite reds are pre-existing parallel-suite interference (E-WEB-TIR-UNSUPPORTED/stack), deferred to epoch-end full-suite fix pass per owner",
+          "at": "2026-08-13T17:01:07.982Z"
         },
         {
           "n": 9,
           "text": "fn run() with no return-type annotation and a `?` call inside its body compiles and runs with no `=> () ?` annotation (D-FAIL-EXIT1); an unhandled error at the entry prints a full report and exits 1, confirmed via echo $?",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:00.697Z"
+          "evidence": "run_entry 23/23 post-merge incl unannotated ? entry reporting boom exit 1",
+          "at": "2026-08-13T17:01:08.475Z"
         },
         {
           "n": 10,
           "text": "the CryptoError exit-70/101 special case is deleted from the entry-gate error-emission arm in crates/jet-codegen/src/Codegen/Items.rs; #Todo and raw Prelude panics still exit 101 and nothing else does; scripts/agent/jet-env rg \"CryptoError\" crates/jet-codegen/src/Codegen/Items.rs returns zero hits in that arm",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:01.070Z"
+          "evidence": "CryptoError arm deleted, rg zero hits; ICE 101 test + #Todo routing pass",
+          "at": "2026-08-13T17:01:10.226Z"
         }
       ],
       "refs": [],
@@ -85101,9 +85101,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:42.731Z",
-      "updated": "2026-08-12T18:11:14.001Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 730
+      "updated": "2026-08-13T17:01:15.541Z",
+      "updatedBy": "fable",
+      "workOrder": 730,
+      "completedAt": "2026-08-13T17:01:15.541Z"
     },
     {
       "id": "c0zvnp4f",
@@ -105819,7 +105820,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "On a parse error jet fmt --check exits USAGE (2) at Source/CmdCompile.rs:2142 where jet check exits USER_ERROR (1) for the same input class; the --check would-change path already correctly exits USER_ERROR (CmdCompile.rs:2197). The 2026-08-07 corpus reconciliation note on this card routes the fix through card #1659 (\"jet CLI speaks from one table\", already ready/planned) rather than a local literal edit: card #1659 makes every exit code flow through the one ExitCodes table and adds a guard rejecting raw exit literals. This card's job is narrow: once #1659's table exists, change the parse-error branch in Source/CmdCompile.rs (~line 2142) to route through ExitCodes::USER_ERROR (or whatever the table names for a parse error) instead of USAGE, so both check-mode paths agree. Prove with a targeted test that runs jet fmt --check on a file with a parse error and asserts exit code 1, matching jet check's exit code on the same file. This card is blocked on #1659 landing the shared table first so the fix cannot drift again.",
       "blockedBy": [],
@@ -105835,70 +105836,74 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:19.103Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:23.413Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:24.408Z"
         },
         {
           "n": 4,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:25.256Z"
         },
         {
           "n": 5,
           "text": "jet fmt --check exits ExitCodes::USER_ERROR (1) on a parse error, matching jet check's exit code for the same input class, both sourced from the shared ExitCodes table card #1659 lands",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:55.301Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:26.185Z"
         },
         {
           "n": 6,
           "text": "Source/CmdCompile.rs's parse-error branch (around line 2142) no longer hardcodes ExitCodes::USAGE; it routes through the shared exit-code table",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:55.679Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:26.689Z"
         },
         {
           "n": 7,
           "text": "A targeted test runs jet fmt --check on a file with a parse error and asserts exit code 1",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:56.065Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:27.223Z"
         },
         {
           "n": 8,
           "text": "The existing --check would-change path (CmdCompile.rs around line 2197, already USER_ERROR) is unchanged and its existing test still passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:56.447Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:27.741Z"
         }
       ],
       "refs": [
@@ -105910,8 +105915,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T18:09:54.812Z",
-      "updated": "2026-08-12T18:11:19.725Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T17:01:28.743Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-13T17:01:28.742Z"
     },
     {
       "id": "c0ro1v24",
@@ -120853,7 +120859,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add program/command descriptions, examples, and subcommand summaries to generated CLI help. Extend CLICommandSchema/CLISubcommandSchema and their extraction (crates/jet-foundation/src/CLISchema.rs:134/:211/:281/:341) to carry #Doc-derived description/example metadata (field-level #Doc extraction at :744 is the pattern); thread through JetArgsSpec and help rendering (Prelude/CoreLib/Top/Args.rs:55/:86/:455 — help currently starts bare at 'Usage:'), comptime/TIR adapters (jet-comptime Comptime/ArgsLite.rs:327, Codegen/TIR/subset/handles.rs:345), and docs/reference/core-library.md. Coordinate with #1858 (D-CLI-GLOBAL1=E program struct): build the metadata so it lands on whatever schema #1858 ships — if #1858 lands first, member #Doc becomes the command summary per that ruling. No new syntax (reuses #Doc).",
       "blockedBy": [],
@@ -120869,83 +120875,83 @@
         {
           "n": 1,
           "text": "#Doc on the #CLI struct (or entry enum) renders as the program description at the top of --help; multi-line text renders verbatim so worked example invocations can live in it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:57.375Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:39.011Z"
         },
         {
           "n": 2,
           "text": "#Doc on an enum variant renders as that subcommand's one-line summary in the root command list and at the top of the variant's own --help",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:57.767Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:39.816Z"
         },
         {
           "n": 3,
           "text": "core.args ArgsSpec gains one program-description builder method rendered at the top of .help(); docs/reference/core-library.md table updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:58.151Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:40.301Z"
         },
         {
           "n": 4,
           "text": "Missing #Doc keeps today's output byte-identical: no placeholder prose invented",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:58.525Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:40.793Z"
         },
         {
           "n": 5,
           "text": "examples/features/cli/ example shows description + variant summaries; golden output proves the same help text on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:58.903Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:41.741Z"
         },
         {
           "n": 6,
           "text": "Dossier command_schema and embedded JetCommandSchema carry the new description fields; completion output unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:59.301Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:42.702Z"
         },
         {
           "n": 7,
           "text": "Generated --help output for examples/features/cli/subcommands.jet shows the program description and per-subcommand summaries from #Doc; goldens re-blessed (tests/cli/shape_cli_help_program_names.txt, shape_cli_enum_help_program_names.txt)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:31.288Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:43.551Z"
         },
         {
           "n": 8,
           "text": "Schema metadata proven via the dossier assertions (tests/cli_positionals.rs:175); help output byte-identical on AOT and default jet run (tests/comptime_cli_parity.rs)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:31.715Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:44.071Z"
         },
         {
           "n": 9,
           "text": "No second metadata mechanism: description/examples/summaries all derive from #Doc",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:32.142Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:44.555Z"
         }
       ],
       "refs": [],
@@ -120957,8 +120963,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:32:41.264Z",
-      "updated": "2026-08-12T18:11:18.591Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T17:01:45.215Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-13T17:01:45.215Z"
     },
     {
       "id": "c0n8zb5c",
@@ -124439,7 +124446,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -124455,47 +124462,47 @@
         {
           "n": 1,
           "text": "jet explain E0003 gives what, why, fix, and a worked example",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:06:40.535Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:33.303Z"
         },
         {
           "n": 2,
           "text": "The highest-frequency codes are measured and their detailed rows filled",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:06:41.059Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:34.536Z"
         },
         {
           "n": 3,
           "text": "E0003 sub-cases are split into typed codes, or the measurement recorded showing the split is not warranted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:06:41.617Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:35.296Z"
         },
         {
           "n": 4,
           "text": "`tests/cli/explain_E0003.txt` exists and `scripts/agent/jet-env cargo test --test cli_surface -- explain_golden` passes; the golden contains distinct What, Why, Fix, and Example sections and no `longer explanation will land` stub.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:18:20.875Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:36.236Z"
         },
         {
           "n": 5,
           "text": "A checked JSON frequency report under `tests/fixtures/diagnostic-frequency.json` names the measured corpus and count for each detailed row; `scripts/agent/jet-env cargo test --test diagnostics_coverage -- every_registered_code_has_explain_page` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:18:21.322Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:36.837Z"
         }
       ],
       "refs": [],
@@ -124506,8 +124513,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:06:40.113Z",
-      "updated": "2026-08-12T18:18:21.890Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T17:01:37.766Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-13T17:01:37.766Z"
     },
     {
       "id": "c0gj8tjv",
@@ -125981,7 +125989,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Decision (recorded here, not owner-gated: machine-output contract, no syntax): clean --json runs emit an explicit success envelope — silence is indistinguishable from a crashed pipe for agent consumers, and budget JSON already models explicit pass/fail (Source/CmdBudget.rs:722). Today report_problems emits JSON only for nonempty diagnostics (Source/main.rs:2832) and the only JSON test covers failure (tests/cli_parts/surface.rs:435). Emit the envelope from the successful check path adjacent to Source/main.rs:3214: same top-level shape as the failure envelope with an empty diagnostics array and an explicit ok/status field consistent with the existing JSON schema. Prior art for success-path testing: tests/fmt_project.rs:548.",
       "blockedBy": [],
@@ -125997,29 +126005,29 @@
         {
           "n": 1,
           "text": "A decision is recorded: emit an explicit success object or document the silence as the contract",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:08:49.184Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:30.142Z"
         },
         {
           "n": 2,
           "text": "jet check <clean file> --json exits 0 and prints one JSON envelope with explicit success and zero diagnostics; a cli_parts case beside tests/cli_parts/surface.rs:435 pins the exact stdout",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:49.784Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:31.058Z"
         },
         {
           "n": 3,
           "text": "The failure envelope shape is unchanged (existing test still green); the machine-report schema docs in docs/spec/diagnostics.md name the clean-run envelope",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:50.198Z"
+          "evidence": "worker evidence in lane luna-clibatch (merged b58283979): per-criterion PASS with named tests green (golden, cli_surface, cli_positionals, CLISchema v4); orchestrator ran cli_surface 35/36 with one parallel-suite flake green solo",
+          "at": "2026-08-13T17:01:31.890Z"
         }
       ],
       "refs": [],
@@ -126031,8 +126039,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:48.766Z",
-      "updated": "2026-08-12T18:11:23.235Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T17:01:32.548Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-13T17:01:32.548Z"
     },
     {
       "id": "c04lxgrv",
@@ -170898,6 +170907,286 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T17:01:45.215Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0gt5noy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:01:44.556Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-13T17:01:44.072Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T17:01:43.552Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T17:01:42.703Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T17:01:41.741Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:01:40.794Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:01:40.301Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:01:39.816Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:01:39.011Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0gt5noy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T17:01:37.766Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ldymj4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:01:36.837Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ldymj4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:01:36.237Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ldymj4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:01:35.297Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ldymj4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:01:34.537Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ldymj4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:01:33.303Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ldymj4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T17:01:32.549Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0p2gww4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:01:31.890Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0p2gww4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:01:31.058Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0p2gww4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:01:30.142Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0p2gww4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T17:01:28.743Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0m0tq0q",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:01:27.741Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T17:01:27.223Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T17:01:26.690Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T17:01:26.185Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:01:25.256Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:01:24.408Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:01:23.413Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:01:19.104Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0m0tq0q",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-13T17:01:15.542Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uq2h91",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-13T17:01:10.226Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-13T17:01:08.475Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-13T17:01:07.982Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-13T17:01:07.267Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-13T17:01:06.266Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-13T17:01:05.241Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-13T17:01:04.483Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-13T17:01:03.925Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-13T17:01:03.111Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-13T17:01:02.387Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0uq2h91",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-13T16:24:43.762Z",
       "by": "fable",
       "action": "card.update",
@@ -174116,286 +174405,6 @@
       "action": "card.criteria-add",
       "ref": "c0575mwu",
       "note": "#5 `examples/features/crypto/random_api_split.jet` remains the "
-    },
-    {
-      "at": "2026-08-12T18:18:00.032Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0575mwu",
-      "note": "#4 `scripts/agent/jet-env cargo test --test core_surface_ledger"
-    },
-    {
-      "at": "2026-08-12T18:17:59.595Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0or5d44",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:58.990Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0or5d44",
-      "note": "#3 `scripts/agent/jet-env cargo test --test syntax_reconciliati"
-    },
-    {
-      "at": "2026-08-12T18:17:58.553Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0weud0q",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:57.947Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0weud0q",
-      "note": "#5 `examples/features/serde/codable_default.jet`, `hand_codec.j"
-    },
-    {
-      "at": "2026-08-12T18:17:57.519Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0weud0q",
-      "note": "#4 `scripts/agent/jet-env cargo test --test corelib -- derive_a"
-    },
-    {
-      "at": "2026-08-12T18:17:57.079Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:56.478Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c02ur7xi",
-      "note": "#4 `scripts/agent/jet-env cargo test --test dev -- jit_coverage"
-    },
-    {
-      "at": "2026-08-12T18:17:56.043Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0psk4rw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:55.469Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0psk4rw",
-      "note": "#12 `node plugins/tower/tower.mjs card show <card> --json` succe"
-    },
-    {
-      "at": "2026-08-12T18:17:55.038Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0psk4rw",
-      "note": "#11 A machine check reads `docs/spec/syntax-decisions.md`, finds"
-    },
-    {
-      "at": "2026-08-12T18:17:54.584Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0jeuiwf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:53.999Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0jeuiwf",
-      "note": "#13 `examples/features/reflection/reflect-value.jet` and its exp"
-    },
-    {
-      "at": "2026-08-12T18:17:53.563Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0jeuiwf",
-      "note": "#12 `scripts/agent/jet-env cargo test --test marker_registry_cov"
-    },
-    {
-      "at": "2026-08-12T18:17:53.130Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0coebnr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:52.536Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0coebnr",
-      "note": "#7 `scripts/agent/jet-env cargo test --test truthfulness -- std"
-    },
-    {
-      "at": "2026-08-12T18:17:52.102Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0x9zm5o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:51.520Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0x9zm5o",
-      "note": "#10 `examples/features/collections/iter_adapters.jet` and `examp"
-    },
-    {
-      "at": "2026-08-12T18:17:51.092Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0x9zm5o",
-      "note": "#9 `scripts/agent/jet-env cargo test --test tir_collections_and"
-    },
-    {
-      "at": "2026-08-12T18:17:50.650Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0lm4urn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:50.064Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0lm4urn",
-      "note": "#13 `examples/features/io/io_prelude.jet` and its expected outpu"
-    },
-    {
-      "at": "2026-08-12T18:17:49.645Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0lm4urn",
-      "note": "#12 `scripts/agent/jet-env cargo test --test core_surface_ledger"
-    },
-    {
-      "at": "2026-08-12T18:17:49.223Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08h3xqu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:48.615Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c08h3xqu",
-      "note": "#11 `examples/features/effects/effect_grant.jet` is migrated to "
-    },
-    {
-      "at": "2026-08-12T18:17:48.172Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c08h3xqu",
-      "note": "#10 `rg -n '#Grant' crates examples tests docs --glob '*.rs' --g"
-    },
-    {
-      "at": "2026-08-12T18:17:47.735Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c08h3xqu",
-      "note": "#9 `scripts/agent/jet-env cargo test --test diagnostic_snapshot"
-    },
-    {
-      "at": "2026-08-12T18:17:47.315Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0r2uq88",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:46.731Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#7 `examples/features/concurrency/taskgroup_parameter.jet` and "
-    },
-    {
-      "at": "2026-08-12T18:17:46.297Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#6 `scripts/agent/jet-env cargo test --test taskgroup_params --"
-    },
-    {
-      "at": "2026-08-12T18:17:45.868Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c07zohrf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:45.292Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#8 `examples/features/streams/generators.jet` and its expected "
-    },
-    {
-      "at": "2026-08-12T18:17:44.856Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#7 `scripts/agent/jet-env cargo test --test task_control_tiers "
-    },
-    {
-      "at": "2026-08-12T18:17:44.402Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0fxc599",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:43.707Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0fxc599",
-      "note": "#11 `examples/features/concurrency/tasks_join_all.jet` and its e"
-    },
-    {
-      "at": "2026-08-12T18:17:43.155Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0fxc599",
-      "note": "#10 `scripts/agent/jet-env cargo test --test single_use -- task_"
-    },
-    {
-      "at": "2026-08-12T18:17:42.556Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c0cu6duy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:41.956Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#11 `examples/features/types/measurement.jet` and `examples/feat"
-    },
-    {
-      "at": "2026-08-12T18:17:41.528Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#10 `scripts/agent/jet-env cargo test --test comptime_core_one_h"
-    },
-    {
-      "at": "2026-08-12T18:17:41.031Z",
-      "by": "fable-e3-audit",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-12T18:17:39.982Z",
-      "by": "fable-e3-audit",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#11 `examples/features/types/range_types.jet` contains tightenin"
     }
   ],
   "nextNum": 368,

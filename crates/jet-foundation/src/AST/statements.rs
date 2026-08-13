@@ -170,7 +170,7 @@ pub enum Stmt {
     /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the
     /// audited Tier-2 comptime effect gate. `reason` is the argument of
     /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
-    /// AND `--allow-impure` at build time are required to execute ambient
+    /// AND `--gate impure=allow` at build time are required to execute ambient
     /// comptime I/O (FS/Env/Exec/IO). Erases to a plain block at codegen;
     /// the gate is enforced entirely in the comptime interpreter (I3). The
     /// retained reason is the sema recording point for the shared gate ledger

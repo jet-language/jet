@@ -153,12 +153,12 @@ pub(super) struct Interp<'a> {
     pub(super) cur_func: String,
     /// D-CTEFFECT1: nesting depth of active `#Impure("reason") { … }` blocks.
     /// Tier-2 comptime effect calls (core.files/env/exec/io) are allowed only
-    /// while this is `> 0` AND `allow_impure` is true.
+    /// while this is `> 0` and the invocation gate set allows `impure`.
     pub(super) impure_depth: usize,
-    /// D-CTEFFECT1: true when the caller compiled with `--allow-impure`.
+    /// D-CTEFFECT1: true when the caller compiled with `--gate impure=allow`.
     /// Without this, `#Impure` blocks are syntactically valid but Tier-2
     /// effect calls inside them still fail with E3411.
-    pub(super) allow_impure: bool,
+    pub(super) gates: jet_foundation::Policy::GateSet,
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
@@ -345,7 +345,7 @@ impl<'a> Interp<'a> {
         }
         let extern_names = HashSet::new();
         let fuel = self.fuel;
-        let allow_impure = self.allow_impure;
+        let gates = self.gates;
         let impure_depth = self.impure_depth;
         let repl_mode = self.repl_mode;
         let base_dir = self.base_dir;
@@ -374,7 +374,7 @@ impl<'a> Interp<'a> {
             repl_mode,
             repl_grants,
             repl_authorizer,
-            allow_impure,
+            gates,
             impure_depth,
             emitted_fragments,
             embed_inputs,
@@ -510,7 +510,7 @@ impl<'a> Interp<'a> {
         }
         let extern_names = HashSet::new();
         let fuel = self.fuel;
-        let allow_impure = self.allow_impure;
+        let gates = self.gates;
         let impure_depth = self.impure_depth;
         let repl_mode = self.repl_mode;
         let base_dir = self.base_dir;
@@ -531,7 +531,7 @@ impl<'a> Interp<'a> {
             base_dir,
             globals: &globals,
             core_imports,
-            allow_impure,
+            gates,
             initial_impure_depth: impure_depth,
             structs,
             computed_fields: self.computed_fields,

@@ -356,7 +356,7 @@ pub struct ExprEvalRequest<'a> {
     pub base_dir: &'a Path,
     pub globals: &'a HashMap<String, CtValue>,
     pub core_imports: &'a HashMap<String, String>,
-    pub allow_impure: bool,
+    pub gates: jet_foundation::Policy::GateSet,
     pub initial_impure_depth: usize,
     pub structs: &'a HashMap<String, &'a StructDef>,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
@@ -394,7 +394,7 @@ pub struct BlockEvalRequest<'a> {
     pub repl_mode: bool,
     pub repl_grants: &'a [String],
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
-    pub allow_impure: bool,
+    pub gates: jet_foundation::Policy::GateSet,
     pub impure_depth: usize,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
     /// D-METADERIVE1: `emit(…)` fragments from a derive body.
@@ -415,13 +415,12 @@ pub enum StmtOutcome {
 }
 
 pub struct Hooks {
-    pub run_bundle: fn(&ProgramBundle, &mut DevSink, bool) -> Result<CtValue, Diagnostic>,
-    /// Runtime/deopt callers must carry their stage explicitly.  Keeping the
-    /// legacy three-argument hook preserves the direct dev/test seam; the
-    /// staged hook prevents a runtime fragment from inheriting build-time
-    /// purity defaults.
+    pub run_bundle: fn(&ProgramBundle, &mut DevSink, jet_foundation::Policy::GateSet) -> Result<CtValue, Diagnostic>,
+    /// Runtime/deopt callers must carry their stage explicitly. The staged
+    /// hook prevents a runtime fragment from inheriting build-time purity
+    /// defaults while keeping the direct dev/test seam.
     pub run_bundle_at_stage:
-        fn(&ProgramBundle, &mut DevSink, bool, PurityStage) -> Result<CtValue, Diagnostic>,
+        fn(&ProgramBundle, &mut DevSink, jet_foundation::Policy::GateSet, PurityStage) -> Result<CtValue, Diagnostic>,
     pub eval_expr: fn(&mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic>,
     pub eval_block: fn(&mut BlockEvalRequest<'_>) -> Result<StmtOutcome, Diagnostic>,
 }
@@ -441,9 +440,9 @@ fn hooks() -> &'static Hooks {
 pub fn run_bundle(
     bundle: &ProgramBundle,
     sink: &mut DevSink,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
-    (hooks().run_bundle)(bundle, sink, allow_impure)
+    (hooks().run_bundle)(bundle, sink, gates)
 }
 
 /// Run a whole program through an explicit purity stage.  Runtime/deopt must
@@ -452,10 +451,10 @@ pub fn run_bundle(
 pub fn run_bundle_at_stage(
     bundle: &ProgramBundle,
     sink: &mut DevSink,
-    allow_impure: bool,
+    gates: jet_foundation::Policy::GateSet,
     stage: PurityStage,
 ) -> Result<CtValue, Diagnostic> {
-    (hooks().run_bundle_at_stage)(bundle, sink, allow_impure, stage)
+    (hooks().run_bundle_at_stage)(bundle, sink, gates, stage)
 }
 
 pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {

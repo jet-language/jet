@@ -767,7 +767,7 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
             skip_next = false;
             continue;
         }
-        if matches!(arg.as_str(), "-p" | "--task" | "--output") {
+        if matches!(arg.as_str(), "-p" | "--task" | "--output" | "--gate") {
             skip_next = true;
             continue;
         }
@@ -991,6 +991,70 @@ fn check_flags(raw: &[String], subcmd: &str) {
     }
 }
 
+fn reject_retired_gate_flags(argv: &[String], json: bool) {
+    let Some(retirement) = jet::Syntax::retirement("allow-impure") else {
+        return;
+    };
+    if !argv.iter().any(|arg| arg == retirement.retired) {
+        return;
+    }
+    emit_cli_report(
+        retirement.code.unwrap_or("E1343"),
+        format!("`{}` is retired", retirement.retired),
+        "the old boolean changed which audited escapes were checked and is no longer accepted".to_string(),
+        format!("use `{}`", retirement.canonical),
+        json,
+    );
+    exit(ExitCodes::USAGE);
+}
+
+fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
+    let mut gates = jet::Policy::GateSet::default();
+    let mut index = 0;
+    while index < argv.len() {
+        let argument = &argv[index];
+        let spec = if let Some(spec) = argument.strip_prefix("--gate=") {
+            Some(spec.to_string())
+        } else if argument == "--gate" {
+            match argv.get(index + 1) {
+                Some(spec) if !spec.starts_with('-') => {
+                    index += 1;
+                    Some(spec.clone())
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(spec) = spec {
+            match jet::Policy::GateSet::parse(&spec) {
+                Ok(key) => gates.insert(key),
+                Err(detail) => {
+                    emit_cli_report(
+                        "E2104",
+                        "invalid audited gate".to_string(),
+                        detail,
+                        "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`".to_string(),
+                        json,
+                    );
+                    exit(ExitCodes::USAGE);
+                }
+            }
+        } else if argument == "--gate" {
+            emit_cli_report(
+                "E2104",
+                "`--gate` needs a gate assignment".to_string(),
+                "an invocation gate names one audited escape and its allow value".to_string(),
+                "use `--gate name=allow`".to_string(),
+                json,
+            );
+            exit(ExitCodes::USAGE);
+        }
+        index += 1;
+    }
+    gates
+}
+
 /// Find an external `jet-<cmd>` executable on PATH (D-DX5).
 fn find_external(cmd: &str) -> Option<PathBuf> {
     let exe = format!("{}-{}", jet::Syntax::BINARY_NAME, cmd);
@@ -1113,9 +1177,10 @@ fn main() {
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     let json = jet_argv.iter().any(|a| a == "--json");
+    reject_retired_gate_flags(jet_argv, json);
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
-    let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
+    let gates = parse_gate_flags(jet_argv, json);
     let build_grants: Vec<String> = BuildEffect::ALL
         .into_iter()
         .filter(|effect| {
@@ -1253,7 +1318,7 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--task" || a == "--output" {
+            if a == "-p" || a == "--task" || a == "--output" || a == "--gate" {
                 skip_next = true;
                 continue;
             }
@@ -1353,7 +1418,7 @@ fn main() {
                 emit_generated,
                 small,
                 freestanding,
-                allow_impure,
+                gates,
                 &build_grants,
                 remote_builder.as_deref(),
                 locked,
@@ -2014,7 +2079,7 @@ fn main() {
                     if let Some(port) = dev_port {
                         std::env::set_var("JET_WEBAPP_PORT", port.to_string());
                     }
-                    run_dev(file, try_anyway, policy, mode, true);
+                    run_dev(file, try_anyway, policy, gates, mode, true);
                 }
                 run_web_app_dev_entry(file, mode, dev_port);
                 return;
@@ -2032,7 +2097,7 @@ fn main() {
                 run_dev_web(file, mode, verbose, dev_port);
                 return;
             }
-            run_dev(file, try_anyway, policy, mode, use_interpreter);
+            run_dev(file, try_anyway, policy, gates, mode, use_interpreter);
             return;
         }
         // D-CLI-DEVSERVE1=A: `jet serve` is deleted — `jet dev` is the only dev
@@ -2235,6 +2300,7 @@ fn main() {
                                         &entry_str,
                                         try_anyway,
                                         WatchPolicy::Restart,
+                                        gates,
                                         mode,
                                         use_interpreter,
                                     );
@@ -2249,7 +2315,7 @@ fn main() {
                                     emit_generated,
                                     small,
                                     freestanding,
-                                    allow_impure,
+                                    gates,
                                     &build_grants,
                                     remote_builder.as_deref(),
                                     locked,
@@ -2470,6 +2536,7 @@ fn main() {
                         &resolved,
                         try_anyway,
                         WatchPolicy::Restart,
+                        gates,
                         mode,
                         use_interpreter,
                     );
@@ -2484,7 +2551,7 @@ fn main() {
                 emit_generated,
                 small,
                 freestanding,
-                allow_impure,
+                gates,
                 &build_grants,
                 remote_builder.as_deref(),
                 locked,

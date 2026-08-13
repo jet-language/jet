@@ -208,9 +208,9 @@ fn ui_snapshots() {
         let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
             || path.file_name().and_then(|name| name.to_str())
                 == Some(jet::Syntax::WORKSPACE_FILE);
-        // D-CTEFFECT1: files marked `// @allow_impure` compile with the
-        // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
-        let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
+        // D-ONCE-GATE1=A: files marked with the invocation gate exercise the
+        // same audited policy path as the CLI.
+        let gates = src.lines().any(|l| l.trim() == "// @gate impure=allow");
         let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
         // Runtime/interpreter diagnostics still use the same exact snapshot
         // product contract as front-end diagnostics.
@@ -264,6 +264,9 @@ fn ui_snapshots() {
         let jetpack_retired_environment_flag = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_retired_environment_flag");
+        let retired_gate_flag = src
+            .lines()
+            .any(|line| line.trim() == "// @retired_gate_flag");
         // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
         // use the same registered diagnostic in tooling and CLI paths.
         let workspace_lock_e1202 = src
@@ -298,6 +301,8 @@ fn ui_snapshots() {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if jetpack_retired_environment_flag {
             run_jetpack_retired_environment_flag_snapshot()
+        } else if retired_gate_flag {
+            run_retired_gate_flag_snapshot(&file_arg)
         } else if env_facet_missing {
             let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment(
                 &src,
@@ -340,7 +345,7 @@ fn ui_snapshots() {
                     &file_arg,
                     &build_grants,
                     false,
-                    true,
+                    jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
                     true,
                     false,
                     false,
@@ -425,8 +430,11 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
-        } else if allow_impure {
-            match jet::compile_allow_impure(&file_arg) {
+        } else if gates {
+            match jet::compile_with_gates(
+                &file_arg,
+                jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+            ) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
@@ -502,6 +510,22 @@ fn ui_snapshots() {
         "expected the ui suite to contain tests, found {}",
         checked
     );
+}
+
+fn run_retired_gate_flag_snapshot(file: &str) -> String {
+    let retirement = jet::Syntax::retirement("allow-impure").expect("retired gate row");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", file])
+        .arg(retirement.retired)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run retired gate fixture");
+    assert!(!output.status.success(), "retired gate flag must fail");
+    let mut rendered = String::from_utf8(output.stdout).expect("retired gate stdout is UTF-8");
+    rendered.push_str(
+        &String::from_utf8(output.stderr).expect("retired gate stderr is UTF-8"),
+    );
+    rendered
 }
 
 fn run_jetpack_retired_environment_flag_snapshot() -> String {

@@ -1,0 +1,23 @@
+Error [E3105]: organization or package policy forbids unsafe code
+  --> tests/ui/audited_gate_ladder_forbidden/run.jet:3:5
+    |
+  3 |     #Unsafe("the organization policy refuses this audited escape") {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: a lexical `#Unsafe` gate cannot widen the effective safety floor
+ Fix: remove the low-level operation or change the outer policy through its owner
+
+Error [E3415]: the `impure` gate is denied by effective policy
+  --> tests/ui/audited_gate_ladder_forbidden/run.jet:6:5
+    |
+  6 |     #Impure("the organization policy refuses this audited escape") {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: an organization or package policy can refuse an audited escape, including its invocation gate
+ Fix: remove the `impure` escape or change the owning policy
+
+Error [E3415]: the `nondeterministic` gate is denied by effective policy
+  --> tests/ui/audited_gate_ladder_forbidden/run.jet:9:5
+    |
+  9 |     #Nondeterministic("the organization policy refuses this audited escape") {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: an organization or package policy can refuse an audited escape, including its invocation gate
+ Fix: remove the `nondeterministic` escape or change the owning policy

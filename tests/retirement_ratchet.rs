@@ -43,6 +43,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("set-take", 0),
     ("map-replace", 0),
     ("set-replace", 0),
+    ("allow-impure", 0),
 ];
 
 const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
@@ -268,10 +269,32 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if path.extension().is_none_or(|ext| ext != "jet") {
                     continue;
                 }
+                // The generated diagnostic catalog quotes the retired form in
+                // E1317's teaching text. It is evidence about the retirement,
+                // not package source written in the retired order.
+                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet") {
+                    continue;
+                }
                 let Some(text) = read(&path) else { continue };
                 if writes_provider_first(&text) {
                     retired += 1;
                 } else if writes_canonical_ref(&text) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "allow-impure" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains(row.retired) {
+                    retired += 1;
+                } else if text.contains(row.canonical) {
                     canonical += 1;
                 }
             }

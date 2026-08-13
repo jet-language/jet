@@ -129,7 +129,11 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
     }
     let mut sink = crate::Comptime::DevSink::new();
-    let outcome = match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
+    let outcome = match crate::Comptime::TirBridge::run_bundle(
+        bundle,
+        &mut sink,
+        jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+    ) {
         Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
             let rendered = error
                 .to_jet_err()
@@ -244,7 +248,7 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
         &mut sink,
         globals,
         &core_imports,
-        true,
+        jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         {
             let mut fields = std::collections::HashMap::new();
             for module in &bundle.modules {
@@ -386,13 +390,20 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 /// `use_interpreter` — D-JIT2=A: when false (default for `jet dev`), the
 /// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
 /// tier-0 interpreter only.
-fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
+fn checked_bundle(
+    file: &str,
+    gates: jet_foundation::Policy::GateSet,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
                 crate::RunCache::note_check();
-                let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+                let diags = crate::Sema::check_bundle_gates(
+                    &mut bundle,
+                    crate::Sema::CompileMode::Run,
+                    gates,
+                );
                 // Same gate as `jet build` / entry-swap: recoverable parse
                 // teaching must not disappear on the default `jet run` path.
                 // The canonical extension hook runs before this gate so its
@@ -432,13 +443,27 @@ pub fn run_jit_once_with_args_opts(
     program_args: &[&str],
     json: bool,
 ) -> RunOutcome {
+    run_jit_once_with_args_opts_and_gates(
+        file,
+        program_args,
+        json,
+        jet_foundation::Policy::GateSet::default(),
+    )
+}
+
+pub fn run_jit_once_with_args_opts_and_gates(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+) -> RunOutcome {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
     let entry = std::path::Path::new(file);
     if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
         return outcome;
     }
-    match checked_bundle(file) {
+    match checked_bundle(file, gates) {
         Ok(bundle) => {
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
@@ -465,11 +490,23 @@ pub fn run_jit_once_with_args_opts(
 /// Run one program through the tier-0 interpreter with the same argv shape as
 /// the default run path.
 pub fn run_interpreter_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
+    run_interpreter_once_with_args_and_gates(
+        file,
+        program_args,
+        jet_foundation::Policy::GateSet::default(),
+    )
+}
+
+pub fn run_interpreter_once_with_args_and_gates(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+) -> RunOutcome {
     crate::RunCache::reset_phases();
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle(file) {
+        let outcome = match checked_bundle(file, gates) {
             Ok(bundle) => {
                 let mut args = Vec::with_capacity(program_args.len() + 1);
                 args.push(file.to_string());
@@ -488,10 +525,24 @@ pub fn run_interpreter_once_with_args(file: &str, program_args: &[&str]) -> RunO
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
+    dev_iteration_with_gates(
+        file,
+        try_anyway,
+        use_interpreter,
+        jet_foundation::Policy::GateSet::default(),
+    )
+}
+
+pub fn dev_iteration_with_gates(
+    file: &str,
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+) -> RunOutcome {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle(file) {
+        let outcome = match checked_bundle(file, gates) {
             Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
             Err(diags) => RunOutcome::Problems(diags),
         };

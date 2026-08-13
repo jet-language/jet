@@ -254,7 +254,7 @@ pub(crate) fn eval_comptime_items(
                         base_dir,
                         &globals,
                         core_imports,
-                        false,
+                        crate::Policy::GateSet::default(),
                         0,
                         &structs,
                         None,
