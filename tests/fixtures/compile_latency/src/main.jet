@@ -1,0 +1,17 @@
+module perf.ci {
+    compile_workloads: {
+        rename_route: CompilerWorkload.Edit.{
+            target: "cli",
+            patch: "edits/rename-route.patch",
+        },
+    },
+    budgets: [Budget.{
+        name: "edit-compile",
+        scope: .Target("cli"),
+        metric: .CompileTime(.P95),
+        provider: .CompilerProbe(.Edit("rename_route")),
+        comparison: .RelativeTo("ci/linux-x64"),
+        limit: .RegressionAtMost(100pct),
+    }],
+}
+fn run() {}

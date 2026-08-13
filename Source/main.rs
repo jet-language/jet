@@ -481,6 +481,7 @@ usage:
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
   {bin} test  <file> --shuffle      run tests in a random (printed) order
   {bin} test  <file> --serial       run one test at a time (default: parallel)
+  {bin} test  <file> --coverage     show function and branch coverage
   {bin} bench <file|dir>            benchmark regions/programs (recurses into subdirs)
   {bin} bench <file|dir> --filter=foo   only run benchmark regions whose name contains `foo`
   {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
@@ -2477,7 +2478,7 @@ fn main() {
                 .iter()
                 .any(|a| a == "--update-snapshots" || a == "-u");
             // D-COV1: `jet test --coverage` builds an instrumented harness and
-            // reports per-function / per-line coverage after the test results.
+            // reports function and branch coverage after the test results.
             let coverage = jet_argv.iter().any(|a| a == "--coverage");
             // D-TESTKIT1=A gap #4: `--filter=<substr>` keeps only test names
             // containing it (harness-side, `JET_TEST_FILTER`).

@@ -154,6 +154,12 @@ fn examples_compile_and_run() {
         }
         for e in fs::read_dir(&topic_path).unwrap().flatten() {
             let path = e.path();
+            // A package manifest is Jet-shaped data, not an executable
+            // example. Keep the manifest beside module examples without
+            // turning it into a golden entry.
+            if path.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
+                continue;
+            }
             if path.extension().and_then(|x| x.to_str()) == Some(ext) {
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 let stem = format!("{}/{}", topic_name, name);

@@ -1567,7 +1567,7 @@ pub fn has_test_blocks(file: &str) -> bool {
 /// `(name, 1-based line)`. Mirrors the probe set: free functions, inherent
 /// methods, and trait-impl methods in the entry file (`run` is excluded — it is
 /// never probed). The runner diffs the recorded hit lines against this set to
-/// report per-function / per-line coverage.
+/// report function and branch coverage.
 pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
     with_compiler_stack(|| coverable_functions_inner(file))
 }

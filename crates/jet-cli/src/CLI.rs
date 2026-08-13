@@ -805,7 +805,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     // E2-M11 flags.
     FlagSpec { long: "--capabilities-json", help: "with build: write used capabilities as JSON" },
     FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
-    FlagSpec { long: "--coverage", help: "with test: show function and line coverage" },
+    FlagSpec { long: "--coverage", help: "with test: show function and branch coverage" },
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
     FlagSpec { long: "--emit-generated", help: "with build: copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },

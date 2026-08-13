@@ -559,6 +559,33 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
 }
 
 #[test]
+fn budget_check_measures_typed_compile_edit_and_records_provenance() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = compile_latency_budget_project("budget_compile_latency");
+    let bootstrap = Command::new(jet()).args(["budget", "update", "--baseline", "ci/linux-x64", "--bootstrap", "--reason", "initial compile latency", "--yes", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(bootstrap.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&bootstrap.stdout), String::from_utf8_lossy(&bootstrap.stderr));
+    let check = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(check.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&check.stdout).unwrap() else { panic!("command") };
+    let CanonicalJson::Object(report) = &command["report"] else { panic!("report") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
+    assert_eq!(measurement["unit"], CanonicalJson::String("Duration".into()));
+    assert_eq!(measurement["provider"].as_object().unwrap()["kind"], CanonicalJson::String("CompilerProbe".into()));
+    let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+    assert_eq!(samples.len(), 20);
+    let CanonicalJson::Object(statistics) = &measurement["statistics"] else { panic!("statistics") };
+    assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
+    let CanonicalJson::Object(compile) = &measurement["compile"] else { panic!("compile metadata") };
+    for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "phase_totals", "sample_records", "variance"] {
+        assert!(compile.contains_key(key), "missing compile metadata field {key}");
+    }
+    let bytes = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
+    jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(bytes).unwrap()).unwrap();
+}
+
+#[test]
 fn budget_build_artifact_measures_real_selected_binary() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = artifact_budget_project("budget_build_artifact", 100_000_000);

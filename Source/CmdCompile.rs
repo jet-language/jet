@@ -1,6 +1,7 @@
 //! check / build / run / test / new / fmt / fix subcommand handlers + the
 //! rustc bridge.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
@@ -219,6 +220,7 @@ pub(crate) fn run_compile_cmd(
     capabilities_json: bool,
     sbom: bool,
     named_profile: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
     output_name: Option<&str>,
     program_args: &[&String],
     mode: OutputMode,
@@ -335,7 +337,12 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates(file, &args, gates);
+        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates_and_settings(
+            file,
+            &args,
+            gates,
+            setting_overrides,
+        );
         match outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
@@ -372,11 +379,12 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_jit_once_with_args_opts_and_gates(
+        let outcome = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings(
             file,
             &args,
             mode.json,
             gates,
+            setting_overrides,
         );
         match outcome {
             jet::Interpreter::RunOutcome::Ran {
@@ -413,7 +421,11 @@ pub(crate) fn run_compile_cmd(
         && cross_target.is_none()
         && (cmd == "build" || cmd == "run")
     {
-        native_cache_key(file, &profile_tag, mode_tag)
+        native_cache_key(
+            file,
+            &format!("{profile_tag};{}", setting_overrides_tag(setting_overrides)),
+            mode_tag,
+        )
     } else {
         None
     };
@@ -482,9 +494,14 @@ pub(crate) fn run_compile_cmd(
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
 
     let compile_result = if is_library {
-        jet::compile_library_with_gates(file, library_output.as_deref(), gates)
+        jet::compile_library_with_gates_and_settings(
+            file,
+            library_output.as_deref(),
+            gates,
+            setting_overrides,
+        )
     } else if let Some(output) = output_name {
-        jet::compile_output_with_options(
+        jet::compile_output_with_options_and_settings(
             file,
             output,
             freestanding,
@@ -492,6 +509,7 @@ pub(crate) fn run_compile_cmd(
             is_web,
             is_plugin,
             cross_target,
+            setting_overrides,
         )
     } else if cmd == "build" && emit_generated {
         jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile(
@@ -505,6 +523,7 @@ pub(crate) fn run_compile_cmd(
             cross_target,
             remote_builder,
             profile.budget_name(),
+            setting_overrides,
         )
     } else if cmd == "build" {
         jet::compile_programmable_build_opts_with_builder_and_profile(
@@ -518,15 +537,16 @@ pub(crate) fn run_compile_cmd(
             cross_target,
             remote_builder,
             profile.budget_name(),
+            setting_overrides,
         )
     } else if is_web {
-        jet::compile_web_with_gates(file, gates)
+        jet::compile_web_with_gates_and_settings(file, gates, setting_overrides)
     } else if is_plugin {
-        jet::compile_plugin_with_gates(file, gates)
+        jet::compile_plugin_with_gates_and_settings(file, gates, setting_overrides)
     } else if freestanding {
-        jet::compile_freestanding_with_gates(file, gates)
+        jet::compile_freestanding_with_gates_and_settings(file, gates, setting_overrides)
     } else if !gates.is_empty() {
-        jet::compile_with_gates(file, gates)
+        jet::compile_with_gates_and_settings(file, gates, setting_overrides)
     } else {
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
         // codegen only emits/links `#Target(OS.*)`-gated impls for the OS
@@ -537,6 +557,7 @@ pub(crate) fn run_compile_cmd(
             gates,
             cross_target,
             profile.budget_name(),
+            setting_overrides,
         )
     };
     let (
@@ -1523,8 +1544,8 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
 }
 
 /// `jet test [--coverage] [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
-/// With `coverage`, the harness is built with line/function probes (D-COV1) and
-/// a per-function coverage report prints after the test results. A directory
+/// With `coverage`, the harness is built with function/branch probes (D-COV1) and
+/// a function/branch coverage report prints after the test results. A directory
 /// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
 /// non-reserved `.jet` file found, in sorted path order.
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
