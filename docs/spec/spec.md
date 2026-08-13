@@ -151,7 +151,7 @@ expr     = precedence climbing over:
   value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
-  `fn run() => () ?` for top-level error propagation, or a single typed CLI
+  `fn run() ?` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
@@ -982,7 +982,7 @@ violations.
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** may stay bare for beginner programs. Use
-  **`fn run() => () ?`** only when the entry itself propagates errors with
+  **`fn run() ?`** only when the entry itself propagates errors with
   **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
@@ -3333,8 +3333,8 @@ api: Output :: .Service.{ name: "todo-api", entry: serve };
 release: Output :: .Check.{ name: "release", entry: verify_release };
 
 fn launch() {}
-fn serve() => () ? {}
-fn verify_release() => () ? {}
+fn serve() ? {}
+fn verify_release() ? {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,

@@ -75,6 +75,48 @@ impl<'a> Parser<'a> {
         Ok((ty, Span::new(start, end)))
     }
 
+    /// D-FAIL-UNIT1=A: a unit-fallible declaration writes its failure clause
+    /// directly after the parameter list (`fn save() ? IOError`).
+    pub(in crate::Parser) fn parse_unit_fallible_return(
+        &mut self,
+    ) -> Result<Option<(Type, Span)>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::Question) {
+            return Ok(None);
+        }
+        let start = self.bump().span.start;
+        let err = if self.type_starts_here() {
+            self.type_()?.0
+        } else {
+            Type::Named(Syntax::TYPE_ERR.to_string())
+        };
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Some((
+            Type::Result {
+                ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                err: Box::new(err),
+            },
+            Span::new(start, end),
+        )))
+    }
+
+    pub(in crate::Parser) fn is_unit_fallible_type(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Result { ok, .. }
+                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+        )
+    }
+
+    pub(in crate::Parser) fn retired_unit_fallible_signature(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0003",
+            "this unit-fallible signature uses the retired arrow-and-unit form".to_string(),
+            "a function that can fail but returns no value has no result payload for an arrow to introduce".to_string(),
+            "write `fn save(path: String) ? IOError`, or `fn sync() ?` for the default error".to_string(),
+            Some(span),
+        )
+    }
+
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
         // rules as every other type position. Parentheses only group
@@ -880,26 +922,53 @@ impl<'a> Parser<'a> {
             effect_bound =
                 Some(self.parse_effect_arrow_row(decorated, retired_ballot)?);
         }
-        let ret = if decorated
-            || retired_double
+        let mut arrow_return = false;
+        let mut return_type_span = None;
+        let ret = if decorated {
+            if self.type_starts_here() {
+                arrow_return = true;
+                let (r, span) = self.type_()?;
+                return_type_span = Some(span);
+                Some(Box::new(r))
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                return_type_span = Some(span);
+                Some(Box::new(ty))
+            } else {
+                None
+            }
+        } else if retired_double
             || retired_ballot
             || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
         {
-            if !decorated && !retired_double && !retired_ballot {
+            arrow_return = true;
+            if !retired_double && !retired_ballot {
                 let arrow = self.bump();
                 if matches!(arrow.kind, TokKind::Arrow) {
                     self.diags.push(Self::retired_callable_arrow(arrow.span));
                 }
             }
             if self.type_starts_here() {
-                let (r, _) = self.type_()?;
+                let (r, span) = self.type_()?;
+                return_type_span = Some(span);
                 Some(Box::new(r))
             } else {
                 None
             }
+        } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+            return_type_span = Some(span);
+            Some(Box::new(ty))
         } else {
             None
         };
+        if arrow_return
+            && ret
+                .as_deref()
+                .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+        {
+            self.diags.push(Self::retired_unit_fallible_signature(
+                return_type_span.unwrap_or(self.peek().span),
+            ));
+        }
         // Synthetic params so `from line` reuses the same resolver as fn results.
         let from_params: Vec<crate::AST::Param> = param_names
             .into_iter()

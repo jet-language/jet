@@ -482,7 +482,7 @@ fn uncaught_err_prints_propagation_chain() {
         return;
     }
 
-    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() => () ?` prints the
+    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() ?` prints the
     // `?` chain (file:line per frame) then the error text, exit 1.
     let src = r#"
 fn read_raw() => String ? {
@@ -496,7 +496,7 @@ fn load_config() => String ? {
     cfg :: parse_config().context("loading config")?
     return Ok(cfg)
 }
-fn run() => () ? {
+fn run() ? {
     _ :: load_config()?
 }
 "#;

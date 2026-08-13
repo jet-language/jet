@@ -759,7 +759,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.vault as vault
 
-fn provision() =[Secret]=> () ? vault.VaultError {
+fn provision() =[Secret]=> ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -847,7 +847,7 @@ batteries. `app.auth` reuses the same Prelude symbols (one mechanism):
 verify_jwt(token, key:, audience:, issuer:, clock_skew:) => Claims ? AuthError
 verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) => Claims ? AuthError
 
-register_user(user_id, password_hash) => () ? String
+register_user(user_id, password_hash) ? String
 password_login(user_id, password_hash, now_ms, ttl_ms) => Session ? String
 session_validate(session_id, now_ms) => Session ? String
 magic_link_issue(user_id, now_ms, ttl_ms) => String ? String
@@ -1738,7 +1738,7 @@ signal and chooses behavior.
 ```jet
 use core.perf as perf
 
-fn run() => () ? {
+fn run() ? {
     if perf.fidelity() < 0.5 {
         print("low quality mode")
     }
