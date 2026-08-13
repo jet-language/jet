@@ -32,8 +32,8 @@ fn run() {}
     let body_items = r#"
 module complete<T, count: Int, label: String> {
     #Meta(category: label)
-    $value :: count
-    $comptime_value :: count + 1
+    @value :: count
+    @comptime_value :: count + 1
     tag Marked { deny: [Net] }
     trait Reveal { fn reveal(self) => T }
     struct Wrapped { value: T }
@@ -153,10 +153,10 @@ fn run() {}
 fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box<capacity: Int> {
-    $base :: capacity
+    @base :: capacity
     pub fn shadowed() => Int {
-        $base :: 5
-        return $base
+        @base :: 5
+        return @base
     }
     pub fn plain_shadowed() => Int {
         capacity := 5

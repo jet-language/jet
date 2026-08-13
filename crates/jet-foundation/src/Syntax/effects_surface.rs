@@ -95,7 +95,7 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 /// D-META-NAME1=A: the rule-declaration contextual keyword —
 /// `marker Name(params…)`. Declares one applied rule as an ordinary Jet
 /// declaration in Prelude (or, later, library) source; the rule's own
-/// arguments and facts about the rule (`$sites`, `$repeatable`, …) share one
+/// arguments and facts about the rule (`@sites`, `@repeatable`, …) share one
 /// named-parameter list under D-META-FORM1=A, the facts marked with the
 /// compile-time sigil. Contextual like `state`/`protocol`. Declaration-side
 /// parse only (card #1456); lowering the parsed declaration into the runtime
@@ -103,7 +103,7 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1
 
 /// D-FACTDECL1=A: the one non-code fact declaration word —
-/// `fact Name($holds: …, $safe: …, …)`. It reuses the marker declaration
+/// `fact Name(@holds: …, @safe: …, …)`. It reuses the marker declaration
 /// parameter-list shape; the registry reads its rows from `Prelude/Facts.jet`.
 pub const KW_FACT: &str = "fact"; // D-FACTDECL1
 
@@ -408,7 +408,8 @@ pub const MARKER_PREFIX: &str = "#";
 pub const MARKER_LIST_OPEN: &str = "[";
 pub const MARKER_LIST_CLOSE: &str = "]";
 
-/// D-VERDICT-732-1: rejected old `@` applied-rule spelling (teaching error).
+/// D-VERDICT-732-1: rejected `@` applied-rule spelling (teaching error; prefix
+/// `@` is reserved for compile-time names and fact reads by D-ONCE-AT1=D).
 pub const FOREIGN_AT_ATTR: &str = "@";
 
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the

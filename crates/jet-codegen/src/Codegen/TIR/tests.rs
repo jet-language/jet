@@ -234,13 +234,13 @@
         let lowered = lower_after_sema(
             r#"
 fn run() {
-    $narrow :: F32.{16777217.0}
-    $wide :: 2.5
-    $label :: "ready"
+    @narrow :: F32.{16777217.0}
+    @wide :: 2.5
+    @label :: "ready"
 
-    print($narrow)
-    print($wide)
-    print($label)
+    print(@narrow)
+    print(@wide)
+    print(@label)
 }
 "#,
             "run",
@@ -1155,7 +1155,7 @@ fn mk() {
         // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
         // lowering reads `selected_then`, but the gate does not need sema for routing.)
         let src =
-            "fn f(x: Int) => Int {\n $if true {\n return x\n } else {\n return 0\n }\n}\n";
+            "fn f(x: Int) => Int {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -1876,9 +1876,9 @@ fn mk(k: Kind) => Query {
         // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
         // value into the interpolation operand, so this needs the full sema pass.
         let src = "\
-$header :: \"<html>\"
+@header :: \"<html>\"
 fn wrap(s: String) => String {
-    return \"{$header}: {s}\"
+    return \"{@header}: {s}\"
 }
 fn run() {
     wrap(\"body\")
@@ -1889,7 +1889,7 @@ fn run() {
 
     #[test]
     fn covers_comptime_local_binding() {
-        // c109 (S57/M9.5): a comptime LOCAL `$name :: expr` in a function body
+        // c109 (S57/M9.5): a comptime LOCAL `@name :: expr` in a function body
         // routes once sema fills `b.ct`. The runtime `init` (`build()`) is NOT in-subset
         // on its own merits, but the comptime path never emits it — it emits the
         // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
@@ -1903,8 +1903,8 @@ fn build() => [Int] {
     return xs
 }
 fn run() {
-    $xs :: build()
-    print(\"{$xs}\")
+    @xs :: build()
+    print(\"{@xs}\")
 }
 ";
         install_comptime_bridge();
@@ -2207,9 +2207,9 @@ fn run() {
 
     #[test]
     fn covers_field_read_and_eq_on_inlined_comptime_values() {
-        // c109: a FIELD READ off a comptime-const struct value (`$pair_value ::
-        // Pair{…}`; then `$pair_value.left`) and an `==` against a comptime-const enum value
-        // (`$light_value :: Light.Green`; then `$light_value == Light.Green`). The const inlines to
+        // c109: a FIELD READ off a comptime-const struct value (`@pair_value ::
+        // Pair{…}`; then `@pair_value.left`) and an `==` against a comptime-const enum value
+        // (`@light_value :: Light.Green`; then `@light_value == Light.Green`). The const inlines to
         // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
         // inlined struct / comparing the inlined enum is byte-identical to the AST path.
         // The Field gate now admits a non-local comptime-const receiver.
@@ -2225,13 +2225,13 @@ enum Light {
     Green
 }
 
-$pair_value :: Pair.{left: 7, right: "seven"}
-$light_value :: Light.Green
+@pair_value :: Pair.{left: 7, right: "seven"}
+@light_value :: Light.Green
 
 fn run() {
-    print("{$pair_value.left}")
-    print("{$pair_value.right}")
-    print("{$light_value == Light.Green}")
+    print("{@pair_value.left}")
+    print("{@pair_value.right}")
+    print("{@light_value == Light.Green}")
 }
 "#;
         assert!(

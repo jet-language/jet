@@ -708,7 +708,7 @@ fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<St
         .map(|row| {
             let (line, column) = jet::Diagnostics::span_line_col(&row.source, row.span.start);
             format!(
-                "{}:{}:{}   {}.$layout   {}",
+                "{}:{}:{}   {}.@layout   {}",
                 row.module,
                 line,
                 column,

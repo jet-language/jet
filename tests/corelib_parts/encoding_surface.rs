@@ -264,7 +264,7 @@ use core.random as random
 
 fn run() {
     values := [1, 2, 3]
-    $folded :: random.shuffle(&values)
+    @folded :: random.shuffle(&values)
 }
 "#;
     let fold_diagnostics = jet::compile(fold_src).expect_err("ambient shuffle must not fold");
@@ -277,7 +277,7 @@ use core.random as random
 
 fn run() {
     #Impure("the gate must not authorize nondeterministic folding") {
-        $folded :: random.int(1, 6)
+        @folded :: random.int(1, 6)
     }
 }
 "#;
@@ -400,7 +400,7 @@ fn run() {
     jet_jit::reset_jit_trace_for_test();
     let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
-            assert_eq!((exit_code, stderr.as_str()), (0, ""), "resident JIT stderr");
+            assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "resident JIT stderr");
             stdout
         }
         other => panic!("nondeterministic matrix resident JIT failed: {other:?}"),
@@ -411,7 +411,7 @@ fn run() {
 
     let forced_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
-            assert_eq!((exit_code, stderr.as_str()), (0, ""), "forced interpreter stderr");
+            assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "forced interpreter stderr");
             stdout
         }
         other => panic!("nondeterministic matrix forced interpreter failed: {other:?}"),
@@ -653,7 +653,7 @@ fn run() {{
             "XML element nesting exceeds max_depth (1)\n",
         )
     );
-    assert_eq!(stderr, "");
+    assert_eq!(stderr, "$xml_event");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -705,10 +705,10 @@ fn summarize() => String {
     return "unreachable"
 }
 
-$expected :: summarize()
+@expected :: summarize()
 
 fn run() {
-    print($expected)
+    print(@expected)
     print(summarize())
 }
 "#;
@@ -719,7 +719,7 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "xml_whole_bytes", source, &[], None);
     assert_eq!(code, 0, "XML whole-byte AOT fixture failed: {stderr}");
     assert_eq!(stdout, expected);
-    assert_eq!(stderr, "");
+    assert_eq!(stderr, "$xml_event");
 
     let dev_path = dir.join("xml_whole_bytes.jet");
     fs::write(&dev_path, source).unwrap();
@@ -755,17 +755,17 @@ fn show(result: DataTree ? XMLError) => String {
     return "unreachable"
 }
 
-$numeric :: show(xml.parse("<r>&#0;</r>"))
-$attribute :: show(xml.parse("<r a='&#0;'/>"))
-$namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+@numeric :: show(xml.parse("<r>&#0;</r>"))
+@attribute :: show(xml.parse("<r a='&#0;'/>"))
+@namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
-    print("{$numeric}|{runtime_numeric}")
-    print("{$attribute}|{runtime_attribute}")
-    print("{$namespace}|{runtime_namespace}")
+    print("{@numeric}|{runtime_numeric}")
+    print("{@attribute}|{runtime_attribute}")
+    print("{@namespace}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
@@ -776,7 +776,7 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "xml_chars", &source, &[], None);
     assert_eq!(code, 0, "XML character AOT fixture failed: {stderr}");
     assert_eq!(stdout, expected);
-    assert_eq!(stderr, "");
+    assert_eq!(stderr, "$xml_event");
 
     let dev_path = dir.join("xml_chars.jet");
     fs::write(&dev_path, &source).unwrap();
@@ -818,14 +818,14 @@ fn summarize(source: String) => String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-$cr :: String.from_bytes([13]) ?? panic("CR")
-$close :: "/>"
-$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{$cr}\nD{$cr}E' b='&#xD;&#xA;&#x9;'{$close}"
-$normalized :: summarize($source)
+@cr :: String.from_bytes([13]) ?? panic("CR")
+@close :: "/>"
+@source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{@cr}\nD{@cr}E' b='&#xD;&#xA;&#x9;'{@close}"
+@normalized :: summarize(@source)
 
 fn run() {
-    runtime := summarize($source)
-    print("{$normalized}|{runtime}")
+    runtime := summarize(@source)
+    print("{@normalized}|{runtime}")
 }
 "#;
     let expected = "true|true|3|true|true|true|3|true\n";
@@ -836,7 +836,7 @@ fn run() {
         "XML attribute normalization AOT fixture failed: {stderr}"
     );
     assert_eq!(stdout, expected);
-    assert_eq!(stderr, "");
+    assert_eq!(stderr, "$xml_event");
 
     let dev_path = dir.join("xml_attribute_normalization.jet");
     fs::write(&dev_path, source).unwrap();
@@ -898,24 +898,24 @@ fn show32(text: String) => String {
     return "unreachable"
 }
 
-$standard_ws :: show64("Z g = =\n")
-$standard_unpadded :: show64("Zg")
-$standard_interior :: show64("Zg=A")
-$standard_excess :: show64("Zg====")
-$standard_bits :: show64("Zh==")
-$standard_padding :: show64("=AAA")
-$standard_alphabet :: show64("Zg-=")
-$standard_size :: show64("A")
-$url_outer_ws :: show64url(" \tZg==\n")
-$url_interior :: show64url("Zg=A")
-$url_standard_alphabet :: show64url("+w")
-$url_bits :: show64url("Zh")
-$url_padding :: show64url("=AAA")
-$url_size :: show64url("A")
-$base32_loose :: show32("m=y======\n")
-$base32_bits :: show32("MZ======")
-$base32_short :: show32("A")
-$base32_alphabet :: show32("M0======")
+@standard_ws :: show64("Z g = =\n")
+@standard_unpadded :: show64("Zg")
+@standard_interior :: show64("Zg=A")
+@standard_excess :: show64("Zg====")
+@standard_bits :: show64("Zh==")
+@standard_padding :: show64("=AAA")
+@standard_alphabet :: show64("Zg-=")
+@standard_size :: show64("A")
+@url_outer_ws :: show64url(" \tZg==\n")
+@url_interior :: show64url("Zg=A")
+@url_standard_alphabet :: show64url("+w")
+@url_bits :: show64url("Zh")
+@url_padding :: show64url("=AAA")
+@url_size :: show64url("A")
+@base32_loose :: show32("m=y======\n")
+@base32_bits :: show32("MZ======")
+@base32_short :: show32("A")
+@base32_alphabet :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")
@@ -936,24 +936,24 @@ fn run() {
     r_base32_bits := show32("MZ======")
     r_base32_short := show32("A")
     r_base32_alphabet := show32("M0======")
-    print("{$standard_ws}|{r_standard_ws}")
-    print("{$standard_unpadded}|{r_standard_unpadded}")
-    print("{$standard_interior}|{r_standard_interior}")
-    print("{$standard_excess}|{r_standard_excess}")
-    print("{$standard_bits}|{r_standard_bits}")
-    print("{$standard_padding}|{r_standard_padding}")
-    print("{$standard_alphabet}|{r_standard_alphabet}")
-    print("{$standard_size}|{r_standard_size}")
-    print("{$url_outer_ws}|{r_url_outer_ws}")
-    print("{$url_interior}|{r_url_interior}")
-    print("{$url_standard_alphabet}|{r_url_standard_alphabet}")
-    print("{$url_bits}|{r_url_bits}")
-    print("{$url_padding}|{r_url_padding}")
-    print("{$url_size}|{r_url_size}")
-    print("{$base32_loose}|{r_base32_loose}")
-    print("{$base32_bits}|{r_base32_bits}")
-    print("{$base32_short}|{r_base32_short}")
-    print("{$base32_alphabet}|{r_base32_alphabet}")
+    print("{@standard_ws}|{r_standard_ws}")
+    print("{@standard_unpadded}|{r_standard_unpadded}")
+    print("{@standard_interior}|{r_standard_interior}")
+    print("{@standard_excess}|{r_standard_excess}")
+    print("{@standard_bits}|{r_standard_bits}")
+    print("{@standard_padding}|{r_standard_padding}")
+    print("{@standard_alphabet}|{r_standard_alphabet}")
+    print("{@standard_size}|{r_standard_size}")
+    print("{@url_outer_ws}|{r_url_outer_ws}")
+    print("{@url_interior}|{r_url_interior}")
+    print("{@url_standard_alphabet}|{r_url_standard_alphabet}")
+    print("{@url_bits}|{r_url_bits}")
+    print("{@url_padding}|{r_url_padding}")
+    print("{@url_size}|{r_url_size}")
+    print("{@base32_loose}|{r_base32_loose}")
+    print("{@base32_bits}|{r_base32_bits}")
+    print("{@base32_short}|{r_base32_short}")
+    print("{@base32_alphabet}|{r_base32_alphabet}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
@@ -1014,7 +1014,7 @@ fn xml_stream_reader_is_incremental_exact_and_terminal() {
                 ),
             )
             .unwrap();
-            format!("\"{}\"", path.to_string_lossy().replace('\\', "\\\\"))
+            format!("\"{}\"$xml_event", path.to_string_lossy().replace('\\', "\\\\"))
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -1056,15 +1056,15 @@ fn run() {{
             maybe :: reader.next() ?? panic("boundary next")
             if maybe == {{
                 Val(event) -> {{
-                    event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? ""
+                    event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? "$xml_event"
                     if event_kind == "document_start" {{
-                        wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? ""
+                        wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? "$xml_event"
                         document_start = wire_encoding == "UTF-8"
                     }}
                     if event_kind == "element_start" {{
                         name := event.field("name") ?? panic("name")
-                        local := (name.field("local") ?? panic("local")).text() ?? ""
-                        namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
+                        local := (name.field("local") ?? panic("local")).text() ?? "$xml_event"
+                        namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? "$xml_event"
                         root_start = local == "r" && namespace == "urn:r"
                     }}
                     if event_kind == "document_end" {{ document_end = true }}
@@ -1176,7 +1176,7 @@ fn run() {{
         stdout,
         "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\ntrue\n2\nXML declaration conflicts with detected input encoding\n"
     );
-    assert_eq!(stderr, "");
+    assert_eq!(stderr, "$xml_event");
     let _ = fs::remove_dir_all(&dir);
 }
 

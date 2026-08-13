@@ -653,13 +653,13 @@ fn class_matches(class: &[char], needle: char) -> bool {
 }
 
 /// D-META-STAGE1=B (formerly D-CTMARKER1=C's splice spelling): substitute
-/// `$name` mentions in a string with their compile-time value from the
-/// comptime scope. Unknown names are left as-is (`$unknown`). Used by `emit(…)`.
-pub fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
+/// `@name` mentions in a string with their compile-time value from the
+/// comptime scope. Unknown names are left as-is (`@unknown`). Used by `emit(…)`.
+pub fn apply_at_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '$' {
+        if c == '@' {
             let mut name = String::new();
             while let Some(&nc) = chars.peek() {
                 if nc.is_alphanumeric() || nc == '_' {
@@ -673,11 +673,11 @@ pub fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String
                 if let Some(val) = scope.get(&name) {
                     result.push_str(&val.jet_show());
                 } else {
-                    result.push('$');
+                    result.push('@');
                     result.push_str(&name);
                 }
             } else {
-                result.push('$');
+                result.push('@');
             }
         } else {
             result.push(c);
@@ -850,7 +850,7 @@ impl<'a> Interp<'a> {
                 None => return Err(unsupported("`emit` requires one argument", span)),
             };
             if let CtValue::Str(s) = val {
-                let fragment = apply_dollar_splices(&s, scope);
+                let fragment = apply_at_splices(&s, scope);
                 self.emitted_fragments.push(fragment);
                 return Ok(CtValue::Unit);
             }
@@ -1544,7 +1544,7 @@ impl<'a> Interp<'a> {
         match target {
             // D-META-STAGE1=B: the mark is part of the identifier, so a marked
             // name is written back exactly like a plain one. Without this a
-            // marked receiver never advances: `$ct.read_u8()` twice read the
+            // marked receiver never advances: `@ct.read_u8()` twice read the
             // same byte while the runtime copy moved on.
             Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
                 scope.insert(name.clone(), new_value);

@@ -547,7 +547,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 {
                     return true;
                 }
-                // c109: a comptime-const receiver (`$pair_value :: Pair{…}`; then
+                // c109: a comptime-const receiver (`@pair_value :: Pair{…}`; then
                 // `pair_value.left`).
                 // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
                 // = `__jet_Pair { … }`) at the use site, and reading a field off it is a

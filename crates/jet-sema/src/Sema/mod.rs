@@ -1518,7 +1518,7 @@ pub(crate) struct Checker<'a> {
     /// by Bundle.rs after the full bundle is checked.
     pub(super) ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
-    /// `$if` arm — name-resolution runs normally (so unknown-name
+    /// `@if` arm — name-resolution runs normally (so unknown-name
     /// typos are caught) but all other diagnostics are suppressed and the arm
     /// is never lowered to codegen.
     in_dropped_comptime_arm: bool,

@@ -185,7 +185,7 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
         "Linux triple should strip the OS.MacOS impl:\n{}",
         out.rust
     );
-    // D-OSTARGET2=B: `$if build.os == { … }` in `main` must fold to the
+    // D-OSTARGET2=B: `@if build.os == { … }` in `main` must fold to the
     // Linux arm for a Linux triple — the arm constructs `LinuxBackend.{ name:
     // "gtk" }`, so "gtk" appears and the discarded arms' payloads do not.
     assert!(

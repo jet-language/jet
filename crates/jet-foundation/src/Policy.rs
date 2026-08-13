@@ -206,7 +206,7 @@ impl RuleSite {
     }
 }
 
-/// D-META-FORM1=A: `$sites` on a `marker` declaration takes `[Site]`, so the
+/// D-META-FORM1=A: `@sites` on a `marker` declaration takes `[Site]`, so the
 /// eighteen attachment points are published as an ordinary `core.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
@@ -342,7 +342,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
 /// Generated from the active/retired applied-rule signatures. `Track` is the
 /// compatibility reflection enum retained by D-RULEARG-TYPES1.
 pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
-    // `Site` is published for `$sites` on a `marker` declaration (D-META-FORM1=A)
+    // `Site` is published for `@sites` on a `marker` declaration (D-META-FORM1=A)
     // and `Track` for reflection; neither appears in a marker signature, so both
     // are seeded rather than found.
     let mut names = std::collections::BTreeSet::from(["Site", "Track"]);

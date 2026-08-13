@@ -1,4 +1,4 @@
-//! D-EACH1=C / D-VERDICT-1320-1 fenced statement expansion.
+//! D-EACH1=C / D-FENCE-GLYPH1=A fenced statement expansion.
 //!
 //! The parser receives ordinary statements: this pass copies one authored
 //! statement per fence entry and substitutes each fence in lock-step. A
@@ -296,6 +296,38 @@ fn parse_entries(
     // Numbered-name range: exactly `prefixN..prefixM`. Anything else with a
     // `..` falls through and reads as an ordinary expression entry.
     if content.len() == 3 && matches!(content[1].kind, TokKind::DotDot) {
+        // D-FENCE-RANGE1=A: expression fences expand only ascending ranges
+        // whose endpoints are integer literals. A descending range, or any
+        // other endpoint shape, remains one ordinary range expression.
+        if !binding_fence {
+            if let (TokKind::Int(start, _), TokKind::Int(end, _)) =
+                (&content[0].kind, &content[2].kind)
+            {
+                if start <= end {
+                    let range_span = Span::new(content[0].span.start, content[2].span.end);
+                    let entries = (*start..=*end)
+                        .map(|value| {
+                            vec![Token {
+                                kind: TokKind::Int(value, value.to_string()),
+                                span: range_span,
+                            }]
+                        })
+                        .collect::<Vec<_>>();
+                    let names = entries
+                        .iter()
+                        .map(|entry| (String::new(), entry[0].span))
+                        .collect();
+                    return Ok((
+                        FencedNames {
+                            span: open_span,
+                            range: None,
+                            names,
+                        },
+                        entries,
+                    ));
+                }
+            }
+        }
         if let (TokKind::Ident(start), TokKind::Ident(end)) = (&content[0].kind, &content[2].kind)
         {
             let range_span = Span::new(content[0].span.start, content[2].span.end);
@@ -502,7 +534,7 @@ mod tests {
 
     #[test]
     fn lexer_uses_fence_digraphs_and_close_suppresses_a_terminator() {
-        let (tokens, diagnostics) = Lexer::lex("$[\n    first,\n    second\n]$");
+        let (tokens, diagnostics) = Lexer::lex("@[\n    first,\n    second\n]@");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(matches!(tokens[0].kind, TokKind::FenceOpen));
         assert!(tokens
@@ -518,7 +550,7 @@ mod tests {
     #[test]
     fn expands_numbered_binding_and_lock_step_reference_fences() {
         let (tokens, facts) = expanded(
-            "fn run() {\n$[ t1..t3 ]$ :: work()\n$[ t1..t3 ]$.wait()\nuse_pair($[ t1, t2, t3 ]$, $[ a, b, c ]$)\n}\n",
+            "fn run() {\n@[ t1..t3 ]@ :: work()\n@[ t1..t3 ]@.wait()\nuse_pair(@[ t1, t2, t3 ]@, @[ a, b, c ]@)\n}\n",
         );
         let names = tokens
             .iter()
@@ -537,11 +569,11 @@ mod tests {
     #[test]
     fn diagnoses_empty_duplicate_mismatch_and_header_position() {
         for (source, code) in [
-            ("fn run() { $[ ]$ :: 1 }", "E0368"),
-            ("fn run() { $[ a, a ]$ :: 1 }", "E0369"),
-            ("fn run() { $[ f(x), g ]$ :: 1 }", "E0371"),
-            ("fn run() { call($[ a, b ]$, $[ c ]$) }", "E0370"),
-            ("fn run() { if $[ a, b ]$ { print(a) } }", "E0371"),
+            ("fn run() { @[ ]@ :: 1 }", "E0368"),
+            ("fn run() { @[ a, a ]@ :: 1 }", "E0369"),
+            ("fn run() { @[ f(x), g ]@ :: 1 }", "E0371"),
+            ("fn run() { call(@[ a, b ]@, @[ c ]@) }", "E0370"),
+            ("fn run() { if @[ a, b ]@ { print(a) } }", "E0371"),
         ] {
             let (tokens, lex_diags) = Lexer::lex(source);
             assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -555,13 +587,13 @@ mod tests {
 
     #[test]
     fn formatter_emits_one_fence_and_is_stable() {
-        let source = "fn run() {\n    $[ first, second ]$ :: work()\n    show($[ first, second ]$)\n}\n";
+        let source = "fn run() {\n    @[ first, second ]@ :: work()\n    show(@[ first, second ]@)\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse fenced source");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert_eq!(formatted.matches("$[ first, second ]$").count(), 2);
+        assert_eq!(formatted.matches("@[ first, second ]@").count(), 2);
         let (tokens, diagnostics) = Lexer::lex(&formatted);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -575,7 +607,7 @@ mod tests {
     #[test]
     fn formatter_preserves_whitespace_inside_fenced_string_literals() {
         let source =
-            "fn run() {\n    show($[ first, second ]$, \"keep  two   spaces\")\n}\n";
+            "fn run() {\n    show(@[ first, second ]@, \"keep  two   spaces\")\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -588,7 +620,7 @@ mod tests {
     fn formatter_keeps_fenced_lambda_body_after_an_inline_comment() {
         let source = "\
 fn run() {
-    $[ first, second ]$ :: work(() => { // keep this note
+    @[ first, second ]@ :: work(() => { // keep this note
         print(\"body\")
         return 1
     })
@@ -616,21 +648,21 @@ fn run() {
 
     #[test]
     fn formatter_wraps_a_wide_fence_one_name_per_line() {
-        let source = "fn run() {\n    $[ this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three ]$ :: work()\n}\n";
+        let source = "fn run() {\n    @[ this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three ]@ :: work()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse wide fence");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert!(formatted.contains("$[\n"));
+        assert!(formatted.contains("@[\n"));
         assert!(formatted.contains("this_name_is_deliberately_long_one,\n"));
-        assert!(formatted.contains("\n    ]$ :: work()"));
+        assert!(formatted.contains("\n    ]@ :: work()"));
     }
 
     #[test]
     fn numbered_range_expands_in_binding_and_receiver_expression() {
         let source =
-            "fn run() {\n    $[ task1..task3 ]$ :: spawn()\n    $[ task1..task3 ]$.wait()\n}\n";
+            "fn run() {\n    @[ task1..task3 ]@ :: spawn()\n    @[ task1..task3 ]@.wait()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse range fences");
@@ -648,7 +680,7 @@ fn run() {
     #[test]
     fn expression_entries_expand_an_expression_statement() {
         let (tokens, facts) = expanded(
-            "fn run() {\n    print($[ \"a={x}\", \"b\", total(1, 2) ]$)\n}\n",
+            "fn run() {\n    print(@[ \"a={x}\", \"b\", total(1, 2) ]@)\n}\n",
         );
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].copies, 3);
@@ -666,8 +698,35 @@ fn run() {
     }
 
     #[test]
+    fn expression_integer_range_expands_each_literal() {
+        let (tokens, facts) = expanded("fn run() { print(@[0..3]@) }\n");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].copies, 4);
+        let values = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokKind::Int(value, _) => Some(*value),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(values, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn expression_descending_and_non_literal_ranges_stay_single_entries() {
+        for source in [
+            "fn run() { print(@[3..0]@) }\n",
+            "fn run() { print(@[start..3]@) }\n",
+        ] {
+            let (_, facts) = expanded(source);
+            assert_eq!(facts.len(), 1, "{source}");
+            assert_eq!(facts[0].copies, 1, "{source}");
+        }
+    }
+
+    #[test]
     fn nested_lambda_and_struct_braces_stay_inside_fenced_statements() {
-        let source = "fn run() {\n    $[ first, second ]$ :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: $[ first, second ]$ })\n}\n";
+        let source = "fn run() {\n    @[ first, second ]@ :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: @[ first, second ]@ })\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse nested fenced statements");

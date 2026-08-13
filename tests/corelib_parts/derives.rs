@@ -641,7 +641,7 @@ fn user_derive_orphan_rule_allows_either_local_side() {
 derive T.RemoteLabel {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn remote_label(self) => String {{ return \"remote:$name\" }} }}")
+    emit("impl @name {{ fn remote_label(self) => String {{ return \"remote:@name\" }} }}")
 }
 
 #LocalLabel
@@ -658,7 +658,7 @@ use labels
 derive T.LocalLabel {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ pub fn local_label(self) => String {{ return \"local:$name\" }} }}")
+    emit("impl @name {{ pub fn local_label(self) => String {{ return \"local:@name\" }} }}")
 }
 
 #RemoteLabel
@@ -691,7 +691,7 @@ fn user_derive_layout_fact_matches_reflection_projection() {
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
 derive T.LayoutFacts {
-    info :: T.$layout
+    info :: T.@layout
     reflected :: T.reflect().layout
     selected :: info[.count]
     kind :: info.kind
@@ -701,7 +701,7 @@ derive T.LayoutFacts {
     reflected_kind :: reflected.kind
     field_name :: selected.name
     name :: T.reflect().name
-    emit("impl $name {{ fn layout_facts(self) => String {{ return \"$kind:$target:$guarantee:$source:$reflected_kind:$field_name\" }} }}")
+    emit("impl @name {{ fn layout_facts(self) => String {{ return \"@kind:@target:@guarantee:@source:@reflected_kind:@field_name\" }} }}")
 }
 
 #LayoutFacts
@@ -795,7 +795,7 @@ derive T.TypeName {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn get_value(self) => $param {{ return ~self.value }} fn type_name(self) => String {{ return \"$name\" }} }}")
+    emit("impl @name {{ fn get_value(self) => @param {{ return ~self.value }} fn type_name(self) => String {{ return \"@name\" }} }}")
 }
 
 #TypeName
@@ -836,7 +836,7 @@ fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
 derive T.CopyCallback {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn duplicate(self) => fn(Int) => Int {{ return ~self.callback }} }}")
+    emit("impl @name {{ fn duplicate(self) => fn(Int) => Int {{ return ~self.callback }} }}")
 }
 
 #CopyCallback

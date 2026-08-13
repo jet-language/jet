@@ -655,7 +655,7 @@ pub enum Expr {
         span: Span,
     },
     /// D-META-STAGE1=B (formerly D-CTMARKER1's splice-expression spelling):
-    /// a compile-time name, `$limit`. The mark is part of the
+    /// a compile-time name, `@limit`. The mark is part of the
     /// name and is written at every mention, so this is an ordinary identifier
     /// read that happens to name a value the compiler already computed. `name`
     /// holds the written text, mark included, and never denotes the same

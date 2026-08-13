@@ -282,17 +282,24 @@ back      :: seen.take(id)                  // ...which Set spells take
 
 And the written law drifts from the written code: the API rubric documents `Type.from_x()` as the conversion shape, while bare `.from()` dominates the real corpus 32 call sites to 21 with no rule blessing it. Ballot B9 adopts one verb table — one verb per job on every collection, the constructor law updated to match reality — and the retired verbs migrate through element 5's mechanism. Note for the record: the amended IDs (D-API-STORE1, D-STDRUBRIC1) are themselves spec-only today, which is element 9's disease; B9's amendment lands wherever B8 homes the ledger.
 
-### 12. The at-sign, honestly stated **[new — ballot B10]**
+### 12. The at-sign, honestly stated **[amended by D-ONCE-AT1=D]**
 
-The `@` sigil has one ratified, working meaning: the package-reference source separator, `textkit#1.2.0@vendor`, `target@provider` (D-JPK-REF1, errors E0968/E0979/E1317). It also carries a much broader documented reservation — "locations, addresses, and sources" — and outside package refs, every use hits a teaching error citing that promise. No location or address feature exists: no type, no design card, no due date. The reservation is real law; the promise behind it is invisible except as an error message.
+The `@` sigil is position-sensitive. Prefix `@` marks compile-time names and
+fact reads (`@config`, `T.@range`, `@build.profile`); infix `@` remains the
+package-reference source separator, `textkit#1.2.0@vendor` and
+`target@provider` (D-JPK-REF1, errors E0968/E0979/E1317). D-ONCE-AT1=D
+supersedes B10's former reservation-only framing. A marker written with
+leading `@` is still a teaching error: applied rules use `#`.
 
 ```jet
-deps: { http: "jetlib/http#2.1@vendor" }   // the live, ratified meaning — package refs
-task :: work@node2                          // everywhere else: reserved-sigil teaching error
-// ...and the location feature that error advertises has no card anywhere
+deps: { http: "jetlib/http#2.1@vendor" }   // infix: package refs
+@config :: build.profile                    // prefix: compile-time/fact read
+task :: work@node2                          // infix: package source ref
 ```
 
-Ballot B10 asks what happens to the unfulfilled half of the reservation: design the promised feature now, formally narrow the reservation to the packaging meaning it already has, or keep the reservation and publish it as a row in `jet inspect reserved` with a named minting condition. It does not touch D-JPK-REF1's semantics — the live meaning stays under every option.
+B10's reservation-only question is superseded. It does not touch D-JPK-REF1's
+semantics — the infix package-reference meaning stays live, and D-ONCE-AT1=D
+adds the prefix compile-time/fact-read meaning.
 ## The final vision
 
 One session, both rungs. Everything marked *(proposed)* is not yet law; everything else is ratified today and merely unbuilt.

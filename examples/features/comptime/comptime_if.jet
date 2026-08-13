@@ -1,26 +1,26 @@
-// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `$if` selects a branch at
+// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `@if` selects a branch at
 // compile time. Only the selected arm is type-checked and emitted; the
 // dropped arm gets name-resolution only (typos still caught).
-$debug :: false
+@debug :: false
 
-$platform :: "unix"
+@platform :: "unix"
 
 fn run() {
-    $if $debug {
+    @if @debug {
         print("debug mode")
     } else {
         print("release mode")
     }
-    $if $platform == "windows" {
+    @if @platform == "windows" {
         print("windows path")
     } else {
         print("unix path")
     }
-    // Nested $if (comptime else-if chain)
-    $if $debug {
+    // Nested @if (comptime else-if chain)
+    @if @debug {
         print("debug")
     } else {
-        $if $platform == "unix" {
+        @if @platform == "unix" {
             print("unix, non-debug")
         } else {
             print("other")

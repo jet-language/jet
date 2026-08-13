@@ -9,24 +9,28 @@ use tir_support::{build_and_run, have_rustc};
 
 const SOURCE: &str = r#"
 fn run() {
-    $[ score1..score3 ]$ :: 7
-    print($[ score1..score3 ]$)
+    @[ score1..score3 ]@ :: 7
+    print(@[ score1..score3 ]@)
 }
 "#;
 
-#[test]
-fn fenced_names_match_on_aot_jit_and_interpreter() {
-    let expected = "7\n7\n7\n";
+const INTEGER_RANGE_SOURCE: &str = r#"
+fn run() {
+    print(@[0..3]@)
+}
+"#;
+
+fn run_fenced_source(name: &str, source: &str, expected: &str) {
     if have_rustc() {
-        let (code, stdout) = build_and_run("fenced_names", SOURCE);
+        let (code, stdout) = build_and_run(name, source);
         assert_eq!(code, 0);
         assert_eq!(stdout, expected);
     }
 
-    let dir = std::env::temp_dir().join(format!("jet_fenced_names_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_{name}_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
-    fs::write(&path, SOURCE).unwrap();
+    fs::write(&path, source).unwrap();
     let shown = path.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("fenced-name bundle should load");
@@ -78,4 +82,14 @@ fn fenced_names_match_on_aot_jit_and_interpreter() {
             }
         }
     }
+}
+
+#[test]
+fn fenced_names_match_on_aot_jit_and_interpreter() {
+    run_fenced_source("fenced_names", SOURCE, "7\n7\n7\n");
+}
+
+#[test]
+fn fenced_integer_range_matches_on_aot_jit_and_interpreter() {
+    run_fenced_source("fenced_integer_range", INTEGER_RANGE_SOURCE, "0\n1\n2\n3\n");
 }

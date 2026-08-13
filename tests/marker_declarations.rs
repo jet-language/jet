@@ -65,7 +65,7 @@ fn the_parser_and_the_registry_read_the_same_rows() {
             .map(|param| param.name.as_str())
             .collect();
         assert!(
-            facts.contains(&"$sites"),
+            facts.contains(&"@sites"),
             "`{}` must say where it may be written",
             declaration.name
         );
@@ -171,7 +171,7 @@ fn every_fact_row_carries_its_law_columns() {
             .find(|row| row.name == declaration.name)
             .unwrap_or_else(|| panic!("fact `{}` has no registry row", declaration.name));
         assert!(source.starts_with(&format!("fact {}(", declaration.name)));
-        for column in ["$holds:", "$safe:", "$gates:"] {
+        for column in ["@holds:", "@safe:", "@gates:"] {
             assert!(source.contains(column), "`{}` must write `{column}`", declaration.name);
         }
         assert_eq!(row.name, declaration.name);

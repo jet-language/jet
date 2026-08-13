@@ -4,11 +4,11 @@ Working proposal, 2026-08-07. A first-principles rethink of how anything in Jet 
 
 ## Executive summary
 
-Jet never founded its name story. Every ratified rethink leans on names — the Core tree, `use` lists, computed modules, `$` facts — but the ground under them is five accidental systems that grew separately.
+Jet never founded its name story. Every ratified rethink leans on names — the Core tree, `use` lists, computed modules, `@` facts — but the ground under them is five accidental systems that grew separately. D-ONCE-AT1=D supersedes the former prefix `$` fact spelling; infix `@` package references are unchanged.
 
 **The finding.** A name reaches you through one of five doors today: a quoted file import (`use "scoring"`), a bare module import (`use math`), a file-reference declaration (`module math`), automatic project discovery, or the prelude — a closed table inside the compiler. Visibility has six spellings, and two of them give the underscore different meanings. Inside the compiler, six separate stores resolve names, two of them disagree about package visibility, and two tools re-derive imports by scanning raw source text. The shadowing rule has one law and four carve-outs.
 
-**The one idea.** A name is a member at one point in one tree. A declaration attaches it. `.` walks the tree. `pub` fences an edge. `use` makes a local short name that only points — it never creates, moves, or changes meaning. The prelude is a short alias list you can read. `$` marks the compile-time grade of a name. The underscores are one ladder: `_` discards, `_name` marks internal, `__name` belongs to the machine. Reflection and diagnostics print the same path you type.
+**The one idea.** A name is a member at one point in one tree. A declaration attaches it. `.` walks the tree. `pub` fences an edge. `use` makes a local short name that only points — it never creates, moves, or changes meaning. The prelude is a short alias list you can read. `@` marks the compile-time grade of a name. The underscores are one ladder: `_` discards, `_name` marks internal, `__name` belongs to the machine. Reflection and diagnostics print the same path you type.
 
 **The law.** *A declaration attaches; an alias only points. Declarations never collide. A declaration replaces an alias — never another declaration.* Every ratified naming rule falls out of this law, and the four shadowing carve-outs stop being carve-outs: prelude names, reserved Core names, and FFI modules are aliases, so your declaration wins by law, not by exception.
 
@@ -23,9 +23,9 @@ The concrete payoffs:
 
 What the nine ballots ask: adopt the model; make project files visible without imports; pick the audit switch for explicit imports; move the prelude into Core source; pick the visibility set; record the ratified underscore ladder; unpark `use` inside module bodies; finish the ratified retirement of role modules; make reflection print paths.
 
-What does not change: private by default, no wildcards, no `namespace` keyword, the ratified Core tree and grouped `use` list, `$` law, casing law, generic modules, and the one-definition rule.
+What does not change: private by default, no wildcards, no `namespace` keyword, the ratified Core tree and grouped `use` list, `@` law, casing law, generic modules, and the one-definition rule.
 
-Six terms carry the whole doc. **Tree**: the single namespace of a program — your project, its packages, `core`, the FFI roots. **Attach**: what a declaration does — put a member at one tree point. **Alias**: a local short name made by `use` or the prelude; it points at a member and has no meaning of its own. **Fence**: a visibility mark on a tree edge. **Grade**: when a name exists — runtime, compile time (`$name`), or compiler fact (`$build`). **Ledger**: the compiler's one table mapping every mention to the member it resolved to; sema writes it, everything else reads it.
+Six terms carry the whole doc. **Tree**: the single namespace of a program — your project, its packages, `core`, the FFI roots. **Attach**: what a declaration does — put a member at one tree point. **Alias**: a local short name made by `use` or the prelude; it points at a member and has no meaning of its own. **Fence**: a visibility mark on a tree edge. **Grade**: when a name exists — runtime, compile time (`@name`), or compiler fact (`@build`). **Ledger**: the compiler's one table mapping every mention to the member it resolved to; sema writes it, everything else reads it.
 
 ## The problem, briefly
 
@@ -66,7 +66,7 @@ Inside the compiler, the same fragmentation (file:line evidence from this audit)
 | B8 | three unrelated things called "prelude" | ambient ident list; `Units.jet` re-parsed at every check (Bundle.rs:2677); the Rust runtime text under `Prelude/**` |
 | B9 | "did you mean" search twice with different candidate sets | names_incdec.rs:66 vs direct_calls.rs:749 |
 
-Why now: `modularize` is the third most frequent operation in real code, and the one surface this audit family never measured (docs/audits/surface-frequency-audit-2026-08-04.md:448). Every ratified rethink — Core tree, `use` lists, `$` facts, computed modules, build config — lands on this ground. Founding it once means building them once.
+Why now: `modularize` is the third most frequent operation in real code, and the one surface this audit family never measured (docs/audits/surface-frequency-audit-2026-08-04.md:448). Every ratified rethink — Core tree, `use` lists, `@` facts, computed modules, build config — lands on this ground. Founding it once means building them once.
 
 ## The proposal
 
@@ -74,7 +74,7 @@ Three axes. Every name has all three; nothing else exists.
 
 1. **Place** — the tree point where the declaration attached it. Scopes are the same shape at every zoom level: block ⊂ function ⊂ module ⊂ package ⊂ tree. A type body is a namespace. A module body is a namespace. The project is a namespace.
 2. **Fence** — who may cross the edge: private (default), `pub(package)`, `pub`. `_name` adds "not a promise" on top of any fence.
-3. **Grade** — when the name exists: runtime, compile time (`$name`, D-META-STAGE1), or compiler fact (`$layout`, `$build`; D-LAYOUT-FACTS1, D-CONF-READ1, and the ratified fact law on card #1620).
+3. **Grade** — when the name exists: runtime, compile time (`@name`, D-META-STAGE1), or compiler fact (`@layout`, `@build`; D-LAYOUT-FACTS1, D-CONF-READ1, and the ratified fact law on card #1620).
 
 The law, restated: *a declaration attaches; an alias only points. Declarations never collide. A declaration replaces an alias — never another declaration.*
 
@@ -259,7 +259,7 @@ Greenfield means the unclaimed shapes are part of the design, not leftovers. Her
 | `_name` | internal: out of discovery, callable, warns outside, never a promise | one meaning via FENCE1 |
 | `pub _name` | the same internal signal on a public member (soft-public) | ratified D-SHAPE-INTERNAL1; folds into the one `_` story |
 | `__name` — any double underscore | the machine's space: rejected in user source; reserved for compiler-generated binders, debugger and serializer metadata, and tools | ratified D-SHAPE-DUNDER2 |
-| `__name__` (dunder) | nothing, ever — rejected with the rest of `__`; protocol members are trait members, compiler facts read as `$facts` | SIGIL1 |
+| `__name__` (dunder) | nothing, ever — rejected with the rest of `__`; protocol members are trait members, compiler facts read as `@facts` | SIGIL1 |
 | `_name_`, `name_` (sunder, trailing) | no meaning on purpose; a trailing underscore is just a character | SIGIL1 |
 
 The ladder reads aloud in one sentence: **zero underscores is a name, one underscore is a message to humans, two underscores is the machine talking.**
@@ -277,7 +277,7 @@ What the peers did with this space, and what it teaches:
 | `_name` | Dart | library privacy fused into the name | renaming changes access; Jet keeps fence and promise as separate marks |
 | `#name` | JavaScript | true privacy via a new sigil | a whole sigil spent on one job; Jet spends none |
 
-Python's regret is the sharpest: dunders gave the language a protocol namespace but put the machine's names in the user's mouth — everyone types `__init__` daily and typos fail silently. Jet already has both halves of the answer, ratified: protocol members ride traits with ordinary names, and compiler-held facts are read through `$` (`T.$range`, `f.$effects` — D-FACT-READ1), so there is nothing left for a dunder to do. The machine's namespace exists (`__`), but no human ever types into it.
+Python's regret is the sharpest: dunders gave the language a protocol namespace but put the machine's names in the user's mouth — everyone types `__init__` daily and typos fail silently. Jet already has both halves of the answer, ratified: protocol members ride traits with ordinary names, and compiler-held facts are read through `@` (`T.@range`, `f.@effects` — D-FACT-READ1), so there is nothing left for a dunder to do. The machine's namespace exists (`__`), but no human ever types into it.
 
 The ratified SIGIL1 ruling writes the ladder into the spec as one law, settles the dunder/sunder shapes (no meaning, stated on purpose — an explicit wall, so nobody "discovers" a use for `_name_` in year three), and gives the reserved `__` space one visible product — every compiler-generated symbol a tool can show you (stack traces, dumps, generated-code review) starts with `__jet`, so a machine name is recognizable on sight:
 
@@ -384,7 +384,7 @@ Everything above, plus every name-adjacent form the audit touched, in one table.
 | explicit-imports switch | — | `policy: .{ imports: .Explicit }` | AUDIT1 |
 | generic modules | `module cache<K>(n) { }`, `module hot :: cache<…>` | unchanged (ratified) | — |
 | FFI modules (`python.…`, `go.…`, …) | importable; in-situ user shadowing is a carve-out (syntax-decisions.md:2527) | same spelling; FFI roots are tree members and their ambient names are aliases, so user-wins is the law, not a carve-out | TREE1 |
-| compiler facts | `$build.…` reads (ratified), `T.$layout` | unchanged; facts are the `$` grade of the same tree, resolved by the same walk | — |
+| compiler facts | `@build.…` reads (ratified), `T.@layout` | unchanged; facts are the `@` grade of the same tree, resolved by the same walk | — |
 
 ## Beginner magic, expert control
 
@@ -428,7 +428,7 @@ pub fn _legacy() { }                    // internal, warns outside
 ```jet
 module cache<K>(capacity: Int) { … }
 module hot :: cache<String>(64)
-module tuned :: cache<Int>($build.settings.cache_slots)
+module tuned :: cache<Int>(@build.settings.cache_slots)
 ```
 
 **Rung 6 — control the authority.** Refuse the defaults; audit everything.
@@ -537,7 +537,7 @@ module cache<K>(capacity: Int) {       // ratified generic module
     pub struct Entry { key: K }
     pub fn get(k: K) => K? { … }
 }
-module hot :: cache<String>($build.settings.slots)   // ratified splice
+module hot :: cache<String>(@build.settings.slots)   // ratified splice
 
 fn run() {
     print(hot.Entry.reflect().path)    // "project.hot.Entry"  (proposed)
@@ -553,7 +553,7 @@ expert.jet resolves 3 names it did not declare:
 
   print      core.prelude.print    core/prelude.jet:3     use line (expert.jet:2)
   metrics    "../shared/metrics.jet"  ../shared/metrics.jet  use line (expert.jet:3)
-  $build     the build facts       package.jet            compiler fact (ratified)
+  @build     the build facts       package.jet            compiler fact (ratified)
 
 out-of-tree files: ../shared/metrics.jet   (1)
 
@@ -572,14 +572,14 @@ If this section were the whole proposal: one tree, no import lines until you wan
 - **Tooling**: rename, hover, go-to-definition, Canvas, and the REPL read one ledger instead of five models; the devserver stops parsing sema's Rust source with `include_str!`.
 - **Metaprogramming**: derives emit paths that resolve anywhere, closing the unqualified-name traps in derive output and the inline-module Codable gap by construction — generated code names members by path, and paths mean the same thing everywhere.
 - **Critical builds**: `pub(package)` enforced in one place ends the sema/codegen divergence; machine names are recognizable on sight (`__jet`), so generated-code review and stack traces stop guessing.
-- **The ratified backlog lands once**: the Core tree (#1574), use lists (#1575), prelude policy (#1576), generic modules (#1523), and the `$` fact planes all sit on one resolver instead of five.
+- **The ratified backlog lands once**: the Core tree (#1574), use lists (#1575), prelude policy (#1576), generic modules (#1523), and the `@` fact planes all sit on one resolver instead of five.
 
 ## What stays
 
 - Private by default (S18); no wildcards (D-GLOBIMPORT1, E0612); no `namespace` keyword (D-NAMESPACE1); one definition per name (D-CAP10).
 - The ratified Core tree and doctrine (D-CORE-TREE1, D-CORE-DOCTRINE1), grouped `use` lists (D-CORE-USELIST1), prelude membership and criteria (D-CORE-PRELUDE1/2).
 - `__name` belongs to Jet (D-SHAPE-DUNDER2) — SIGIL1 structures the reserved space; it does not reopen it.
-- `$` law: the mark on the name (D-META-STAGE1), `$build` reads (D-CONF-READ1), `$layout` (D-LAYOUT-FACTS1); users never declare `$` members on types.
+- `@` law: the mark on the name (D-META-STAGE1), `@build` reads (D-CONF-READ1), `@layout` (D-LAYOUT-FACTS1); users never declare `@` members on types.
 - Generic modules: declaration, `::` binding, instance identity (D-CONF-GENSPELL1, D-GENMOD-IDENTITY1, D-META-MODNAME1).
 - Casing law (D-SHAPE-CASE1), acronym law, kebab name positions (S84).
 - `module name { }` inline grouping — it earns its place as the one way to put several namespaces in one file.
@@ -607,6 +607,6 @@ Ratified rulings each ballot amends are named inside the ballot text: FILES1 ame
 
 **Phase A — internal re-founding, no surface change, all tests green.** One resolver in sema produces the name ledger (generalize the existing reference and import fact stores); codegen, JIT, interpreter, LSP, REPL, and devserver consume it. One `mangle` function under the `__jet` scheme; delete the ~30 inline `format!("user_…")` bypasses and the JIT's private drift (the JIT derives the same `__jet` prefix from the ledger). Delete the import-map rebuild, the second call ladder, the `{alias}__{method}` byte slicing, the AST string rewrite for sibling calls, and the devserver's source scrapers. Codegen visibility filters read the ledger, closing the `pub(package)` divergence. I3 holds: resolution is checking, so it lives in sema; engines stay dumb readers. I6 holds: the ledger is plain data in an existing seam crate.
 
-**Phase B — land ratified-but-unbuilt work on the new substrate**: the Core tree (#1574), grouped use lists (#1575), prelude policy (#1576), generic module respelling (#1523), `$build` facts (#1518). Built once, on one resolver.
+**Phase B — land ratified-but-unbuilt work on the new substrate**: the Core tree (#1574), grouped use lists (#1575), prelude policy (#1576), generic module respelling (#1523), `@build` facts (#1518). Built once, on one resolver.
 
 **Phase C — balloted surface unifications, each a coherent greenfield migration that deletes the replaced form**: FILES1 (delete the file-reference `module` and in-tree quoted imports; land `jet imports`), AUDIT1 (the switch and `jet fix` support), FENCE1 (one visibility story), SIGIL1 (the spec law and the `__jet` scheme), ALIAS1 (prelude module), WALK1, ROLEMOD1 (finish the ecosystem ruling; delete `ENV_FILE`, `pkg.jet` readers, migrate the repo's own `env.jet`), REFLECT1. Every example, snapshot, and doc migrates in the same change.

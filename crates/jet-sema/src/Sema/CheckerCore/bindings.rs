@@ -782,11 +782,11 @@ impl<'a> Checker<'a> {
                 let is_patch_binding = matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
-                // explicit `$` demands a compile-time answer.
+                // explicit `@` demands a compile-time answer.
                 // (mem.address_of specifically always declines to fold — see
                 // the runtime_execution guard at its mint point in
                 // crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, which
-                // covers this path, the `$` path above, method_calls.rs's
+                // covers this path, the `@` path above, method_calls.rs's
                 // evaluate_constant, and any Expr::Paren-wrapped spelling —
                 // one guard where the value is minted, not a syntactic
                 // pattern match here that a stray `(...)` could dodge.)

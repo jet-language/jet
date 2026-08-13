@@ -7,7 +7,7 @@ Revision: single-sigil comparison and final S33 reconciliation ballot
 
 The owner ratified both final surfaces:
 
-- D-LAYOUT-FACTS1=B: focused facts use `Packet.$layout`; full reflection stays
+- D-LAYOUT-FACTS1=B: focused facts use `Packet.@layout`; full reflection stays
   `Packet.reflect()`.
 - D-GENERIC-CALL1=A: calls infer by default and permit explicit
   `call<T>(...)` everywhere.
@@ -15,20 +15,20 @@ The owner ratified both final surfaces:
 The layout research now recommends the single-sigil option:
 
 ```jet
-Packet.$layout
+Packet.@layout
 Packet.reflect()
 ```
 
-`Packet.$layout` is the focused compiler-known view. `Packet.reflect()` is
+`Packet.@layout` is the focused compiler-known view. `Packet.reflect()` is
 the explicit full metaprogramming root. Both return the same typed metadata.
 The focused form must not create a second fact engine.
 
 Known fields use typed contextual selectors, not strings:
 
 ```jet
-Packet.$layout.size
-Packet.$layout.alignment
-Packet.$layout[.count].offset
+Packet.@layout.size
+Packet.@layout.alignment
+Packet.@layout[.count].offset
 
 meta :: Packet.reflect()
 loop field; meta.layout.fields { print(field.name) }
@@ -39,14 +39,14 @@ and navigates to the field declaration. Dynamic tools can search `.fields`.
 Ordinary source does not turn a known field into text.
 
 The compiler-dunder alternative was rejected. D-LAYOUT-FACTS1=B reserves the
-focused member for the single `$` compiler-fact plane and leaves ordinary
+focused member for the single `@` compiler-fact plane and leaves ordinary
 double-underscore names governed by the existing identifier rules.
 
-## Why `$` is the only credible single sigil
+## Why `@` is the only credible single sigil
 
 Jet already assigns these meanings:
 
-- `$name`: compile-time splice;
+- `@name`: compile-time splice;
 - `_name`: soft or internal discovery;
 - `__name`: compiler-owned identifier namespace;
 - `#Rule`: applied rule;
@@ -60,17 +60,17 @@ Jet already assigns these meanings:
 search, terminals, and fonts. `@`, `#`, `?`, `!`, `^`, `~`, `&`, and `*`
 would create a false rhyme with an existing stronger meaning.
 
-`$` already marks two compile-time transformations. D-LAYOUT-FACTS1 option B
+`@` now marks the compile-time transformations. D-LAYOUT-FACTS1 option B
 would add a third contextual form:
 
 ```jet
-$name         // materialize a user-known compile-time binding
-$[ a, b ]$    // expand one statement per entry
-Packet.$layout // select a compiler-known fact attached to Packet
+@name         // materialize a user-known compile-time binding
+@[ a, b ]@    // expand one statement per entry
+Packet.@layout // select a compiler-known fact attached to Packet
 ```
 
 Grammar position distinguishes all three forms. Users cannot declare
-`$` members. The compiler-fact catalog stays small, closed, documented, and
+`@` members. The compiler-fact catalog stays small, closed, documented, and
 visible in completion. This amends D-CTMARKER1 and reconciles
 D-VERDICT-1320-1; it does not add a second metaprogramming engine.
 
@@ -79,12 +79,13 @@ Why this beats dunder on the surface:
 - one character instead of two;
 - explicit specialness without Python's learned “hidden member” association;
 - one compile-time signal for splicing, expansion, and compiler-known facts;
-- normal `Packet.` completion can show `$layout` under **Compiler facts**;
+- normal `Packet.` completion can show `@layout` under **Compiler facts**;
 - no collision with ordinary user fields.
 
-Its cost is real: `$` stops being splice-only. If the catalog grows into
-`$size`, `$alignment`, `$offset`, and many peers, the option fails. The one
-focused member is `$layout`; its related facts remain grouped inside it.
+Its cost is real: `@` is shared by prefix compile-time uses and infix package
+references. If the catalog grows into `@size`, `@alignment`, `@offset`, and
+many peers, the option fails. The one focused member is `@layout`; its related
+facts remain grouped inside it.
 
 ## Recovered S33 history
 
@@ -272,8 +273,8 @@ underscores and inherit hidden-member expectations. The owner rejected it.
 ### B — Single `$` meta member
 
 ```jet
-Packet.$layout.size
-Packet.$layout[.count].offset
+Packet.@layout.size
+Packet.@layout[.count].offset
 Packet.reflect().layout
 ```
 
@@ -294,7 +295,7 @@ the full metaprogramming path.
 
 - `T._layout`: falsely means internal or soft-public.
 - Python-style trailing-underscore compiler members: trailing underscores add noise.
-- scalar magic members such as `$size` and `$offset`: flat catalog.
+- scalar magic members such as `@size` and `@offset`: flat catalog.
 - `T.@layout`, `T.#layout`, `T.?layout`, and similar forms: collide with a
   stronger existing plane.
 - a new `%` or Unicode sigil: no mnemonic and worse typing or search.

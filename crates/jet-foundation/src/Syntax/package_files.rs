@@ -411,7 +411,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `$`).
+    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `@`).
     KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION,
@@ -610,9 +610,8 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 //
 // `#` is the sole prefix for attributes, instructions, and properties: every
 // typed rule, built-in or user derive, wire marker, and compile-time
-// instruction lives on `#`. `@` is reserved for locations, addresses, and
-// sources — it is never a marker sigil. `$` is the one compile-time mark
-// (D-META-STAGE1=B; retires D-CTMARKER1's splice-only spelling).
+// instruction lives on `#`. D-ONCE-AT1=D assigns prefix `@` to compile-time
+// names and fact reads; infix `@` remains the package-source separator.
 // A leading `@Rule` is E0063 with the canonical `#Rule` fix.
 //
 // D-VERDICT-732-1 supersedes the earlier two-plane sigil law: D-SHAPE2's

@@ -26,9 +26,9 @@ that are configuration in all but name. Four ratified features share the word
 The one idea: **configuration is the program's knowledge about itself — one
 plane of typed compile-time facts with one contribution law.** The manifest
 declares facts. Optimization bundles, the command line, and system config contribute
-values to facts. Programs read facts with the `$` sigil — the
+values to facts. Programs read facts with the `@` sigil — the
 metaprogramming rethink's one splice, "read a compile-time value here" — so
-`$build.settings.tls` folds to a constant and `build` never becomes a
+`@build.settings.tls` folds to a constant and `build` never becomes a
 reserved word. One law turns many contributions into one effective value
 with one audit chain (`jet explain`). One boundary law says what lives in
 manifest text (facts, for auditing) and what lives in `fn build` (actions,
@@ -43,7 +43,7 @@ registration table behind markers, planes, rights, and build facts. This
 proposal is that table's build column.
 
 Eleven ratified decisions adopt the model (one plane, one parser), settle the
-manifest vocabulary, read facts as `$build.*`, and make typed settings replace
+manifest vocabulary, read facts as `@build.*`, and make typed settings replace
 the `features:`/`env:` string tables; one contribution law across the full
 scope ladder (item → block → function → module → file → package → layers);
 the facts-in-text/actions-in-function boundary; build entry discovery (where
@@ -60,8 +60,8 @@ exist. The failure slate keeps ownership of how `fn build` errors report.
 ## Glossary
 
 - **Fact** — one named, typed thing the compiler knows about the program.
-  Example: `$build.os`, `$build.package.version`, `$build.settings.tls`.
-- **`$` (splice)** — the metaprogramming rethink's one sigil: read a
+  Example: `@build.os`, `@build.package.version`, `@build.settings.tls`.
+- **`@` (splice)** — the metaprogramming rethink's one sigil: read a
   compile-time value here (its S4). Fact reads ride it.
 - **Plane** — a family of knowledge with one algebra (D-TYPE2-PLANE1,
   ratified). This proposal adds the program's own plane.
@@ -85,7 +85,7 @@ exist. The failure slate keeps ownership of how `fn build` errors report.
 
 **Configuration is the program's knowledge about itself: one plane of typed
 compile-time facts, declared once, merged by one contribution law, readable
-anywhere with `$`.**
+anywhere with `@`.**
 
 Type-system-v2 (ratified) says a type is a carrier plus knowledge, and the
 knowledge erases before codegen. The build/config plane is the same model
@@ -94,7 +94,7 @@ moment. Contributions merge by one law. The effective value folds into the
 built artifact.
 
 The beginner never writes any of this: `jet run` works with zero files, and
-the first fact a beginner meets is `$build.package.version`, which is just
+the first fact a beginner meets is `@build.package.version`, which is just
 there. The expert gets the full ledger: declare typed settings, contribute
 per optimization bundle or per fleet, compute contributions in `fn build`, and audit any
 effective value with `jet explain`.
@@ -137,7 +137,7 @@ effective value with `jet explain`.
 - **Layer** — where a contribution comes from, above the package
   declaration: optimization bundle → workspace → environment → system → fleet → command
   line.
-- **Moment** — when the value is fixed. Fixed by the compiler (`$build.os`),
+- **Moment** — when the value is fixed. Fixed by the compiler (`@build.os`),
   declared (manifest), contributed (optimization bundle, CLI, system), or computed
   (`fn build`, computed module fields). Runtime data is off the plane by
   type: `core.env.get` behind the `Env` effect; comptime denies it (E0951,
@@ -196,7 +196,7 @@ contributions to declared facts.
 
 ### The connections
 
-- A setting and `$build.os` are the same thing: a fact. Conditional
+- A setting and `@build.os` are the same thing: a fact. Conditional
   compilation needs no new construct — `#Known if` folds on closed values.
 - An optimization bundle and a `#Policy` scope are the same thing: a named bundle
   of contributions.
@@ -208,14 +208,14 @@ contributions to declared facts.
   lattice lesson, free of charge).
 - The compile-time/runtime config boundary is an effect, not a folder name
   (the trap Elixir documents and cannot check).
-- Fact reads and splices are one sigil: `$build.settings.tls` in a source
-  file and `$tname` in a derive body are the same act — read a compile-time
+- Fact reads and splices are one sigil: `@build.settings.tls` in a source
+  file and `@tname` in a derive body are the same act — read a compile-time
   value here (metaprogramming S4).
 
 ## Relation to the sibling rethinks
 
 - **Metaprogramming (one compile-time program, #1508).** Three shared
-  seams, aligned by construction. (1) `$` is the one compile-time read;
+  seams, aligned by construction. (1) `@` is the one compile-time read;
   fact reads adopt it (D-CONF-READ1), so the build plane needs no
   reserved word and no second spelling. (2) D-META-REG1 proposes one
   registration table behind markers, planes, rights, and build facts; this
@@ -271,12 +271,12 @@ members: find("./packages")
 Bare `name:`/`version:` are the only identity spelling. All other block nouns
 keep their ratified decision IDs.
 
-### 3. Open the cage with `$` (D-CONF-READ1=A; amends D-OSTARGET2 and D-CANVASSTATE1)
+### 3. Open the cage with `@` (D-CONF-READ1=A; amends D-OSTARGET2 and D-CANVASSTATE1)
 
-Fact reads ride the metaprogramming splice: **`$build.*` — read a
+Fact reads ride the metaprogramming splice: **`@build.*` — read a
 compile-time value here.** This replaces v1's bare `build.*` record and
 deletes its worst cost: `build` stays an ordinary identifier, because the
-`$` sigil carries the compile-time meaning. One spelling covers compiler
+`@` sigil carries the compile-time meaning. One spelling covers compiler
 facts, package identity, settings, and stamps.
 
 Before:
@@ -291,15 +291,15 @@ After:
 
 ```jet
 fn run() {
-    print("birdfeed {$build.package.version}")
+    print("birdfeed {@build.package.version}")
 }
 ```
 
-The record is `$build.package.name`, `$build.package.version`, `$build.os`,
-`$build.target.arch`, `$build.profile`, `$build.settings.<key>`, and
-`$build.stamp.*`. Reads fold to constants. Bare scripts read fallback
+The record is `@build.package.name`, `@build.package.version`, `@build.os`,
+`@build.target.arch`, `@build.profile`, `@build.settings.<key>`, and
+`@build.stamp.*`. Reads fold to constants. Bare scripts read fallback
 identity (file name, `0.0.0`). The dispatch subject is
-`#Known if $build.os == { ... }`. Value-position reads are legal. `build`
+`#Known if @build.os == { ... }`. Value-position reads are legal. `build`
 stays an ordinary identifier. This rides D-META-ONE1/S4.
 
 ### 4. Declared settings replace the string tables (D-CONF-KEY1=A; amends D-BUILDPROFILE1)
@@ -319,12 +319,12 @@ build: .{ release: .{ settings: .{ tls: true } } }
 ```
 
 ```jet
-#Known if $build.settings.tls == {
+#Known if @build.settings.tls == {
     true -> use core.crypto.tls
     else -> {}
 }
 
-fn base_url() => String { return $build.settings.api_base }
+fn base_url() => String { return @build.settings.api_base }
 ```
 
 ```sh
@@ -384,7 +384,7 @@ module cache<K>(capacity: Int) {
     pub fn key_of(k: K) => String { ... }
 }
 
-module tuned :: cache<Int>($build.settings.cache_slots)
+module tuned :: cache<Int>(@build.settings.cache_slots)
 ```
 
 The module value-parameter rules stay unchanged apart from this admission.
@@ -404,7 +404,7 @@ parameters use parentheses with `name: Type`. The module alias binds with
 ```jet
 module cache<K>(capacity: Int) { ... }
 module int_cache :: cache<Int>(64)
-module tuned :: cache<Int>($build.settings.cache_slots)
+module tuned :: cache<Int>(@build.settings.cache_slots)
 ```
 
 `<>` means types, `()` means typed values, `::` means bound once — one rule,
@@ -416,9 +416,9 @@ arity and type meanings.
 
 ### 9. Provenance facts (D-CONF-STAMP1=B)
 
-`$build.stamp.git` is the commit hash, with a `-dirty` suffix for an unclean
-tree and no value outside a repository. `$build.stamp.toolchain` is the Jet
-version. `$build.stamp.at` is captured once when the lock is written and
+`@build.stamp.git` is the commit hash, with a `-dirty` suffix for an unclean
+tree and no value outside a repository. `@build.stamp.toolchain` is the Jet
+version. `@build.stamp.at` is captured once when the lock is written and
 replayed from the lock. All stamps are recorded in `.jet/lock`; a locked
 rebuild does not read the wall clock. Repository state is a Tier-1 locked
 input under D-CTEFFECT1. The timestamp describes lock history, not source.
@@ -440,8 +440,8 @@ a fact is written.
 
 | Rung | You write | You get |
 |------|-----------|---------|
-| Script | one `.jet` file, no manifest | `jet run` works; `$build.package.name` reads the file name |
-| First fact | `{$build.package.version}` in a print | the version, folded, no manifest required (fallback `0.0.0`) |
+| Script | one `.jet` file, no manifest | `jet run` works; `@build.package.name` reads the file name |
+| First fact | `{@build.package.version}` in a print | the version, folded, no manifest required (fallback `0.0.0`) |
 | Package | `name:`, `version:` in `package.jet` | real identity; `jet build <name>` finds it |
 | Settings | `settings: .{ tls: Bool = true }` | typed switches; `--set`, optimization bundles, `jet explain` |
 | Actions | `fn build(b) => BuildPlan ?` | probes, steps, generated code, computed contributions |
@@ -484,7 +484,7 @@ one security ledger, with the injection hole closed.
 |----------|-----------------|
 | D-CONF-PLANE1 | A — one fact plane, one parser |
 | D-CONF-NAME1 | A — bare identity, ratified nouns |
-| D-CONF-READ1 | A — `$build.*` fact reads; amends D-OSTARGET2 and D-CANVASSTATE1 |
+| D-CONF-READ1 | A — `@build.*` fact reads; amends D-OSTARGET2 and D-CANVASSTATE1 |
 | D-CONF-KEY1 | A — declared typed settings; delete `features:` and `env:`; amends D-BUILDPROFILE1 |
 | D-CONF-MERGE1 | A — nearest source scope, most explicit layer, `.Force` pins; extends D-MARK-SCOPE1 and amends the Config composition conflict rule |
 | D-CONF-SPLIT1 | A — facts in text, actions in `fn build`, recorded contributions; scopes D-BUILDCTX-FLAGS1 |
@@ -515,7 +515,7 @@ The implementation children carry the settled terms once:
 
 - **Phase A — re-found, no surface change.** Compile path adopts the
   role-typed parser; legacy parser deleted; fact registry lands (shared
-  with D-META-REG1 if adopted); `$build.os` is row one.
+  with D-META-REG1 if adopted); `@build.os` is row one.
 - **Phase B — land ratified-but-unbuilt work on the substrate.**
   D-ECO-DECL1 root, Hangar receipts, System/Fleet outputs, `jet deploy`.
 - **Phase C — implementation children**, each a coherent greenfield migration

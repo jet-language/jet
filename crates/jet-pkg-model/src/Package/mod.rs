@@ -196,7 +196,7 @@ pub struct PackageFacts {
     /// D-POLICY-WORD1=A: the one governance namespace (`policy: .{ … }`).
     pub policy: PackagePolicy,
     /// D-CONF-NAME1: typed settings declared in `settings: .{ … }`. Stored
-    /// structurally; runtime `$build.settings.*` reads are a separate,
+    /// structurally; runtime `@build.settings.*` reads are a separate,
     /// unratified ballot (D-CONF-KEY1) and are not wired here.
     pub settings: BTreeMap<String, SettingDecl>,
     pub configs: Vec<String>,

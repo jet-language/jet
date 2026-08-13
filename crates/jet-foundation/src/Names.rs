@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn rust_names_use_one_projection() {
         assert_eq!(mangle("run"), "__jet_run");
-        assert_eq!(mangle("$value"), "__jet_ct_value");
+        assert_eq!(mangle("@value"), "__jet_ct_value");
         assert_eq!(mangle_path("Fire.Burn"), "__jet_Fire__Burn");
         assert_eq!(member_name("math", "double"), "__jet_math__double");
         assert_eq!(

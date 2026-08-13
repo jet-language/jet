@@ -265,7 +265,7 @@ pub(crate) fn resolve_builtin_op(
             2 => match &args[1].expr {
                 Expr::EnumLit { variant, .. } if variant == "Val" => Some(ListRemoveMode::Value),
                 Expr::EnumLit { variant, .. } if variant == "Slot" => Some(ListRemoveMode::Slot),
-                // A `$` selector is an enum value by the time codegen runs.
+                // A `@` selector is an enum value by the time codegen runs.
                 // Recover the same fixed mode from sema's evaluated fact so a
                 // non-Int list does not fall through to an unlowered method call.
                 Expr::Ident(name, _) => match cx.const_values.get(name) {

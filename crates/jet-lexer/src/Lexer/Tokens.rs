@@ -164,8 +164,8 @@ pub enum TokKind {
     ShrEq,
     /// S76 (2026-06-16): `#` separates the element type and size in `[T#N]`.
     Hash,
-    /// D-META-STAGE1=B (retires D-CTMARKER1's splice-only spelling): `$` —
-    /// the one compile-time mark.
+    /// D-ONCE-AT1=D: retired compile-time mark `$`, kept for the E0003
+    /// migration diagnostic.
     Dollar,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),

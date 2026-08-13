@@ -1508,14 +1508,16 @@ proc macros and Tier 4 grammar/sigil changes rejected — even for experts.
 
 **D-VERDICT-732-1 — Marker plane reconciliation** *(ratified 2026-07-23,
 card #732; supersedes the sigil assignment in D-SHAPE2 and
-D-MARKER-FAMILY1)*: `#` is the sole prefix for attributes, instructions, and
-properties. `@` is reserved for locations, addresses, and sources. Thus
+D-MARKER-FAMILY1; its former `@` reservation is amended by D-ONCE-AT1=D)*:
+`#` is the sole prefix for attributes, instructions, and properties. Prefix
+`@` is now the compile-time and fact-read mark; infix `@` still separates a
+package target from its source. Thus
 `#Rule` is the target syntax for applying a typed rule to the next
 declaration, expression, or brace scope. Braces show extent; the rule name
 states behavior; each rule declares its legal attachment targets. Authority-
 bearing rules require a visible brace scope, reason, and audit treatment, and
 `#Unsafe` remains the sole user-written unsafe gate. D-JPK-REF1 puts the thing
-before `@` and its source after it. A leading `@Rule` produces E0063
+before `@` and its source after it. A leading `@Rule` in marker position produces E0063
 with the canonical `#Rule` fix.
 
 **`#` disambiguation** *(D-ONCE-HASH1=B, ratified 2026-08-07)*: `#` lexes to
@@ -1533,8 +1535,9 @@ sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
-Later rulings assign `$name` to known-value splice, `$[ … ]$` to statement
-expansion, and `T.$layout` to the compiler-known layout projection.
+Later rulings assign `@name` to known-value splice, `@[ … ]@` to statement
+expansion, and `T.@layout` to the compiler-known layout projection (D-ONCE-AT1=D
+and D-FENCE-GLYPH1=A supersede the former `$` spellings).
 
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
 D-VERDICT-732-1)*: on `#`: `MustUse`,
@@ -1551,7 +1554,7 @@ bracket group, is written immediately before its target. The registry says
 which targets each rule accepts. Parentheses appear exactly when arguments are
 written; empty parentheses are an error the formatter fixes.
 
-That one sentence covers every position. `#Codable struct …`, `$limit ::
+That one sentence covers every position. `#Codable struct …`, `@limit ::
 32`, `#Inline fn hot(…)`, and `#Unsafe("reason") { … }` are the same shape —
 marker, then target — differing only in what the target is. The five written
 forms (`Bare`, `Call`, `BareOrCall`, `Block`, `Prefix`) are retired; they
@@ -2303,28 +2306,28 @@ results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
 
-**S57 — Compile-time demand** *(as amended by D-META-STAGE1=B,
-ratified 2026-08-06, card #1537)*: ordinary foldable expressions fold
-implicitly. Compile time has one mark, `$`, and **the mark belongs to the
+**S57 — Compile-time demand** *(as amended by D-META-STAGE1=B and
+D-ONCE-AT1=D, ratified 2026-08-06, card #1537)*: ordinary foldable expressions
+fold implicitly. Compile time has one mark, `@`, and **the mark belongs to the
 name**, so it is written at every mention:
 
 ```jet
-$limit :: 1000
+@limit :: 1000
 
 fn run() {
-    $ {
-        $ratio :: $limit /% 10
+    @ {
+        @ratio :: @limit /% 10
     }
-    $if debug { … }
-    print("limit: {$limit}")
-    print("ratio: {$ratio}")
+    @if debug { … }
+    print("limit: {@limit}")
+    print("ratio: {@ratio}")
 }
 ```
 
-`$name :: expr` demands an immutable value now and fails the build if
-evaluation cannot complete. A bare mark opens the execution block (`$ { … }`,
-the Jai `#run` analog) and precedes the compile-time verbs `$if` and
-`$loop`. Sema treats the mark as part of the identifier, so a plain name and
+`@name :: expr` demands an immutable value now and fails the build if
+evaluation cannot complete. A bare mark opens the execution block (`@ { … }`,
+the Jai `#run` analog) and precedes the compile-time verbs `@if` and
+`@loop`. Sema treats the mark as part of the identifier, so a plain name and
 a marked name can never denote the same binding, and codegen keeps them apart:
 a marked name spells `__jet_ct_<name>` in generated Rust where a plain name
 spells `__jet_<name>`.
@@ -2341,8 +2344,9 @@ Constants: `COMPTIME_MARK` and `is_comptime_name` in
 `crates/jet-foundation/src/Syntax/core_surface.rs`. Examples:
 `examples/features/comptime/comptime_block.jet` and `comptime_if.jet`.
 
-**D-LAYOUT-FACTS1=B — Compiler-owned type facts**: `T.$layout`, `T.$name`
-and `T.$fields` are one closed spelling, each projecting the matching
+**D-LAYOUT-FACTS1=B — Compiler-owned type facts** *(spelling amended by
+D-ONCE-AT1=D)*: `T.@layout`, `T.@name` and `T.@fields` are one closed spelling,
+each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
 
@@ -2386,17 +2390,18 @@ the field list; each field carries `.name`/`.ty`/`.markers`/
 `.has_marker("…")`. Runtime `reflect.of(x)` uses the same rule: `.type_name()`
 is the leaf and `.path()` is the canonical path.
 
-**D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
-2026-08-03)*: `T.$layout` is exactly the focused projection of
-`T.reflect().layout`, not a second metadata model. Users cannot declare `$`
+**D-LAYOUT-FACTS1=B — Focused compiler facts use `@`** *(ratified
+2026-08-03, spelling amended by D-ONCE-AT1=D)*: `T.@layout` is exactly the
+focused projection of `T.reflect().layout`, not a second metadata model. Users
+cannot declare `@` members.
 members. Layout exposes kind, optional size/alignment/stride, target,
 guarantee, source, fields, and typed `[.field]` selection. Field byte facts are
 optional when physical layout is not guaranteed. Completion visibly groups
-`$layout` as a compiler fact; hover, rename, navigation, diagnostics,
+`@layout` as a compiler fact; hover, rename, navigation, diagnostics,
 `jet inspect expand --facts layout`, and JSON project the same model.
 
 **D-METADERIVE1 — User derives**: `derive T.Wire { … }` (old
-`derive Wire for T` is E2714); body uses `T.reflect()` + `$name` splices,
+`derive Wire for T` is E2714); body uses `T.reflect()` + `@name` splices,
 emits Jet source text that re-enters lexer→parser→sema like hand-written code
 (**D-CTCODEGEN1** — never inject pre-parsed AST). Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
@@ -2711,7 +2716,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `$if build.os ==` /
+Target variants select via the existing `@if build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -3748,12 +3753,12 @@ arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
-`if subject == { }` if-table) with the existing `$if` lead (D-WHEN1) —
+`if subject == { }` if-table) with the existing `@if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    $if build.os == {
+    @if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
@@ -3763,7 +3768,7 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `$if` chain
+`OSTarget::active`). Sema desugars the dispatch into an `@if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -3787,7 +3792,7 @@ handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
 handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `$if
+in place (the shipped reactive core, I8). Selected by the shipped `@if
 build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
@@ -6315,14 +6320,15 @@ Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) uses the
 bare-identity spelling; no fallback parse path remains. Flagship:
 `examples/features/packages/outputs_build/`. Card #1517.
 
-**D-CONF-READ1=A — `$build.*` fact reads** *(ratified 2026-08-06, card
-#1518)*: facts are read with the metaprogramming splice:
-`$build.package.version`, `$build.os`, and `$build.settings.tls`. `$` carries
+**D-CONF-READ1=A — `@build.*` fact reads** *(ratified 2026-08-06, card
+#1518; spelling amended by D-ONCE-AT1=D)*: facts are read with the
+metaprogramming mark: `@build.package.version`, `@build.os`, and
+`@build.settings.tls`. `@` carries
 the compile-time meaning, so `build` remains an ordinary identifier. One
 spelling covers compiler facts, identity, settings, and stamps. Reads fold to
 constants before codegen; bare scripts use fallback identity from the file
 name and `0.0.0`. The `build.os` dispatch subject becomes
-`#Known if $build.os == { ... }`, and value-position fact reads are legal.
+`@if @build.os == { ... }`, and value-position fact reads are legal.
 This amends D-OSTARGET2 and D-CANVASSTATE1 and rides D-META-ONE1/S4. All I9
 tiers see one folded program.
 
@@ -6372,7 +6378,7 @@ the D-SHAPE-OUTPUT-CALLABLE1 override.
 #1524)*: settings and module value parameters share one evaluator, one fuel
 budget, and one diagnostic family. A build fact is a legal module value
 argument, so the final module spelling can read
-`module tuned :: cache<Int>($build.settings.cache_slots)`. The closed-
+`module tuned :: cache<Int>(@build.settings.cache_slots)`. The closed-
 expression rule in D-GENMOD-VALUE1 admits facts as value arguments. The
 ratified `[T#capacity]` layout carve-out admits fact-fed `Int` parameters. A
 change to the optimization bundle produces a different cached specialization.
@@ -6389,7 +6395,7 @@ The canonical form is:
 ```jet
 module cache<K>(capacity: Int) { ... }
 module int_cache :: cache<Int>(64)
-module tuned :: cache<Int>($build.settings.cache_slots)
+module tuned :: cache<Int>(@build.settings.cache_slots)
 ```
 
 A module with no value parameters has no parentheses. The value-parameter
@@ -6400,9 +6406,10 @@ E0851/E0853 keep their arity and type meanings. D-CONF-MODULE1 facts use the
 value position.
 
 **D-CONF-STAMP1=B — stamps plus a lock-pinned timestamp** *(ratified
-2026-08-06, card #1525)*: `$build.stamp.git` is the commit hash, with a
+2026-08-06, card #1525; spelling amended by D-ONCE-AT1=D)*: `@build.stamp.git`
+is the commit hash, with a
 `-dirty` suffix for an unclean tree and no value outside a repository.
-`$build.stamp.toolchain` is the Jet version. `$build.stamp.at` is captured once
+`@build.stamp.toolchain` is the Jet version. `@build.stamp.at` is captured once
 when the lock is written and replayed from the lock. All stamps are recorded
 in `.jet/lock`; a locked rebuild does not read the wall clock. Repository state
 is a Tier-1 locked input under D-CTEFFECT1. The timestamp describes lock
@@ -6464,8 +6471,8 @@ own. Marker rows come from the marker registry, so law zero (`D-VERDICT-1455-1`)
 is unchanged and every marker is still a row.
 **D-META-FORM1=A — one named-parameter list** *(ratified 2026-08-06, card
 #1538)*: A marker declaration uses one ordinary named parameter list. Plain
-parameters are use-site arguments; `$`-marked parameters are facts about the
-rule, such as `$sites` and `$repeatable`. There is no second parameter list,
+parameters are use-site arguments; `@`-marked parameters are facts about the
+rule, such as `@sites` and `@repeatable`. There is no second parameter list,
 trailing clause, or scope block. A new rule fact is a new named parameter. Typed
 rule arguments use D-RULEARG-TYPES1.
 
@@ -6506,8 +6513,9 @@ constant-evaluation law.
 instance path, for example `three_ints.Buffer`. Any mangled implementation name
 is internal and is not a second user-facing naming form.
 
-**D-META-STAGE1=B — `$` marks every compile-time mention** *(ratified
-2026-08-06, card #1537)*: `$` belongs to the name at every compile-time mention.
+**D-META-STAGE1=B — `@` marks every compile-time mention** *(ratified
+2026-08-06, card #1537; spelling amended by D-ONCE-AT1=D)*: `@` belongs to the
+name at every compile-time mention.
 It marks a declaration, use, and fact read; `#Known`, `#Known if`, and the
 `#Known { ... }` form retire from the marker plane. This amends
 D-VERDICT-1308-1 and D-VERDICT-1308-2 and retires D-CTMARKER1.
@@ -6586,9 +6594,10 @@ cannot bury the security rows. This generalizes `D-AUTHORITY-GATE1`:
 surface, and no gate gains new ceremony — reasons stay exactly where ratified law
 already puts them. Card #1571.
 
-**D-FACT-READ1 = A — the `$` mark reads every plane.** Reading a compiler-held
-fact is one act with one mark: `Severity.$range`, `send_report.$effects`,
-`Order.$states`, `Meters.$dimension`, and `$build.profile` as the same act with
+**D-FACT-READ1 = A — the `@` mark reads every plane** *(spelling amended by
+D-ONCE-AT1=D)*. Reading a compiler-held fact is one act with one mark:
+`Severity.@range`, `send_report.@effects`, `Order.@states`, `Meters.@dimension`,
+and `@build.profile` as the same act with
 the build as its subject. This extends `D-META-STAGE1` from build facts and
 splices to member position on types and functions. Facts answer typed values
 from the registry. `reflect()` remains the aggregate view and loses its string
@@ -6664,7 +6673,9 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-ONCE-GATE1=A** — one org-policy ladder governs every audited escape (`#Unsafe`, `#Impure`, `#Nondeterministic`); `--gate <name>=allow` is the per-invocation escape the org file can refuse; `--allow-impure` retires. The shared ledger is D-FACT-GATE1's.
 - **D-ONCE-LEDGER1=A** — Tower is the one decision home; spec text renders it; `tower lint --docs` walks `docs/spec/**`; supersession links are mandatory on verdicts.
 - **D-ONCE-VERB1=A** — one verb per job across collections: `pop` is remove-and-return everywhere; `replace` keeps only the List swap meaning; bare `.from()` is the blessed conversion constructor, `from_x()` for source-qualified variants (amends the D-API-STORE1 table and D-STDRUBRIC1 idioms).
-- **D-ONCE-AT1=D** — `@` is the word *at*, in space and time: infix `@` stays the package-source separator (D-JPK-REF1, unchanged); prefix `@` becomes the compile-time mark and the fact-read glyph (`@config`, `T.@range`, `@build.profile`), amending D-FACT-READ1's spelling half and the `$` comptime-mention mark. The location reservation rides the same word, minted by a future ballot.
+- **D-ONCE-AT1=D** — `@` is the word *at*, in space and time: infix `@` stays the package-source separator (D-JPK-REF1, unchanged); prefix `@` becomes the compile-time mark and the fact-read glyph (`@config`, `T.@range`, `@build.profile`), amending D-FACT-READ1's spelling half, superseding D-VERDICT-732-1's former prefix reservation, and replacing the `$` comptime-mention mark. The location reservation rides the same word, minted by a future ballot.
+- **D-FENCE-GLYPH1=A** *(card #1516)* — expression fences are spelled `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration. The open and close digraphs are longest-match lexer forms. The retired `$` spelling has no compatibility path; old prefix `$` uses teach the `@` form through E0003.
+- **D-FENCE-RANGE1=A** *(card #1516)* — inside an expression fence, an ascending integer-literal range `0..3` expands to the four entries `0`, `1`, `2`, and `3`. Descending ranges and ranges with non-integer-literal endpoints remain one ordinary Range value and add no diagnostic. Binding-name ranges keep their existing numbered-name rule.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
@@ -6687,9 +6698,9 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 - `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
   declaration per rule, in the ratified D-META-FORM1=A form. A plain parameter
-  is an argument the use site writes; a `$`-marked parameter is a fact about the
-  rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
-  `$scopes`, `$companion`, `$retired`.
+  is an argument the use site writes; an `@`-marked parameter is a fact about
+  the rule: `@sites`, `@repeatable`, `@owns_menu`, `@inherits`, `@resolution`,
+  `@scopes`, `@companion`, `@retired`.
 - `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer

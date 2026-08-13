@@ -12,7 +12,7 @@
 // a marker rule, a knowledge plane, a right, and a build fact are rows of the
 // same table, separated only by what they attach to. Facts about a rule ride the
 // declaration's own named-parameter list under the compile-time mark
-// (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
+// (`@sites: [Site]`, `@repeatable: true`); no clause form and no second keyword
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
@@ -124,8 +124,8 @@
 // D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
 // `effect Root.Leaf` adds one package-view fact and erases before TIR.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
-// SIGIL_FENCE_CLOSE. D-VERDICT-1320-1 (card #1320) respells them
-// `$[ a, b ]$` and opens expression-position fences to expression entries:
+// SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
+// `@[ a, b ]@` and opens expression-position fences to expression entries:
 // the statement is copied once per entry, fences advance in lock-step.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
@@ -453,7 +453,7 @@ pub fn name_has_case(name: &str, case: NameCase) -> bool {
     if name == "_" { return true; }
     // D-META-STAGE1=B: the compile-time mark is part of the name; case policy
     // reads the name under the mark.
-    let name = name.strip_prefix('$').unwrap_or(name);
+    let name = name.strip_prefix(COMPTIME_MARK).unwrap_or(name);
     let name = name.strip_prefix('_').unwrap_or(name);
     if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") { return false; }
     let mut chars = name.chars();
@@ -468,8 +468,8 @@ pub fn name_has_case(name: &str, case: NameCase) -> bool {
 
 pub fn canonical_name_case(name: &str, case: NameCase) -> String {
     // D-META-STAGE1=B: keep the compile-time mark, re-case the name under it.
-    if let Some(rest) = name.strip_prefix('$') {
-        return format!("${}", canonical_name_case(rest, case));
+    if let Some(rest) = name.strip_prefix(COMPTIME_MARK) {
+        return format!("{}{}", COMPTIME_MARK, canonical_name_case(rest, case));
     }
     match case {
         NameCase::Pascal => {

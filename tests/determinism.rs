@@ -386,7 +386,7 @@ fn run() {
 use core.time.date as date;
 
 fn run() {
-    $today :: date.today()
+    @today :: date.today()
 }
 "#;
     let fold_diagnostics =

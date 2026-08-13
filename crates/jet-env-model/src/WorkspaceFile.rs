@@ -299,7 +299,7 @@ fn evaluate_with_resolver(
     // every top-level `fn` (callable) and every top-level `const`/`comptime`
     // binding (referenceable), evaluated in source order so a later binding can
     // build on an earlier one. This is what lets `members:` compose a sibling
-    // `$packages :: […]` or call a local helper `fn`, rather than being
+    // `@packages :: […]` or call a local helper `fn`, rather than being
     // limited to inline literals + the `find("./dir")` fast path.
     let funcs: HashMap<String, &Func> = program
         .items
@@ -821,7 +821,7 @@ module workspace {
     fn members_references_sibling_comptime_const() {
         // Slice A: a `members:` expression can name a top-level `comptime`
         // binding declared in the same file — not just inline literals.
-        let src = "$pkgs :: [\"./packages/hello\", \"./packages/ranker\"]\n\
+        let src = "@pkgs :: [\"./packages/hello\", \"./packages/ranker\"]\n\
                    module workspace {\n    members: pkgs\n}\n";
         let tmp = tempdir("comptime-list");
         for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
@@ -838,7 +838,7 @@ module workspace {
     #[test]
     fn members_composes_comptime_const_with_string_ops() {
         // A binding can be composed inside the list expression.
-        let src = "$base :: \"./workspace-packages\"\n\
+        let src = "@base :: \"./workspace-packages\"\n\
                    module workspace {\n    members: [\"{base}/a\", \"{base}/b\"]\n}\n";
         let tmp = tempdir("comptime-strings");
         for (relative, name) in [("workspace-packages/a", "a"), ("workspace-packages/b", "b")] {

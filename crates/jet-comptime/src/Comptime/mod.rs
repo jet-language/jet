@@ -243,7 +243,7 @@ pub fn evaluate_typed_head(
 pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
     Methods::data_status_rows()
 }
-pub use Methods::apply_dollar_splices;
+pub use Methods::apply_at_splices;
 pub use Purity::{
     check_build_time_io, walk_calls, walk_identifiers, walk_purity_expr, walk_purity_stmts,
     walk_purity_stmts_from, walk_expr_nodes_for_validation,
@@ -1276,7 +1276,7 @@ fn run_repl_step_inner(
     }
 }
 
-/// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run a `$ { … }` block at
+/// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run an `@ { … }` block at
 /// build time. Purity-checked (E3401) then tree-walked with fuel cap (E0952).
 /// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
 pub fn run_block_with_imports(

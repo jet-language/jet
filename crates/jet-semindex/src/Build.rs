@@ -1948,7 +1948,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             else_body,
             ..
         }
-        // D-OSTARGET2=B: `$if build.os == { … }` — index arm bodies
+        // D-OSTARGET2=B: `@if build.os == { … }` — index arm bodies
         // the same as a runtime dispatch (sema desugars it away later).
         | AST::Stmt::ComptimeSwitch {
             subject,

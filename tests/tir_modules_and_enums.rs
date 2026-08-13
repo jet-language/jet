@@ -629,7 +629,7 @@ fn decorate(s: String) => String {
     assert_eq!(stdout, "[hi]\n");
 }
 
-/// c109 Phase 15: a resolved comptime-if (`$if … { } else { }`). Sema selects
+/// c109 Phase 15: a resolved comptime-if (`@if … { } else { }`). Sema selects
 /// the branch; codegen emits ONLY that branch's statements inline (no `if`). Here
 /// `debug` is `false`, so the `else` branch is emitted; the `then` branch is dropped.
 #[test]
@@ -638,9 +638,9 @@ fn comptime_if_selected_branch() {
         return;
     }
     let src = "\
-$debug :: false
+@debug :: false
 fn pick(x: Int) => Int {
-    $if $debug {
+    @if @debug {
         return x + 100
     } else {
         return x + 1

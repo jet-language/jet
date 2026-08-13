@@ -1,6 +1,8 @@
 /// D-VERDICT-732-1: the sole prefix for applying a typed rule. A rule may target a
 /// declaration, expression, or brace scope when that rule declares the target
-/// legal. `@` is reserved for locations, addresses, and sources.
+/// legal. D-ONCE-AT1=D supersedes the former marker-plane reservation: prefix
+/// `@` marks compile-time names and facts, while infix `@` remains the
+/// package-source reference.
 ///
 /// `#` has two other jobs, told apart by parser position only (no lookahead
 /// heuristics): inside a bracketed type, `[T#N]`, it is the fixed-size-list

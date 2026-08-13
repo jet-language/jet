@@ -1,21 +1,21 @@
-// D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` execution block.
+// D-META-STAGE1=B: `@ { … }` execution block.
 // Runs at build time via the comptime interpreter; erases entirely — no runtime
 // Rust is emitted (I3). A block-local comptime binding can be spliced into
-// runtime code with `$name` after the block.
-$limit :: 1000
+// runtime code with `@name` after the block.
+@limit :: 1000
 
-$base :: 10
+@base :: 10
 
 fn run() {
     // Build-time assertion: verify constants are valid before compiling.
-    $ {
-        $ratio :: $limit /% $base
-        if $ratio < 1 { panic("limit must be >= base") }
+    @ {
+        @ratio :: @limit /% @base
+        if @ratio < 1 { panic("limit must be >= base") }
     }
     // The block ran at build time and produced no runtime code. Its comptime
-    // binding leaks into the surrounding comptime scope, so `$ratio` splices a
+    // binding leaks into the surrounding comptime scope, so `@ratio` splices a
     // runtime literal.
-    print("limit: {$limit}")
-    print("base: {$base}")
-    print("ratio: {$ratio}")
+    print("limit: {@limit}")
+    print("base: {@base}")
+    print("ratio: {@ratio}")
 }

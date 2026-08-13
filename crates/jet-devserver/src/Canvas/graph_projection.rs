@@ -1027,13 +1027,13 @@ fn project_stmt(
             span,
             ..
         } => {
-            add_region(g, ordinal, "comptime_if", "$if", *span);
+            add_region(g, ordinal, "comptime_if", "@if", *span);
             let node_id = format!("{}:stmt:{ordinal}:comptime_if", g.graph_id);
             add_node(
                 g,
                 &node_id,
                 "branch",
-                "$if",
+                "@if",
                 (*span).into(),
                 x,
                 y,

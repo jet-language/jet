@@ -8,7 +8,7 @@ use crate::Syntax::{self, OSTarget as OS};
 use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use std::collections::HashMap;
 
-/// D-OSTARGET2=B (ratified 2026-07-03): fold every `$if build.os == {
+/// D-OSTARGET2=B (ratified 2026-07-03): fold every `@if build.os == {
 /// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
 /// matching this build's active OS (`bundle.active_os`), discarding the rest.
 ///
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
 /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
 /// whose arm conditions are the compile-time constants `build.os == .OS`
-/// (emitted here as a `Bool` literal), so all the existing `$if`
+/// (emitted here as a `Bool` literal), so all the existing `@if`
 /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
 /// handles it unchanged. `build.os` is meaningful only as this switch's
 /// subject; anywhere else `build` is an ordinary identifier (unknown at
@@ -159,7 +159,7 @@ fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Validate one `$if build.os == { … }` switch and rewrite it into the
+/// Validate one `@if build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
 fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {

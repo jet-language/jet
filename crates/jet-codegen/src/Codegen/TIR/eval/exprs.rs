@@ -2966,7 +2966,7 @@ impl<'a> EvalCtx<'a> {
                         // A Core alias can still lower as StaticCall when the
                         // fragment was typed before imports were propagated.
                         // Check its comptime effect before entering arguments;
-                        // an explicit `$` must report E3403 for ambient
+                        // an explicit `@` must report E3403 for ambient
                         // nondeterminism even when an argument is a runtime
                         // place that cannot be materialized by the evaluator.
                         if let Some(diagnostic) = self.core_call_fold_diagnostic(leaf) {
@@ -5162,7 +5162,7 @@ impl<'a> EvalCtx<'a> {
                     };
                     return self.call_callable(&grads, Vec::new());
                 }
-                // D-LAYOUT-FACTS1=B: `$layout` is a contextual projection of
+                // D-LAYOUT-FACTS1=B: `@layout` is a contextual projection of
                 // the TypeInfo value bound to a derive type parameter. It is
                 // not a second stored TypeInfo member; ordinary `.layout`
                 // remains the full-reflection projection.
@@ -5215,7 +5215,7 @@ impl<'a> EvalCtx<'a> {
                             "layout field selector needs a `LayoutInfo` value".to_string(),
                             "typed field selection is only defined on compiler layout facts"
                                 .to_string(),
-                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            "use `T.@layout[.field]` for a reflected field fact".to_string(),
                             Some(self.span()),
                         ));
                     };
@@ -5225,7 +5225,7 @@ impl<'a> EvalCtx<'a> {
                             "layout field selector needs a `LayoutInfo` value".to_string(),
                             "typed field selection is only defined on compiler layout facts"
                                 .to_string(),
-                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            "use `T.@layout[.field]` for a reflected field fact".to_string(),
                             Some(self.span()),
                         ));
                     }
@@ -7912,7 +7912,7 @@ impl<'a> EvalCtx<'a> {
             let Some(CtValue::Str(s)) = argv.into_iter().next() else {
                 return Err(unsupported("`emit` argument must be a string", self.span()));
             };
-            let fragment = crate::Comptime::apply_dollar_splices(&s, scope);
+            let fragment = crate::Comptime::apply_at_splices(&s, scope);
             if let Some(out) = self.emitted_fragments.as_mut() {
                 out.push(fragment);
             }

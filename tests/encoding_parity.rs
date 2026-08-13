@@ -144,7 +144,7 @@ fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
     assert!(
         errors.is_empty(),
         "fixture must type-check:\n{}",
-        jet::render_diagnostics(path, "", &diags)
+        jet::render_diagnostics(path, "$xml_event", &diags)
     );
     bundle
 }
@@ -350,24 +350,24 @@ use core.encoding.cbor as cbor
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-$json_canon :: json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))
-$jsonl_n :: (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()
-$csv_n :: (csv.parse("name,score\nada,9\n") ?? panic("csv")).len()
-$xml_text :: xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))
-$cbor_round :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))
-$b64_n :: (base64.decode("Zg==") ?? panic("b64")).len()
-$b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
-$b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
+@json_canon :: json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))
+@jsonl_n :: (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()
+@csv_n :: (csv.parse("name,score\nada,9\n") ?? panic("csv")).len()
+@xml_text :: xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))
+@cbor_round :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))
+@b64_n :: (base64.decode("Zg==") ?? panic("b64")).len()
+@b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
+@b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
 
 fn run() {
-    print("{$json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
-    print("{$jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
-    print("{$csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
-    print("{$xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
-    print("{$cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
-    print("{$b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
-    print("{$b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
-    print("{$b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
+    print("{@json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
+    print("{@jsonl_n}|{(jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()}")
+    print("{@csv_n}|{(csv.parse("name,score\nada,9\n") ?? panic("csv")).len()}")
+    print("{@xml_text}|{xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))}")
+    print("{@cbor_round}|{json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))}")
+    print("{@b64_n}|{(base64.decode("Zg==") ?? panic("b64")).len()}")
+    print("{@b64url_n}|{(base64.decode_url("aGk") ?? panic("b64url")).len()}")
+    print("{@b32_n}|{(base32.decode("MZXQ====") ?? panic("b32")).len()}")
 }
 "#;
 
@@ -415,8 +415,8 @@ struct Packet {
     payload: [U8]
 }
 
-$root :: hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
-$packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+@root :: hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+@packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
 fn gap() => String {
     folded := text.casefold("Straße")
@@ -427,7 +427,7 @@ fn gap() => String {
 }
 
 fn run() {
-    print("{$root}|{$packet}")
+    print("{@root}|{@packet}")
     print(gap())
 }
 "#;
@@ -479,7 +479,7 @@ impl Token.Decode {
     fn decode(tree: DataTree) => Token ? [FieldError] {
         value :: tree.text()?
         if value != "wire" {
-            return Err([FieldError.{ path: "", reason: "bad token" }])
+            return Err([FieldError.{ path: "$xml_event", reason: "bad token" }])
         }
         return Ok(Token.{ raw: "decoded" })
     }
@@ -713,7 +713,7 @@ fn run() {
         matches!(
             failed_change,
             jet::AST::CtValue::Str(ref value)
-                if value == "score:expected Int, found text \"bad\""
+                if value == "score:expected Int, found text \"bad\"$xml_event"
         ),
         "failed migration change lost its keyed decode error: {failed_change:?}"
     );
@@ -1023,7 +1023,7 @@ fn run() {
 
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
 /// `[T]` list of `#Codable` values. The resident JIT used to send both to the
-/// rows host, so a typed list rendered "" and still reported success — silent
+/// rows host, so a typed list rendered "$xml_event" and still reported success — silent
 /// data loss on the default `jet run` path (#1269). Both shapes are exercised
 /// here so the rows form stays covered too.
 const TYPED_CSV_ENCODE: &str = r#"
@@ -1060,7 +1060,7 @@ fn typed_csv_encode_matches_aot_and_default_dev_inner() {
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "typed CSV AOT failed: {}", aot.stderr);
     // An empty success is never correct: pin the real cells, not just parity,
-    // so both lenses agreeing on "" could not pass this test.
+    // so both lenses agreeing on "$xml_event" could not pass this test.
     assert!(
         aot.stdout.contains("item,qty\npen,3\nink,5"),
         "typed CSV AOT lost the records: {}",
@@ -1401,7 +1401,7 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
     ] {
         let scratch = Scratch::new(label);
         let source = format!(
-            "use core.encoding.[{module}]\nuse core.files as files\n\n$probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
+            "use core.encoding.[{module}]\nuse core.files as files\n\n@probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
         );
         let path = scratch.write_project("2026", &source);
         let diags = jet::check_with_path(path.to_str().unwrap());

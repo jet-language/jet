@@ -22,7 +22,7 @@ flagged, but §15 tracks the ratified option shapes exactly.
   `derive T.Wire`). The boilerplate killer.
 - **reflection** — reading a type's shape at compile time (`T.reflect()` →
   `TypeInfo`). The read half of derives.
-- **splice** — `$name`, weaving a compile-time value into generated source
+- **splice** — `@name`, weaving a compile-time value into generated source
   (D-CTMARKER1).
 - **build entry** — the compile-time `fn main` equivalent: one function per
   unit that orchestrates its build. Spelling open (D-BUILDENTRY1); this doc
@@ -70,7 +70,7 @@ jobs (I8). A beginner lives on rungs 0–1 and never learns the rest exist.
 | 0 | type-driven boilerplate | built-in derives (`#Codable`, …) | shipped (S55) |
 | 1 | compile-time values | `comptime x = f();`, `comptime if`, `comptime { }` | shipped (S26/S57, D-CTMARKER1) |
 | 2 | pure eval + data embedding | whitelist Core (D-CTCORE1), `embed_file`/`embed_bytes` (D-CTIO1), `find` (D-CTFIND1), `fetch(url, sha256:)` (D-NETDEP1) | shipped |
-| 3 | user derives | `T.reflect()` (D-METAREFLECT1) + `derive T.Trait` emitting source fragments with `$` splices (D-METADERIVE1) | shipped |
+| 3 | user derives | `T.reflect()` (D-METAREFLECT1) + `derive T.Trait` emitting source fragments with `@` splices (D-METADERIVE1) | shipped |
 | 4 | whole-program build metaprogramming | **`fn build`** — this document | ratified 2026-07-01, card c1nixrpd (§15) |
 
 Rejected forever (D-METADEPTH1, load-bearing): token/AST macros, custom
@@ -498,7 +498,7 @@ Jai's model structurally cannot deliver this list. It is Jet's moat.
 ## 14. Status map
 
 **Ratified substrate (already law):** S26/S57 comptime bindings ·
-D-CTMARKER1 `$` splices + `comptime { }` · D-CTCORE1 pure whitelist ·
+D-CTMARKER1 `@` splices + `comptime { }` · D-CTCORE1 pure whitelist ·
 D-CTIO1 embed · D-CTFIND1/2 find · D-CTEFFECT1 tiers + `#Impure` ·
 D-NETDEP1 fetch backend (shipped — `Comptime/Methods.rs::eval_net_fetch`,
 sha256-pinned, lock-recorded) · D-CTCODEGEN1 source re-entry ·
@@ -522,7 +522,7 @@ D-BUILDSCHED1=A, D-BUILDQUERY1=A, D-BUILDLEGACY1=A, D-BUILDPLUGIN1=A,
 D-FRONTENDAPI1=A, D-DSLBLOCK1=A, D-METAMUTATE1=A.
 
 **Parked:** c147 #14 remains a frozen evidence-gated serde-bound reserve.
-`$` splice + `comptime {}` on #94 are shipped lower rungs, not a mutation
+`@` splice + `comptime {}` on #94 are shipped lower rungs, not a mutation
 surface. #38 stays closed as authority/effects duplicate of #95.
 
 **Sequencing after ratification:** `fetch(url, sha256:)` backend shipped →

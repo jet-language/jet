@@ -124,13 +124,13 @@ fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
     None
 }
 
-/// D-LAYOUT-FACTS1=B: completion context for the compiler-owned dollar
-/// member. It is kept separate from ordinary member completion because dollar
-/// is not part of an identifier prefix.
+/// D-LAYOUT-FACTS1=B: completion context for the compiler-owned `@` member.
+/// It is kept separate from ordinary member completion because the marked
+/// fact name is a contextual identifier after `.`.
 fn context_is_compiler_fact_access(src: &str, offset: usize) -> Option<(String, String)> {
     let before = &src[..offset.min(src.len())];
-    let dollar = before.rfind('$')?;
-    let dot = dollar.checked_sub(1)?;
+    let mark = before.rfind('@')?;
+    let dot = mark.checked_sub(1)?;
     if before.as_bytes().get(dot) != Some(&b'.') {
         return None;
     }
@@ -145,7 +145,7 @@ fn context_is_compiler_fact_access(src: &str, offset: usize) -> Option<(String, 
     if receiver_start == receiver_end {
         return None;
     }
-    let suffix = &before[dollar..];
+    let suffix = &before[mark..];
     if !suffix[1..]
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')

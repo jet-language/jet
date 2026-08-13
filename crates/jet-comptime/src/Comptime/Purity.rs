@@ -27,7 +27,7 @@ pub enum PurityStage {
     /// time. `#Impure(...)` bodies DO run at run time — the marker records
     /// and gates the ambient call, it doesn't erase it — so a
     /// declared-pure function must still be checked inside one; an empty
-    /// declared effect set can't silently admit an ambient call. `$ { ... }`
+    /// declared effect set can't silently admit an ambient call. `@ { ... }`
     /// comptime blocks emit no runtime code at all (I3), so they are
     /// excluded: nothing inside one can trip a run-time-voiced E3401.
     RunTime,
@@ -36,7 +36,7 @@ pub enum PurityStage {
     /// evaluates the expression. `#Impure(...)` bodies are gated by
     /// `--allow-impure`/E3411 at the point they would actually execute
     /// (unchanged prior behavior), so the build-time walk skips them here.
-    /// A nested `$ { ... }` block runs for real during build-time
+    /// A nested `@ { ... }` block runs for real during build-time
     /// evaluation too, so it stays in the walk.
     BuildTime,
 }
@@ -53,7 +53,7 @@ struct WalkOpts {
     include_suppressed: bool,
     /// `#Impure(...)` bodies — see [`PurityStage`].
     descend_impure: bool,
-    /// `$ { ... }` comptime blocks — see [`PurityStage`].
+    /// `@ { ... }` comptime blocks — see [`PurityStage`].
     descend_comptime_block: bool,
 }
 
@@ -733,7 +733,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
             walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::ComptimeBlock { body, .. } => {
-            // See PurityStage: build-time descends (a nested `$ { ... }`
+            // See PurityStage: build-time descends (a nested `@ { ... }`
             // block runs for real during build-time evaluation), run-time
             // skips (it emits no runtime code at all — I3 — so nothing
             // inside one can trip a run-time-voiced E3401).

@@ -83,7 +83,7 @@ impl<'a> Fmt<'a> {
             return;
         }
 
-        // Expression entries (D-VERDICT-1320-1) store an empty display name;
+        // Expression entries (D-FENCE-GLYPH1=A) store an empty display name;
         // emit their authored source slice instead.
         let names = fence
             .names
@@ -608,14 +608,14 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-VERDICT-1308-1: `$ { … }` demand block.
+            // D-VERDICT-1308-1: `@ { … }` demand block.
             Stmt::ComptimeBlock { body, .. } => {
                 self.write(&format!("{} {{", Syntax::COMPTIME_MARK));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-VERDICT-1308-2: format like `if` with a `$` lead.
+            // D-VERDICT-1308-2: format like `if` with an `@` lead.
             Stmt::ComptimeIf {
                 cond,
                 then_body,
@@ -635,9 +635,9 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
-            // D-OSTARGET2=B (ratified 2026-07-03): `$if build.os == { … }`
+            // D-OSTARGET2=B (ratified 2026-07-03): `@if build.os == { … }`
             // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
-            // (D-IF3 arm grammar) with a `comptime` lead.
+            // (D-IF3 arm grammar) with an `@if` lead.
             Stmt::ComptimeSwitch {
                 subject,
                 arms,
@@ -781,7 +781,7 @@ impl<'a> Fmt<'a> {
     /// written. Preserve an author-written braceless simple body when it fits.
     /// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
     /// `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-    /// `$if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+    /// `@if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
     fn fmt_dispatch(&mut self, subject: &Expr, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
         let table_op = self
             .dispatch_op_from_source(subject)

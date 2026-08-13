@@ -42,22 +42,23 @@ patch — and the standard sets ship filled, starting with the `Mass` dimension
 Jet does not have. Beginners see no change at all: `#Codable` still reads
 `#Codable` when you write it, and most of the time you no longer need to.
 
-**The most visible change.** `$` is the one mark for compile time, in every
-position:
+**The most visible change.** `@` is the one mark for compile time, in every
+position. D-ONCE-AT1=D amends D-META-STAGE1=B's spelling and supersedes the
+former prefix `$`; infix `@` package references remain unchanged:
 
 ```jet
 // before                         // settled
-#Known limit :: 1000              $limit :: 1000
-#Known if debug { … }             $if debug { … }
-#Known { … }                      $ { … }
-T.reflect().name                  T.$name
-T.$layout                         T.$layout        (already ratified)
+#Known limit :: 1000              @limit :: 1000
+#Known if debug { … }             @if debug { … }
+#Known { … }                      @ { … }
+T.reflect().name                  T.@name
+T.@layout                         T.@layout        (already ratified)
 ```
 
 `D-META-STAGE1=B` settles the mark as part of the name. It is written at every
-mention. `$limit` is the same name inside and outside a compile-time block, so
+mention. `@limit` is the same name inside and outside a compile-time block, so
 there is no value-carry rule. `#Known`, `#Known if`, and the `#Known` block
-retire in favour of `$`, `$if`, and `$ { … }`. The mark belongs to the name; a
+retire in favour of `@`, `@if`, and `@ { … }`. The mark belongs to the name; a
 plain name and a marked name never denote the same binding.
 
 **Settled slate.** Thirteen decisions on card #1508 are ratified. The slate
@@ -83,7 +84,7 @@ model gives them a reason instead of a list.
   declaration in Jet, read from the one registration table.
 - **Contribution** — what compile-time code hands back: a value, a fact, some
   source code, or a diagnostic.
-- **Stage** — when code runs. Jet has two: compile time and run time. `$` marks
+- **Stage** — when code runs. Jet has two: compile time and run time. `@` marks
   a name as belonging to the first.
 - **Fact** — one named piece of knowledge the compiler holds about a target.
   `#Inline` records a fact. So does a unit dimension.
@@ -123,7 +124,7 @@ Every row is one job done more than once. File and line proof.
 | 1 | Register a compile-time rule | `Policy::APPLIED_RULES`, 99 rows in Rust (`crates/jet-foundation/src/Policy.rs:833`) | `known_derive_names` — user `derive T.X {}` names join the marker vocabulary (`crates/jet-sema/src/Sema/Bundle.rs:1234-1239`) | Two registries for one vocabulary. One is closed, one is open. |
 | 2 | Generate code from a type | User derive: emits a **string**, re-lexed and re-parsed (`Bundle.rs:1654-1697`, E2710 on failure) | Built-in derive: hand-written Rust codegen (`crates/jet-codegen/src/Codegen/Items.rs:1158-1199`) | Two derive engines. Only one is writable by users. |
 | 3 | Generate code from a type (again) | Serde via Jet-source template (`crates/jet-sema/src/Sema/Registration/Serde.rs:3-49`) | Serde via raw Rust strings for enums and unions (`Items.rs:1030-1090`) | The code admits a half-finished migration at `Items.rs:1811-1815`. |
-| 4 | Splice a compile-time value | `Expr::ComptimeSplice`, a real AST node (`crates/jet-foundation/src/AST/expressions.rs:624-633`) | `apply_dollar_splices` — `$name` inside an `emit()` string, handled as string interpolation | One sigil, two implementations. |
+| 4 | Splice a compile-time value | `Expr::ComptimeSplice`, a real AST node (`crates/jet-foundation/src/AST/expressions.rs:624-633`) | `apply_at_splices` — `@name` inside an `emit()` string, handled as string interpolation | One sigil, two implementations. |
 | 5 | Instantiate code with parameters | Generic modules: real Jet, substituted (`crates/jet-sema/src/Sema/Bundle/GenericModules.rs:1-51`) | Derives: escaped string templates | Same job. Only the first is checkable before use. |
 | 6 | Instantiate code with parameters (again) | Generic functions, specialized in codegen (`crates/jet-codegen/src/Codegen/TIR/mod.rs:816-902`) | Variadic-bound synthesis, a third AST-synthesis pass (`crates/jet-codegen/src/Codegen/VariadicBound.rs:1-30`) | Three instantiation engines in two crates. |
 | 7 | Prove a whole-program property | Effect inference, a worklist fixpoint (`crates/jet-sema/src/Sema/Effects.rs:750-787`); run-time purity, a hand-rolled recursive walk raising E3401 (`crates/jet-sema/src/Sema/Purity.rs:765-1058`) | Comptime purity, a third checker raising E0951 (`crates/jet-comptime/src/Comptime/Purity.rs`, `Comptime/Diagnostics.rs:104-121`) | Three transitive-closure engines, two diagnostic families for one rule. Also flagged by `authority-one-model.md:118`. |
@@ -227,8 +228,8 @@ Spelled out, because each one deletes a mechanism:
    Tier 0, 1, 2 (`D-CTEFFECT1`) is what `=[FS]=>` already says at run time.
 7. **Reading a constant is one job.** The comptime evaluator exists. Array
    sizes and enum discriminants do not call it.
-8. **A splice and a compiler fact are the same reading.** `$name` weaves a
-   compile-time value into code. `T.$layout` reads a compile-time fact. Both
+8. **A splice and a compiler fact are the same reading.** `@name` weaves a
+   compile-time value into code. `T.@layout` reads a compile-time fact. Both
    say "this is known before the program runs". One sigil already covers both,
    and `#Known` is the odd one out.
 
@@ -239,33 +240,33 @@ Spelled out, because each one deletes a mechanism:
 This is the point of the proposal. Every change below makes code shorter or
 clearer to read. Each states settled law or an amendment to settled law.
 
-### S1 — `$` is the one compile-time sigil (D-META-STAGE1=B; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1)
+### S1 — `@` is the one compile-time sigil (D-META-STAGE1=B, amended by D-ONCE-AT1=D; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1)
 
 Today, compile time is spelled four ways. A binding is `#Known x :: 5`. A branch
-is `#Known if`. A splice is `$name`. A compiler fact is `T.$layout`. Two of
-those already use `$`.
+is `#Known if`. A splice is `@name`. A compiler fact is `T.@layout`. Two of
+those already use `@`.
 
-Settled: **`$` means compile time, in every position.**
+Settled: **`@` means compile time, in every position.**
 
 ```jet
 // before                                 // settled
-#Known limit :: 1000                      $limit :: 1000
-#Known if debug { … } else { … }          $if debug { … } else { … }
-#Known { … }                              $ { … }
-T.$layout                                 T.$layout
-info :: T.reflect(); info.name            T.$name
+#Known limit :: 1000                      @limit :: 1000
+#Known if debug { … } else { … }          @if debug { … } else { … }
+#Known { … }                              @ { … }
+T.@layout                                 T.@layout
+info :: T.reflect(); info.name            T.@name
 ```
 
-**What the mark means at a binder.** `$x :: expr` does not claim that `x` is
+**What the mark means at a binder.** `@x :: expr` does not claim that `x` is
 already known. It puts the requirement on `expr`: compute this before the
 program runs, or stop the build. The name is the result. A binder introduces and
 a use consumes, so there is no circle — the obligation is discharged in one place
 and relied on in the others.
 
 `D-META-STAGE1=B` settles the mark as part of the name. It is written at every
-mention. `$limit` is the same name inside and outside a compile-time block, so
+mention. `@limit` is the same name inside and outside a compile-time block, so
 there is nothing to carry out. `#Known`, `#Known if`, and the `#Known` block
-retire in favour of `$`, `$if`, and `$ { … }`. `D-CTMARKER1` retires outright.
+retire in favour of `@`, `@if`, and `@ { … }`. `D-CTMARKER1` retires outright.
 Implicit folding remains unchanged.
 
 Two things follow:
@@ -274,8 +275,8 @@ Two things follow:
    A stage is not a rule about a target, which is why `#Known` needed four legal
    sites and a `Prefix` form nothing else used. `#` keeps exactly two readings
    and gets cleaner, not busier.
-2. **Compiler facts already read this way.** `T.$layout` is ratified
-   (`D-LAYOUT-FACTS1=B`). `T.$name` and `T.$fields` join it instead of needing a
+2. **Compiler facts already read this way.** `T.@layout` is ratified
+   (`D-LAYOUT-FACTS1=B`). `T.@name` and `T.@fields` join it instead of needing a
    separate reflection call.
 
 This amends `D-VERDICT-1308-1` and `D-VERDICT-1308-2` and retires
@@ -290,9 +291,9 @@ derive T.DebugText {
     info :: T.reflect()
     tname :: info.name
     emit("""
-impl $tname {{
+impl @tname {{
     fn debug_string(self) => String {{
-        return "$tname"
+        return "@tname"
     }}
 }}
 """)
@@ -303,7 +304,7 @@ Settled:
 
 ```jet
 derive T.DebugText {
-    fn debug_string(self) => String = T.$name
+    fn debug_string(self) => String = T.@name
 }
 ```
 
@@ -316,27 +317,27 @@ The `derive T.Trait` spelling is unchanged, as `D-METADERIVE1` requires. Only
 the body changes: members instead of a string.
 
 When a derive must generate one member per field, compile-time control flow does
-it, with the same `$` from S1:
+it, with the same `@` from S1:
 
 ```jet
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
-        $loop f, T.$fields {
-            parts.add("{f.$name}={self.$f}")
+        @loop f, T.@fields {
+            parts.add("{f.@name}={self.@f}")
         }
         return parts.join(", ")
     }
 }
 ```
 
-Three readings of one sigil, and they agree. `T.$fields` is a compiler fact.
-`f.$name` is a compiler fact on the field handle the loop bound. `self.$f`
-reads the field that handle names. In every case the name after `$` belongs to
-compile time — which is the same rule as `$limit` and the same rule as the
-ratified `T.$layout`.
+Three readings of one sigil, and they agree. `T.@fields` is a compiler fact.
+`f.@name` is a compiler fact on the field handle the loop bound. `self.@f`
+reads the field that handle names. In every case the name after `@` belongs to
+compile time — which is the same rule as `@limit` and the same rule as the
+ratified `T.@layout`.
 
-`$loop` is the ratified `loop` verb at compile time, not a second iteration
+`@loop` is the ratified `loop` verb at compile time, not a second iteration
 mechanism. It is the same word, marked by the same sigil, and it is the reason
 this proposal needs no `for` keyword.
 
@@ -351,29 +352,29 @@ rule!("Inline", sig!(mode: InlineMode = .Hint),
 
 In Prelude Jet source, a rule declaration is an ordinary Jet
 declaration with named parameters. The rule's own arguments and the facts about
-the rule share one list, and `$` says which is which:
+the rule share one list, and `@` says which is which:
 
 ```jet
 marker Inline(mode: InlineMode = .Hint,
-              $sites: [.Function, .Method, .Constant])
+              @sites: [.Function, .Method, .Constant])
 
 marker Unsafe(reason: String, obligations: ObligationMode = .None,
-              $sites: [.Function, .Method, .Block, .Operation])
+              @sites: [.Function, .Method, .Block, .Operation])
 
 marker Pre(condition: Any, message: String,
-           $sites: [.Function, .Method], $repeatable: true)
+           @sites: [.Function, .Method], @repeatable: true)
 ```
 
 `mode`, `reason`, and `condition` are what a user writes at the use site.
-`$sites` and `$repeatable` are facts about the rule, so they carry the
-compile-time mark from S1. This is the same rule as `$limit` and `T.$layout`,
+`@sites` and `@repeatable` are facts about the rule, so they carry the
+compile-time mark from S1. This is the same rule as `@limit` and `T.@layout`,
 applied to a parameter list.
 
 Three things fall out:
 
 - **No new keywords.** `marker` is the only word introduced, and `D-META-NAME1`
   picks it. There is no `on`, no `repeatable`, no trailing grammar.
-- **The site set is data.** `$sites` is a list of enum members, so a program can
+- **The site set is data.** `@sites` is a list of enum members, so a program can
   read it. `Site` is already a real compiler enum (`RuleSite`, 18 members),
   published as a Prelude enum by `D-RULEARG-TYPES1=A`.
 - **The row is extensible.** A new fact about rules is a new named optional
@@ -398,11 +399,11 @@ rejects the build. That is the whole difference between `#Inline` and
 
 ```jet
 // records a fact; no body needed
-marker Audited(owner: String, $sites: [.Function])
+marker Audited(owner: String, @sites: [.Function])
 
 // rejects the build; the body is ordinary Jet
-marker NeedsTimeout($sites: [.Function]) {
-    if not target.$params.has("timeout") {
+marker NeedsTimeout(@sites: [.Function]) {
+    if not target.@params.has("timeout") {
         reject(code: "ORG_NET01",
             what: "network function has no timeout",
             why: "company services must fail predictably",
@@ -450,22 +451,22 @@ Settled:
 
 ```jet
 b.generate("build_message") {
-    fn generated_build_message() => String = $stamp
+    fn generated_build_message() => String = @stamp
 }?
 ```
 
-Same block of items as a derive body, in the same `$` vocabulary. One way to
+Same block of items as a derive body, in the same `@` vocabulary. One way to
 write generated code at every rung, and no new kind of value.
 
 ### S7 — Compile-time expressions where constants are legal (D-META-CONST1=A)
 
 ```jet
 // today: E0963 and E0035
-$LANES :: 8
-$BASE  :: 100
+@LANES :: 8
+@BASE  :: 100
 
-buffer: [Int#($LANES * 2)]              // settled
-enum Code { First = $BASE + 1 }         // settled
+buffer: [Int#(@LANES * 2)]              // settled
+enum Code { First = @BASE + 1 }         // settled
 ```
 
 The evaluator already exists. Two parsers refuse to call it. This is a
@@ -492,7 +493,7 @@ Declarations, not Rust rows:
 ```jet
 effect Py                                // settled declaration
 dimension Mass                           // settled declaration
-marker GraphQL<Row>($sites: [.Block]) { … }   // settled declaration
+marker GraphQL<Row>(@sites: [.Block]) { … }   // settled declaration
 ```
 
 Making a table writable is not enough. **The standard sets ship filled.** Jet has five
@@ -563,11 +564,11 @@ the only place a marker is required rather than offered.
 
 **Rung 4 — you require the answer now.** An ordinary binding folds at compile
 time when it can, and stays a run-time value when it cannot. Neither outcome is
-an error. Writing `$` says the value must be known before the program runs, so
+an error. Writing `@` says the value must be known before the program runs, so
 failing to compute it stops the build instead of passing quietly.
 
 ```jet
-$limit :: parse_budget(embed_file("budget.txt"))
+@limit :: parse_budget(embed_file("budget.txt"))
 ```
 
 **Rung 5 — you see what happened.** `jet inspect expand` prints the generated
@@ -615,8 +616,8 @@ entry that only runs at the root, far from the function it judges.
 
 ```jet
 // settled
-marker NeedsTimeout($sites: [.Function]) {
-    if not target.$params.has("timeout") {
+marker NeedsTimeout(@sites: [.Function]) {
+    if not target.@params.has("timeout") {
         reject(code: "ORG_NET01",
             what: "network function has no timeout",
             why: "company services must fail predictably",
@@ -636,8 +637,8 @@ derive T.Wire {
     info :: T.reflect()
     tname :: info.name
     emit("""
-impl $tname {{
-    fn tag(self) => String {{ return "$tname" }}
+impl @tname {{
+    fn tag(self) => String {{ return "@tname" }}
 }}
 """)
 }
@@ -646,8 +647,8 @@ impl $tname {{
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
-        $loop f, T.$fields {
-            parts.add("{f.$name}={self.$f}")
+        @loop f, T.@fields {
+            parts.add("{f.@name}={self.@f}")
         }
         return parts.join(", ")
     }
@@ -663,8 +664,8 @@ fn build(b: BuildContext) =[FS]=> BuildPlan ? {
 
     b.generate("db_client") {
         module db_client {
-            $loop table, parse_tables(schema) {
-                pub fn $table.name(id: Int) => $table.row_type { … }
+            @loop table, parse_tables(schema) {
+                pub fn @table.name(id: Int) => @table.row_type { … }
             }
         }
     }?
@@ -688,7 +689,7 @@ The generated block is now code the compiler checks and the editor understands.
 Today the same work is a helper function that returns `String`, built by joining
 text.
 
-Note the two loops. `$loop` runs at compile time and emits one function per
+Note the two loops. `@loop` runs at compile time and emits one function per
 table. `loop` runs when the build runs and reads the checked program. Same verb,
 and the sigil is the only thing that says which stage you are in.
 
@@ -703,7 +704,7 @@ and the sigil is the only thing that says which stage you are in.
   seven SI base dimensions ship in the Prelude. A language with `Speed` and no
   `Mass` cannot state force, energy, or pressure.
 - **FFI gets its promised roots.** `D-FFI-PY1=A` ships as a declaration.
-- **One thing to learn about compile time.** `$` in every position, instead of
+- **One thing to learn about compile time.** `@` in every position, instead of
   a marker for bindings, a second marker for branches, a sigil for splices, and
   a method call for reflection.
 - **Text DSLs open safely.** `#GraphQL`, `#Regex`, `#Shader` become
@@ -732,9 +733,9 @@ Each item earns its place. None is kept because it shipped.
 - **`D-BUILDGEN1=A` — materialized, additive, addressed.** Generated code is a
   real file you can open. Swift shipped the same conclusion in 2023.
 - **The marker sigil map.** `#` keeps exactly two readings, and gets cleaner:
-  `#Known` leaves for `$`, so `#` means only "a rule applies to this target".
-  No new sigil is minted — `$` already exists and already carries this meaning
-  in `T.$layout`.
+  `#Known` leaves for `@`, so `#` means only "a rule applies to this target".
+  No new sigil is minted — `@` already exists and already carries this meaning
+  in `T.@layout`.
 - **The one placement law** (`D-MARK-FORM1=A`) and grouping
   (`D-MARK-STACK1=A`). Zero spelling changes for any marker that stays.
 - **Implicit folding** (`D-VERDICT-1308-1`). An ordinary binding still folds
@@ -754,7 +755,7 @@ Each item earns its place. None is kept because it shipped.
 | `D-META-ONE1` | A — compile time is one Jet program; rules are Jet declarations; fulfills `D-VERDICT-1455-1` |
 | `D-META-REG1` | A — one registration table serves markers, planes, rights, and facts |
 | `D-META-NAME1` | A — `marker` declares a rule |
-| `D-META-FORM1` | A — one named-parameter list; `$` marks rule facts; no new clause grammar; typed arguments use `D-RULEARG-TYPES1` |
+| `D-META-FORM1` | A — one named-parameter list; `@` marks rule facts; no new clause grammar; typed arguments use `D-RULEARG-TYPES1` |
 | `D-META-USER1` | A — user rules record facts or add code; `D-METADEPTH1` rises to additive user rules; Law 1 forbids mutation and shadowing |
 | `D-META-CODE1` | A — generated code is real Jet code with typed holes; amends D-CTCODEGEN1 only by retaining its filled-template rule |
 | `D-META-BODY1` | A — a derive body is its implementation; compile-time control flow adds members |
@@ -762,7 +763,7 @@ Each item earns its place. None is kept because it shipped.
 | `D-META-EFFECT1` | A — one effect model at both stages; amends D-CTCORE1; D-CTEFFECT1 tiers keep their meaning |
 | `D-META-CONST1` | A — any compile-time value is legal where a constant is legal; retire E0963/E0035 literal-only checks |
 | `D-META-MODNAME1` | A — generic-module members are reached through the instance; user code never names a mangled symbol |
-| `D-META-STAGE1` | B — `$` belongs to the name and appears at every mention; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1 |
+| `D-META-STAGE1` | B — `@` belongs to the name and appears at every mention; amends D-VERDICT-1308-1/2 and retires D-CTMARKER1 |
 | `D-META-AUTO1` | A — derive every structurally derivable trait unless refused; amends D-AUTODERIVE1=E and `D-AUTODERIVE-SYNTAX1`; refusal spelling stays |
 
 All thirteen decisions are ratified. Their accepted terms are settled law.
@@ -786,9 +787,9 @@ cards #1509 and #1510 remain separate from this slate.
 
 This proposal introduces exactly **one new word**: the keyword that declares a
 rule, which `D-META-NAME1` picks. Everything else reuses ratified syntax. Facts
-about a rule are named optional parameters marked with `$`. Rule bodies use
+about a rule are named optional parameters marked with `@`. Rule bodies use
 `if`, `not`, and `loop`. `reject` is a Prelude function, not a keyword, with the
-same code/what/why/fix signature `b.error` already has. `$loop` is the ratified
+same code/what/why/fix signature `b.error` already has. `@loop` is the ratified
 `loop` verb at compile time. That word ships with a row in
 `crates/jet-foundation/src/Syntax.rs` and a decision ID, as I7 requires.
 

@@ -124,13 +124,17 @@ impl<'a> Parser<'a> {
                         }
                     };
                 }
+                TokKind::Dollar => {
+                    let span = self.bump().span;
+                    return Err(self.retired_comptime_mark(span));
+                }
                 TokKind::At => {
                     let span = self.bump().span;
                     return Err(Diagnostic::error(
-                        "E0063",
-                        "applied rules use `#`, not `@`".to_string(),
-                        "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
-                        "replace the leading `@` with `#`".to_string(),
+                        "E0003",
+                        "`@` needs a compile-time name or a package ref here".to_string(),
+                        "prefix `@` marks compile-time names and fact reads; infix `@` joins a package target to its source (D-ONCE-AT1=D)".to_string(),
+                        "write `@name`, `T.@layout`, or a complete `target@source` ref".to_string(),
                         Some(span),
                     ));
                 }
@@ -339,7 +343,7 @@ impl<'a> Parser<'a> {
                     }
                     return self.expr_primary(allow_struct_lit);
                 }
-                // D-META-STAGE1=B: `$limit` reads a compile-time name. The
+                // D-META-STAGE1=B / D-ONCE-AT1=D: `@limit` reads a compile-time name. The
                 // lexer merges the mark into one `Ident` token, and the mark
                 // stays on the name here — a marked name and a plain name are
                 // two different names. Declaration positions consume the same

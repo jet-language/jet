@@ -98,8 +98,8 @@ binding  = [ "#Track" ] ( ident "::" expr     // immutable
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 fenced-stmt = fence ( "::" | ":=" ) expr NL | expr-with-fence NL ; // D-EACH1=C / D-VERDICT-1320-1
-fence    = "$[" fence-entry { "," fence-entry } "]$"
-         | "$[" numbered-name ".." numbered-name "]$" ;
+fence    = "@[" fence-entry { "," fence-entry } "]@"
+         | "@[" numbered-name ".." numbered-name "]@" ;
 // binding fences: entries are plain names; expression fences: any expression
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
@@ -158,11 +158,14 @@ expr     = precedence climbing over:
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
   Types never annotate the binding name — use `Type.{ … }` or a signature/field.
-- `$[ a, b ]$` expands one complete binding or expression statement per entry.
-  Multiple fences advance in lock-step. `$[ task1..task8 ]$` generates or
-  reuses the ascending numbered names. Expression-position fences accept
-  expression entries (`print($[ "a", total(1, 2) ]$)`); binding fences need
-  plain names. A fence is not a list or destructure (D-VERDICT-1320-1).
+- `@[ a, b ]@` expands one complete binding or expression statement per entry.
+  Multiple fences advance in lock-step. `@[ task1..task8 ]@` generates or
+  reuses the ascending numbered names. An expression fence also expands an
+  ascending integer-literal range such as `@[0..3]@` to four entries;
+  descending or non-literal ranges remain one Range value. Expression-position
+  fences accept expression entries (`print(@[ "a", total(1, 2) ]@)`); binding
+  fences need plain names. A fence is not a list or destructure (D-FENCE-GLYPH1,
+  D-FENCE-RANGE1).
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() => String`; untracked Floats return `"untracked"`.
@@ -645,9 +648,9 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 Card #644 owns the implementation migration from the shipped module-local
 `no_alloc` denylist to this transitive contract.
 
-`$name :: value` is the explicit compile-time-demand binding
+`@name :: value` is the explicit compile-time-demand binding
 (S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
-`#Static $` emits a Rust `static`
+`#Static @` emits a Rust `static`
 when a stable address is required. `#Persist name := value` marks hot-reload
 state on a bare binding (D-PERSIST1).
 
@@ -808,7 +811,8 @@ impl Circle {
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. An explicit empty effect row is `=[]=>`;
-  compile-time demand is the prefix marker `$`.
+  compile-time demand is the prefix marker `@` (D-ONCE-AT1=D supersedes the
+  former `$` spelling).
 - **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
   code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
@@ -823,7 +827,7 @@ impl Circle {
   |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
-  **`$if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
+  **`@if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
   }`** — `build.os` is a compiler-known comptime value, the switch folds to the
   arm matching the build's target OS and discards the rest before any gating
   check runs. Arms must cover every OS or carry an `else`
@@ -831,7 +835,7 @@ impl Circle {
   (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
-- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `$` binding,
+- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside an `@` binding,
   **`embed_file("path") => String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") => [U8]`** bakes its raw bytes (binary-safe, no
   UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
@@ -2097,7 +2101,7 @@ Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
 `sync`, `set_current_dir`, `on_interrupt`.
 
 POSIX process/session control requires an audited `#Unsafe("…")` region and a
-host-OS gate (`$if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
+host-OS gate (`@if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
 `setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
 `waitpid`, `pipe`, `close_fd`, `mkfifo`, `umask`, `getpriority`,
 `setpriority`, `utime`, `atexit`, `stop`. Those helpers do not fake POSIX
@@ -3562,7 +3566,7 @@ Schema 2 (D-CODEMOD-BATCH1=A) is an ordered batch over typed Jet templates.
 beneath `examples/` or `tests/ui/`; absolute, parent, and symlink escapes fail.
 Directory discovery is recursive and byte-path ordered. Rules are either a
 semantic `symbol_rename` or an `ast_rewrite` whose `node` is `expr`, `stmt`,
-`item`, or `type`. `$value` captures one subtree and `$values...` captures a
+`item`, or `type`. `@value` captures one subtree and `@values...` captures a
 list. Matching is confined to the requested compiler-owned AST boundaries;
 same token bytes in another node class are not candidates. Symbol definitions
 and references are selected by their resolved definition anchors, never by

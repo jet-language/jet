@@ -3,13 +3,13 @@
 // I/O, and no UTF-8 requirement, so it works for images, fonts, or any blob.
 // A `comptime require` audits the bytes while compiling: if it fails you get a
 // compile error, not a runtime surprise.
-$logo :: embed_bytes("logo.bin")
+@logo :: embed_bytes("logo.bin")
 
-$size :: byte_count($logo)
+@size :: byte_count(@logo)
 
-$fifth :: $logo[5]
+@fifth :: @logo[5]
 
-$ok :: nonempty($logo)
+@ok :: nonempty(@logo)
 
 fn byte_count(bytes: [U8]) => Int = bytes.len()
 
@@ -19,6 +19,6 @@ fn nonempty(bytes: [U8]) => Bool {
 }
 
 fn run() {
-    print("logo is {$size} bytes")
-    print("byte 5 is {$fifth}")
+    print("logo is {@size} bytes")
+    print("byte 5 is {@fifth}")
 }

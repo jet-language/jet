@@ -300,7 +300,7 @@ fn proposal_marker_census_matches_syntax_registry() {
     });
     assert!(
         text.contains("`#` is the sole prefix for attributes, instructions, and\nproperties.")
-            && text.contains("`@` is reserved for locations, addresses, and sources.")
+            && text.contains("Prefix `@` is now the compile-time and fact-read mark; infix `@`")
             && text.contains("A leading `@Rule` produces E0063\nwith the canonical `#Rule` fix."),
         "{MARKER_CENSUS_DOC} must teach the Syntax registry's canonical `#` applied-rule plane"
     );

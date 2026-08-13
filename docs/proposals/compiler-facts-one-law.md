@@ -19,7 +19,7 @@ Status: ratified 2026-08-07 — all seven D-FACT ballots decided on card #1620; 
 
 **What the ballots ask.** Seven direction-level choices: ratify the one-way law (LAW1); one vocabulary (WORD1); one gate ledger (GATE1); one fact-read surface (READ1); home the orphan facts (HOME1); ratify the ownership wall (OWN1); one flow-fact engine (FLOW1). Each stands alone.
 
-**What does not change.** Every ratified spelling stays: `&`/`^`/`~`, `=[Net]=>`, `tag`/`state`/`effect`, `distinct Int(0..10)`, `#Unsafe("reason")`, `$build.*`, `task` / `task.all` / `task.race`. Every wall stays: no macros, no dependent types, no HKT, no top type, comptime never creates types (S26), facts classify and erase and never dispatch (D-FACTMODEL1), zero cost, I1–I9. This proposal deletes vocabulary, dead code, phantom types, and duplicate engines. It adds no keyword and no annotation to any common case.
+**What does not change.** Every ratified spelling stays: `&`/`^`/`~`, `=[Net]=>`, `tag`/`state`/`effect`, `distinct Int(0..10)`, `#Unsafe("reason")`, `@build.*`, `task` / `task.all` / `task.race`. D-ONCE-AT1=D amended the former prefix `$` to `@` and preserves infix `@` package references. Every wall stays: no macros, no dependent types, no HKT, no top type, comptime never creates types (S26), facts classify and erase and never dispatch (D-FACTMODEL1), zero cost, I1–I9. This proposal deletes vocabulary, dead code, phantom types, and duplicate engines. It adds no keyword and no annotation to any common case.
 
 ## Glossary
 
@@ -124,7 +124,7 @@ pkg.jet           grants image-codec: FS.Read            (lockfile: recorded)
 build             stamp.at forced via .Force             (profile: release)
 ```
 
-**2. One way to read a fact** (READ1; extends D-CONF-READ1's `$build.*` and D-META-STAGE1's `$` mark to every registered plane):
+**2. One way to read a fact** (READ1; extends D-CONF-READ1's `@build.*` and D-META-STAGE1's `@` mark to every registered plane):
 
 ```jet
 // before — each plane has its own partial story; some facts are strings,
@@ -132,10 +132,10 @@ build             stamp.at forced via .Force             (profile: release)
 info :: Order.reflect()          // state names arrive as "\0state:..." strings
 
 // after (proposed) — reading what the compiler knows is one act, one sigil
-Order.$states                    // [.Draft, .Confirmed, .Shipped] — typed values
-Severity.$range                  // 0..10
-send_report.$effects             // [Net, DB.Read]
-$build.profile                   // ratified today — the same act, build subject
+Order.@states                    // [.Draft, .Confirmed, .Shipped] — typed values
+Severity.@range                  // 0..10
+send_report.@effects             // [Net, DB.Read]
+@build.profile                   // ratified today — the same act, build subject
 ```
 
 **3. Phantom types die honestly** (HOME1):
@@ -198,7 +198,7 @@ fn handle(r: Request) =[Net, DB.Read]=>   // rights bound
 altitude :: 100meter                       // unit fact from the literal
 ```
 
-**Rung 2 — read the facts.** `$` on any registered plane (proposed, READ1); `jet explain` answers "what is known about this value and where was it learned".
+**Rung 2 — read the facts.** `@` on any registered plane (proposed, READ1); `jet explain` answers "what is known about this value and where was it learned".
 
 **Rung 3 — gate a fact.** One written word per away-move, exactly where ratified law already puts it: `approx(x)`, `#Scrub(Pii)`, `wrapping(sum + b)`, `.Force`, `#Unsafe("reason")`. No gate gets new ceremony; the gates only gain a shared ledger.
 
@@ -246,9 +246,9 @@ fn ingest(rows: [Row]) =[DB.Read, Log]=> Report {
 And the same model read back (proposed, READ1):
 
 ```jet
-Report.$fields.wire.$exactness    // .Approximate(bits: 53)
-ingest.$effects                   // [DB.Read, Log]
-Stats.$reach                      // .Sendable — the fact five checkers ask about today
+Report.@fields.wire.@exactness    // .Approximate(bits: 53)
+ingest.@effects                   // [DB.Read, Log]
+Stats.@reach                      // .Sendable — the fact five checkers ask about today
 ```
 
 The through-line: a beginner reads this program top to bottom and sees two odd words — `#Scrub` and `approx` — exactly the two places the program stepped off the safe path. That is the law working: the diff *is* the audit.
@@ -257,7 +257,7 @@ The through-line: a beginner reads this program top to bottom and sees two odd w
 
 - **Certification and security review** — flight software, medical, fintech: one ledger is the difference between "grep the repo for a week" and "read one list". The Epoch-8 sandbox proof verifies one law instead of five.
 - **Teaching** — one sentence covers types, effects, ownership, and concurrency safety. Today that story takes four chapters with four vocabularies.
-- **Tooling and agents** — `jet explain` and `$`-reads give IDEs, doc generators, and AI agents the same typed model the checker uses; no string parsing.
+- **Tooling and agents** — `jet explain` and `@`-reads give IDEs, doc generators, and AI agents the same typed model the checker uses; no string parsing.
 - **The unbuilt cards** — #1517–#1579 (config, failure, meta, concurrency, authority, corelib) all manipulate facts; one substrate means each card builds its feature, not its own fact plumbing.
 - **Soundness** — one flow engine with one join rule closes the dead-join holes (typestate and partial-init across branches) instead of patching them twice.
 - **Trivial one-liners** — unchanged: zero annotations, and now zero gate noise too, because a program that never leaves the safe path has an empty ledger.
@@ -266,7 +266,7 @@ The through-line: a beginner reads this program top to bottom and sees two odd w
 
 Only what wins on merit; nothing stays because it shipped.
 
-- Every ratified spelling: the memory sigils, effect rows, `tag`/`state`/`effect`, inline refinements, unit literals, `$build.*`, the concurrency surface, every gate word. This proposal renames nothing a user types.
+- Every ratified spelling: the memory sigils, effect rows, `tag`/`state`/`effect`, inline refinements, unit literals, `@build.*`, the concurrency surface, every gate word. This proposal renames nothing a user types.
 - Per-plane algebras. Units are a group; intervals are arithmetic; rights are sets; states are automata. One algebra for all of them would be a false unification — the shared thing is the order and the law, and that is enough.
 - The borrow checker as its own prover (ballot OWN1 makes it a wall).
 - All walls: no macros, no dependent types, no HKT, no top type (D-ANY-JAI1), S26, D-FACTMODEL1's never-dispatch rule, zero cost, effect erasure, I1–I9.
@@ -281,7 +281,7 @@ All seven ratified 2026-08-07 on card #1620. Outcomes are recorded in the `docs/
 | D-FACT-LAW1 | Ratify the one-way law as one spec law that EXACT1, AUTHORITY-MODEL1, CONF-MERGE1, POLICY-SCOPE1, FLOWTYPE1, and the duty rules instantiate | **B** — one law plus the guarded registry |
 | D-FACT-WORD1 | One law vocabulary in diagnostics and docs: facts tighten, a gate loosens; "attenuate/conserve" retire as law-words (flow narrowing keeps its operation name) | **A** — tighten/loosen |
 | D-FACT-GATE1 | One ledger + `jet inspect gates` for every gate (generalizes D-AUTHORITY-GATE1); choose full ledger vs security-gates-only | **A** — full ledger, grouped by kind |
-| D-FACT-READ1 | `$` reads every registered plane (`T.$range`, `f.$effects`, `x.$state`); extends D-CONF-READ1 / D-META-STAGE1; kills string reflection | **A** — adopted |
+| D-FACT-READ1 | `@` reads every registered plane (`T.@range`, `f.@effects`, `x.@state`); extends D-CONF-READ1 / D-META-STAGE1; kills string reflection | **A** — adopted |
 | D-FACT-HOME1 | Home the user-facing orphans: attribution, `#Track`, view/unit provenance, maturity, send-safety become registry rows; prover internals (uninit, exhaustiveness) stay engine-side; phantom fact enums rejected at signatures with fix-its | **A** — adopted |
 | D-FACT-OWN1 | Ratify the wall: the borrow checker is a prover, never a plane; its published facts register; the sigil surface is closed | **A** — wall ratified |
 | D-FACT-FLOW1 | One flow-fact store and one join contract for moved/uninit/state/narrow/taint (machinery; fixes the dead joins) | **A** — adopted |
@@ -292,4 +292,4 @@ Effort is expendable; the sequence is what matters.
 
 - **Phase A — internal re-founding, no surface change.** One fact store on the checker (replacing the six flow stores and the twelve `LocalInfo` columns), one join contract, the D-META-REG1 table as the single plane registry. Every test stays green; generated Rust byte-identical.
 - **Phase B — land the owed cards on the substrate.** #1517–#1579 build their features as plane instances; the concurrency facts (UNIT1/CROSS1) and authority substrate (MODEL1) land once, here.
-- **Phase C — the balloted surface.** The ledger command, the `$` fact reads, the phantom rejections, the one error voice — each a coherent greenfield migration that deletes the replaced form.
+- **Phase C — the balloted surface.** The ledger command, the `@` fact reads, the phantom rejections, the one error voice — each a coherent greenfield migration that deletes the replaced form.

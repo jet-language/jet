@@ -443,8 +443,8 @@ impl<'a> Parser<'a> {
         }
 
         /// D-META-FORM1=A: parse `marker Name(params…)`. The rule's own
-        /// arguments and facts about the rule ($sites, $repeatable, …) share
-        /// one named-parameter list, told apart by the `$` mark the lexer
+        /// arguments and facts about the rule (@sites, @repeatable, …) share
+        /// one named-parameter list, told apart by the `@` mark the lexer
         /// already carried into the name (`marker_decl_param_list`).
         /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
         /// list, and a scope block by name — each teaches the ratified form.
@@ -472,7 +472,7 @@ impl<'a> Parser<'a> {
         }
 
         /// D-FACTDECL1=A: parse one non-code registry row. Fact columns are
-        /// ordinary `$`-marked named parameters in the one shared list.
+        /// ordinary `@`-marked named parameters in the one shared list.
         pub(super) fn fact_decl(&mut self) -> Result<crate::AST::FactDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `fact`
@@ -494,7 +494,7 @@ impl<'a> Parser<'a> {
 
         /// D-META-FORM1=A: the rule's own arguments read `name: Type [=
         /// default]`, the same shape as an ordinary function parameter. A
-        /// fact about the rule reads `$name: value` instead — it is a fixed
+        /// fact about the rule reads `@name: value` instead — it is a fixed
         /// property of the declaration, not something a use site supplies,
         /// so it carries a value directly rather than a type.
         fn marker_decl_param_list(&mut self) -> Result<Vec<crate::AST::MarkerDeclParam>, Diagnostic> {
@@ -558,7 +558,7 @@ impl<'a> Parser<'a> {
 
         /// D-META-FORM1=A rejected three spellings for facts about a rule —
         /// a trailing `on` clause, a second parameter list, and a scope
-        /// block — in favor of ordinary `$`-marked named parameters in the
+        /// block — in favor of ordinary `@`-marked named parameters in the
         /// one list `marker_decl` already read. Recognize and consume each
         /// so the writer sees one teaching error naming the ratified fix,
         /// not a cascade of unrelated parse errors.
@@ -567,20 +567,20 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(n) if n == "on" => (
                     "E0381",
                     "a trailing `on` clause isn't how a marker states a fact",
-                    "D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `$` sigil — not a clause after the list",
-                    "move the sites into the parameter list as `$sites: [.Function, …]`".to_string(),
+                    "D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `@` sigil — not a clause after the list",
+                    "move the sites into the parameter list as `@sites: [.Function, …]`".to_string(),
                 ),
                 TokKind::LParen => (
                     "E0381",
                     "a second parameter list isn't how a marker states a fact",
-                    "D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `$` sigil — not two parameter lists",
-                    "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`".to_string(),
+                    "D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists",
+                    "fold the second list's facts into the first as `@sites: […]`, `@repeatable: true`".to_string(),
                 ),
                 TokKind::LBrace => (
                     "E0381",
                     "a scope block isn't how a marker states a fact",
-                    "D-META-FORM1=A: a fact about the rule is an ordinary `$`-marked named parameter in the declaration's own parameter list — not a member line in a trailing block",
-                    "write the facts as parameters, e.g. `$sites: [.Function, …], $repeatable: true`".to_string(),
+                    "D-META-FORM1=A: a fact about the rule is an ordinary `@`-marked named parameter in the declaration's own parameter list — not a member line in a trailing block",
+                    "write the facts as parameters, e.g. `@sites: [.Function, …], @repeatable: true`".to_string(),
                 ),
                 _ => return None,
             };
@@ -634,10 +634,10 @@ mod marker_decl_tests {
     use crate::{AST, Lexer, Parser};
 
     /// D-META-NAME1=A / D-META-FORM1=A: the ratified shape from the ballot's
-    /// own worked example — named parameters, a fact marked with `$`.
+    /// own worked example — named parameters, a fact marked with `@`.
     #[test]
-    fn ratified_named_parameter_form_parses_with_a_dollar_marked_fact() {
-        let source = "marker Inline(mode: InlineMode, $sites: [.Function, .Method, .Constant])\nfn run() {}\n";
+    fn ratified_named_parameter_form_parses_with_an_at_marked_fact() {
+        let source = "marker Inline(mode: InlineMode, @sites: [.Function, .Method, .Constant])\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
@@ -652,15 +652,15 @@ mod marker_decl_tests {
         assert_eq!(decl.name, "Inline");
         assert_eq!(decl.params.len(), 2);
         assert_eq!(decl.params[0].name, "mode");
-        assert_eq!(decl.params[1].name, "$sites");
+        assert_eq!(decl.params[1].name, "@sites");
     }
 
     /// D-FACTDECL1=A: fact declarations reuse the marker parameter AST shape.
     #[test]
     fn fact_declaration_parses_its_law_columns() {
         let source = concat!(
-            "fact Exactness($holds: .Value, $safe: .Gain, ",
-            "$gates: [approx, raw], $decision: \"D-TEST\")\n",
+            "fact Exactness(@holds: .Value, @safe: .Gain, ",
+            "@gates: [approx, raw], @decision: \"D-TEST\")\n",
             "fn run() {}\n"
         );
         let (tokens, lex_diags) = Lexer::lex(source);
@@ -680,7 +680,7 @@ mod marker_decl_tests {
                 .iter()
                 .map(|param| param.name.as_str())
                 .collect::<Vec<_>>(),
-            ["$holds", "$safe", "$gates", "$decision"]
+            ["@holds", "@safe", "@gates", "@decision"]
         );
         assert!(decl
             .params
@@ -688,14 +688,14 @@ mod marker_decl_tests {
             .all(|param| param.ty.is_none() && param.value.is_some()));
     }
 
-    /// D-META-FORM1=A: `$repeatable` is a named parameter like every other
+    /// D-META-FORM1=A: `@repeatable` is a named parameter like every other
     /// fact about a rule, never a trailing word. A new fact about rules is a
     /// new named parameter, so the list stays open-ended and the grammar does
-    /// not grow. `$sites` takes `[Site]`, the eighteen-member menu published in
+    /// not grow. `@sites` takes `[Site]`, the eighteen-member menu published in
     /// `core.lang` (`Policy::SITE_VARIANTS`).
     #[test]
     fn a_fact_about_the_rule_is_one_more_named_parameter() {
-        let source = "marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {}\n";
+        let source = "marker Pre(condition: String, message: String, @sites: [.Function, .Method], @repeatable: true)\nfn run() {}\n";
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
@@ -708,12 +708,12 @@ mod marker_decl_tests {
             })
             .expect("a MarkerDecl item");
         let names: Vec<&str> = decl.params.iter().map(|param| param.name.as_str()).collect();
-        assert_eq!(names, ["condition", "message", "$sites", "$repeatable"]);
+        assert_eq!(names, ["condition", "message", "@sites", "@repeatable"]);
 
         // A fact about the rule carries a value, not a type; an argument the
         // use site supplies carries a type.
         for param in &decl.params {
-            if param.name.starts_with('$') {
+            if param.name.starts_with('@') {
                 assert!(param.ty.is_none(), "{}", param.name);
                 assert!(param.value.is_some(), "{}", param.name);
             } else {
@@ -721,14 +721,14 @@ mod marker_decl_tests {
             }
         }
 
-        // The site names `$sites` may hold are exactly the published menu.
+        // The site names `@sites` may hold are exactly the published menu.
         for site in jet_foundation::Policy::RuleSite::ALL {
             assert!(jet_foundation::Policy::SITE_VARIANTS.contains(&site.name()));
         }
     }
 
     /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
-    /// list, and a scope block by name, in favor of `$`-marked named
+    /// list, and a scope block by name, in favor of `@`-marked named
     /// parameters in the declaration's own list.
     #[test]
     fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
@@ -753,8 +753,8 @@ fn run() {}
         assert_eq!(codes, ["E0381", "E0381", "E0381"], "{diagnostics:?}");
         for diagnostic in &diagnostics {
             assert!(
-                diagnostic.fix.contains('$'),
-                "fix must name the ratified $-marked named-parameter form: {diagnostic:?}"
+                diagnostic.fix.contains('@'),
+                "fix must name the ratified @-marked named-parameter form: {diagnostic:?}"
             );
         }
     }

@@ -108,7 +108,7 @@ impl<'a> Parser<'a> {
             markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
-            // D-META-STAGE1=B: the mark rides the name. The lexer hands `$x` as
+            // D-META-STAGE1=B: the mark rides the name. The lexer hands `@x` as
             // one Ident token, so the ordinary path must read stage from it.
             is_comptime: Syntax::is_comptime_name(&name),
             name,
@@ -411,11 +411,11 @@ impl<'a> Parser<'a> {
     /// so this only catches the REDUNDANT case structurally — cases genuinely
     /// requiring the struct's field count are re-checked in sema, which has
     /// the registry. A `..` present with zero named fields is never redundant.
-    /// D-VERDICT-1308-1: parse `$ { … }`; recover retired `comptime`.
-    /// Erases at codegen (build-time only). `$name` splice deferred to c155.
+    /// D-VERDICT-1308-1 / D-ONCE-AT1=D: parse `@ { … }`; recover retired
+    /// `comptime`. Erases at codegen (build-time only).
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
-        self.expect(TokKind::LBrace, "to open the `$` block body")?;
+        self.expect(TokKind::LBrace, "to open the `@` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
@@ -424,9 +424,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-META-STAGE1=B: `$loop …` is the ratified `loop` verb at compile time,
+    /// D-META-STAGE1=B / D-ONCE-AT1=D: `@loop …` is the ratified `loop` verb at compile time,
     /// not a second iteration form. It is one compile-time block holding one
-    /// loop, so it folds through the same path as `$ { … }` and emits no
+    /// loop, so it folds through the same path as `@ { … }` and emits no
     /// runtime code.
     pub(super) fn comptime_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
@@ -438,8 +438,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-2: parse `$if <cond> { … } else { … }`.
-    /// Both arms require `{ }` (braceless bodies are not allowed for `$if`).
+    /// D-VERDICT-1308-2 / D-ONCE-AT1=D: parse `@if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `@if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -447,7 +447,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `$if build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `@if build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -459,7 +459,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBrace)
             {
                 self.bump(); // `==`
-                self.expect(TokKind::LBrace, "to open the `$if` dispatch body")?;
+                self.expect(TokKind::LBrace, "to open the `@if` dispatch body")?;
                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
@@ -479,28 +479,28 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Not the dispatch form — rewind and parse the boolean `$if`.
+        // Not the dispatch form — rewind and parse the boolean `@if`.
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-        self.expect(TokKind::LBrace, "to open the `$if` body")?;
+        self.expect(TokKind::LBrace, "to open the `@if` body")?;
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
-            // Allow `else if` chained with another `$if`.
+            // Allow `else if` chained with another `@if`.
             if (matches!(
                 self.peek().kind,
-                TokKind::Dollar | TokKind::KwComptime
+                TokKind::At | TokKind::KwComptime
             ) && matches!(self.peek2().kind, TokKind::KwIf))
                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
                 Some(vec![chain])
             } else {
-                self.expect(TokKind::LBrace, "to open the `$if` else body")?;
+                self.expect(TokKind::LBrace, "to open the `@if` else body")?;
                 Some(self.block_stmts())
             }
         } else {
@@ -553,13 +553,13 @@ impl<'a> Parser<'a> {
     }
 
     /// D-META-STAGE1=B: true when the retired `#Known` spelling is at the
-    /// cursor. It parses only far enough to teach the `$` form.
+    /// cursor. It parses only far enough to teach the `@` form.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    /// D-META-STAGE1=B: `#Known` retired in favour of the `$` mark. One
+    /// D-META-STAGE1=B / D-ONCE-AT1=D: `#Known` retired in favour of the `@` mark. One
     /// teaching error covers all three of its forms, because the fix is the
     /// same move in each: put the mark on the name, or open the block with a
     /// bare mark.
@@ -567,27 +567,27 @@ impl<'a> Parser<'a> {
         Diagnostic::error(
             "E0377",
             format!("`#{}` is retired", Syntax::RETIRED_MARKER_KNOWN),
-            "compile time has one mark, `$`, and the mark belongs to the name, so it is written at every mention"
+            "compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention"
                 .to_string(),
             fix,
             Some(span),
         )
     }
 
-    /// D-META-STAGE1=B: consume whatever opened a compile-time construct. The
-    /// ratified mark is `$`; the retired `#Known` and `comptime` spellings are
+    /// D-META-STAGE1=B / D-ONCE-AT1=D: consume whatever opened a compile-time
+    /// construct. The ratified mark is `@`; the retired `#Known` and `comptime` spellings are
     /// recovered here so each teaches its replacement once.
     fn take_mark(&mut self) -> Result<Span, Diagnostic> {
         if self.at_known_lead() {
             let head = self.read_marker_head()?;
             let fix = if matches!(self.peek().kind, TokKind::KwIf) {
-                "write `$if <condition> { … }`".to_string()
+                "write `@if <condition> { … }`".to_string()
             } else if matches!(self.peek().kind, TokKind::LBrace) {
-                "write `$ { … }`".to_string()
+                "write `@ { … }`".to_string()
             } else if let TokKind::Ident(name) = &self.peek().kind {
-                format!("write `${name} :: …`")
+                format!("write `@{name} :: …`")
             } else {
-                "write the mark on the name: `$name :: …`".to_string()
+                "write the mark on the name: `@name :: …`".to_string()
             };
             self.diags.push(self.retired_known_error(head.span, fix));
             return Ok(head.span);
@@ -599,13 +599,13 @@ impl<'a> Parser<'a> {
                 "`comptime` is retired".to_string(),
                 "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                     .to_string(),
-                "remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build"
+                "remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build"
                     .to_string(),
                 Some(span),
             ));
             return Ok(span);
         }
-        if matches!(self.peek().kind, TokKind::Dollar) {
+        if matches!(self.peek().kind, TokKind::At) {
             return Ok(self.bump().span);
         }
         // The control keyword still reads its `#Known` head through the one

@@ -3046,9 +3046,9 @@ impl<'a> Checker<'a> {
                             "layout field selector `.{field}` needs a `{}` value",
                             crate::Syntax::TYPE_LAYOUT_INFO
                         ),
-                        "typed `[.field]` selection is only defined on `T.$layout`"
+                        "typed `[.field]` selection is only defined on `T.@layout`"
                             .to_string(),
-                        "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                        "use `T.@layout[.field]` for a reflected field fact".to_string(),
                         Some(*selector_span),
                     ));
                 }
@@ -3515,7 +3515,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
-            // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
+            // type carries. `T.@layout`, `T.@name` and `T.@fields` are one
             // spelling, and each projects the matching `TypeInfo` member, so
             // the fact answers the same type reflection already answers.
             if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
