@@ -719,6 +719,17 @@ contract — codes are never repurposed.
 | `70`  | A built program breached or stopped at runtime (`panic`/`require`, S36, or another program-side fault). Forwarded through by `jet run`. | the user's program / Prelude boundary |
 | `101` | Jet's own compiler defect (I2/R5): rustc rejected generated code or the compiler reached an impossible state. Never a user-program exit. | compiler |
 
+The final boundary keeps the same report and changes only its transport.
+Native command-line output prints the frame and uses code 1. A Web target
+raises a typed error object, a Wasm module returns a host-readable error
+value, and a Service writes one structured report record. The selected build
+target chooses that boundary; runtime inspection never does.
+
+Explicit `process.exit(code)` and `os.stop(code)` use the same cleanup law.
+The boundary runs deferred closes in reverse declaration order, scope guards in
+reverse registration order, and `atexit` handlers in registration order. A
+host kill or abort skips all three mechanisms.
+
 Presentation is TTY-aware (E2-M3): color and progress appear only when
 the relevant stream is a terminal. `NO_COLOR` and `--color=never` force
 plain output; `FORCE_COLOR` and `--color=always` force color; `--color=auto`

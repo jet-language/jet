@@ -676,15 +676,16 @@ pub(crate) fn emit_cli_entry_if_needed(
         Item::Const(value) => value.resolved_output.as_ref().filter(|output| output.selected),
         _ => None,
     });
-    let (callable, params, entry_error, serve_app) = if let Some(output) = output {
+    let (callable, params, entry_error, serve_app, service_target) = if let Some(output) = output {
         (
             output.lowered_name.clone(),
             output.params.clone(),
             output
                 .return_type
                 .as_ref()
-                .and_then(entry_error),
+                .and_then(|ty| entry_error(cx, ty)),
             output.return_type.as_ref().is_some_and(returns_web_app),
+            output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
         let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
@@ -697,8 +698,12 @@ pub(crate) fn emit_cli_entry_if_needed(
         (
             mangle("run"),
             params,
-            run_fn.return_type.as_ref().and_then(entry_error),
+            run_fn
+                .return_type
+                .as_ref()
+                .and_then(|ty| entry_error(cx, ty)),
             run_fn.return_type.as_ref().is_some_and(returns_web_app),
+            false,
         )
     } else {
         return;
@@ -709,6 +714,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             None,
             entry_error,
             serve_app,
+            service_target,
             "    ",
         );
         out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{invoke}}}\n\n"));
@@ -759,6 +765,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 Some(&call_arg),
                 entry_error,
                 serve_app,
+                service_target,
                 "                ",
             );
             out.push_str(&format!(
@@ -786,6 +793,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             &arg_expr,
             entry_error,
             serve_app,
+            service_target,
             out,
         );
     }
@@ -796,32 +804,73 @@ fn emit_entry_invocation(
     argument: Option<&str>,
     entry_error: Option<EntryError>,
     serve_app: bool,
+    service_target: bool,
     indent: &str,
 ) -> String {
     let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
+    let error_text = |error: &str| match entry_error {
+        Some(EntryError::Jet) => format!("jet_entry_error_text_jet(&{error})"),
+        Some(EntryError::Rust) => format!("jet_entry_error_text(&{error})"),
+        None => unreachable!("entry error text requested for an infallible entry"),
+    };
+    if service_target && entry_error.is_some() {
+        let app = mangle_generated("service_app");
+        let error = mangle_generated("service_error");
+        if serve_app {
+            return format!(
+                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => jet_service_edge_report({text}),\n{indent}}});\n",
+                text = error_text(&error),
+            );
+        }
+        return format!(
+            "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        jet_service_edge_report({text});\n{indent}    }}\n{indent}}});\n",
+            text = error_text(&error),
+        );
+    }
     if serve_app {
         return match entry_error {
-            Some(EntryError::Generic) => jet_format!(
-                "{indent}match jet_runtime_boundary(|| {call}) {{\n{indent}    Ok({jet_prefix}app) => {jet_prefix}app.serve(),\n{indent}    Err({jet_prefix}err) => {{\n{indent}        eprintln!(\"{{}}\", {jet_prefix}err);\n{indent}        std::process::exit(1);\n{indent}    }}\n{indent}}}\n"
+            Some(_) => format!(
+                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => jet_entry_error_exit({text}),\n{indent}}});\n",
+                app = mangle_generated("entry_app"),
+                error = mangle_generated("entry_error"),
+                text = error_text(&mangle_generated("entry_error")),
             ),
             None => format!("{indent}jet_runtime_boundary(|| {call}).serve();\n"),
         };
     }
     match entry_error {
-        Some(EntryError::Generic) => jet_format!(
-            "{indent}if let Err({jet_prefix}err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", {jet_prefix}err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
-        ),
+        Some(_) => {
+            let error = mangle_generated("entry_error");
+            format!(
+                "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        jet_entry_error_exit({text});\n{indent}    }}\n{indent}}});\n",
+                text = error_text(&error),
+            )
+        }
         None => format!("{indent}jet_runtime_boundary(|| {call});\n"),
     }
 }
 
 #[derive(Clone, Copy)]
 enum EntryError {
-    Generic,
+    Jet,
+    Rust,
 }
 
-fn entry_error(ty: &Type) -> Option<EntryError> {
-    matches!(ty, Type::Result { .. }).then_some(EntryError::Generic)
+fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
+    let Type::Result { err, .. } = ty else {
+        return None;
+    };
+    let uses_jet_display = match err.as_ref() {
+        Type::Named(name) => {
+            cx.auto_printable.contains(name) || cx.has_display_type(name)
+        }
+        _ => false,
+    };
+    Some(if uses_jet_display {
+        EntryError::Jet
+    } else {
+        EntryError::Rust
+    })
 }
 
 fn returns_web_app(ty: &Type) -> bool {
@@ -849,6 +898,7 @@ fn emit_cli_subcommand_entry(
     arg_expr: &dyn Fn(&str) -> String,
     entry_error: Option<EntryError>,
     serve_app: bool,
+    service_target: bool,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
@@ -881,6 +931,7 @@ fn emit_cli_subcommand_entry(
             Some(&call_arg),
             entry_error,
             serve_app,
+            service_target,
             "                        ",
         );
         let spec_name = cli_helper_name("spec", payload_name);

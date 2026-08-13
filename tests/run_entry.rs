@@ -58,7 +58,8 @@ fn run() {
         out.rust
     );
     assert!(
-        out.rust.contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())"),
+        out.rust.contains("jet_runtime_boundary(|| {")
+            && out.rust.contains("jet_entry_error_exit("),
         "the default entry must report an unhandled error:\n{}",
         out.rust
     );
@@ -238,13 +239,14 @@ fn run() ? {
     );
     assert!(
         out.rust
-            .contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())"),
+            .contains("jet_runtime_boundary(|| {")
+            && out.rust.contains("jet_entry_error_exit("),
         "fallible run wrapper must handle returned errors:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains("std::process::exit(1);"),
-        "fallible run wrapper must exit nonzero on error:\n{}",
+        out.rust.contains("jet_runtime_explicit_exit(1)"),
+        "fallible run wrapper must use the shared exit boundary:\n{}",
         out.rust
     );
 }
@@ -273,7 +275,8 @@ fn run() ? CryptoError {
     let main = out.rust.rfind("\nfn main()").expect("generated main");
     let entry = &out.rust[main..];
     assert!(
-        entry.contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())")
+        entry.contains("jet_runtime_boundary(|| {")
+            && entry.contains("jet_entry_error_text(&")
             && !entry.contains("jet_render_e3001_crypto")
             && !entry.contains("jet_abort_diagnostic"),
         "CryptoError run must use the generic reported-error boundary:\n{entry}"
@@ -330,6 +333,68 @@ fn run() ? CryptoError {
 }
 
 #[test]
+fn typed_entry_error_pins_the_declared_family() {
+    let src = r#"
+enum StoreErr {
+    Missing
+}
+
+fn run() ? StoreErr {
+    return Err(StoreErr.Missing)
+}
+"#;
+    let out = jet::compile(src).expect("typed fallible entries must compile");
+    assert!(
+        out.rust.contains("JetOutcome<(), __jet_StoreErr>"),
+        "the entry must keep StoreErr as its error family:\n{}",
+        out.rust
+    );
+
+    let dir = common::unique_tmp("jet_typed_entry_error");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.jet"), src).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--quiet", "main.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "Missing\n");
+
+    if common::have_rustc() {
+        let (code, stdout, stderr) = common::build_and_run("jet_typed_entry_aot", "main", src);
+        assert_eq!(code, 1, "AOT exit code: {stderr}");
+        assert!(stdout.is_empty(), "AOT stdout: {stdout:?}");
+        assert_eq!(stderr, "Missing\n");
+    }
+
+    let interpreter_dir = common::unique_tmp("jet_typed_entry_interpreter");
+    std::fs::create_dir_all(&interpreter_dir).unwrap();
+    let interpreter_path = interpreter_dir.join("main.jet");
+    std::fs::write(&interpreter_path, src).unwrap();
+    let interpreter = jet::Interpreter::dev_iteration(
+        interpreter_path.to_str().unwrap(),
+        false,
+        true,
+    );
+    let _ = std::fs::remove_dir_all(&interpreter_dir);
+    match interpreter {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 1);
+            assert!(stdout.is_empty());
+            assert_eq!(stderr, "Missing\n");
+        }
+        other => panic!("interpreter did not run typed entry: {other:?}"),
+    }
+}
+
+#[test]
 fn internal_crypto_error_uses_the_reported_entry_exit() {
     let src = r#"
 use core.crypto as crypto
@@ -340,10 +405,13 @@ fn run() ? CryptoError {
 "#;
     let out = jet::compile(src).expect("CryptoError entrypoint should compile");
     let ffi = out.ffi.as_ref().expect("core.crypto must emit its bridge");
-    let marker = "if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run()) {";
-    let start = out.rust.find(marker).expect("generated crypto error boundary");
+    let main = out.rust.rfind("\nfn main()").expect("generated main");
+    let start = out.rust[main..]
+        .find("jet_runtime_boundary(|| {")
+        .map(|offset| main + offset)
+        .expect("generated crypto error boundary");
     let rest = &out.rust[start..];
-    let end = rest.find("\n    }\n").expect("generated boundary close") + "\n    }".len();
+    let end = rest.find("\n    });").expect("generated boundary close") + "\n    });".len();
     let invocation = &rest[..end];
     let rust = format!(r#"
 mod {ffi_name} {{
@@ -356,6 +424,10 @@ mod {ffi_name} {{
     }}
 }}
 fn jet_runtime_boundary<T>(f: impl FnOnce() -> T) -> T {{ f() }}
+fn jet_entry_error_text<E: std::fmt::Display>(error: &E) -> String {{ error.to_string() }}
+fn jet_entry_report(error: String) -> String {{ format!("{{}}\n", error) }}
+fn jet_runtime_explicit_exit(code: i64) -> ! {{ std::process::exit(code as i32) }}
+fn jet_entry_error_exit(error: String) -> ! {{ eprint!("{{}}", jet_entry_report(error)); jet_runtime_explicit_exit(1) }}
 fn __jet_run() -> Result<(), {ffi_name}::JetCryptoError> {{
     Err({ffi_name}::JetCryptoError::Internal {{ incident_id: "test-17" }})
 }}

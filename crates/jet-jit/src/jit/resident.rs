@@ -9,16 +9,29 @@ use super::functions_compile::{compile_program, compile_program_tiered};
 use super::runtime_host::{jit_result, new_jit_module, ResidentModule};
 use super::tiers::TierPlan;
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
+use crate::Collections;
+
+fn main_error_type(program: &JitProgram) -> Option<Type> {
+    program.funcs.iter().find_map(|func| {
+        (func.name == program.entry).then(|| match &func.ret {
+            Some(Type::Result { err, .. }) => Some(err.as_ref().clone()),
+            _ => None,
+        })?
+    })
+}
 
 fn main_returns_default_err(program: &JitProgram) -> bool {
-    program.funcs.iter().any(|func| {
-        func.name == program.entry
-            && matches!(
-                &func.ret,
-                Some(Type::Result { err, .. })
-                    if matches!(err.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR)
-            )
-    })
+    matches!(
+        main_error_type(program),
+        Some(Type::Named(name)) if name == jet_foundation::Syntax::TYPE_ERR
+    )
+}
+
+fn main_error_is_packed(program: &JitProgram) -> bool {
+    matches!(
+        main_error_type(program),
+        Some(Type::Named(name)) if program.enum_variants.contains_key(&name)
+    )
 }
 
 fn main_returns_web_app(program: &JitProgram) -> bool {
@@ -226,6 +239,8 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_error_type = main_error_type(program);
+    let main_error_is_packed = main_error_is_packed(program);
     let main_returns_web_app = main_returns_web_app(program);
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
@@ -244,6 +259,8 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
                 main_returns_result,
                 main_returns_web_app,
                 main_returns_default_err,
+                main_error_type,
+                main_error_is_packed,
             });
         });
         return Ok(());
@@ -266,13 +283,22 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
             resident.main_returns_result = main_returns_result;
             resident.main_returns_web_app = main_returns_web_app;
             resident.main_returns_default_err = main_returns_default_err;
+            resident.main_error_type = main_error_type;
+            resident.main_error_is_packed = main_error_is_packed;
             Ok(())
         })
     })
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result, main_returns_web_app, main_returns_default_err) = RESIDENT_MODULE
+    let (
+        code,
+        main_returns_result,
+        main_returns_web_app,
+        main_returns_default_err,
+        main_error_type,
+        main_error_is_packed,
+    ) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -282,6 +308,8 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                         r.main_returns_result,
                         r.main_returns_web_app,
                         r.main_returns_default_err,
+                        r.main_error_type.clone(),
+                        r.main_error_is_packed,
                     )
                 })
         })
@@ -379,6 +407,15 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                             .get((result.bits as i64).saturating_sub(1) as usize)
                             .ok_or_else(|| "jit fallible entry returned invalid Err handle".to_string())?;
                         jet_foundation::Outcome::jet_render_err(error)
+                    } else if main_error_is_packed {
+                        let Some(Type::Named(name)) = main_error_type.as_ref() else {
+                            return Err("jit packed entry error lost its type".to_string());
+                        };
+                        Collections::render_packed_enum(
+                            result.bits as i64,
+                            name,
+                            &runtime.heap,
+                        )
                     } else {
                         runtime
                             .heap
@@ -450,6 +487,8 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_error_type = main_error_type(program);
+    let main_error_is_packed = main_error_is_packed(program);
     let main_returns_web_app = main_returns_web_app(program);
     let (mut module, host) = new_jit_module()?;
     let mut runtime = RESIDENT_RUNTIME
@@ -490,6 +529,8 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
             main_returns_result,
             main_returns_web_app,
             main_returns_default_err,
+            main_error_type,
+            main_error_is_packed,
         });
     });
     resident_invoke()
@@ -510,6 +551,8 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_error_type = main_error_type(program);
+    let main_error_is_packed = main_error_is_packed(program);
     let main_returns_web_app = main_returns_web_app(program);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
     RESIDENT_MODULE.with(|slot| {
@@ -520,6 +563,8 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
             main_returns_result,
             main_returns_web_app,
             main_returns_default_err,
+            main_error_type,
+            main_error_is_packed,
         });
     });
     resident_invoke()

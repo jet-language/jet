@@ -307,6 +307,15 @@ impl JitRuntime {
         self.store_trap(message);
     }
 
+    pub(crate) fn set_rendered_runtime_stop(&mut self, rendered: String, exit_code: i32) {
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        self.stderr.push_str(&rendered);
+        self.exit_code = Some(exit_code);
+        self.trapped = Some("__jet_rich_panic__".to_string());
+    }
+
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
         const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
         self.source_file = file.to_string();
@@ -342,6 +351,8 @@ pub(crate) struct ResidentModule {
     pub(crate) main_returns_result: bool,
     pub(crate) main_returns_web_app: bool,
     pub(crate) main_returns_default_err: bool,
+    pub(crate) main_error_type: Option<jet_foundation::AST::Type>,
+    pub(crate) main_error_is_packed: bool,
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
@@ -406,11 +417,10 @@ pub(crate) const INTN_MODE_CHECKED: i64 = 3;
 /// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
 /// pending (branch to epilogue); `0` = keep going.
 extern "C" fn jet_jit_is_trapped() -> i64 {
-    if Concurrency::in_scheduler_task() {
-        return i64::from(Concurrency::task_trap_pending());
-    }
     if Concurrency::local_rich_panic_pending() {
         1
+    } else if Concurrency::in_scheduler_task() {
+        i64::from(Concurrency::task_trap_pending())
     } else {
         Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
     }
@@ -1132,23 +1142,24 @@ extern "C" fn jet_jit_rich_panic(
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let locals = rt.heap.clone_string(locals).unwrap_or_default();
         Concurrency::set_rich_panic_reason(msg.clone());
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            "E3001",
+            &file,
+            line.max(0) as u32,
+            &fn_name,
+            &src_line,
+            col.max(1) as u32,
+            caret.max(1) as u32,
+            &msg,
+            &locals,
+        );
         if in_task {
             // A child failure is a typed TaskFailure. Its trap must remain
             // thread-local: the resident runtime is shared with the parent,
             // and a shared trap would make the parent skip unrelated joins.
+            Concurrency::set_rich_panic_report(report.rendered);
             Concurrency::set_local_rich_panic();
         } else {
-            let report = jet_foundation::Outcome::jet_render_runtime_stop(
-                "E3001",
-                &file,
-                line.max(0) as u32,
-                &fn_name,
-                &src_line,
-                col.max(1) as u32,
-                caret.max(1) as u32,
-                &msg,
-                &locals,
-            );
             rt.stderr.push_str(&report.rendered);
             rt.exit_code = Some(report.exit_code);
             rt.set_trap("__jet_rich_panic__");

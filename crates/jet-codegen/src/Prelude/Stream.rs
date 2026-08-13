@@ -6,6 +6,7 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
     let values = JetSchedulerChannel::new();
     let acknowledgements = JetSchedulerChannel::new();
     let completion = JetSchedulerChannel::<JetStreamCompletion>::new();
+    let failure_report = std::sync::Arc::new(std::sync::Mutex::new(None));
     let value_tx = values.sender();
     let acknowledgement_tx = acknowledgements.sender();
     let completion_tx = completion.sender();
@@ -15,6 +16,7 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
             acknowledgements,
             completion: completion_tx,
             failed: std::sync::atomic::AtomicBool::new(false),
+            failure_report: failure_report.clone(),
         },
         JetStream {
             values: Some(values),
@@ -22,14 +24,15 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
             completion: Some(completion),
             pending: false,
             failed: false,
+            failure_report,
         },
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JetStreamCompletion {
     Completed,
-    Failed,
+    Failed(Option<String>),
 }
 
 pub struct JetStream<T> {
@@ -38,6 +41,7 @@ pub struct JetStream<T> {
     completion: Option<JetSchedulerChannel<JetStreamCompletion>>,
     pending: bool,
     failed: bool,
+    failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl<T: Send> JetStream<T> {
@@ -67,11 +71,29 @@ impl<T: Send> JetStream<T> {
         let Some(completion) = self.completion.take() else {
             return;
         };
-        self.failed = matches!(completion.receive(), Some(JetStreamCompletion::Failed));
+        match completion.receive() {
+            Some(JetStreamCompletion::Failed(report)) => {
+                self.failed = true;
+                if let Some(report) = report {
+                    *self
+                        .failure_report
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn failed(&self) -> bool {
         self.failed
+    }
+
+    pub fn failure_report(&self) -> Option<String> {
+        self.failure_report
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 
@@ -85,6 +107,9 @@ impl<T: Send> Iterator for JetStreamIter<T> {
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.stream.pull();
         if value.is_none() && self.stream.failed() {
+            if let Some(report) = self.stream.failure_report() {
+                jet_scheduler_runtime_stop_with_report(report);
+            }
             jet_scheduler_runtime_stop("stream producer failed");
         }
         value
@@ -117,6 +142,7 @@ pub struct JetStreamSender<T> {
     acknowledgements: JetSchedulerChannel<()>,
     completion: JetSchedulerSender<JetStreamCompletion>,
     failed: std::sync::atomic::AtomicBool,
+    failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl<T: Send> JetStreamSender<T> {
@@ -130,6 +156,14 @@ impl<T: Send> JetStreamSender<T> {
         self.failed
             .store(true, std::sync::atomic::Ordering::Release);
     }
+
+    pub fn fail_with(&self, report: String) {
+        *self
+            .failure_report
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+        self.fail();
+    }
 }
 
 impl<T> Drop for JetStreamSender<T> {
@@ -140,7 +174,15 @@ impl<T> Drop for JetStreamSender<T> {
             .failed
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            JetStreamCompletion::Failed
+            let mut failure_report = self
+                .failure_report
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if failure_report.is_none() {
+                *failure_report = jet_stream_take_failure_report();
+            }
+            let report = failure_report.clone();
+            JetStreamCompletion::Failed(report)
         } else {
             JetStreamCompletion::Completed
         };

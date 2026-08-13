@@ -3655,6 +3655,14 @@ fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> St
     jet_foundation::StructuralDebug::jet_debug_variant(&vname, payload)
 }
 
+pub(crate) fn render_packed_enum(
+    packed: i64,
+    enum_name: &str,
+    heap: &jet_rt::JetArena,
+) -> String {
+    show_packed_enum(packed, enum_name, heap)
+}
+
 fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
     if name_ptr == 0 || name_len <= 0 {
         return String::new();

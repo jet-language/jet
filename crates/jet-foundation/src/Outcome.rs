@@ -66,10 +66,29 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
 thread_local! {
     static JET_JOURNEY_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
         const { std::cell::RefCell::new(None) };
+    static JET_JOURNEY_FRAMES: std::cell::RefCell<String> = const {
+        std::cell::RefCell::new(String::new())
+    };
+    static JET_STREAM_FAILURE_REPORT: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub fn jet_stream_record_failure_report(report: String) {
+    JET_STREAM_FAILURE_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+}
+
+pub fn jet_stream_take_failure_report() -> Option<String> {
+    JET_STREAM_FAILURE_REPORT.with(|slot| slot.borrow_mut().take())
 }
 
 pub fn jet_journey_reset() {
     JET_JOURNEY_LAST.with(|last| *last.borrow_mut() = None);
+    JET_JOURNEY_FRAMES.with(|frames| frames.borrow_mut().clear());
+}
+
+pub fn jet_journey_take() -> String {
+    JET_JOURNEY_LAST.with(|last| *last.borrow_mut() = None);
+    JET_JOURNEY_FRAMES.with(|frames| std::mem::take(&mut *frames.borrow_mut()))
 }
 
 pub fn jet_journey_frame<F: FnOnce() -> String>(
@@ -97,9 +116,9 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(
     } else {
         format!(": {note}")
     };
-    Some(format!(
-        "error propagated from: {fn_name} ({file}:{line}) via ?{suffix}\n"
-    ))
+    let frame = format!("error propagated from: {fn_name} ({file}:{line}) via ?{suffix}\n");
+    JET_JOURNEY_FRAMES.with(|frames| frames.borrow_mut().push_str(&frame));
+    Some(frame)
 }
 
 pub fn jet_render_err(error: &JetErr) -> String {

@@ -492,6 +492,8 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
             main_returns_result: false,
             main_returns_web_app: false,
             main_returns_default_err: false,
+            main_error_type: None,
+            main_error_is_packed: false,
         });
     });
     resident_invoke()

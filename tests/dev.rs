@@ -3307,16 +3307,12 @@ fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = dev_diff_lock().lock().unwrap();
-    let file = "examples/features/errors/default_err_value.jet";
+    let file = "examples/features/errors/default_err_edge.jet";
     let expected_stderr = fs::read_to_string(
-        "examples/features/expected/errors/default_err_value.err.out",
+        "examples/features/expected/errors/default_err_edge.err.out",
     )
-    .expect("default_err_value.err.out");
-    let expected = ProgramOutput::ran(
-        "parse failed\nCFG404\nunexpected token at line 3\n".to_string(),
-        expected_stderr,
-        1,
-    );
+    .expect("default_err_edge.err.out");
+    let expected = ProgramOutput::ran(String::new(), expected_stderr, 1);
 
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, stderr, exit_code } => {

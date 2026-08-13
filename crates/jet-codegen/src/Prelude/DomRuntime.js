@@ -9,6 +9,62 @@ export function print(value) {
   return text;
 }
 
+// D-FAIL-EDGE1=A: every browser-visible failure keeps the report frame from
+// the edge object. The overlay uses textContent so report punctuation and
+// source lines are not interpreted as markup.
+export function showRuntimeError(error) {
+  const frame = String(error?.frame ?? error?.report?.frame ?? error?.message ?? error);
+  if (error && typeof error === "object") {
+    if (error.__jetOverlayShown) return frame;
+    error.__jetOverlayShown = true;
+  }
+  if (typeof document === "undefined" || !document.body) {
+    if (typeof console !== "undefined" && console.error) console.error(frame);
+    return frame;
+  }
+  let overlay = document.getElementById("jet-runtime-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "jet-runtime-overlay";
+    overlay.style.position = "fixed";
+    overlay.style.inset = "16px";
+    overlay.style.zIndex = "2147483647";
+    overlay.style.padding = "20px";
+    overlay.style.overflow = "auto";
+    overlay.style.background = "#171923";
+    overlay.style.color = "#f7f7fb";
+    overlay.style.border = "1px solid #e05252";
+    overlay.style.borderRadius = "10px";
+    overlay.style.boxShadow = "0 12px 48px rgba(0,0,0,.45)";
+    overlay.style.font = "14px ui-monospace, SFMono-Regular, monospace";
+    document.body.appendChild(overlay);
+  }
+  overlay.textContent = frame;
+  overlay.hidden = false;
+  return frame;
+}
+
+export function raiseRuntimeError(error) {
+  showRuntimeError(error);
+  throw error;
+}
+
+// D-FAIL-EDGE1=A: Wasm exposes one host-readable JSON value. The host copies
+// it before clearing the slot; no JS runtime target guess chooses the edge.
+export function takeWasmError(wasm) {
+  const length = Number(wasm?.jet_wasm_error_len?.() ?? 0);
+  if (!length) return null;
+  const ptr = Number(wasm.jet_wasm_error_ptr?.() ?? 0);
+  const bytes = new Uint8Array(wasm.memory.buffer, ptr, length).slice();
+  const frame = new TextDecoder().decode(bytes);
+  wasm.jet_wasm_error_clear?.();
+  try {
+    return JSON.parse(frame);
+  } catch (_) {
+    return { code: "E3001", message: frame, cause: null, journey: "", frame };
+  }
+}
+
 // Whole-number Jet values are BigInt on the JS tier (#1485). DOM layout math
 // and CSS pixel lengths still need ordinary numbers (safe for UI sizes).
 function jetNum(value) {

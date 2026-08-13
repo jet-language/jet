@@ -34,6 +34,7 @@ thread_local! {
     static PENDING_CHILD_DEADLINE: RefCell<Option<String>> = const { RefCell::new(None) };
     static PENDING_TASK_GROUP_PERMIT: RefCell<Option<JetTaskGroupPermit>> = const { RefCell::new(None) };
     static RICH_PANIC_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
+    static RICH_PANIC_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     /// A native task owns its trap until the parent observes its join result.
     /// Keeping this in task-local storage prevents a failing child from
@@ -155,7 +156,7 @@ where
             }
         }
         JetSchedulerWait::Panicked(message) => {
-            trap_panic(&message);
+            trap_scheduler_report_or_panic(&message);
             JitWaitStatus::Panicked as i64
         }
     }
@@ -205,7 +206,7 @@ where
             }
         }
         JetSchedulerWait::Panicked(message) => {
-            trap_panic(&message);
+            trap_scheduler_report_or_panic(&message);
             JitWaitStatus::Panicked as i64
         }
     }
@@ -267,6 +268,14 @@ fn take_pending_task_group_permit() -> Option<JetTaskGroupPermit> {
 
 pub(crate) fn set_rich_panic_reason(reason: String) {
     RICH_PANIC_REASON.with(|slot| *slot.borrow_mut() = Some(reason));
+}
+
+pub(crate) fn set_rich_panic_report(report: String) {
+    RICH_PANIC_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+}
+
+pub(crate) fn take_rich_panic_report() -> Option<String> {
+    RICH_PANIC_REPORT.with(|slot| slot.borrow_mut().take())
 }
 
 fn take_rich_panic_reason() -> Option<String> {
@@ -356,6 +365,19 @@ where
 fn trap_panic(msg: &str) -> i64 {
     with_runtime_mut(|rt| rt.set_trap(msg));
     0
+}
+
+fn trap_scheduler_report_or_panic(message: &str) {
+    if message.starts_with("Stop [E") {
+        with_runtime_mut(|rt| {
+            rt.set_rendered_runtime_stop(
+                message.to_string(),
+                jet_foundation::ExitCodes::RUNTIME_PANIC,
+            )
+        });
+    } else {
+        trap_panic(message);
+    }
 }
 
 extern "C" fn jet_jit_channel_new() -> i64 {
@@ -495,7 +517,11 @@ extern "C" fn jet_jit_sender_close(s: i64, failed: i64) {
         let sender = with_runtime_mut(|rt| rt.stream_senders.remove(&s));
         if failed != 0 {
             if let Some(sender) = sender.as_ref() {
-                sender.fail();
+                if let Some(report) = take_rich_panic_report() {
+                    sender.fail_with(report);
+                } else {
+                    sender.fail();
+                }
             }
         }
         drop(sender);
@@ -525,8 +551,20 @@ extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
     if status == JitWaitStatus::Ready as i64 && producer_failed {
         // Match AOT `JetStreamIter::next`: a producer that completed with a
         // failure must not become ordinary EOF in the resident adapter. The
-        // lowering checks this trap before dispatching the EOF branch.
-        trap_panic("stream producer failed");
+        // status must also cross the wait boundary so the lowering cannot
+        // dispatch the EOF branch before observing the trap.
+        if let Some(report) = consumer.failure_report() {
+            with_runtime_mut(|rt| {
+                rt.set_rendered_runtime_stop(
+                    report,
+                    jet_foundation::ExitCodes::RUNTIME_PANIC,
+                )
+            });
+        } else {
+            trap_panic("stream producer failed");
+        }
+        drop(consumer);
+        return JitWaitStatus::Panicked as i64;
     }
     if status == JitWaitStatus::Ready as i64 {
         if WAIT_VALUE.with(|slot| slot.get()) == 0 {
@@ -668,6 +706,7 @@ where
             // its top-level diagnostic state before re-raising, or the shared
             // resident runtime would report the child as a parent panic too.
             let panic_reason = take_rich_panic_reason();
+            let _panic_report = take_rich_panic_report();
             let rich = panic_reason.is_some();
             set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());

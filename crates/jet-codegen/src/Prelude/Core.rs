@@ -555,6 +555,10 @@ fn jet_scheduler_panic_should_unwind() -> bool {
 
 struct JetRuntimeExit;
 
+struct JetRenderedRuntimeStop {
+    rendered: String,
+}
+
 /// A user-requested process stop unwinds through the same boundary as a
 /// runtime report. This gives guards and deferred resource closes a chance to
 /// run before the final native exit.
@@ -624,14 +628,66 @@ where
                     eprint!("{}", report.rendered);
                     std::process::exit(report.exit_code);
                 }
-                Err(payload) => match payload.downcast::<JetExplicitExit>() {
-                    Ok(exit) => std::process::exit(exit.code),
-                    Err(payload) if payload.is::<JetRuntimeExit>() => std::process::exit(70),
-                    Err(payload) => std::panic::resume_unwind(payload),
+                Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+                    Ok(report) => {
+                        eprint!("{}", report.rendered);
+                        jet_runtime_panic_exit();
+                    }
+                    Err(payload) => match payload.downcast::<JetExplicitExit>() {
+                        Ok(exit) => std::process::exit(exit.code),
+                        Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
+                        Err(payload) => std::panic::resume_unwind(payload),
+                    },
                 },
             }
         }
     }
+}
+
+fn jet_entry_error_text<E: std::fmt::Display>(error: &E) -> String {
+    error.to_string()
+}
+
+fn jet_entry_error_text_jet<E: JetDisplay>(error: &E) -> String {
+    error.jet_display()
+}
+
+fn jet_entry_report(error: String) -> String {
+    let journey = jet_journey_take();
+    let mut report = format!("{journey}{error}");
+    if !report.ends_with('\n') {
+        report.push('\n');
+    }
+    report
+}
+
+fn jet_entry_error_exit(error: String) -> ! {
+    let report = jet_entry_report(error);
+    eprint!("{report}");
+    jet_runtime_explicit_exit(1)
+}
+
+// D-FAIL-EDGE1: a selected Service has one native log record at its edge.
+// The report stays the same Jet text; only the service transport adds a
+// target field and JSON string framing.
+fn jet_service_edge_report(error: String) -> ! {
+    let report = jet_entry_report(error);
+    let mut quoted = String::with_capacity(report.len() + 2);
+    quoted.push('"');
+    for ch in report.chars() {
+        match ch {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            ch if ch.is_control() => quoted.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => quoted.push(ch),
+        }
+    }
+    quoted.push('"');
+    eprintln!("{{\"target\":\"service\",\"report\":{quoted}}}");
+    jet_runtime_explicit_exit(1)
 }
 
 fn jet_runtime_exit() -> ! {
@@ -642,12 +698,25 @@ fn jet_runtime_explicit_exit(code: i64) -> ! {
     std::panic::resume_unwind(Box::new(JetExplicitExit { code: code as i32 }))
 }
 
+fn jet_runtime_panic_exit() -> ! {
+    std::process::exit(70)
+}
+
 fn jet_runtime_stop(code: &str, file: &str, line: u32, msg: &str) -> ! {
     jet_runtime_stop_with_context(code, file, line, "", "", msg)
 }
 
 fn jet_scheduler_runtime_stop(msg: &str) -> ! {
     jet_runtime_stop("E3001", "", 0, msg)
+}
+
+fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
+    jet_test_record_stop("E3001");
+    if jet_runtime_should_unwind() {
+        panic!("{}", report);
+    }
+    eprint!("{}", report);
+    jet_runtime_exit();
 }
 
 fn jet_runtime_caught_stop(message: &str) {
@@ -703,10 +772,12 @@ fn jet_runtime_stop_with_context(
         "",
     );
     if jet_runtime_should_unwind() {
+        jet_stream_record_failure_report(report.rendered.clone());
         panic!("{}", report.rendered);
     }
-    eprint!("{}", report.rendered);
-    jet_runtime_exit();
+    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+        rendered: report.rendered,
+    }));
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
@@ -878,10 +949,12 @@ fn jet_panic_rich(
         locals,
     );
     if jet_runtime_should_unwind() {
+        jet_stream_record_failure_report(report.rendered.clone());
         panic!("{}", report.rendered);
     }
-    eprint!("{}", report.rendered);
-    jet_runtime_exit();
+    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+        rendered: report.rendered,
+    }));
 }
 /// E3002 / D-FAIL-CTX1: `?`-propagation trace in **dev** builds.
 ///
@@ -894,9 +967,7 @@ fn jet_panic_rich(
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if cfg!(not(jet_release)) {
         if r.is_err() {
-            if let Some(frame) = jet_journey_frame(file, line, fn_name, || String::new()) {
-                eprint!("{frame}");
-            }
+            let _ = jet_journey_frame(file, line, fn_name, || String::new());
         } else {
             jet_journey_reset();
         }
@@ -913,15 +984,14 @@ fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
 ) -> Result<T, E> {
     if cfg!(not(jet_release)) {
         if r.is_err() {
-            if let Some(frame) = jet_journey_frame(file, line, fn_name, note) {
-                eprint!("{frame}");
-            }
+            let _ = jet_journey_frame(file, line, fn_name, note);
         } else {
             jet_journey_reset();
         }
     }
     r
 }
+
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {

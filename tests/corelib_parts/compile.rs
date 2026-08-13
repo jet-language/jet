@@ -796,10 +796,15 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     let task_mem = include_str!("../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
     let time = include_str!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
     let scheduler = include_str!("../../crates/jet-codegen/src/Prelude/Scheduler.rs");
+    let scheduler_host = include_str!("../../crates/jet-codegen/src/SchedulerHost.rs");
+    let stream = include_str!("../../crates/jet-codegen/src/Prelude/Stream.rs");
     let core = include_str!("../../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(!task_mem.contains("process::exit(70)"));
     assert!(!time.contains("process::exit(70)"));
     assert_eq!(scheduler.matches("process::exit(70)").count(), 0);
+    assert_eq!(scheduler_host.matches("process::exit(70)").count(), 0);
+    assert_eq!(stream.matches("process::exit(70)").count(), 0);
+    assert!(scheduler_host.contains("std::panic::panic_any(rendered)"));
     assert!(task_mem.contains("super::jet_panic("));
     // The deadline helper binds the rendered E3003 to a local so it can feed
     // interrupt handlers, native wait boundaries, and explicitly typed deadline
@@ -811,7 +816,7 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(time.contains("jet_scheduler_wait_boundary_should_unwind()"));
     assert!(time.contains("jet_typed_deadline_boundary_should_unwind()"));
     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
-    assert!(scheduler.contains("jet_runtime_diagnostic(format!(\"panic: {msg}\")"));
+    assert!(scheduler.contains("jet_scheduler_runtime_stop(msg)"));
     assert!(scheduler.contains("jet_runtime_diagnostic(rendered)"));
     assert!(scheduler.contains("struct JetSchedulerWaitBoundary"));
     assert!(scheduler.contains("let _boundary = JetSchedulerWaitBoundary::enter()"));
@@ -828,11 +833,11 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(typed_task_spawn.contains("super::JetTypedDeadlineBoundary::enter()"));
     assert_eq!(core.matches("std::process::exit(70)").count(), 1);
     assert!(core.contains(
-        "Self::SchedulerFatal { msg } => jet_runtime_diagnostic(format!(\"panic: {msg}\"))"
+        "Self::SchedulerFatal { msg } => jet_runtime_stop(\"E3001\", \"\", 0, &msg)"
     ));
     assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
-    assert!(core.contains("jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()"));
+    assert!(core.contains("jet_scheduler_in_task()"));
+    assert!(core.contains("jet_interrupt_handler_should_unwind()"));
     assert!(core.contains("if jet_runtime_should_unwind()"));
     assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
 }
-

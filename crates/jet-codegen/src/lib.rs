@@ -20,7 +20,10 @@ pub mod scheduler {
     // it is `crate::task_group`. Same source either way.
     use crate::task_group as jet_std;
     #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::{JetOutcome, JetTaskFailure};
+    pub use jet_foundation::Outcome::{
+        jet_stream_record_failure_report, jet_stream_take_failure_report, JetOutcome,
+        JetTaskFailure,
+    };
     include!("Prelude/Deadline.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/CoreLib/Top/TimeSleep.rs");

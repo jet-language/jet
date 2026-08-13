@@ -1542,6 +1542,252 @@ fn run() {
 }
 
 #[test]
+fn web_edge_preserves_one_report_across_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web failure-edge parity test (need rustc + node)");
+        return;
+    }
+    let source = include_str!("../examples/features/errors/default_err_edge.jet");
+    let expected = include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
+    let harness = r#"
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  console.log("unexpected success");
+} catch (error) {
+  console.log("kind=" + (error.constructor?.name ?? ""));
+  console.log("instance=" + (error instanceof Error));
+  console.log("code=" + error.code);
+  console.log("message=" + error.message);
+  console.log("cause=" + (error.cause?.message ?? error.cause ?? ""));
+  console.log("journey=" + (error.journey ?? ""));
+  console.log("frame=" + JSON.stringify(error.frame));
+}
+"#;
+
+    let cli_dir = std::env::temp_dir().join(format!("jet_failure_edge_cli_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&cli_dir);
+    fs::create_dir_all(&cli_dir).unwrap();
+    let cli_source = cli_dir.join("main.jet");
+    fs::write(&cli_source, source).unwrap();
+    let cli_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--quiet", cli_source.to_str().unwrap()])
+        .current_dir(&cli_dir)
+        .output()
+        .unwrap();
+    assert_eq!(cli_run.status.code(), Some(1), "CLI edge failed unexpectedly");
+    assert_eq!(
+        String::from_utf8_lossy(&cli_run.stderr).trim_end(),
+        expected,
+        "CLI edge changed the report frame"
+    );
+
+    let wasm_dir = build_web_fixture(
+        "failure_edge_wasm",
+        source,
+        "examples/features/errors/default_err_edge.jet",
+    );
+    let wasm = fs::read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap();
+    let wasm_js = fs::read_to_string(wasm_dir.join("build/app.js")).unwrap();
+    assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
+    assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
+    assert!(
+        !wasm.contains("panic_any(report.rendered)"),
+        "raw Wasm panic survived:\n{wasm}"
+    );
+    assert!(wasm_js.contains("jetDom.takeWasmError"), "{wasm_js}");
+    assert!(wasm_js.contains("const JET_EDGE_TARGET = \"web\";"), "{wasm_js}");
+    assert!(!wasm_js.contains("_isMain") && !wasm_js.contains("process.argv[1]"), "{wasm_js}");
+    fs::write(wasm_dir.join("build/failure_edge_harness.mjs"), harness).unwrap();
+    let wasm_run = Command::new("node")
+        .current_dir(wasm_dir.join("build"))
+        .arg("failure_edge_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        wasm_run.status.success(),
+        "Wasm edge harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&wasm_run.stdout),
+        String::from_utf8_lossy(&wasm_run.stderr)
+    );
+    let wasm_stdout = String::from_utf8_lossy(&wasm_run.stdout);
+    assert!(wasm_stdout.contains("kind=Object"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("instance=false"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("code=RUNFAIL"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("message=unhandled default error"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("cause=disk offline"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("journey="), "{wasm_stdout}");
+    assert!(wasm_stdout.contains(&format!("frame={expected:?}")), "{wasm_stdout}");
+    assert!(
+        String::from_utf8_lossy(&wasm_run.stderr).contains(expected),
+        "Wasm overlay lost the frame"
+    );
+
+    let js_source = format!("#Target(JS)\n{source}");
+    let js_dir = build_web_fixture(
+        "failure_edge_js",
+        &js_source,
+        "tests/fixtures/failure_edge_js.jet",
+    );
+    let js = fs::read_to_string(js_dir.join("build/app.js")).unwrap();
+    assert!(js.contains("class JetWebRuntimeError"), "{js}");
+    assert!(js.contains("jet_web_edge_result"), "{js}");
+    assert!(!js.contains("_isMain") && !js.contains("process.argv[1]"), "{js}");
+    fs::write(js_dir.join("build/failure_edge_harness.mjs"), harness).unwrap();
+    let js_run = Command::new("node")
+        .current_dir(js_dir.join("build"))
+        .arg("failure_edge_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        js_run.status.success(),
+        "JS edge harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&js_run.stdout),
+        String::from_utf8_lossy(&js_run.stderr)
+    );
+    let js_stdout = String::from_utf8_lossy(&js_run.stdout);
+    assert!(js_stdout.contains("kind=JetWebRuntimeError"), "{js_stdout}");
+    assert!(js_stdout.contains("instance=true"), "{js_stdout}");
+    assert!(js_stdout.contains("code=RUNFAIL"), "{js_stdout}");
+    assert!(js_stdout.contains("message=unhandled default error"), "{js_stdout}");
+    assert!(js_stdout.contains("cause=disk offline"), "{js_stdout}");
+    assert!(js_stdout.contains("journey="), "{js_stdout}");
+    assert!(js_stdout.contains(&format!("frame={expected:?}")), "{js_stdout}");
+    assert!(
+        String::from_utf8_lossy(&js_run.stderr).contains(expected),
+        "JS overlay lost the frame"
+    );
+
+    let _ = fs::remove_dir_all(wasm_dir);
+    let _ = fs::remove_dir_all(js_dir);
+    let _ = fs::remove_dir_all(cli_dir);
+}
+
+#[test]
+fn web_js_try_reaches_typed_edge() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS fallible-edge test (need rustc + node)");
+        return;
+    }
+    let source = r#"#Target(JS)
+fn load() => Int ? {
+    return Err("try failed", code: "TRYFAIL")
+}
+
+#Target(JS)
+fn read() => Int ? {
+    value :: load()?
+    return Ok(value)
+}
+
+#Target(JS)
+fn run() ? {
+    value :: read()?
+    print(value)
+}
+"#;
+    let dir = build_web_fixture(
+        "failure_edge_js_try",
+        source,
+        "tests/fixtures/failure_edge_js_try.jet",
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(js.contains("jet_web_try("), "JS `?` did not use the edge adapter:\n{js}");
+    let harness = r#"
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  console.log("unexpected success");
+} catch (error) {
+  console.log("kind=" + error.constructor?.name);
+  console.log("code=" + error.code);
+  console.log("journey=" + (error.journey ?? ""));
+  console.log("frame=" + error.frame);
+}
+"#;
+    fs::write(dir.join("build/failure_edge_js_try_harness.mjs"), harness).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("failure_edge_js_try_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "JS `?` edge harness failed:\n{}",
+        String::from_utf8_lossy(&node.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&node.stdout);
+    assert!(stdout.contains("kind=JetWebRuntimeError"), "{stdout}");
+    assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
+    assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
+    assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
+    assert!(String::from_utf8_lossy(&node.stderr).contains("Error [TRYFAIL]: try failed"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_wasm_try_returns_typed_journey() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping Wasm fallible-edge test (need rustc + node)");
+        return;
+    }
+    let source = r#"#Target(Wasm)
+fn load() => Int ? {
+    return Err("try failed", code: "TRYFAIL")
+}
+
+#Target(Wasm)
+fn read() => Int ? {
+    value :: load()?
+    return Ok(value)
+}
+
+#Target(Wasm)
+fn run() ? {
+    value :: read()?
+    print(value)
+}
+"#;
+    let dir = build_web_fixture(
+        "failure_edge_wasm_try",
+        source,
+        "tests/fixtures/failure_edge_wasm_try.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm.contains("jet_journey_take"), "Wasm edge did not carry the shared journey:\n{wasm}");
+    let harness = r#"
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  console.log("unexpected success");
+} catch (error) {
+  console.log("kind=" + error.constructor?.name);
+  console.log("code=" + error.code);
+  console.log("journey=" + error.journey);
+  console.log("frame=" + error.frame);
+}
+"#;
+    fs::write(dir.join("build/failure_edge_wasm_try_harness.mjs"), harness).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("failure_edge_wasm_try_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "Wasm `?` edge harness failed:\n{}",
+        String::from_utf8_lossy(&node.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&node.stdout);
+    assert!(stdout.contains("kind=Object"), "{stdout}");
+    assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
+    assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
+    assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
+    assert!(String::from_utf8_lossy(&node.stderr).contains("Error [TRYFAIL]: try failed"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn web_js_enum_match_break_targets_the_enclosing_loop() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping JS EnumMatch break test");

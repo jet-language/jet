@@ -138,7 +138,10 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             let rendered = error
                 .to_jet_err()
                 .map(|error| jet_foundation::Outcome::jet_render_err(&error))
-                .unwrap_or_else(|| error.jet_show());
+                .unwrap_or_else(|| {
+                    crate::Comptime::display_core_pure_value(&error)
+                        .unwrap_or_else(|| error.jet_show())
+                });
             sink.stderr.push_str(&rendered);
             sink.stderr.push('\n');
             RunOutcome::Ran {
@@ -288,7 +291,10 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
             let rendered = error
                 .to_jet_err()
                 .map(|error| jet_foundation::Outcome::jet_render_err(&error))
-                .unwrap_or_else(|| error.jet_show());
+                .unwrap_or_else(|| {
+                    crate::Comptime::display_core_pure_value(&error)
+                        .unwrap_or_else(|| error.jet_show())
+                });
             sink.stderr.push_str(&rendered);
             sink.stderr.push('\n');
             RunOutcome::Ran {

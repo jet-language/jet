@@ -337,12 +337,48 @@ fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
     assert_eq!(tir.entry, "serve");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--output", "api", file.to_str().unwrap()])
+        .args(["run", "--quiet", "--output", "api", file.to_str().unwrap()])
         .current_dir(&dir)
         .output()
         .expect("run explicit Service Output");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8_lossy(&output.stdout), "service\n");
+}
+
+#[test]
+fn service_edge_emits_one_structured_report_record() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_output_service_failure");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        "api: Output :: .Service.{ name: \"api\", entry: serve }\nfn serve() ? { return Err(\"service unavailable\", code: \"SVC503\") }\n",
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--output", "api", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .output()
+        .expect("run failing Service Output");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    let records: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .collect();
+    assert_eq!(records.len(), 1, "service failure must have one structured record:\n{stderr}");
+    assert!(
+        records[0].contains(
+            r#"{"target":"service","report":"Error [SVC503]: service unavailable\n"}"#,
+        ),
+        "service report lost its native report text:\n{stderr}"
+    );
+    assert!(output.stdout.is_empty(), "service failure wrote stdout");
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
