@@ -1056,6 +1056,7 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ArgsSpecRepeat
                 | THandleOp::ArgsSpecPositional
                 | THandleOp::ArgsSpecSubcommand
+                | THandleOp::ArgsSpecDescription
                 | THandleOp::ArgsSpecVersion => Some(Type::Int), // ArgsSpec handle
                 THandleOp::ArgsSpecParse | THandleOp::ArgsSpecParseOrExit => Some(Type::Int),
                 // D-DET-CAPAPI: TIR may leave these as Unit; recover Int for print/interp.
@@ -21012,6 +21013,10 @@ impl LowerCtx<'_, '_> {
             THandleOp::HTTPReqParam => Err("jit handle method unsupported".to_string()),
             THandleOp::HTTPRespField(..) => Err("jit handle method unsupported".to_string()),
             THandleOp::HTTPRespHeader => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecDescription => {
+                let a0 = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.args.description, &[recv_val, a0]))
+            }
             THandleOp::ArgsSpecFlag => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;

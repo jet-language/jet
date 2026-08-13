@@ -1319,6 +1319,7 @@ mod tests {
     fn external_completion_rejects_hostile_program_names() {
         let schema = jet_foundation::CLISchema::CLICommandSchema {
             entry_type: String::new(),
+            description: None,
             inputs: Vec::new(),
             commands: Vec::new(),
         };

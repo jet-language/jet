@@ -4953,6 +4953,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::ArgsSpecVersion
         | THandleOp::ArgsSpecCompletion
+        | THandleOp::ArgsSpecDescription
         | THandleOp::ArgsSpecParse
         | THandleOp::ArgsSpecParseOrExit
             if args.len() == 1 =>

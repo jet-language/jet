@@ -351,6 +351,18 @@ mod native {
                 };
                 Ok(spec_value(replace_spec(id, jet_args_version(spec, &version))))
             }
+            "ArgsSpecDescription" => {
+                let id = spec_id(recv)?;
+                let spec = take_spec(id)?;
+                let description = match str_arg(args, 0, span) {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(e)),
+                };
+                Ok(spec_value(replace_spec(
+                    id,
+                    jet_args_description(spec, &description),
+                )))
+            }
             "ArgsSpecCompletion" => {
                 let id = spec_id(recv)?;
                 let spec = take_spec(id)?;

@@ -75,6 +75,45 @@ fn run(cmd: Cmd) {}
 }
 
 #[test]
+fn documented_subcommands_are_projected_into_the_dossier_schema() {
+    let dir = isolated_cwd("shape_cli_documented_dossier");
+    fs::write(
+        dir.join("commands.jet"),
+        r#"#CLI
+struct ServeArgs {}
+#CLI
+struct ImportArgs {}
+#Doc("Manage the service")
+enum Cmd {
+    #Doc("Start the service") Serve(ServeArgs)
+    #Doc("Import one data file") Import(ImportArgs)
+}
+fn run(cmd: Cmd) {}
+"#,
+    )
+    .unwrap();
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "commands.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "documented dossier failed: {}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    let json = String::from_utf8(dossier.stdout).unwrap();
+    for fact in [
+        "\"description\":\"Manage the service\"",
+        "\"name\":\"serve\",\"description\":\"Start the service\"",
+        "\"name\":\"import\",\"description\":\"Import one data file\"",
+        "\"completion_words\":[\"--help\",\"serve\",\"import\"]",
+    ] {
+        assert!(json.contains(fact), "documented dossier omitted {fact}: {json}");
+    }
+}
+
+#[test]
 fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
     let dir = isolated_cwd("shape_cli_help_program_name");
     fs::write(

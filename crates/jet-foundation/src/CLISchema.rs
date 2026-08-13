@@ -6,9 +6,9 @@ use crate::AST::{CtValue, Expr, Field, Item, Marker, ProgramBundle, StrPart, Str
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
-/// D-CLI-FIELD-MARKERS1=A bumps the record so short names and environment
-/// fallbacks are part of help, completions, dossier, and publish diff.
-pub const RECORD_VERSION: u16 = 3;
+/// D-CLI-DOCS1=A bumps the record so #Doc-derived descriptions are part of
+/// help, dossier, and the embedded command schema.
+pub const RECORD_VERSION: u16 = 4;
 pub const ELF_SECTION: &str = ".jet_command";
 pub const PE_SECTION: &str = ".jetcmd";
 pub const MACH_SECTION: &str = "__jetcmd";
@@ -133,6 +133,8 @@ impl CLIInputSchema {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CLICommandSchema {
     pub entry_type: String,
+    /// Optional #Doc text on the entry type. None keeps the old help shape.
+    pub description: Option<String>,
     pub inputs: Vec<CLIInputSchema>,
     pub commands: Vec<CLISubcommandSchema>,
 }
@@ -140,6 +142,8 @@ pub struct CLICommandSchema {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CLISubcommandSchema {
     pub name: String,
+    /// Optional #Doc text on the enum variant.
+    pub description: Option<String>,
     pub inputs: Vec<CLIInputSchema>,
 }
 
@@ -149,6 +153,7 @@ pub struct CLISubcommandSchema {
 pub fn executable_schema(bundle: &ProgramBundle) -> CLICommandSchema {
     entry_schema_for_bundle(bundle).unwrap_or(CLICommandSchema {
         entry_type: String::new(),
+        description: None,
         inputs: Vec::new(),
         commands: Vec::new(),
     })
@@ -226,9 +231,20 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
             _ => None,
         })?;
         let payload = command_schema(structure)?;
-        Some(CLISubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
+        Some(CLISubcommandSchema {
+            name: variant.name.to_lowercase(),
+            description: marker(&variant.serde_markers, Syntax::MARKER_DOC)
+                .and_then(marker_string),
+            inputs: payload.inputs,
+        })
     }).collect();
-    Some(CLICommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
+    Some(CLICommandSchema {
+        entry_type: name.to_string(),
+        description: marker(&enumeration.type_markers, Syntax::MARKER_DOC)
+            .and_then(marker_string),
+        inputs: Vec::new(),
+        commands,
+    })
 }
 
 /// Module containing the entry parameter's checked CLI type. Local types win;
@@ -281,6 +297,7 @@ pub fn entry_schema(items: &[Item]) -> Option<CLICommandSchema> {
 pub fn encode_record(schema: &CLICommandSchema) -> Vec<u8> {
     let mut payload = Vec::new();
     put_string(&mut payload, &schema.entry_type);
+    put_optional_string(&mut payload, schema.description.as_deref());
     put_u32(&mut payload, schema.inputs.len() as u32);
     for input in &schema.inputs {
         encode_input(&mut payload, input);
@@ -288,6 +305,7 @@ pub fn encode_record(schema: &CLICommandSchema) -> Vec<u8> {
     put_u32(&mut payload, schema.commands.len() as u32);
     for command in &schema.commands {
         put_string(&mut payload, &command.name);
+        put_optional_string(&mut payload, command.description.as_deref());
         put_u32(&mut payload, command.inputs.len() as u32);
         for input in &command.inputs { encode_input(&mut payload, input); }
     }
@@ -354,6 +372,7 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     }
     let mut cursor = Cursor::new(payload);
     let entry_type = cursor.string()?;
+    let description = cursor.optional_string()?;
     let count = cursor.u32()? as usize;
     if count > MAX_INPUTS { return Err(MetadataError::Malformed("too many inputs")); }
     let mut inputs = Vec::with_capacity(count);
@@ -365,14 +384,15 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     let mut commands = Vec::with_capacity(command_count);
     for _ in 0..command_count {
         let name = cursor.string()?;
+        let description = cursor.optional_string()?;
         let input_count = cursor.u32()? as usize;
         if input_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many command inputs")); }
         let mut command_inputs = Vec::with_capacity(input_count);
         for _ in 0..input_count { command_inputs.push(decode_input(&mut cursor)?); }
-        commands.push(CLISubcommandSchema { name, inputs: command_inputs });
+        commands.push(CLISubcommandSchema { name, description, inputs: command_inputs });
     }
     if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
-    Ok(CLICommandSchema { entry_type, inputs, commands })
+    Ok(CLICommandSchema { entry_type, description, inputs, commands })
 }
 
 fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
@@ -810,6 +830,8 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
 
     Some(CLICommandSchema {
         entry_type: structure.name.clone(),
+        description: marker(&structure.type_markers, Syntax::MARKER_DOC)
+            .and_then(marker_string),
         inputs,
         commands: Vec::new(),
     })
@@ -861,6 +883,7 @@ mod tests {
     fn schema() -> CLICommandSchema {
         CLICommandSchema {
             entry_type: "Options".to_string(),
+            description: None,
             inputs: vec![CLIInputSchema {
                 field: "output_file".to_string(),
                 flag: "output-file".to_string(),
@@ -1013,8 +1036,8 @@ mod tests {
         assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
 
         let mut unsupported = record.clone();
-        unsupported[8..10].copy_from_slice(&4u16.to_le_bytes());
-        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(4)));
+        unsupported[8..10].copy_from_slice(&5u16.to_le_bytes());
+        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(5)));
         let mut corrupt = record;
         *corrupt.last_mut().unwrap() ^= 1;
         assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));

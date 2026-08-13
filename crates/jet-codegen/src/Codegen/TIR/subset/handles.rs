@@ -342,6 +342,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ArgsSpec", "repeat", 3) => THandleOp::ArgsSpecRepeat,
         ("ArgsSpec", "required_option", 3) => THandleOp::ArgsSpecRequiredOption,
         ("ArgsSpec", "positional", 2) => THandleOp::ArgsSpecPositional,
+        ("ArgsSpec", "description", 1) => THandleOp::ArgsSpecDescription,
         ("ArgsSpec", "subcommand", 3) => THandleOp::ArgsSpecSubcommand,
         ("ArgsSpec", "version", 1) => THandleOp::ArgsSpecVersion,
         ("ArgsSpec", "completion", 1) => THandleOp::ArgsSpecCompletion,

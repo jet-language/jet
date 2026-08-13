@@ -3306,9 +3306,12 @@ fn run(args: ServeArgs) {
 ```
 
 `#CLI` is a sibling derive of `#Codable` on the same marker/derive
-machinery (D-MARKERMOVE1). `#Doc("...")` is a field-level marker giving
-that flag's `--help` line; a field with no `#Doc(...)` gets a generic
-"value for --name" line instead.
+machinery (D-MARKERMOVE1). On a `#CLI` struct, `#Doc("...")` gives the
+program description; on a field it gives that flag's `--help` line. A field
+with no `#Doc(...)` gets a generic "value for --name" line instead. An entry
+enum may use `#Doc("...")` on the enum for the program description and on
+each variant for its one-line subcommand summary. Descriptions preserve
+embedded line breaks.
 
 **Entry semantics.** `run` is the only reserved program entry name (S12). Plain
 `fn run()` is the default and never requires arguments. `fn run(args: T)` is an
@@ -3377,7 +3380,8 @@ to opt out of). Declaration order of required value fields is part of the
 command interface; reordering them is a breaking shape change reported through
 the checked `CLISchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
-the struct's fields/types/`#Doc` text); a field named `help` collides
+the program description, subcommand summaries, and the struct's
+fields/types/`#Doc` text); a field named `help` collides
 with it and is **E1306**.
 
 `#Short("n")` adds the one-ASCII-letter `-n` form to the field's existing
@@ -3426,13 +3430,17 @@ only for the compile-time shape checks above (E1305–E1308). `88_args_spec`/
 layer generated on top of it, not a replacement.
 
 `jet inspect dossier <entry.jet> run --json` projects that same checked command
-schema as `command_schema`: shell flag, value type, required/default state,
-help text, subcommands, and completion words. The human dossier prints the same
-facts. Tools consume this projection instead of reconstructing field-to-shell
-mapping.
+schema as `command_schema`: the optional `#Doc` description on the entry type,
+shell flag, value type, required/default state, help text, optional `#Doc`
+summary on each subcommand, subcommands, and completion words. The human dossier
+prints the same facts. Tools consume this projection instead of reconstructing
+field-to-shell mapping.
 
 **Executable command metadata (D-SHAPE-CLI-CARRIER1=A).** Every compiled
-program carries one versioned `JetCommandSchema` record inside its executable:
+program carries one versioned `JetCommandSchema` record inside its executable.
+The record includes the optional entry `#Doc` description and optional
+subcommand-variant `#Doc` summaries; completion words do not include these
+human descriptions. The record is inside the executable:
 `.jet_command` in ELF, `.jetcmd` in PE, `__jetcmd` in Mach-O, and the
 `jet.command` custom section in Wasm. Universal Mach-O files carry the same
 record in every architecture slice. The record is emitted before the artifact
