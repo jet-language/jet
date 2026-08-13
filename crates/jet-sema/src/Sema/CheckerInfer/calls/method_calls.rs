@@ -2162,7 +2162,7 @@ impl<'a> Checker<'a> {
                         // the TIR subset gate (mirrors how a named type's method sets
                         // `recv_type_out`) — codegen/subset re-derive the shape from this
                         // rather than re-inferring the receiver's full type.
-                        *recv_type_out = Some("__Fallible__".to_string());
+                        *recv_type_out = Some("__ErrorContext__".to_string());
                         return Some(recv_ty);
                     }
                 }

@@ -1,0 +1,24 @@
+// D-FAIL-CONV1=A: one declared conversion rail can target the default Err.
+struct User {
+    name: String
+}
+
+enum StoreErr {
+    Missing
+}
+
+impl StoreErr => Err {
+    return Err("store unavailable: missing user")
+}
+
+fn read_store() => User ? StoreErr {
+    return Err(StoreErr.Missing)
+}
+
+fn get_user() => User ? {
+    return Ok(read_store()?)
+}
+
+fn run() => () ? {
+    get_user()?
+}

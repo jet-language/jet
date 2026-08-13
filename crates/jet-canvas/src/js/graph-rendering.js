@@ -160,7 +160,7 @@
       ["Int", "Int"],
       ["Float", "Float"],
       ["String", "String"],
-      ["Fallible", "Value?"]
+      ["Failure", "Value?"]
     ];
     const x = Math.max(14, size.width - 430);
     const y = 58;

@@ -797,7 +797,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a
-        // total sema fact (`None`/`Fallible`/`Typed(fn)`), reproduced verbatim. The
+        // total sema fact (`None`/`Typed(fn)`), reproduced verbatim. The
         // inner fallible value must itself be in-subset (a user fallible fn call, a
         // local, an `ok`/`err` literal). A core/stdlib fallible call (e.g. `fs.read`)
         // is NOT in-subset (it stays on the AST path — Phase 10), so a `?` on one is

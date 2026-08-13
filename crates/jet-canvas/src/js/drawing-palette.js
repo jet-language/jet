@@ -294,7 +294,7 @@
     return !!(descriptor && descriptor.palette.insertable);
   }
 
-  function graphIsFallible(graph) {
+  function graphHasFailureRail(graph) {
     const returns = graph && graph.function && String(graph.function.returns || "");
     return returns.includes("?");
   }
@@ -303,13 +303,13 @@
     if (action && action.available === false) {
       return { available: false, code: action.unavailable_reason_code || "unavailable", reason: action.denied_reason || "This action is unavailable here." };
     }
-    const isFallibleRail = action && (
+    const isFailureRail = action && (
       (action.op || action.insert_op) === "insert_fallible_rail"
       || action.node_descriptor_id === "fallible"
       || action.action_id === "canvas.structural:fallible"
-      || (action.kind === "canvas.structural" && action.title === "Fallible")
+      || (action.kind === "canvas.structural" && action.title === "Failure rail")
     );
-    if (isFallibleRail && !graphIsFallible(graph)) {
+    if (isFailureRail && !graphHasFailureRail(graph)) {
       return { available: false, code: "needs_fallible_function", reason: "Needs a fallible function." };
     }
     return { available: true, code: "", reason: "" };

@@ -2253,7 +2253,7 @@ impl LowerCtx<'_, '_> {
                 let tag = self.b.ins().iconst(types::I8, 0);
                 self.call_host(self.host.result_new_i64, &[tag, converted])
             }
-            TIR::TTryConvert::Fallible | TIR::TTryConvert::WidenUnion { .. } => {
+            TIR::TTryConvert::WidenUnion { .. } => {
                 return Err("jit typed Result conversion unsupported".to_string());
             }
         };

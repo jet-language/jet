@@ -2979,11 +2979,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "jet_trace_err({}.map_err(jet_err_from_message), {}, {}, {})?",
                     v, file, line, fn_name
                 ),
-                // S80/D-LIB3: error implements Fallible → `.map_err(|e| e.to_error())`.
-                TTryConvert::Fallible => format!(
-                    "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
-                    v, file, line, fn_name
-                ),
                 // D-ERR-CONV: declared `impl Source => Target` → `.map_err(<fn>)`.
                 TTryConvert::Typed(conv_fn) => format!(
                     "jet_trace_err({}.map_err({}), {}, {}, {})?",

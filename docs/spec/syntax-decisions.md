@@ -1117,7 +1117,7 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Err`. A `? E`
+**S34 — Failure-returning return**: `T ? E`; bare `T ?` means `T ? Err`. A `? E`
 clause after a parameter list is a full unit-fallible return annotation per
 D-FAIL-UNIT1; value-returning signatures keep `=> T ? E`. Lowers to Rust
 `Result` (not surface syntax).
@@ -1131,13 +1131,13 @@ error type and its constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
 still wraps the typed error value `e`. Argument shape distinguishes the two
 readings. `fn run()` is fallible by default; an expert may pin `fn run() ? E`.
 Returned default errors print one report frame and exit non-zero. Cross-type
-`?` conversion uses declared `impl Source => Target`; the `Fallible` trait and
-`to_error` are deleted by D-FAIL-CONV1.
+`?` conversion uses declared `impl Source => Target`; the retired
+default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
 
 **D-ERRCTX1 — Error context** *(amended by D-FAIL-CTX1)*: a postfix `?` may
 carry a lazy string note. Every `?` hop joins the failure journey on every
-tier. The `.context` method and the `"__Fallible__"` lowering sentinel are
-deleted. No new binder grammar is added.
+tier. The `.context` method and the internal error-context lowering sentinel
+are deleted. No new binder grammar is added.
 
 **D-FAIL-MODEL1=A — one report, three routes** *(ratified 2026-08-06, card
 #1507)*: every failure is one product: a report with a code, message, why,
@@ -1191,7 +1191,7 @@ error type is `Err`; bare `T ?` implies it. This amends S80's builder spelling
 and deletes `Error` as a type name, not an alias.
 
 **D-FAIL-CONV1=A — one conversion rail** *(ratified 2026-08-06, card #1529)*:
-the `Fallible` trait, `to_error`, and `TryConvert::Fallible` are deleted.
+the retired default-conversion trait, helper, and compiler arm are deleted.
 Error conversion uses the declared `impl Source => Target` form, including a
 conversion into the default error. The default-error target may name a foreign
 source type; typed targets keep E2406's orphan rule. This amends D-ERR2 and
@@ -1202,7 +1202,7 @@ follow it.
 2026-08-06, card #1532)*: a postfix `?` may carry a string note. Each `?` hop
 joins the failure journey on every tier, whether it has a note or not. Notes
 use D-ERRCTX1's lazy interpolation rule. The `.context` method and the
-`"__Fallible__"` lowering sentinel are deleted.
+internal error-context lowering sentinel are deleted.
 
 **D-FAIL-BREACH1=A — one runtime report family and one renderer** *(ratified
 2026-08-06, card #1530)*: arithmetic traps, bounds traps, contract failures,

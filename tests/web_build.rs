@@ -1287,6 +1287,45 @@ fn run() {}
 }
 
 #[test]
+fn web_declared_default_error_conversion_builds() {
+    let src = r#"#Target(Web)
+enum StoreErr { Missing }
+
+impl StoreErr => Err {
+    return Err("store unavailable")
+}
+
+fn read_store() => Int ? StoreErr {
+    return Err(StoreErr.Missing)
+}
+
+fn get_user() => Int ? {
+    value :: read_store()?
+    return Ok(value)
+}
+
+#Target(Wasm)
+fn run() {
+    result :: get_user()
+    if result == {
+        .Ok(value) -> { print(value) }
+        .Err(error) -> { print(error.message) }
+        else -> {}
+    }
+}
+"#;
+    let dir = build_web_fixture(
+        "declared_default_error_conversion",
+        src,
+        "tests/fixtures/web_declared_default_error_conversion.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm.contains("errconv_StoreErr_to_Err"), "Wasm conversion body missing:\n{wasm}");
+    assert!(wasm.contains("store unavailable"), "Wasm conversion message missing:\n{wasm}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn web_js_iflet_evaluates_subject_once_and_checks_payload_ranges() {
     let src = r#"#Target(Web)
 enum Packet {

@@ -5796,19 +5796,36 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                         // D-FAIL-ERROR1=A: the evaluator marshals the same
-                        // String-to-Err conversion selected by sema.
-                        let e = if matches!(convert, crate::Codegen::TIR::TTryConvert::DefaultErr) {
-                            match *e {
-                                CtValue::Str(message) => Box::new(CtValue::from_jet_err(
-                                    &jet_foundation::Outcome::jet_err_from_message(message),
-                                )),
-                                other => Box::new(other),
+                        // String-to-Err conversion selected by sema. Declared
+                        // conversions run their lowered body, so the evaluator
+                        // cannot invent a second conversion policy.
+                        let converted = match convert {
+                            crate::Codegen::TIR::TTryConvert::DefaultErr => {
+                                let e = match *e {
+                                    CtValue::Str(message) => Box::new(CtValue::from_jet_err(
+                                        &jet_foundation::Outcome::jet_err_from_message(message),
+                                    )),
+                                    other => Box::new(other),
+                                };
+                                CtValue::failed(e)
                             }
-                        } else {
-                            e
+                            crate::Codegen::TIR::TTryConvert::Typed(conv_fn) => {
+                                let func = self.funcs.get(conv_fn).copied().ok_or_else(|| {
+                                    unsupported(
+                                        &format!("error conversion `{conv_fn}`"),
+                                        self.span(),
+                                    )
+                                })?;
+                                let mut child = HashMap::new();
+                                match self.run_func(func, vec![*e], &mut child)? {
+                                    CtValue::Failed(report) => CtValue::Failed(report),
+                                    other => CtValue::failed(Box::new(other)),
+                                }
+                            }
+                            _ => CtValue::failed(e),
                         };
-                        // Propagate as a function return of the error value.
-                        self.pending_return = Some(CtValue::failed(e));
+                        // Propagate as a function return of the converted error value.
+                        self.pending_return = Some(converted);
                         Ok(CtValue::Unit)
                     }
                     CtValue::Failed(CtReport::Clean(_)) => {

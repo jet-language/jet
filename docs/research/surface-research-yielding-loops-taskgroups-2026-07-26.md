@@ -1146,7 +1146,7 @@ result :: outer :: loop {
 - Repeated map keys follow the existing map insertion law.
 - Unbounded sources cannot use this eager form.
 - Lazy transformations stay in `Iter` adapters and stream functions.
-- Fallible projection follows a later explicit failure ruling.
+- Failure-aware projection follows a later explicit failure ruling.
 
 ### Tradeoffs
 

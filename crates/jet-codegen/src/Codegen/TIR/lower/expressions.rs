@@ -4005,7 +4005,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is the
-        // total sema fact — reproduce it exactly (none/Fallible/Typed). The result
+        // total sema fact — reproduce it exactly (none/Typed). The result
         // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
         Expr::Try(inner, span, convert) => {
@@ -4021,7 +4021,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let tconvert = match convert {
                 TryConvert::None => TTryConvert::None,
                 TryConvert::DefaultErr => TTryConvert::DefaultErr,
-                TryConvert::Fallible => TTryConvert::Fallible,
                 TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
                 TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
                     enum_name: enum_name.clone(),
