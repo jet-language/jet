@@ -290,38 +290,6 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
             Comptime::PurityStage::RunTime,
         ) {
             Ok(CtValue::Failed(CtReport::Told(error))) => {
-                let is_crypto_error = matches!(
-                    &*error,
-                    CtValue::Struct { type_name, .. } if type_name == "CryptoError"
-                );
-                if is_crypto_error {
-                    let message = error
-                        .crypto_error_message()
-                        .unwrap_or_else(|| error.jet_show());
-                    // The AOT entry wrapper redacts the propagation chain at
-                    // this boundary. The TIR evaluator has already recorded
-                    // its dev-only `?` frames in the sink; discard only those
-                    // frames and preserve any user-written stderr.
-                    let mut stderr = sink
-                        .stderr
-                        .lines()
-                        .filter(|line| !line.starts_with("error propagated from: "))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    if !stderr.is_empty() {
-                        stderr.push('\n');
-                    }
-                    let report = jet_foundation::Outcome::jet_render_e3001_crypto(
-                        &message,
-                        jet_foundation::Outcome::jet_crypto_error_is_internal(&message),
-                    );
-                    stderr.push_str(&report.rendered);
-                    return RunOutcome::Ran {
-                        stdout: sink.stdout,
-                        stderr,
-                        exit_code: report.exit_code,
-                    };
-                }
                 let rendered = error
                     .to_jet_err()
                     .map(|error| jet_foundation::Outcome::jet_render_err(&error))

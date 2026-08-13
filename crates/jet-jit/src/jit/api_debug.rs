@@ -18,6 +18,14 @@ use super::safety::{
 };
 use super::RESIDENT_RUNTIME;
 
+fn entry_return_supported(ret: Option<&Type>) -> bool {
+    ret.is_none()
+        || matches!(ret, Some(Type::Named(name)) if name == "WebApp")
+        || matches!(ret, Some(Type::Result { ok, err })
+            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "WebApp")
+                && matches!(err.as_ref(), Type::String | Type::Named(_)))
+}
+
 pub fn cranelift_host_supported() -> bool {
     // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
     // default dev path safe by delegating to the tier-0 backend there.
@@ -755,12 +763,9 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         })
     } else {
         program.funcs.iter().any(|f| {
-            f.name == program.entry
+                f.name == program.entry
                 && f.params.is_empty()
-                && (f.ret.is_none()
-                    || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
-                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+                && entry_return_supported(f.ret.as_ref())
                 && resident_safe_func(f, &names)
         })
     };

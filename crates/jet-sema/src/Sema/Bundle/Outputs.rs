@@ -1,15 +1,10 @@
 use super::*;
 
-pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> bool {
+pub(super) fn is_fallible_void_entry_return(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Result { ok, err }
+        Type::Result { ok, .. }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), Type::Named(n)
-                    if n == Syntax::TYPE_ERR
-                        || (n == "CryptoError"
-                            && !state.registry.contains(n)
-                            && state.core_imports.values().any(|module| module == "core.crypto")))
     )
 }
 /// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
@@ -239,7 +234,7 @@ fn resolve_output_callable(
     };
     let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
         matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-            || is_fallible_void_entry_return(ty, &states[target])
+            || is_fallible_void_entry_return(ty)
     });
     if !params_ok || !return_ok {
         diags.extend(contract_diags);

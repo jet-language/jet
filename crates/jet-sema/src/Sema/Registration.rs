@@ -33,20 +33,11 @@ fn is_void_like_return(ty: &Type) -> bool {
         || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))
 }
 
-fn is_fallible_void_return(
-    ty: &Type,
-    registry: &TypeRegistry,
-    core_imports: &HashMap<String, String>,
-) -> bool {
+fn is_fallible_void_return(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Result { ok, err }
+        Type::Result { ok, .. }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), Type::Named(n)
-                    if n == Syntax::TYPE_ERR
-                        || (n == "CryptoError"
-                            && !registry.contains(n)
-                            && core_imports.values().any(|module| module == "core.crypto")))
     )
 }
 
@@ -473,7 +464,7 @@ impl<'a> Checker<'a> {
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
         let is_entry_fallible_void = f.name == "run"
             && f.return_type.as_ref().is_some_and(|ty| {
-                is_fallible_void_return(ty, self.registry, self.core_imports)
+                is_fallible_void_return(ty)
             });
         if !is_generator
             && !is_entry_fallible_void

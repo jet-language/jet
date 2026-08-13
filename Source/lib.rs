@@ -206,7 +206,7 @@ fn check_workspace_file(file: &str) -> Option<Vec<Diagnostic>> {
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
-/// but with `CompileMode::Eval` so E0122 (`run` return shape) is relaxed
+/// but with `CompileMode::Eval` so value-returning `run` entries are accepted
 /// while all other diagnostics (type errors, unknown identifiers, etc.) still
 /// fire. Returns the error diagnostics, or an empty vec on success.
 pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {

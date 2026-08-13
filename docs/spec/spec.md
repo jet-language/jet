@@ -152,7 +152,7 @@ expr     = precedence climbing over:
   type errors.
 - A program must define `fn run` with no parameters and no return type,
   `fn run() ?` for top-level error propagation, or a single typed CLI
-  parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
+  parameter as described by D-CLIFLAG1 (E0101, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
   Assigning to an immutable binding is E0111.

@@ -101,6 +101,9 @@
 // D-FAIL-UNIT1=A (ratified 2026-08-06, card #1534) adds no token: a
 // unit-fallible function writes `? E` or bare `?` directly after its parameters;
 // value-returning fallible functions keep OP_CALLABLE_ARROW.
+// D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
+// its return value is the program. A returned WebApp is served at the runtime
+// edge; there is no hidden app-name convention or synthesized run overlay.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
 // items. Effect-only `if` and `loop` bodies use no arrow. D-BRACE1=A

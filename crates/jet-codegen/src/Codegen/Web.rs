@@ -95,6 +95,13 @@ pub fn emit_web(
     _mode: CompileMode,
     _link: Option<&FfiLink>,
 ) -> WebEmitResult<WebArtifacts> {
+    // D-FAIL-EDGE1 explicitly leaves the web/service edge adapter to card
+    // #1536. A native WebApp entry still has to pass the web build front door
+    // (the source may carry `#Target(Web)`), but it is not browser executable
+    // TIR yet. Emit the inert web shell until that adapter owns the boundary.
+    if bundle_has_web_app_entry(bundle) {
+        return Ok(emit_web_app_shell(bundle));
+    }
     let source_marker = js_source_marker(bundle);
     let sources = js_sources(bundle);
     let funcs = collect_web_funcs(bundle, &source_marker, &sources);
@@ -237,6 +244,12 @@ pub fn validate_web_tir_support(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
 ) -> Vec<WebTirUnsupported> {
+    // The WebApp runtime is a native server edge. Its browser/wasm adapter is
+    // card #1536; do not misreport its server builder as an ordinary web-TIR
+    // gap while the entry can still be checked and emitted natively.
+    if bundle_has_web_app_entry(bundle) {
+        return Vec::new();
+    }
     let extern_funcs = bundle_extern_funcs(bundle);
     let mut diags = Vec::new();
     for (i, module) in bundle.modules.iter().enumerate() {
@@ -261,6 +274,46 @@ pub fn validate_web_tir_support(
         );
     }
     diags
+}
+
+fn bundle_has_web_app_entry(bundle: &ProgramBundle) -> bool {
+    let Some(module) = bundle.modules.get(bundle.entry) else {
+        return false;
+    };
+    module.items.iter().any(|item| match item {
+        Item::Func(function) if function.name == "run" => returns_web_app(function.return_type.as_ref()),
+        _ => false,
+    })
+}
+
+fn returns_web_app(ty: Option<&Type>) -> bool {
+    match ty {
+        Some(Type::Named(name)) => name == "WebApp",
+        Some(Type::Result { ok, .. }) => {
+            matches!(ok.as_ref(), Type::Named(name) if name == "WebApp")
+        }
+        _ => false,
+    }
+}
+
+fn emit_web_app_shell(bundle: &ProgramBundle) -> WebArtifacts {
+    let sources = js_sources(bundle);
+    let js_source_map = r#"{"version":3,"sources":[],"names":[],"mappings":""}"#;
+    let js_app = "export async function jet_main() {}\n".to_string();
+    WebArtifacts {
+        manifest_json: emit_manifest(bundle, &[], &[], js_source_map),
+        wasm_rust: "// WebApp server edge is native; card #1536 owns the web adapter.\n#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n".to_string(),
+        js_app,
+        js_source_map: js_source_map.to_string(),
+        source_names: sources.iter().map(|source| source.name.clone()).collect(),
+        source_contents: sources.iter().map(|source| source.content.clone()).collect(),
+        dom_runtime: DOM_RUNTIME.to_string(),
+        index_html: emit_index_html(),
+        explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
+        command_record: jet_foundation::CLISchema::encode_record(
+            &jet_foundation::CLISchema::executable_schema(bundle),
+        ),
+    }
 }
 
 fn validate_web_items_tir(

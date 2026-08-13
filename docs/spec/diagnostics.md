@@ -233,7 +233,7 @@ renumbered, and no new `W` code may be allocated.
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a parameter without the move-capability marker `^` |
 | E0121 | sema  | value used after it was given away        |
-| E0122 | sema  | `run` returns something other than nothing or `() ?` in run mode |
+| E0122 | sema  | retired by D-FAIL-EXIT1; `run` is fallible by default and may return the program |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
@@ -1370,7 +1370,7 @@ span is embedded in the message (Jet file + line + function name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled `CryptoError` at `fn run` instead reports `unhandled cryptographic error` plus its stable redacted Display text. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup. |
+| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled entry error prints the same full report. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled error. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure, or handle the returned error. Reported entry failures exit 1; program-side faults exit 70; exit 101 is reserved for Jet defects. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` with an optional `: {note}` suffix — one journey frame appended when a `?` re-raises an error. | Each failed `?` joins the failure's journey, with or without a note, making the full error path visible. | Follow the journey from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |

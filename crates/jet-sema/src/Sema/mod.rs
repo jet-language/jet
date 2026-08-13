@@ -1192,7 +1192,7 @@ pub enum CompileMode {
     /// need not define `run`.
     Check,
     /// `jet eval` — full sema type-checking, but `run` may return a non-`()`
-    /// type (E0122 is relaxed). The entry still requires a `run` function.
+    /// type. The entry still requires a `run` function.
     Eval,
 }
 

@@ -7,6 +7,14 @@ use jet_codegen::Codegen::TIR::{
 use jet_foundation::AST::{BinOp, Pattern, Type, UnOp};
 use std::collections::HashSet;
 
+fn entry_return_supported(ret: Option<&Type>) -> bool {
+    ret.is_none()
+        || matches!(ret, Some(Type::Named(name)) if name == "WebApp")
+        || matches!(ret, Some(Type::Result { ok, err })
+            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "WebApp")
+                && matches!(err.as_ref(), Type::String | Type::Named(_)))
+}
+
 pub(crate) fn flatten_string(parts: &[TStrPart]) -> Option<String> {
     let mut out = String::new();
     for p in parts {
@@ -4011,12 +4019,9 @@ pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
             .any(|f| f.name == "run" && resident_safe_func(f, &names))
     } else {
         program.funcs.iter().any(|f| {
-            f.name == program.entry
+                f.name == program.entry
                 && f.params.is_empty()
-                && (f.ret.is_none()
-                    || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
-                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+                && entry_return_supported(f.ret.as_ref())
                 && resident_safe_func(f, &names)
         })
     };

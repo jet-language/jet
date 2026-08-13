@@ -96,6 +96,7 @@ fn check_bundle_opts_for_output_inner(
     }
     let mut diags = Vec::new();
     diags.extend(validate_script_entries(bundle));
+    default_entry_return(bundle);
     diags.extend(inject_units_prelude(bundle));
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
@@ -1820,7 +1821,6 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
-    let entry = &states[bundle.entry];
     if mode == CompileMode::Run || mode == CompileMode::Eval {
         let entry_items = &bundle.modules[bundle.entry].items;
         let has_selected_output = entry_items.iter().any(|item| {
@@ -1832,27 +1832,9 @@ fn check_bundle_opts_for_output_inner(
             Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         }) {
-            // S12/D-S80-RUN1/D-CLIFLAG1: `run` is the only program entry name.
-            // It is zero-arg (optionally `-> () ?`), or one typed CLI-spec
-            // parameter (`#[CLI]` struct / enum).
-            if run_fn.params.is_empty() {
-                if mode == CompileMode::Run
-                    && run_fn
-                        .return_type
-                        .as_ref()
-                        .is_some_and(|ret| !is_fallible_void_entry_return(ret, entry))
-                {
-                    diags.push(Diagnostic::error(
-                        "E0122",
-                        "`run` returns the wrong kind of value".to_string(),
-                        "`run` is where running starts; it either returns nothing or reports top-level errors with `() ?`"
-                            .to_string(),
-                        "write `fn run() { ... }`, or `fn run() ? { ... }` if the entry uses `?`"
-                            .to_string(),
-                        Some(run_fn.name_span),
-                    ));
-                }
-            } else if run_fn.params.len() == 1 {
+            // S12/D-CLIFLAG1: `run` is the only program entry name. It is
+            // zero-arg, or one typed CLI-spec parameter (`#[CLI]` struct / enum).
+            if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
                 let cli_module = jet_foundation::CLISchema::entry_type_module(bundle)
                     .unwrap_or(bundle.entry);
@@ -1865,7 +1847,7 @@ fn check_bundle_opts_for_output_inner(
                     CLIEntryShape::EnumBadVariants(bad) => diags.extend(bad),
                     CLIEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
                 }
-            } else {
+            } else if run_fn.params.len() > 1 {
                 diags.push(e1308(Some(run_fn.name_span)));
             }
         } else {
@@ -2303,4 +2285,26 @@ fn check_bundle_opts_for_output_inner(
             fact_registry,
         },
     )
+}
+
+/// D-FAIL-EXIT1=A: every explicit `fn run` gets the default fallible entry
+/// carrier before registration and body inference. The source may omit the
+/// return clause; the checked AST still carries one canonical `Result<(), Err>`
+/// contract through sema, TIR, AOT, JIT, and the interpreter.
+fn default_entry_return(bundle: &mut ProgramBundle) {
+    let Some(module) = bundle.modules.get_mut(bundle.entry) else {
+        return;
+    };
+    let Some(run) = module.items.iter_mut().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }) else {
+        return;
+    };
+    if run.return_type.is_none() {
+        run.return_type = Some(Type::Result {
+            ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+        });
+    }
 }
