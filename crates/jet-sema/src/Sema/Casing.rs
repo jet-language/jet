@@ -346,8 +346,14 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
         | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
         | Expr::Place(inner, _, _) | Expr::Field(inner, _, _) | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) | Expr::Paren(inner, _) | Expr::Spread(inner, _) =>
+        | Expr::Paren(inner, _) | Expr::Spread(inner, _) =>
             expr_names(inner, out),
+        Expr::Try(inner, _, _, note) => {
+            expr_names(inner, out);
+            if let Some(note) = note {
+                expr_names(note, out);
+            }
+        }
         Expr::MemberSpread { base, .. } => expr_names(base, out),
         Expr::OptField { base, .. } => expr_names(base, out),
         Expr::MethodCall { receiver, args, .. } => {

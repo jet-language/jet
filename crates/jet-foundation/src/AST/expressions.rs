@@ -608,9 +608,10 @@ pub enum Expr {
     /// S34: `Err(expr)` — failure value for `T ? E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
-    /// S7/S80/D-ERR-CONV: `expr?` — propagates failure.
+    /// S7/D-FAIL-CTX1: `expr?` — propagates failure and may carry a lazy
+    /// string note written immediately after the operator.
     /// `TryConvert` records how (if at all) the error type is converted.
-    Try(Box<Expr>, Span, TryConvert),
+    Try(Box<Expr>, Span, TryConvert, Option<Box<Expr>>),
     /// S35: `value or fallback`.
     OrFallback {
         value: Box<Expr>,
@@ -728,7 +729,7 @@ impl Expr {
             | Expr::ReduceMarker(_, s)
             | Expr::Ok(_, s)
             | Expr::Err(_, s)
-            | Expr::Try(_, s, _)
+            | Expr::Try(_, s, _, _)
             | Expr::OrFallback { span: s, .. }
             | Expr::PatternTest { span: s, .. }
             | Expr::If { span: s, .. }
@@ -783,7 +784,7 @@ impl Expr {
             | Expr::ReduceMarker(_, current)
             | Expr::Ok(_, current)
             | Expr::Err(_, current)
-            | Expr::Try(_, current, _)
+            | Expr::Try(_, current, _, _)
             | Expr::OrFallback { span: current, .. }
             | Expr::PatternTest { span: current, .. }
             | Expr::If { span: current, .. }
@@ -868,8 +869,13 @@ impl Expr {
                 | Expr::Present(base, _)
                 | Expr::Ok(base, _)
                 | Expr::Err(base, _)
-                | Expr::Try(base, _, _)
                 | Expr::Paren(base, _) => walk(base, f),
+                Expr::Try(base, _, _, note) => {
+                    walk(base, f);
+                    if let Some(note) = note {
+                        walk(note, f);
+                    }
+                }
                 Expr::MapLit(entries, _) => entries.iter_mut().for_each(|(key, value)| {
                     walk(key, f);
                     walk(value, f);

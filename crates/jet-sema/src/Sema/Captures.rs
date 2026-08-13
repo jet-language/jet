@@ -197,8 +197,14 @@ pub(crate) fn walk_expr_for_const_refs(
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)
         | Expr::BinMatchLit(_, _) => {}
-        Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
+        Expr::Ok(inner, _) | Expr::Err(inner, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
+        }
+        Expr::Try(inner, _, _, note) => {
+            walk_expr_for_const_refs(inner, const_names, taken);
+            if let Some(note) = note {
+                walk_expr_for_const_refs(note, const_names, taken);
+            }
         }
         Expr::OrFallback {
             value,
@@ -330,8 +336,11 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         }
         Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _)
-        | Expr::Try(inner, _, _) => expr_refs_name(inner, name),
+        | Expr::Present(inner, _) => expr_refs_name(inner, name),
+        Expr::Try(inner, _, _, note) => {
+            expr_refs_name(inner, name)
+                || note.as_deref().is_some_and(|note| expr_refs_name(note, name))
+        }
         Expr::MemberSpread { base, .. } => expr_refs_name(base, name),
         Expr::OptField { base, .. } => expr_refs_name(base, name),
         Expr::MethodCall { receiver, args, .. } => {
@@ -635,13 +644,18 @@ pub(crate) fn expr_collect_captures(
         Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
         | Expr::Place(inner, _, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        Expr::Try(inner, _, _, note) => {
+            expr_collect_captures(inner, bound, read, mut_cap);
+            if let Some(note) = note {
+                expr_collect_captures(note, bound, read, mut_cap);
+            }
+        }
         Expr::MethodCall { receiver, args, .. } => {
             // A leading-capital identifier in receiver position is a static type
             // (`Int.parse`, `UserId.from_int`), not a value captured by the lambda.

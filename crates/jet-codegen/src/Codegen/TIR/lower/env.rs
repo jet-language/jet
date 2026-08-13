@@ -223,8 +223,13 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
             | Expr::Tainted(inner, _, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
-            | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => work.push(inner),
+            | Expr::Err(inner, _) => work.push(inner),
+            Expr::Try(inner, _, _, note) => {
+                work.push(inner);
+                if let Some(note) = note {
+                    work.push(note);
+                }
+            }
             Expr::OptField { base, .. } => work.push(base),
             Expr::Index { base, index, .. } => {
                 work.push(index);

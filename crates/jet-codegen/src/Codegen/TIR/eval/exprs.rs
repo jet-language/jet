@@ -5771,6 +5771,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Try {
                 inner,
+                note,
                 convert,
                 file,
                 line,
@@ -5778,20 +5779,31 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let v = self.eval_expr_child(inner, scope)?;
                 match v {
-                    CtValue::Present(inner) => Ok(*inner),
+                    CtValue::Present(inner) => {
+                        jet_foundation::Outcome::jet_journey_reset();
+                        Ok(*inner)
+                    }
                     CtValue::Failed(CtReport::Told(e)) => {
-                        // D-ERRCTX1: match AOT `jet_trace_err` / JIT host (dev builds).
+                        // D-FAIL-CTX1: evaluate the hop note only on a failed
+                        // propagation path, then use the shared journey renderer.
                         let file = file.trim_matches('"');
                         let fn_name = fn_name.trim_matches('"');
-                        let frame = format!(
-                            "error propagated from: {fn_name} ({file}:{line}) via ?\n"
-                        );
-                        if let Some(sink) = self.sink.as_ref() {
-                            let mut sink = sink.lock().expect("evaluator sink poisoned");
-                            let skip = sink
-                                .stderr
-                                .ends_with(&frame);
-                            if !skip {
+                        let note = if let Some(note) = note {
+                            match self.eval_expr_child(note, scope)? {
+                                CtValue::Str(note) => note,
+                                other => other.jet_show(),
+                            }
+                        } else {
+                            String::new()
+                        };
+                        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+                            file,
+                            *line as u32,
+                            fn_name,
+                            || note,
+                        ) {
+                            if let Some(sink) = self.sink.as_ref() {
+                                let mut sink = sink.lock().expect("evaluator sink poisoned");
                                 sink.stderr.push_str(&frame);
                             }
                         }
@@ -5829,6 +5841,7 @@ impl<'a> EvalCtx<'a> {
                         Ok(CtValue::Unit)
                     }
                     CtValue::Failed(CtReport::Clean(_)) => {
+                        jet_foundation::Outcome::jet_journey_reset();
                         self.pending_return = Some(CtValue::absent(crate::AST::Type::Int));
                         Ok(CtValue::Unit)
                     }
@@ -6412,28 +6425,6 @@ impl<'a> EvalCtx<'a> {
                         return Ok(CtValue::Struct {
                             type_name: crate::Syntax::CLOCK_TYPE.to_string(),
                             fields: vec![("now".to_string(), CtValue::Int(0))],
-                        });
-                    }
-                    // D-ERRCTX1: `.context(msg)` — the engine only marshals;
-                    // Outcome.rs owns the cause-chain meaning.
-                    if leaf == "jet_context" || leaf.ends_with("jet_context") {
-                        let msg = match argv.get(1) {
-                            Some(CtValue::Str(s)) => s.clone(),
-                            Some(other) => other.jet_show(),
-                            None => String::new(),
-                        };
-                        return Ok(match argv.first() {
-                            Some(CtValue::Present(v)) => CtValue::Present(v.clone()),
-                            Some(CtValue::Failed(CtReport::Told(err))) => err
-                                .to_jet_err()
-                                .map(|error| {
-                                    CtValue::failed(Box::new(CtValue::from_jet_err(
-                                        &jet_foundation::Outcome::jet_err_context(error, msg),
-                                    )))
-                                })
-                                .unwrap_or_else(|| CtValue::failed(err.clone())),
-                            Some(other) => other.clone(),
-                            None => CtValue::Unit,
                         });
                     }
                     Err(unsupported(

@@ -401,10 +401,15 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Paren(inner, _)
         | Expr::IncDec { operand: inner, .. } => {
             walk_expr_nodes(inner, opts, f);
+        }
+        Expr::Try(inner, _, _, note) => {
+            walk_expr_nodes(inner, opts, f);
+            if let Some(note) = note {
+                walk_expr_nodes(note, opts, f);
+            }
         }
         Expr::OptField { base, .. } => walk_expr_nodes(base, opts, f),
         Expr::Range { start, end, .. } => {

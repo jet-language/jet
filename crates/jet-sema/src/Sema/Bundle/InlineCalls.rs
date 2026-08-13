@@ -201,8 +201,13 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+        | Expr::Err(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+        Expr::Try(inner, _, _, note) => {
+            rewrite_inline_calls_expr(inner, siblings, modname);
+            if let Some(note) = note {
+                rewrite_inline_calls_expr(note, siblings, modname);
+            }
+        }
         Expr::OptField { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
         Expr::Range { start, end, .. } => {
             rewrite_inline_calls_expr(start, siblings, modname);

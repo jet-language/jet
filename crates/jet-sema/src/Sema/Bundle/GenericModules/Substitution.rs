@@ -124,9 +124,14 @@ pub(super) fn substitute_expr(
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Paren(inner, _)
         | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
+        Expr::Try(inner, _, _, note) => {
+            substitute_expr(inner, types, values);
+            if let Some(note) = note {
+                substitute_expr(note, types, values);
+            }
+        }
         Expr::MemberSpread { base, .. } => substitute_expr(base, types, values),
         Expr::OptField { base, .. } => substitute_expr(base, types, values),
         Expr::Range { start, end, .. } => {

@@ -3056,7 +3056,12 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
         | Expr::Tainted(inner, _, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _) => expr_indexes_root_with(inner, root, index_var),
-        Expr::Try(inner, _, _) => expr_indexes_root_with(inner, root, index_var),
+        Expr::Try(inner, _, _, note) => {
+            expr_indexes_root_with(inner, root, index_var)
+                || note
+                    .as_deref()
+                    .is_some_and(|note| expr_indexes_root_with(note, root, index_var))
+        }
         Expr::Binary(_, left, right, _) => {
             expr_indexes_root_with(left, root, index_var)
                 || expr_indexes_root_with(right, root, index_var)

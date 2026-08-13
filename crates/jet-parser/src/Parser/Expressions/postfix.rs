@@ -150,8 +150,18 @@ impl<'a> Parser<'a> {
                     }
                     TokKind::Question => {
                         let qspan = self.bump().span;
-                        let full = Span::new(expr.span().start, qspan.end);
-                        expr = Expr::Try(Box::new(expr), full, TryConvert::None);
+                        // D-FAIL-CTX1: a same-line string immediately after `?`
+                        // is the hop note. The string expression stays in the AST
+                        // so interpolation is checked statically but evaluated only
+                        // by a failing propagation path.
+                        let note = if matches!(&self.peek().kind, TokKind::Str(_)) {
+                            Some(Box::new(self.expr_primary(false)?))
+                        } else {
+                            None
+                        };
+                        let end = note.as_ref().map_or(qspan.end, |note| note.span().end);
+                        let full = Span::new(expr.span().start, end);
+                        expr = Expr::Try(Box::new(expr), full, TryConvert::None, note);
                     }
                     // S71 (D-SG6): `base?.field` optional chaining.
                     TokKind::QuestionDot => {

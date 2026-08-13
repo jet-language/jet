@@ -2385,7 +2385,7 @@ impl<'a> Checker<'a> {
             }
             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
             Expr::Err(inner, span) => self.infer_err(inner, *span),
-            Expr::Try(inner, span, convert) => self.infer_try(inner, *span, convert),
+            Expr::Try(inner, span, convert, note) => self.infer_try(inner, *span, convert, note),
             Expr::OrFallback {
                 value,
                 fallback,

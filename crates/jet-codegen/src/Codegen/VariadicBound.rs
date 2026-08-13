@@ -347,8 +347,11 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => expr_references_ident(inner, name),
+        | Expr::Err(inner, _) => expr_references_ident(inner, name),
+        Expr::Try(inner, _, _, note) => {
+            expr_references_ident(inner, name)
+                || note.as_deref().is_some_and(|note| expr_references_ident(note, name))
+        }
         Expr::OptField { base, .. } => expr_references_ident(base, name),
         Expr::Index { base, index, .. } => {
             expr_references_ident(base, name) || expr_references_ident(index, name)

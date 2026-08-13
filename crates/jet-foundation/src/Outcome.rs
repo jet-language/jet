@@ -60,17 +60,46 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
     error.cause.as_ref().map(|cause| (**cause).clone()).map_err(|_| JetAbsent)
 }
 
-/// D-ERRCTX1=D over D-FAIL-ERROR1=A: add a human boundary without flattening
-/// the original error. The message is evaluated by the caller only on failure.
-pub fn jet_err_context(error: JetErr, message: String) -> JetErr {
-    jet_err(message, Err(JetAbsent), Ok(error))
+// D-FAIL-CTX1: shared development journey state and rendering. Each `?`
+// adapter claims its source site here, so AOT, JIT, and TIR-eval print one
+// journey vocabulary and collapse only consecutive duplicate hops.
+thread_local! {
+    static JET_JOURNEY_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-pub fn jet_context<T, F: FnOnce() -> String>(
-    outcome: JetOutcome<T, JetErr>,
-    message: F,
-) -> JetOutcome<T, JetErr> {
-    outcome.map_err(|error| jet_err_context(error, message()))
+pub fn jet_journey_reset() {
+    JET_JOURNEY_LAST.with(|last| *last.borrow_mut() = None);
+}
+
+pub fn jet_journey_frame<F: FnOnce() -> String>(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    note: F,
+) -> Option<String> {
+    let site = (fn_name.to_string(), file.to_string(), line);
+    let fresh = JET_JOURNEY_LAST.with(|last| {
+        let mut slot = last.borrow_mut();
+        if slot.as_ref() == Some(&site) {
+            false
+        } else {
+            *slot = Some(site);
+            true
+        }
+    });
+    if !fresh {
+        return None;
+    }
+    let note = note();
+    let suffix = if note.is_empty() {
+        String::new()
+    } else {
+        format!(": {note}")
+    };
+    Some(format!(
+        "error propagated from: {fn_name} ({file}:{line}) via ?{suffix}\n"
+    ))
 }
 
 pub fn jet_render_err(error: &JetErr) -> String {
@@ -126,12 +155,6 @@ mod err_tests {
             "Error [CFG404]: parse failed\n  cause: unexpected token at line 3"
         );
 
-        let contextual = jet_context::<(), _>(Err(error), || "loading config".to_string())
-            .expect_err("context preserves failure");
-        assert_eq!(
-            jet_render_err(&contextual),
-            "Error: loading config\n  cause: parse failed\n    cause: unexpected token at line 3"
-        );
     }
 }
 

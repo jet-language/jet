@@ -1076,34 +1076,35 @@ extern "C" fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        let line = format!(
-            "error propagated from: {fn_name} ({file}:{line}) via ?\n"
-        );
-        rt.stderr.push_str(&line);
+        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+            &file,
+            line as u32,
+            &fn_name,
+            || String::new(),
+        ) {
+            rt.stderr.push_str(&frame);
+        }
     });
 }
 
-extern "C" fn jet_jit_result_context(handle: i64, msg: i64) -> i64 {
+extern "C" fn jet_jit_trace_err_note(file: i64, line: i64, fn_name: i64, note: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(result) = jit_result(rt, handle) else {
-            return 0;
-        };
-        if result.ok {
-            return handle;
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        let note = rt.heap.clone_string(note).unwrap_or_default();
+        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+            &file,
+            line as u32,
+            &fn_name,
+            || note,
+        ) {
+            rt.stderr.push_str(&frame);
         }
-        let msg = rt.heap.clone_string(msg).unwrap_or_default();
-        let Some(error) = rt
-            .errors
-            .get((result.bits as i64).saturating_sub(1) as usize)
-            .cloned()
-        else {
-            return 0;
-        };
-        rt.errors
-            .push(jet_foundation::Outcome::jet_err_context(error, msg));
-        let handle = rt.errors.len() as u64;
-        alloc_jit_result(rt, false, handle)
     })
+}
+
+extern "C" fn jet_jit_trace_reset() {
+    jet_foundation::Outcome::jet_journey_reset();
 }
 
 extern "C" fn jet_jit_parse_i64(id: i64) -> i64 {
@@ -2173,6 +2174,12 @@ host_fns! {
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
+        let mut sig_trace_err_note = Signature::new(cc);
+        sig_trace_err_note.params.push(AbiParam::new(types::I64));
+        sig_trace_err_note.params.push(AbiParam::new(types::I64));
+        sig_trace_err_note.params.push(AbiParam::new(types::I64));
+        sig_trace_err_note.params.push(AbiParam::new(types::I64));
+        let sig_trace_reset = Signature::new(cc);
         let mut sig_f64_i64_i64 = Signature::new(cc);
         sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
         sig_f64_i64_i64.params.push(AbiParam::new(types::I64));
@@ -2463,7 +2470,8 @@ host_fns! {
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
     rich_panic: "jet_jit_rich_panic" => jet_jit_rich_panic: sig_rich_panic;
     trace_err: "jet_jit_trace_err" => jet_jit_trace_err: sig_trace_err;
-    result_context: "jet_jit_result_context" => jet_jit_result_context: sig_str_binary_i64;
+    trace_err_note: "jet_jit_trace_err_note" => jet_jit_trace_err_note: sig_trace_err_note;
+    trace_reset: "jet_jit_trace_reset" => jet_jit_trace_reset: sig_trace_reset;
     duration_from_int: "jet_jit_duration_from_int" => jet_jit_duration_from_int: sig_duration_int;
     duration_from_float: "jet_jit_duration_from_float" => jet_jit_duration_from_float: sig_duration_float;
     duration_in: "jet_jit_duration_in" => jet_jit_duration_in: sig_duration_int;

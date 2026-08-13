@@ -114,7 +114,17 @@ impl<'a> Checker<'a> {
         inner: &mut Box<Expr>,
         span: Span,
         convert: &mut TryConvert,
+        note: &mut Option<Box<Expr>>,
     ) -> Option<Type> {
+        if let Some(note) = note.as_mut() {
+            let saved = self.expected_type.clone();
+            self.expected_type = Some(Type::String);
+            let note_ty = self.infer(note);
+            self.expected_type = saved;
+            if let Some(note_ty) = note_ty {
+                self.check_type_assignable(&Type::String, &note_ty, note.span());
+            }
+        }
         if let Expr::Call(call) = inner.as_mut() {
             if self.registry.distinct_range(&call.name).is_some() {
                 call.range_checked = true;

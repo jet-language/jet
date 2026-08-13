@@ -546,8 +546,10 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => vec![inner.as_ref()],
+        | Expr::Err(inner, _) => vec![inner.as_ref()],
+        Expr::Try(inner, _, _, note) => std::iter::once(inner.as_ref())
+            .chain(note.as_deref())
+            .collect(),
         Expr::MapLit(entries, _) => entries
             .iter()
             .flat_map(|(key, value)| [key, value])
@@ -3822,7 +3824,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
             // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
             // new `TExprKind` needed for a single free-function call, same as the
-            // `SQL.raw`/`.context` escapes in `lower_method_call` below.
+            // `SQL.raw` escape in `lower_method_call` below.
             if matches!(kind, IndexKind::Pool) {
                 let elem_ty = match base_ty {
                     Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
@@ -4008,8 +4010,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // total sema fact — reproduce it exactly (none/Typed). The result
         // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
-        Expr::Try(inner, span, convert) => {
+        Expr::Try(inner, span, convert, note) => {
             let inner_t = lower_expr(inner, cx, env);
+            let note_t = note
+                .as_ref()
+                .map(|note| Box::new(lower_expr(note, cx, env)));
             // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
             // resolved to a Result, take its ok type; else fall back to the inner type
             // (never load-bearing in the covered subset — a `?` result feeds a binding
@@ -4032,6 +4037,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: result_ty,
                 kind: TExprKind::Try {
                     inner: Box::new(inner_t),
+                    note: note_t,
                     convert: tconvert,
                     file: escape_rust_str(&cx.file),
                     line,
