@@ -206,6 +206,235 @@ impl RegistryRow {
     }
 }
 
+/// One marker row together with the values recovered from a dedicated AST
+/// node. Block constructs keep their typed fields; this view lets tools render
+/// and reflect them without storing a second `Marker` node.
+#[derive(Debug, Clone)]
+pub struct MarkerRowAndArgs {
+    pub row: &'static RegistryRow,
+    pub negated: bool,
+    pub args: Vec<MarkerArgument>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MarkerArgument {
+    Expr {
+        label: Option<String>,
+        value: crate::AST::Expr,
+    },
+    Ident(String),
+    Idents {
+        label: Option<String>,
+        values: Vec<String>,
+    },
+    Text(String),
+    Policy(Vec<crate::Policy::PolicyDeclaration>),
+}
+
+/// Look up one marker application in the one table.
+pub fn marker_row_and_args(
+    name: &str,
+    negated: bool,
+    args: Vec<MarkerArgument>,
+) -> Option<MarkerRowAndArgs> {
+    let row = row(name)?;
+    Some(MarkerRowAndArgs { row, negated, args })
+}
+
+fn marker_arguments(marker: &crate::AST::Marker) -> Vec<MarkerArgument> {
+    marker
+        .args
+        .iter()
+        .enumerate()
+        .map(|(index, value)| MarkerArgument::Expr {
+            label: marker
+                .arg_labels
+                .get(index)
+                .and_then(|label| label.as_ref())
+                .map(|(name, _)| name.clone()),
+            value: value.clone(),
+        })
+        .collect()
+}
+
+/// Return the registry row and typed argument values for every dedicated
+/// block-construct node. The mapping is kept here so formatter, reflection,
+/// and future editor consumers share one accessor rather than matching the
+/// `Stmt` variants independently.
+pub fn block_marker(
+    stmt: &crate::AST::Stmt,
+    policies: &[crate::Policy::PolicyDeclaration],
+) -> Option<MarkerRowAndArgs> {
+    use crate::AST::Stmt;
+
+    let (name, args) = match stmt {
+        Stmt::Unsafe {
+            audit,
+            audit_expr,
+            span,
+            ..
+        } => {
+            let mut args = Vec::new();
+            if let Some(value) = audit_expr {
+                args.push(MarkerArgument::Expr {
+                    label: None,
+                    value: value.clone(),
+                });
+            } else if let Some(reason) = audit {
+                args.push(MarkerArgument::Text(reason.clone()));
+            }
+            if let Some(mode) = policies
+                .iter()
+                .find(|declaration| {
+                    declaration.key == crate::Policy::PolicyKey::Unsafe
+                        && declaration.target == Some(*span)
+                        && matches!(
+                            declaration.value,
+                            crate::Policy::PolicyValue::UnsafeTrack
+                                | crate::Policy::PolicyValue::UnsafeSkip
+                        )
+                })
+                .map(|declaration| declaration.value.display())
+            {
+                args.push(MarkerArgument::Expr {
+                    label: Some("obligations".to_string()),
+                    value: crate::AST::Expr::Ident(mode, *span),
+                });
+            }
+            (crate::Syntax::KW_UNSAFE, args)
+        }
+        Stmt::Impure {
+            reason,
+            reason_expr,
+            ..
+        } => {
+            let args = if let Some(value) = reason_expr {
+                vec![MarkerArgument::Expr {
+                    label: None,
+                    value: value.clone(),
+                }]
+            } else {
+                reason
+                    .as_ref()
+                    .map(|value| vec![MarkerArgument::Text(value.clone())])
+                    .unwrap_or_default()
+            };
+            (crate::Syntax::KW_IMPURE, args)
+        }
+        Stmt::Reactive { .. } => (crate::Syntax::KW_REACTIVE, Vec::new()),
+        Stmt::Shield { .. } => (crate::Syntax::KW_SHIELD, Vec::new()),
+        Stmt::Region { name, .. } => (
+            crate::Syntax::MARKER_REGION,
+            vec![MarkerArgument::Ident(name.clone())],
+        ),
+        Stmt::Policy { declarations, .. } => (
+            crate::Syntax::MARKER_POLICY,
+            vec![MarkerArgument::Policy(declarations.clone())],
+        ),
+        Stmt::Caps { caps, .. } => (
+            crate::Syntax::KW_CAPS,
+            vec![MarkerArgument::Idents {
+                label: None,
+                values: caps.iter().map(|(name, _)| name.clone()).collect(),
+            }],
+        ),
+        Stmt::Grant {
+            caps, binding, ..
+        } => (
+            crate::Syntax::KW_GRANT,
+            vec![MarkerArgument::Idents {
+                label: Some(binding.clone()),
+                values: caps.iter().map(|(name, _)| name.clone()).collect(),
+            }],
+        ),
+        Stmt::ContextBlock { fields, .. } => (
+            crate::Syntax::CTX_BLOCK,
+            fields
+                .iter()
+                .map(|(name, value, _)| MarkerArgument::Expr {
+                    label: Some(name.clone()),
+                    value: value.clone(),
+                })
+                .collect(),
+        ),
+        Stmt::Live { .. } => (crate::Syntax::MARKER_LIVE, Vec::new()),
+        Stmt::AssumeDet { reason_expr, .. } => (
+            crate::Syntax::MARKER_NONDETERMINISTIC,
+            vec![MarkerArgument::Expr {
+                label: None,
+                value: reason_expr.clone(),
+            }],
+        ),
+        Stmt::Transact { name, .. } => (
+            crate::Syntax::KW_TRANSACT,
+            name.iter()
+                .cloned()
+                .map(MarkerArgument::Ident)
+                .collect(),
+        ),
+        Stmt::Switched { marker, .. } => {
+            return marker_row_and_args(&marker.name, marker.negated, marker_arguments(marker));
+        }
+        _ => return None,
+    };
+    marker_row_and_args(name, false, args)
+}
+
+/// Expression markers use the same row lookup as block markers. A value-tag
+/// prefix may resolve to a fact row rather than an applied-rule row; both are
+/// still rows in the one registry.
+pub fn expression_marker(expr: &crate::AST::Expr) -> Option<MarkerRowAndArgs> {
+    match expr {
+        crate::AST::Expr::Todo { .. } => {
+            marker_row_and_args(crate::Syntax::KW_TODO, false, Vec::new())
+        }
+        crate::AST::Expr::Tainted(_, Some(name), _) => marker_row_and_args(name, false, Vec::new()),
+        _ => None,
+    }
+}
+
+/// The callable formatter's line break is a row property, not a formatter
+/// vocabulary list. The rows below retain the established readable layout;
+/// all other callable markers stay beside `fn`.
+pub fn callable_marker_needs_line_break(name: &str) -> bool {
+    let Some(row) = row(name) else { return false };
+    matches!(
+        row.name,
+        crate::Syntax::MARKER_META
+            | crate::Syntax::KW_UNSAFE
+            | crate::Syntax::MARKER_FFI
+            | crate::Syntax::MARKER_TARGET
+            | crate::Syntax::MARKER_WASM_EXPORT
+    )
+}
+
+/// The raw lexer needs this row predicate to recognize an inline foreign
+/// source string. It derives the rule from the registered signature instead of
+/// naming a marker in the lexer.
+pub fn is_inline_foreign_marker(name: &str) -> bool {
+    let Some(rule) = row(name).and_then(|row| row.rule) else {
+        return false;
+    };
+    rule.sites.len() == 1
+        && rule.sites[0] == RuleSite::Function
+        && rule.signature.params.len() == 1
+        && rule.signature.params[0].source_type == "FfiLanguage"
+}
+
+/// The lexer keeps arbitrary-precision integers only in the registered type
+/// marker whose signature identifies unit-family conversion metadata.
+pub fn is_exact_integer_metadata_marker(name: &str) -> bool {
+    let Some(rule) = row(name).and_then(|row| row.rule) else {
+        return false;
+    };
+    rule.sites.len() == 1
+        && rule.sites[0] == RuleSite::Type
+        && rule.signature.params.len() == 3
+        && rule.signature.params[0].source_type == "Ident"
+        && rule.signature.params[1].source_type == "Value"
+        && rule.signature.params[2].source_type == "Ident"
+}
+
 /// Whether a diagnostic row is currently produced by the compiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticStatus {

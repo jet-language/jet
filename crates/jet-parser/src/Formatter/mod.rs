@@ -122,7 +122,6 @@ fn format_program_with_tokens(
         pub_file: prog.pub_file,
         items: &prog.items,
         policy_declarations: &prog.policy_declarations,
-        applied_rules: &prog.applied_rules,
         fenced_statements: &prog.fenced_statements,
     };
     let mut first = true;
@@ -364,7 +363,6 @@ struct Fmt<'a> {
     pub_file: bool,
     items: &'a [Item],
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
-    applied_rules: &'a [crate::AST::AppliedRuleApplication],
     /// D-EACH1=C authored forms corresponding to expanded AST statements.
     fenced_statements: &'a [crate::AST::FencedStatement],
 }

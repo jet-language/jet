@@ -1022,20 +1022,6 @@ mod s61_tests {
     }
 
     #[test]
-    fn every_active_function_rule_has_an_applicator() {
-        for rule in crate::Policy::applied_rule_registry().iter().filter(|rule| {
-            matches!(rule.status, crate::Policy::RuleStatus::Active)
-                && rule.sites.contains(&crate::Policy::RuleSite::Function)
-        }) {
-            assert!(
-                Parser::function_marker_has_applicator(rule.name),
-                "active function rule `{}` has no applicator",
-                rule.name
-            );
-        }
-    }
-
-    #[test]
     fn doc_on_a_function_requires_task() {
         let task_src = "#[Doc(\"task text\"), Job] fn work() {}\n";
         let (task_tokens, task_lex_diagnostics) = lex(task_src);

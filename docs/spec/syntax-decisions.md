@@ -6795,3 +6795,7 @@ finite-source finding form above. This section records the other outcomes.
   named thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, parameter defaults, field defaults, and enum discriminants
   keep `=`.
+
+**2026-08-13 — D-MARK-BLOCK1=A** *(card #1606)*. Dedicated block-construct
+nodes keep their typed fields. Tools recover the registered marker row and its
+argument values through one accessor instead of storing a second marker node.
