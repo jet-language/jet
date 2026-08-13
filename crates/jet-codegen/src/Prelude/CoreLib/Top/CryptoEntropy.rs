@@ -458,10 +458,12 @@ pub(crate) fn jet_crypto_entropy_fail_closed(
     operation: &str,
     error: JetCryptoEntropyError,
 ) -> ! {
-    let internal = matches!(&error, JetCryptoEntropyError::Internal { .. });
-    jet_abort_diagnostic(jet_render_e3001_crypto(
-        &format!("{operation}: {error}"),
-        internal,
+    let message = format!("{operation}: {error}");
+    // D-FAIL-EXIT1: crypto has no private edge rule. An infallible crypto
+    // shim reports the ordinary E3001 program fault, and the execution tier's
+    // boundary owns delivery and cleanup.
+    std::panic::panic_any(jet_render_runtime_stop(
+        "E3001", "", 0, "", "", 1, 1, &message, "",
     ))
 }
 

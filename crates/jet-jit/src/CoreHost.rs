@@ -154,7 +154,7 @@ mod os_rt {
     }
 
     pub(super) use prelude_impl::{
-            jet_std_os_atexit, jet_std_os_arch, jet_std_os_cpu_count, jet_std_os_exitcode,
+            jet_std_os_arch, jet_std_os_cpu_count, jet_std_os_exitcode,
             jet_std_os_executable, jet_std_os_expand, jet_std_os_family, jet_std_os_fork,
             jet_std_os_geteuid, jet_std_os_getegid, jet_std_os_getgid, jet_std_os_getgroups,
             jet_std_os_getpgid, jet_std_os_getpgrp, jet_std_os_getppid, jet_std_os_getpriority,
@@ -162,7 +162,7 @@ mod os_rt {
             jet_std_os_kill, jet_std_os_loadavg, jet_std_os_mkfifo, jet_std_os_name,
             jet_std_os_pipe, jet_std_os_release, jet_std_os_setgid, jet_std_os_setpgid,
             jet_std_os_setpgrp, jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid,
-            jet_std_os_stop, jet_std_os_success, jet_std_os_sync, jet_std_os_temp_dir,
+            jet_std_os_success, jet_std_os_sync, jet_std_os_temp_dir,
             jet_std_os_times, jet_std_os_umask, jet_std_os_uptime, jet_std_os_username,
             jet_std_os_utime, jet_std_os_version, jet_std_os_wait, jet_std_os_waitpid,
             jet_std_os_close_fd, jet_std_os_pid,
@@ -481,14 +481,18 @@ extern "C" fn jet_jit_os_utime(path: i64, atime: i64, mtime: i64) -> i64 {
     let path = clone_string(path);
     os_rt::marshal_result(os_rt::jet_std_os_utime(&path, atime, mtime), |_| 0)
 }
-extern "C" fn jet_jit_os_atexit(_handler: i64) -> i64 {
-    // The callback handle is an engine-specific ABI value. Registration itself
-    // is owned by the Prelude; this adapter supplies the callback boundary.
-    os_rt::jet_std_os_atexit(|| {});
-    result_ok(0)
+extern "C" fn jet_jit_os_atexit(handler: i64) -> i64 {
+    if crate::runtime_host::register_jit_atexit(handler) {
+        result_ok(0)
+    } else {
+        result_err_msg("invalid resident atexit callback")
+    }
 }
 extern "C" fn jet_jit_os_stop(code: i64) {
-    os_rt::jet_std_os_stop(code)
+    // D-FAIL-EXIT1: the resident host is an in-process boundary. Keep the
+    // same soft exit record as `process.exit`; resident cleanup drains it
+    // before returning the run outcome.
+    jet_jit_process_exit(code)
 }
 
 

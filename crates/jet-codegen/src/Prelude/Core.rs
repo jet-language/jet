@@ -555,19 +555,91 @@ fn jet_scheduler_panic_should_unwind() -> bool {
 
 struct JetRuntimeExit;
 
+/// A user-requested process stop unwinds through the same boundary as a
+/// runtime report. This gives guards and deferred resource closes a chance to
+/// run before the final native exit.
+struct JetExplicitExit {
+    code: i32,
+}
+
+// Process-edge callbacks live beside the one boundary so a program that does
+// not import core.os still has a complete entry wrapper. The OS adapter only
+// registers callbacks; it never installs a second native exit path.
+mod jet_runtime_atexit {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static HANDLERS: RefCell<Vec<Box<dyn Fn() + 'static>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn register<F>(handler: F)
+    where
+        F: Fn() + 'static,
+    {
+        HANDLERS.with(|handlers| handlers.borrow_mut().push(Box::new(handler)));
+    }
+
+    pub(super) fn run() {
+        let pending = HANDLERS.with(|handlers| std::mem::take(&mut *handlers.borrow_mut()));
+        for handler in pending {
+            handler();
+        }
+    }
+}
+
+fn jet_std_os_atexit<F>(handler: std::rc::Rc<F>)
+where
+    F: Fn() + 'static,
+{
+    jet_runtime_atexit::register(move || handler());
+}
+
+fn jet_std_os_run_atexit() {
+    jet_runtime_atexit::run();
+}
+
 fn jet_runtime_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
 {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
-        Ok(value) => value,
-        Err(payload) if payload.is::<JetRuntimeExit>() => std::process::exit(70),
-        Err(payload) => std::panic::resume_unwind(payload),
+        Ok(value) => {
+            jet_std_os_run_atexit();
+            value
+        }
+        Err(payload) => {
+            jet_std_os_run_atexit();
+            if let Some(message) = payload
+                .downcast_ref::<String>()
+                .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
+            {
+                let report = jet_render_runtime_stop(
+                    "E3001", "", 0, "", "", 1, 1, message, "",
+                );
+                eprint!("{}", report.rendered);
+                std::process::exit(report.exit_code);
+            }
+            match payload.downcast::<JetRuntimeDiagnostic>() {
+                Ok(report) => {
+                    eprint!("{}", report.rendered);
+                    std::process::exit(report.exit_code);
+                }
+                Err(payload) => match payload.downcast::<JetExplicitExit>() {
+                    Ok(exit) => std::process::exit(exit.code),
+                    Err(payload) if payload.is::<JetRuntimeExit>() => std::process::exit(70),
+                    Err(payload) => std::panic::resume_unwind(payload),
+                },
+            }
+        }
     }
 }
 
 fn jet_runtime_exit() -> ! {
     std::panic::resume_unwind(Box::new(JetRuntimeExit))
+}
+
+fn jet_runtime_explicit_exit(code: i64) -> ! {
+    std::panic::resume_unwind(Box::new(JetExplicitExit { code: code as i32 }))
 }
 
 fn jet_runtime_stop(code: &str, file: &str, line: u32, msg: &str) -> ! {

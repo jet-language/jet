@@ -4961,6 +4961,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "effects/effect_levers",
         "effects/single_use_discard",
         "effects/smart_context",
+        "errors/default_err_edge",
         "errors/error_context",
         "errors/must_use",
         "errors/panic",
@@ -6044,6 +6045,28 @@ fn golden_stderr(stem: &str) -> String {
     } else {
         String::new()
     }
+}
+
+#[test]
+fn explicit_process_exit_cleanup_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    // The cleanup graph is intentionally deep enough to exceed the small
+    // default test-thread stack. Keep this focused proof on the same generous
+    // stack used by the resident-JIT coverage tests.
+    std::thread::Builder::new()
+        .name("explicit-process-exit-cleanup".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            assert_io_cli_terminal_time_three_way(
+                &example_path("io/process_exit_cleanup"),
+                "io/process_exit_cleanup",
+            );
+        })
+        .expect("cleanup parity worker")
+        .join()
+        .expect("cleanup parity worker must not panic");
 }
 
 fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {

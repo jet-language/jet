@@ -7,18 +7,18 @@
 //! | Code | Name           | Meaning                                         |
 //! |------|----------------|-------------------------------------------------|
 //! | 0    | `OK`           | success                                         |
-//! | 1    | `USER_ERROR`   | the user's program/manifest has a problem       |
+//! | 1    | `USER_ERROR`   | an unhandled entry error report, or a driver-reported user problem |
 //! | 2    | `USAGE`        | the command line was wrong (bad/missing args)   |
-//! | 70   | `RUNTIME_PANIC`| a built program stopped at runtime (`panic`)    |
-//! | 101  | `ICE`          | internal compiler error (I2: rustc rejected     |
-//! |      |                | generated code, or the compiler itself crashed) |
+//! | 70   | `RUNTIME_PANIC`| a built program breached or stopped at runtime (`panic`, `require`, or a program-side fault) |
+//! | 101  | `ICE`          | Jet's own compiler defect (I2: rustc rejected generated code, or the compiler itself crashed) |
 //!
 //! Documented in docs/spec/release-policy.md ("Exit-code table").
 
 /// Everything succeeded.
 pub const OK: i32 = 0;
 
-/// The user's program or manifest has a problem we reported with a diagnostic.
+/// The user's program returned an unhandled error report, or the driver
+/// reported a user-owned problem.
 pub const USER_ERROR: i32 = 1;
 
 /// The command line itself was wrong: unknown command, missing argument, or a
@@ -26,11 +26,12 @@ pub const USER_ERROR: i32 = 1;
 /// "I called jet wrong" apart from "my program has a bug".
 pub const USAGE: i32 = 2;
 
-/// A built program stopped at runtime via `panic`/`require`/an index fault.
-/// Emitted by the generated runtime (`jet_panic`), surfaced by `jet run`.
+/// A built program breached or stopped at runtime via `panic`/`require`, an
+/// index fault, or another program-side fault. Emitted by the generated
+/// runtime and surfaced by `jet run`.
 pub const RUNTIME_PANIC: i32 = 70;
 
-/// Internal compiler error (invariant I2): rustc rejected the Rust we
-/// generated, or the compiler hit a state it should never reach. Never the
-/// user's fault.
+/// Jet's own compiler defect (invariant I2): rustc rejected the Rust we
+/// generated, or the compiler hit a state it should never reach. Never a
+/// user-program exit.
 pub const ICE: i32 = 101;

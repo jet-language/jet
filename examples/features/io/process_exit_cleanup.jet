@@ -1,0 +1,24 @@
+// D-FAIL-EXIT1: explicit process termination runs the one cleanup boundary.
+use core.os as os
+use core.process as process
+use core.scope as scope
+
+struct Resource { name: String }
+
+impl Resource.Close {
+    fn close(^self) {
+        print("close {self.name}")
+    }
+}
+
+fn run() {
+    #Unsafe("the exit callback has no captured state") {
+        os.atexit(() => print("atexit"))
+    }
+    outer :: scope.guard(() => print("guard outer"))
+    inner :: scope.guard(() => print("guard inner"))
+    resource := Resource.{ name: "resource" }
+    defer close(^resource)
+    print("body")
+    process.exit(0)
+}

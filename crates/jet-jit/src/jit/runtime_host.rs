@@ -130,6 +130,9 @@ pub(crate) struct JitRuntime {
     /// Runtime function values. Negative words are explicit callable handles;
     /// raw Cranelift addresses are normalized at the boundary before a call.
     pub(crate) jit_callables: Vec<JitCallableSlot>,
+    /// Process-edge callbacks. The resident adapter invokes these after all
+    /// generated scope cleanup and before it returns the run outcome.
+    pub(crate) atexit_handlers: Vec<JitCallableSlot>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     pub(crate) task_groups: Vec<Option<super::Concurrency::JitTaskGroup>>,
@@ -1690,6 +1693,39 @@ fn jit_callable_index(handle: i64) -> Option<usize> {
 
 fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
     jit_callable_index(handle).and_then(|index| rt.jit_callables.get(index).copied())
+}
+
+pub(crate) fn register_jit_atexit(handler: i64) -> bool {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = jit_callable_slot(rt, handler) else {
+            rt.set_trap("invalid resident atexit callback");
+            return false;
+        };
+        rt.atexit_handlers.push(slot);
+        true
+    })
+}
+
+/// Invoke the callbacks in registration order. The generated function value
+/// ABI is either `extern "C" fn()` or `extern "C" fn(i64)` when it carries
+/// the resident environment handle.
+pub(crate) fn run_jit_atexit_handlers(rt: &mut JitRuntime) {
+    let handlers = std::mem::take(&mut rt.atexit_handlers);
+    for handler in handlers {
+        // SAFETY: `fn_ptr`, `env`, and `has_env` are written together by the
+        // checked JIT callable binder. The callback signature is the zero-arg
+        // `atexit` signature, with the environment word prepended only for a
+        // captured closure.
+        unsafe {
+            if handler.has_env {
+                let callback: extern "C" fn(i64) = std::mem::transmute(handler.fn_ptr as usize);
+                callback(handler.env);
+            } else {
+                let callback: extern "C" fn() = std::mem::transmute(handler.fn_ptr as usize);
+                callback();
+            }
+        }
+    }
 }
 
 fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) -> i64 {

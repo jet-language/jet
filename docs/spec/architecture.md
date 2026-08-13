@@ -714,10 +714,10 @@ contract — codes are never repurposed.
 | Code | Meaning | Who produces it |
 |------|---------|-----------------|
 | `0`   | Success. (Includes the no-args greeting — orientation, not an error.) | driver |
-| `1`   | User error: a reported diagnostic, a failed `check`, a missing file, a failed `test`. | driver |
+| `1`   | An unhandled entry error report, or a driver-reported user problem such as a failed `check`, missing file, or failed `test`. | entry boundary or driver |
 | `2`   | Usage error: unknown subcommand (E2101), unknown/ambiguous flag (E2102), or a missing required argument. | driver |
-| `70`  | A built program panicked at runtime (`panic`/`require`, S36). Forwarded through by `jet run`. | the user's program |
-| `101` | Internal compiler error (I2/R5): rustc rejected generated code. A P0 bug, never the user's fault. | driver |
+| `70`  | A built program breached or stopped at runtime (`panic`/`require`, S36, or another program-side fault). Forwarded through by `jet run`. | the user's program / Prelude boundary |
+| `101` | Jet's own compiler defect (I2/R5): rustc rejected generated code or the compiler reached an impossible state. Never a user-program exit. | compiler |
 
 Presentation is TTY-aware (E2-M3): color and progress appear only when
 the relevant stream is a terminal. `NO_COLOR` and `--color=never` force

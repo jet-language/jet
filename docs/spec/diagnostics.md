@@ -235,7 +235,6 @@ renumbered, and no new `W` code may be allocated.
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a parameter without the move-capability marker `^` |
 | E0121 | sema  | value used after it was given away        |
-| E0122 | sema  | retired by D-FAIL-EXIT1; `run` is fallible by default and may return the program |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
@@ -506,7 +505,7 @@ renumbered, and no new `W` code may be allocated.
 | E0769 | sema   | a label-only parameter, declared after `*`, was passed by position (D-APILABEL1) |
 | E0770 | parser | two parameters publish the same call label, so the second could never be called (D-APILABEL1) |
 | E0771 | sema   | a function value's public call labels or parameter zones do not satisfy the expected function type (D-APILABEL1) |
-| E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
+| E3001 | runtime | program-side runtime breach with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return journey frame on a `?`-propagated failure, with an optional hop note (E2-M12, D-OBS1, D-FAIL-CTX1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
 | E3004 | runtime | task cancelled at a cooperative wait point (D-CANCELMODEL1) |
@@ -1378,7 +1377,7 @@ span is embedded in the message (Jet file + line + function name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled entry error prints the same full report. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled error. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure, or handle the returned error. Reported entry failures exit 1; program-side faults exit 70; exit 101 is reserved for Jet defects. |
+| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). An unhandled entry error is a returned report, not E3001. | Fix the logic that led to the failure. Program-side stops exit 70; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` with an optional `: {note}` suffix — one journey frame appended when a `?` re-raises an error. | Each failed `?` joins the failure's journey, with or without a note, making the full error path visible. | Follow the journey from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |

@@ -350,6 +350,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         || stem == "memory/rawptr"
         || stem == "memory/pin"
         || stem == "io/os_process_control"
+        || stem == "io/process_exit_cleanup"
         || stem == "effects/single_use_discard"
         || stem == "memory/uninit"
         || stem == "crypto/crypto_migration"

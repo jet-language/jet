@@ -85,7 +85,7 @@ impl<T: Send> Iterator for JetStreamIter<T> {
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.stream.pull();
         if value.is_none() && self.stream.failed() {
-            std::process::exit(70);
+            jet_scheduler_runtime_stop("stream producer failed");
         }
         value
     }

@@ -41,9 +41,15 @@ pub fn jet_scheduler_panic_should_unwind() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
 
+fn jet_scheduler_edge_exit(code: i32) -> ! {
+    // The scheduler has no resident runtime to return through. This is its
+    // one process edge; AOT uses Prelude/Core.rs for the same law.
+    std::process::exit(code);
+}
+
 fn jet_runtime_diagnostic(rendered: String) -> ! {
     eprintln!("{rendered}");
-    std::process::exit(70);
+    jet_scheduler_edge_exit(jet_foundation::ExitCodes::RUNTIME_PANIC);
 }
 
 fn jet_scheduler_runtime_stop(msg: &str) -> ! {

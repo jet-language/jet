@@ -1283,8 +1283,8 @@ this process and machine.
 | `getpriority(who)` | `Int ? IOError` | Nice value for process `who` (`0` = self) |
 | `setpriority(who, prio)` | `() ? IOError` | Set nice value for process `who` |
 | `utime(path, atime, mtime)` | `() ? IOError` | Set access / modification times |
-| `stop(code)` | never returns | Exit this process with `code` |
-| `atexit(handler)` | `()` | Register a process-exit callback |
+| `stop(code)` | never returns | Request process termination through the same cleanup boundary as `process.exit(code)` |
+| `atexit(handler)` | `()` | Register a process-exit callback; callbacks run in registration order |
 | `set_current_dir(path)` | `() ? IOError` | Change process working directory |
 | `on_interrupt(handler)` | `()` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
 
@@ -1366,6 +1366,21 @@ fn run() {
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
 `stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
 `terminal()` or `terminal(policy)`.
+
+#### Explicit termination cleanup law
+
+`process.exit(code)` and `os.stop(code)` use one explicit-stop boundary. The
+boundary unwinds the active Jet scopes before it returns the final code:
+
+- `defer close(^resource)` actions run in reverse declaration order.
+- `scope.guard` closures run in reverse registration order.
+- `os.atexit` handlers run in registration order after scope cleanup.
+
+Deferred closes run before scope guards. The exit code is returned only after
+these actions finish. Statements after the stop do not run. A guard, deferred
+close, or `atexit` handler registered after the stop is not registered and does
+not run. A host kill or abort is outside this law and skips all three cleanup
+mechanisms.
 `mode` is one of the three stream-mode dot-literals: `.Stream` (pipe it —
 drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
 parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at

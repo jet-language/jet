@@ -28,6 +28,10 @@
 // E0432 teaching diagnostic; it never resolves as a type.
 // D-FAIL-BIND1=A: core_surface::AMBIENT_ERR owns the contextual lowercase
 // `err` binder inside a fallible `??` fallback. It is not a lexer keyword.
+// D-FAIL-EXIT1=A / D-FAIL-EDGE1=A (ratified 2026-08-06, cards #1533/#1536)
+// add no token: `fn run()` is the default-fallible entry, and the build target
+// selects the final report boundary. CLI, web, wasm, and service adapters
+// carry one report with target-native delivery.
 //
 // D-APILABEL1=A adds the two parameter-zone separators
 // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in

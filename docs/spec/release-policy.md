@@ -110,15 +110,15 @@ registry protocol: v1
 
 `jet` returns a stable, documented exit code so shells and CI gates can branch
 on the outcome without parsing text. The numbers never change meaning. The
-single source of truth is `Source/ExitCodes.rs`.
+single source of truth is `crates/jet-foundation/src/ExitCodes.rs`.
 
 | Code | Name           | Meaning                                                |
 |------|----------------|--------------------------------------------------------|
 | 0    | `OK`           | success                                                |
-| 1    | `USER_ERROR`   | the user's program or manifest has a problem we reported with a diagnostic |
+| 1    | `USER_ERROR`   | an unhandled entry error report, or a driver-reported user problem |
 | 2    | `USAGE`        | the command line itself was wrong (unknown command, missing/invalid argument or flag) |
-| 70   | `RUNTIME_PANIC`| a built program stopped at runtime (`panic`, `require`, an index fault); emitted by the generated runtime `jet_panic` |
-| 101  | `ICE`          | internal compiler error (invariant I2): rustc rejected generated code, or the compiler hit an impossible state — never the user's fault |
+| 70   | `RUNTIME_PANIC`| a built program breached or stopped at runtime (`panic`, `require`, an index fault, or another program-side fault); emitted by the Prelude boundary |
+| 101  | `ICE`          | Jet's own compiler defect (invariant I2): rustc rejected generated code, or the compiler hit an impossible state — never a user-program exit |
 
 `USER_ERROR` (1) and `USAGE` (2) are deliberately distinct: "my program has a
 bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.

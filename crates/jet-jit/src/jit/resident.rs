@@ -56,6 +56,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         next_option_lift2_thunk: 0,
         next_shared_txn_thunk: 0,
         jit_callables: Vec::new(),
+        atexit_handlers: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
         task_groups: Vec::new(),
@@ -150,6 +151,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.next_stream_sender = -1;
     rt.stack_depth = 0;
     rt.jit_callables.clear();
+    rt.atexit_handlers.clear();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
@@ -312,6 +314,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::close_active_task_groups();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
+        super::runtime_host::run_jit_atexit_handlers(runtime);
         jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
         Concurrency::clear_http_shared_runtime();

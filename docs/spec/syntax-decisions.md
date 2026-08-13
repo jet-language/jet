@@ -6891,6 +6891,12 @@ finite-source finding form above. This section records the other outcomes.
 nodes keep their typed fields. Tools recover the registered marker row and its
 argument values through one accessor instead of storing a second marker node.
 
+**2026-08-13 — D-FAIL-EXIT1=A / D-FAIL-EDGE1=A implementation log**
+*(cards #1533/#1536)*. The default-fallible `fn run()` uses the generic entry
+report and exit-1 path. Program-side stops and explicit process termination
+cross the shared Prelude boundary; target adapters carry that report in their
+native shape. No source spelling changed.
+
 **M03 marker ballot migration — D-MARK-FORM1=A, D-MARK-REPEAT1=A,
 D-IMPURE-REASON1=B, D-SQL-ARG1=B, and D-HTML-NAME1=B** *(cards #1457 and
 #1461)*: marker declarations use one ordinary named parameter list. `#Impure`

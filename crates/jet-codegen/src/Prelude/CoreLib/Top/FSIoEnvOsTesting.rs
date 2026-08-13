@@ -945,7 +945,7 @@ fn sanitize_test_name(name: &str) -> String {
 }
 
 fn jet_std_process_exit(code: i64) -> ! {
-    std::process::exit(code as i32)
+    jet_runtime_explicit_exit(code)
 }
 fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     jet_process_spec_run(&jet_std_process_cmd(cmd))

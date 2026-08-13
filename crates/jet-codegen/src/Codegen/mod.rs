@@ -215,8 +215,7 @@ fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
         concat!(
             "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\n",
             "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n",
-            "    let message = if message.is_null() {{ \"panic: a foreign function panicked\".into() }} else {{ String::from_utf8_lossy(unsafe {{ std::slice::from_raw_parts(message, len) }}).into_owned() }};\n",
-            "    eprintln!(\"{{message}}\");\n",
+            "    let _ = (message, len);\n",
             "}}\n",
             "// JET_VETTED_UNSAFE_END: ffi_reporter\n",
             "fn jet_ffi_install_reporter() {{ {}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n"
