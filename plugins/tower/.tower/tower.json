@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1965,
-    "rev": 36322,
+    "rev": 36346,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-13T20:19:13.791Z"
+    "completionCursor": "2026-08-13T20:25:09.139Z"
   },
   "epochs": [
     {
@@ -82679,12 +82679,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Implement the ratified outcome of D-LIB-REUSE1 (card #1421). Baseline shape if A wins: the compiler emits per-package compile actions into the jetpack action IR (E4-JP2); artifact identity covers package sources, dependency artifact digests, compiler identity, target, and profile; dependency artifacts restore from local or shared caches (E4-JP5) and link statically; generic bodies travel as typed IR in the artifact and instantiate at use sites; per-package sema summaries cache with dependent-only invalidation (extends docs/plans/compiler-speed.md jet-queries promotion); no cache path bypasses parsing, sema, policy, or diagnostics (JP2 law). Extends the planned precompiled stdlib object store from stdlib-only to all packages.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-cache; implementing per-package compile actions and dependency artifact cache proofs."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -82779,8 +82784,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T19:37:16.261Z",
-      "updated": "2026-08-12T18:17:20.952Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:29:38.202Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0dxl32d",
@@ -82979,12 +82984,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: D-CALLVALUE1=B. Any call result requires a chained .call(...) to invoke again; ')(' directly after a call is a parse error with a fix-it inserting '.call'. Function-typed values gain a builtin .call(...) member; a struct member literally named 'call' shadows it. Direct calls on plain names/fields/index/lambdas are unchanged. Out of scope: D-CALLVALUE1 options A/C/D, autodiff (#1428-1436).\nApproach:\n1. crates/jet-parser/src/Parser/Expressions/postfix.rs: in the postfix call loop, when '(' follows an already-built Call node, stop building a second Call directly; emit the new E0xxx diagnostic (docs/spec/diagnostics.md 'Adding a diagnostic', next free code near the E09xx call family) with a fix-it that inserts '.call' before the parens, mirroring the retired_callable_arrow teaching pattern in crates/jet-parser/src/Parser/Statements/conditionals.rs:104-128.\n2. crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs: give every function-typed receiver a builtin 'call' member whose signature mirrors the callee's parameter/return contract; resolve struct member lookup first so a user field/method named 'call' wins (same precedence pattern already used for builtin collection methods).\n3. Lower '.call' identically at every tier per I9: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (AOT/JIT shared TIR lower), crates/jet-jit/src/jit/lower_ctx.rs if JIT has a separate lowering path, and crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs (interpreter/comptime). '.call(args)' lowers to the same underlying call-of-value the parser used to accept directly -- no new runtime semantics, so verify all three tiers already share one lowering before adding tier-specific code.\n4. crates/jet-parser/src/Formatter/Items.rs (or Expressions formatter): print the retained '.call' node; add a fmt STABILITY case in tests/fmt.rs using assert_fmt_stable.\n5. Register the diagnostic in docs/spec/diagnostics.md and add tests/ui/<code>_call_result_not_called.jet + .stderr snapshot (pattern: tests/ui/E0927_unknown_marker_function.jet).\n6. editors/tree-sitter/grammar.js, editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/grammars: regenerate via 'jet self devtools grammars' (Source/CmdDevTools.rs) so '.call' highlights as a builtin member; do not hand-edit generated output.\n7. Source/LSP/Features.rs: add 'call' to member-completion for function-typed receivers.\n8. Add/extend an example under examples/features/ (a function returning a function, invoked via .call) with golden output in examples/features/expected/; prove it under both jet build and jet run per I9.\n9. docs/spec/syntax-decisions.md: append a dated D-CALLVALUE1=B decision-log entry following the existing '**YYYY-MM-DD -- D-ID=Outcome**: ...' format at the end of the Decision log section, naming the implementing card.\nProof:\n- scripts/agent/jet-env cargo test --test diagnostic_snapshots -- call_result (new E-code fixture)\n- scripts/agent/jet-env cargo test --test fmt -- call_value (new stability case)\n- scripts/agent/jet-env cargo test --test grammar\n- scripts/agent/jet-env cargo test --test golden -- <new example name>\n- scripts/agent/jet-env jet run examples/features/<new-or-updated-example>.jet (I9: AOT + jet run agree; interpreter path exercised if deopt reachable)\nOwned paths: crates/jet-parser/src/Parser/Expressions/postfix.rs, crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs, crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs, crates/jet-jit/src/jit/lower_ctx.rs, crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs, crates/jet-parser/src/Formatter/Items.rs, Source/LSP/Features.rs, editors/**, docs/spec/diagnostics.md, docs/spec/syntax-decisions.md, tests/ui/*, tests/fmt.rs, examples/features/**.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-call; implementing canonical returned-function .call."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-syntax",
@@ -83073,8 +83083,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T10:54:53.602Z",
-      "updated": "2026-08-12T18:11:27.828Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:32:38.741Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 720
     },
     {
@@ -84004,12 +84014,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Prelude bignum representation + arithmetic. 2) Sema literal/width rules. 3) All-tier wiring per I9. 4) Fixed-width trap + range diagnostics. 5) Examples + golden incl. factorial(25). 6) Targeted perf smoke on small-int path.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-bigint; implementing arbitrary-precision default Int with fixed-width boundaries."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -84095,8 +84110,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.858Z",
-      "updated": "2026-08-12T18:11:29.512Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:32:44.783Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 320
     },
     {
@@ -84347,12 +84362,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m06-names-core",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: D-COLLNAME1=A. Rename table (old -> new): Deque -> Queue, SortedSet -> Rank, Bag -> Tally, BitSet -> Bits, ByteBuffer -> Bytes. Unchanged: Set, PriorityQueue, Cache (TYPE_LRU), HashMap, BTreeMap. Greenfield: delete every old spelling repo-wide in one change, no aliases.\nApproach:\n1. crates/jet-foundation/src/Syntax/math_layout.rs: rename the string values of TYPE_DEQUE ('Deque'->'Queue'), TYPE_SORTED_SET ('SortedSet'->'Rank'), TYPE_BIT_SET ('BitSet'->'Bits'), TYPE_BYTE_BUFFER ('ByteBuffer'->'Bytes'). 'Bag' is currently a bare string literal, not a Syntax.rs constant (I7 gap) -- add pub const TYPE_TALLY: &str = \"Tally\" and route every Bag use through it, closing the gap in the same change.\n2. crates/jet-foundation/src/Collections.rs: RESERVED_TYPES list (line ~9-40) and the Bag/Deque match arms at lines ~378, ~1734, ~2307 -- switch the bare 'Bag' literal to Syntax::TYPE_TALLY and use the renamed constants.\n3. Sweep every matched-name site: crates/jet-sema/src/Sema/CheckerCore/type_assign.rs:286-288, crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:202, crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs (~1398-1441), crates/jet-codegen/src/Codegen/Context.rs:2078-2084, crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:142,642, crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (multiple), crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:507-533, crates/jet-codegen/src/Codegen/TIR/subset/types.rs:294, crates/jet-codegen/src/Codegen/TIR/eval/closure_ops.rs:438, crates/jet-codegen/src/Codegen/TIR/tests.rs:844-860, crates/jet-comptime/src/Comptime/CollectionEval.rs (Bag/SortedSet/PriorityQueue/Deque match arms), crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:207-1158, crates/jet-jit/src/jit/safety.rs (Deque/SortedSet/PriorityQueue/Bag arms), crates/jet-jit/src/jit/lower_ctx.rs (Bag/Deque/PriorityQueue/SortedSet arms), crates/jet-jit/src/jit/types_meta.rs:196-197. Replace every bare string match with the Syntax.rs constant where one exists (I7); update literal renames elsewhere.\n4. crates/jet-codegen/src/Prelude/Core/Collections.rs and crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs: rename the Rust-side struct/impl identifiers that carry the old English word in doc comments or generated type names (JetBitSet/JetByteBuffer internal names may stay as Rust identifiers -- only the user-facing Jet type name string changes; do not rename Rust internals unless a comment surfaces the old word as the taught name).\n5. examples/features/collections/deque.jet -> rename file and its Jet type usages to Queue; examples/features/collections/set.jet, examples/features/collections/iter_tools_audit.jet, examples/types/nested_enum_groups.jet: update any Deque/SortedSet/Bag/BitSet/ByteBuffer usages. Update matching goldens in examples/features/expected/.\n6. tests/fuzz/sema/differential/ex_collections_deque.jet -> rename/update; tests/fuzz/sema/valid/ex_collections_iter_tools_audit.jet; tests/ui/incomparable_eq.*, tests/ui/missing_assoc_type.*: update any renamed type text. tests/cli.rs, tests/comptime_core_pure_parity.rs, tests/comptime_diff.rs, tests/dev.rs, tests/fuzz_sema.rs, tests/golden.rs, tests/parity.rs, tests/tir_collections_and_methods.rs: update references.\n7. docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/python-surface.json, docs/spec/syntax-decisions.md, docs/audits/isomorphic-ontology-audit-2026-07-27.md, docs/audits/isomorphic-ontology-audit-2026-07-28.md, docs/archive/syntax-law-source-status-matrix-2026-07-07.md (archive: leave historical text, do not rewrite archived record): update the live docs; append the D-COLLNAME1=A decision-log entry to docs/spec/syntax-decisions.md.\n8. editors/tree-sitter, editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/grammars: regenerate via 'jet self devtools grammars' since these are reserved type names in highlighting lists.\nProof:\n- rg -n \"\\\\bDeque\\\\b|\\\\bSortedSet\\\\b|\\\\bByteBuffer\\\\b|\\\\bBitSet\\\\b\" crates/ Source/ examples/ docs/ tests/ | grep -v docs/archive -> zero hits (Bag is excluded from this grep since 'Bag' also appears as an English word in unrelated prose; instead grep for the Syntax constant usage sites individually before/after)\n- scripts/agent/jet-env cargo build (whole workspace compiles clean after the rename)\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env cargo test --test golden -- collections\n- scripts/agent/jet-env cargo test --test parity -- collections\n- scripts/agent/jet-env cargo test --test grammar\n- scripts/agent/jet-env jet run examples/features/collections/queue.jet (renamed) and the Tally/Rank/Bits/Bytes examples, comparing AOT vs jet run output (I9)\nOwned paths: crates/jet-foundation/src/Syntax/math_layout.rs, crates/jet-foundation/src/Collections.rs, crates/jet-sema/**, crates/jet-codegen/**, crates/jet-comptime/**, crates/jet-jit/**, examples/features/collections/**, examples/types/nested_enum_groups.jet, examples/features/expected/**, tests/fuzz/**, tests/*.rs (listed above), docs/reference/**, docs/spec/syntax-decisions.md, editors/**.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M06 collection-name migration in bd-wave-m06-names; completing ratchet and parity blockers."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-corelib",
@@ -84420,8 +84440,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T17:23:16.931Z",
-      "updated": "2026-08-12T18:11:08.984Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:28:04.754Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 120
     },
     {
@@ -85205,12 +85225,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: D-JOB-NAME1 outcome A. Unify on job. The #Job marker keyword already matches; rename the CLI to match it: --task/--task= becomes --job/--job=, and jet tasks becomes jet jobs. No alias, no deprecated flag left behind. Out of scope: the typed scope enum and subcommand dispatch (#1449, sequenced after this card).\n\nApproach:\n1. Source/main.rs (:998-1019, --task/--task= flag parsing): rename to --job/--job=. Update the dispatch at :2246-2255 that calls run_task_entry accordingly (function itself can keep its Rust name or be renamed to run_job_entry — prefer renaming for clarity since D-JOB-NAME1 also settles internal vocabulary drift, not just the CLI surface).\n2. Source/main.rs (:1263-1270, jet tasks subcommand) and Source/CmdCompile.rs run_tasks (:976-1010) / list_task_names (:944-975, doc-tagged D-TASKS-LIST1=A): rename the subcommand from tasks to jobs. Update the D-TASKS-LIST1 doc comment to note it is now reached via jet jobs.\n3. Source/CmdCompile.rs run_task_entry (:804-897, doc-tagged D-JPK-TASKRUN1): rename references from \"task\" to \"job\" in comments and any user-facing strings (error text, --help), keep the doc-tag D-JPK-TASKRUN1 as historical provenance unless the mechanism itself changes under #1449.\n4. crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928 reserved-lifecycle-name guard): update diagnostic text if it says \"task\" anywhere; keep the reserved-name list (run/dev/build/test) as-is, this card does not touch job semantics.\n5. CLI help/completion goldens: tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt — regenerate for the --job/jet jobs rename.\n6. Grep every remaining \"--task\" / \"jet tasks\" / \"run_task\" / \"list_task_names\" mention across Source/, crates/, docs/, examples/, tests/ and migrate each one in this change; do not leave a --task alias.\n7. docs/spec/syntax-decisions.md: add \"D-JOB-NAME1=A — unify on job\" entry, same log format as the existing D-SCHEDULE1 entry (around :5059).\n\nProof:\n- scripts/agent/jet-env cargo test --test jetpack_tasks\n- scripts/agent/jet-env cargo test --test jetpack_tool\n- scripts/agent/jet-env cargo test --test cli\n- scripts/agent/jet-env jet run examples/features/devloop/task_runner.jet -- --job <name-from-fixture> (manual smoke of the renamed flag)\n- scripts/agent/jet-env jet jobs examples/features/devloop/task_runner.jet (manual smoke of the renamed subcommand)\n- scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ crates/ docs/ examples/ tests/ (zero hits)\n\nOwned paths: Source/main.rs, Source/CmdCompile.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt, tests/cli.rs, tests/jetpack_tasks.rs, tests/jetpack_tool.rs, docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 job-vocabulary migration in bd-wave-m07-jobnames; completing fixtures and targeted parity."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -85297,8 +85322,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.352Z",
-      "updated": "2026-08-12T18:13:19.733Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:28:07.492Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 760
     },
     {
@@ -85649,12 +85674,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: D-BENCH-PARITY1 outcome B. jet bench accepts the same targets jet test already does: a file, a directory (walked recursively), or a project, plus --filter for region names by name. Benches still always run one at a time, serially, for timing integrity. Assertion-only test flags (--shuffle, --coverage, --update-snapshots) stay test-only. Multi-file output is one line per region plus a per-file heading; --json emits one record per region. A standing rule pins the two commands together going forward: future runner-surface changes apply to both or name an explicit carve-out. Out of scope: the fn bench(suite) override itself (#1451, recommended to land after this card so it reuses this card's discovery/filter pass instead of duplicating it).\n\nApproach:\n1. Port the existing TestRunOpts shape (Source/CmdCompile.rs :1207-1218: update_snapshots, coverage, filter: Option<String>, shuffle_seed: Option<u64>, serial: bool) into a bench-only options struct in Source/CmdDevTools.rs — only filter and an implicit always-serial flag apply to bench; coverage/update_snapshots/shuffle_seed are test-only per the ratified carve-out and must not appear on the bench struct.\n2. Port collect_test_files_recursive (Source/CmdCompile.rs :1273-1289, skips build/ and dot-dirs) into Source/CmdDevTools.rs (or a shared helper both files call, if that's the smaller diff — prefer a shared helper under Source/ so #1452's standing \"future changes apply to both\" rule has one place to change) and reuse it for bench's directory walk.\n3. Source/CmdDevTools.rs run_bench (:2447-2530): replace the single-file-only fn run_bench(file: &str, mode: OutputMode) with a directory/project-aware entry point mirroring Source/CmdCompile.rs run_test_opts's dir branch (:1242-1268) — p.is_dir() walks recursively via the shared helper, sorts paths, benches every file, aggregates a summary.\n4. Add --filter to Source/main.rs's bench argument parsing (today minimal, no flag-parsing block comparable to test's at :2069-2110) — thread it to jet::has_bench_blocks / run_bench_regions (Source/CmdDevTools.rs :2532-2551) the same way JET_TEST_FILTER threads to the generated test harness (Source/CmdCompile.rs :1367-1369), matching region names post-discovery.\n5. Bare-entry / project-root resolution: Source/main.rs (:1996-2010, resolve_bare_entry(\"test\",...) vs the partial bare_bench_entry) — extend bench's bare-entry path to the same directory/project walk as test's, not just a single resolved file.\n6. Multi-file output: one line per region plus a per-file heading (per the ratified technical note, to avoid filter-name collisions across files) — path-qualify region names in both human and --json output.\n7. --json: one record per region (mirror whatever shape jet test --json already emits per test, adjusted for bench's timing fields).\n8. Explicitly do NOT add --shuffle, --coverage, --update-snapshots to bench — these are named test-only in the ratified text; if the CLI flag parser is shared code, gate them behind the command (test vs bench) rather than deleting the parser.\n9. docs/spec/syntax-decisions.md: add \"D-BENCH-PARITY1=B — bench runner parity with test\" log entry documenting the standing pairing rule for future runner changes, so the next agent who touches jet test's target resolution knows to check bench too (and vice versa).\n\nProof:\n- scripts/agent/jet-env cargo test --test jet_test (must stay green — this card must not regress test's own behavior while sharing helpers)\n- new scripts/agent/jet-env cargo test --test jet_bench (add this test file mirroring tests/jet_test.rs's directory/filter coverage, since none exists today)\n- scripts/agent/jet-env jet bench examples/features/ (manual smoke: directory target, was previously an error)\n- scripts/agent/jet-env jet bench examples/features/ --filter=<a-real-region-name> (manual smoke: name selection, was previously unsupported)\n- scripts/agent/jet-env jet bench . --json (manual smoke: one record per region across the project)\n- scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-update-snapshots\" Source/CmdDevTools.rs (zero hits — confirms the test-only carve-out held)\n\nOwned paths: Source/CmdDevTools.rs, Source/CmdCompile.rs (shared helper extraction only), Source/main.rs, tests/jet_bench.rs (new), docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 benchmark lane in bd-wave-m07-bench; completing project/filter/flag behavior."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -85745,8 +85775,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:21:44.499Z",
-      "updated": "2026-08-12T18:13:23.072Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:28:12.544Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 810
     },
     {
@@ -85758,12 +85788,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: D-LOOP-STMT-ARROW1=C. In statement position every loop header (finite-source, condition-only, bare infinite, state loop) accepts an arrow body '-> statement' and the yielded value is discarded; a non-unit discarded value gets a lint naming ':: collection' and the '&' write-handle form ('loop v, &values -> v *= 2'). Value position (loop producing a collected list, D-LOOPEVAL1) is unchanged: still finite source + non-unit yield only. The body picks arrow-vs-block by line width per the shared rule with D-BODY-ARROW1 (companion card #1454) -- implement together where practical since both touch the same formatter width rule. Out of scope: value-position restrictions, the write-handle '&' mechanism itself if not already implemented (check crates/jet-foundation memory-model status first; if the '&' write handle does not exist yet, the lint text still names it but the mechanism is a separate card -- do not invent it here).\nApproach:\n1. crates/jet-parser/src/Parser/Statements/control.rs: 'effect_loop_body' (~line 1330) currently hard-errors on TokKind::Arrow with 'this effect-only loop uses a result arrow' and requires a brace block (~line 1330-1364). Replace: when the body is a single statement that fits one line, accept '-> stmt' and wrap it as a one-statement Vec<Stmt>; when it does not fit one line or the next token is '{', keep the existing brace-block path. This applies uniformly across all three call sites of effect_loop_body: the infinite loop (line ~1207 uses block_stmts directly, needs the same arrow branch added), the state/counted loop (~1247), the iteration loop (~1307), and the conditional loop (~1320).\n2. Add the non-unit-discard lint: when the parsed arrow body's expression statement has a non-unit type (sema-checked, not parser-checked -- flag the node and let crates/jet-sema surface the lint) reading '::' for collection and '&' for write-in-place, matching the exact wording in D-LOOP-STMT-ARROW1's code sample.\n3. crates/jet-parser/src/Formatter/Items.rs: emit '-> stmt' for a loop body that is one statement and fits the configured line width; otherwise widen to a brace block with one statement per line (S6). Add a fmt STABILITY case per form in tests/fmt.rs (assert_fmt_stable), covering all four loop header kinds.\n4. Delete the retired-arrow diagnostic path for loops once the new rule lands (the 'this effect-only loop uses a result arrow' error text and its teach_control_braces call become dead for loops specifically; conditionals.rs's analogous if-statement path is card #1454's responsibility, do not touch it here unless sharing a helper forces a joint edit -- coordinate via the shared helper, do not duplicate it).\n5. editors/tree-sitter/grammar.js, editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json: regenerate via 'jet self devtools grammars' if the loop-arrow shape needs a new grammar rule (loops already accept '->' in value position, so this may only need highlighting/precedence confirmation, not a new token).\n6. Source/LSP/Features.rs: confirm completion/hover for loop bodies is not spelling-specific; update only if it hardcodes brace-only loop bodies.\n7. Add/extend an example under examples/features/ demonstrating a one-line arrow-bodied loop in statement position (e.g. 'loop job, jobs -> print(job)'), golden output in examples/features/expected/, proven under jet build (AOT) and jet run (JIT) per I9; exercise the interpreter path if the example can reach deopt.\n8. crates/jet-foundation/src/Syntax.rs: confirm the Arrow token's decision-id comment is updated/cross-referenced to D-LOOP-STMT-ARROW1 alongside its existing D-ARROW-CONTROL1/D-LOOPEVAL1 references (no new sigil, so no new constant).\n9. docs/spec/syntax-decisions.md: append the dated D-LOOP-STMT-ARROW1=C decision-log entry naming the implementing card.\nProof:\n- scripts/agent/jet-env cargo test --test fmt -- loop_arrow (new stability cases per header kind)\n- scripts/agent/jet-env cargo test --test diagnostic_snapshots -- loop (confirm the retired-arrow loop error/teaching text is gone and the discard lint fixture is added)\n- scripts/agent/jet-env cargo test --test grammar\n- scripts/agent/jet-env cargo test --test golden -- <new example name>\n- scripts/agent/jet-env jet run examples/features/<new-example>.jet (I9 parity)\nOwned paths: crates/jet-parser/src/Parser/Statements/control.rs, crates/jet-parser/src/Formatter/Items.rs, crates/jet-sema/** (lint), docs/spec/syntax-decisions.md, tests/fmt.rs, tests/ui/*, examples/features/**, editors/** (only if grammar changes).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-bodies; implementing statement-loop arrow bodies."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-syntax",
@@ -85849,8 +85884,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:24:56.629Z",
-      "updated": "2026-08-12T18:11:25.535Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:32:51.102Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 820
     },
     {
@@ -85862,12 +85897,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Implements the reconciled body-rule slate, newest ruling first: D-ONELINE-BODY1=B (2026-08-10, this card) — a one-line function body binds with :: like every other definition; the arrow sends a head to a body, so guards, if-arms and loops keep ->. D-CHOOSE-FNBODY1=A (2026-08-07, card #1651) states the same function law and is absorbed here from folded card #1812. D-BODY-ARROW1=B (2026-08-05) survives for the non-function half: effect-only if bodies gain the one-line arrow (retiring the E0071 rejection at crates/jet-parser/src/Parser/Statements/conditionals.rs:94-117), a brace block opens on the next line when the form does not fit one line, and = retires from bodies to mean values and slot-fills only (parser one-line = body path: crates/jet-parser/src/Parser/Items/functions_params.rs:147-160; formatter emission: crates/jet-parser/src/Formatter/Items.rs:635-647). Statement-position loop arrows are card #1453 (D-LOOP-STMT-ARROW1=C), not this card. Migrate the whole in-repo corpus (examples, tests, docs, snapshots) in the same change, delete the old spellings, give each retired form one teaching diagnostic with a jet fix, and prove I9 parity: parser, sema, TIR, AOT, default jet run, interpreter agree; formatter round-trips; grammars regenerate.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-bodies; implementing the ratified one-body rule and corpus migration."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -85985,8 +86025,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:47:48.204Z",
-      "updated": "2026-08-12T18:11:24.947Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:32:55.130Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 830
     },
     {
@@ -92089,12 +92129,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "CORRECTION to this card's prep brief: the verbatim ratified D-ALIAS-OP1 outcome is B = 'Bind with alias X :: Y' -- switch the alias mark from `=` to `::`. Option A ('Keep alias X = Y') was NOT chosen. (The prep brief's parenthetical calling B 'keep =' does not match `tower decision show D-ALIAS-OP1`; going with the verbatim ratified record, per authority order.) This is a real syntax migration, not a record-only doc chore.\n\nParser: crates/jet-parser/src/Parser/Items/distinct_units_structs.rs:399 -- `self.expect(TokKind::Eq, \"in a type alias declaration\")?;` becomes `self.expect(TokKind::ColonColon, \"in a type alias declaration\")?;`. TokKind::ColonColon already exists as the `::` binding mark (Syntax::SIGIL_BIND_IMMUT; lexed at crates/jet-lexer/src/Lexer/Scan.rs:247; used e.g. at Parser/Statements/bindings.rs:145). No new token needed.\n\nFormatter: crates/jet-parser/src/Formatter/Items.rs:168 emits Item::TypeAlias verbatim from its source span ('type alias declarations are emitted verbatim') -- no formatter code change needed once source is migrated; it just copies whatever the author wrote. Confirm no other formatter path re-derives `=` for aliases before closing.\n\nSyntax.rs: crates/jet-foundation/src/Syntax/core_surface.rs:271-273, KW_ALIAS doc comment -- update the worked example from `=` to `::`; add 'amended by D-ALIAS-OP1=B (2026-08-06)'.\n\nsyntax-decisions.md: docs/spec/syntax-decisions.md:904-906 (D-TYPEALIAS1 entry) spells `alias X = Y` -- update the example to `::` and append a new dated log entry recording D-ALIAS-OP1=B amending D-TYPEALIAS1 (append near the existing entry; do not rewrite decision history in place).\n\nMigrate all 6 in-repo .jet files spelling `alias X = Y` (rg-confirmed, exhaustive): examples/features/types/type_alias.jet:6, tests/fuzz/sema/valid/ui_type_alias_ok.jet:5, tests/ui/type_alias_ok.jet:5, tests/ui/parallel_function_worker_type.jet:2, tests/fuzz/sema/invalid/ui_type_alias_no_params.E0324.jet:1, tests/ui/type_alias_no_params.jet:1. Greenfield: no `=`-spelled alias may remain anywhere once the parser stops accepting it.\n\nSnapshots: re-bless tests/ui/type_alias_no_params.stderr (its fixture source line 1 changes) via UPDATE_EXPECT; check the other ~17 tests/ui/*.stderr files mentioning 'alias' for embedded `alias X = Y` snippets in rendered diagnostic text and re-bless any that need it.\n\nGrammar: editors/tree-sitter/grammar.js has no dedicated production for the alias declaration's `=` -- only a keyword-highlight list entry at line 16 -- so no production-rule edit is expected. Run the regen commands anyway per criterion #3 (expected no-op, not a skip): `nix develop -c cargo run --bin jet -- devtools grammars` then `nix develop -c cargo test --test grammar`.\n\nTest commands: `scripts/agent/jet-env cargo build`; `scripts/agent/jet-env cargo test --test diagnostic_snapshots`; `scripts/agent/jet-env cargo test --test fuzz_sema`; `scripts/agent/jet-env cargo test --test golden` if type_alias.jet is golden-tested.\n\nCriteria: the 4 existing criteria (Syntax.rs, syntax-decisions.md, grammars regenerated, snapshots re-blessed) already cover this correctly once read against the real outcome (B = `::`); no additions needed.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-alias; implementing alias :: clean cutover."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -92182,8 +92227,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:18:20.412Z",
-      "updated": "2026-08-12T18:17:28.671Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:32:59.961Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1070
     },
     {
@@ -92195,12 +92240,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "## Gate\n\nBallot D-FMT-SIMPLIFY1 on this card picks the catalog, the surface, and the default. No implementation before it is ratified. Card #1512 is the first concrete slice and lands under whatever surface the owner picks.\n\n## Starter catalog (each cites its law; all proven by AST equality: emit, re-parse, compare)\n\n- R1 — braced single-return body becomes a one-liner (card #1512).\n  Before: `fn mirror(p: Point) => Point { return .{x: -p.x, y: p.y} }`\n  After:  `fn mirror(p: Point) => Point = .{x: -p.x, y: p.y}`\n- R2 — else-if chain becomes one ordered arm table (S68, D-BRANCH-PREF1, the shape L0507 teaches).\n  Before: `if code == 200 { ok() } else if code == 301 { redirect() } else { log(code) }`\n  After:  `if code == { 200 -> ok()  301 -> redirect()  else -> log(code) }`\n- R3 — struct literal drops a type name the context already knows (dot-construction law).\n  Before: `p :: Point.{x: 1, y: 2}` where the binding or parameter already fixes Point... only when the context types it.\n  After:  `p: Point :: .{x: 1, y: 2}` / argument position `draw(.{x: 1, y: 2})`\n- R4 — listed run of integers in an expression fence becomes a range (D-FENCE-RANGE1=A, card #1516; gated on #1516 shipping).\n  Before: `$[0, 1, 2, 3]$`   After: `$[0..3]$`\n\n## After ratification\n\n1. Implement per the chosen surface. Reuse the fmt engine and emitters. One catalog module, one rewrite per entry, each tagged with its decision ID.\n2. Every rewrite gets the AST-equality check and a fmt stability test case.\n3. Run the chosen mode over the in-repo corpus once and re-bless goldens/snapshots in the same change if the owner picked a batch surface.\n4. Targeted proof: `scripts/agent/jet-env cargo test --test fmt` once at the end.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-fmt; implementing ratified AST simplify mode."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -92295,8 +92345,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:18:20.747Z",
-      "updated": "2026-08-12T18:13:30.359Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:33:04.786Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1080
     },
     {
@@ -92308,12 +92358,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "Scope: type-position map colon only. `[K:V]` (no space). Value-position map literal entries (`[\"ana\": 31]`) and record fields (`.{x: 1}`, `age: Int`) keep their space -- unchanged.\n\nParser: crates/jet-parser/src/Parser/Types.rs:435-446 -- map-type parsing checks TokKind::Colon and the lexer discards inter-token whitespace generically, so both `[K:V]` and `[K: V]` already parse today. No parser change needed.\n\nFormatter: crates/jet-parser/src/Formatter/Expressions.rs:348-354, the Type::Map branch -- change `self.write(\": \")` to `self.write(\":\")`. Also check crates/jet-foundation/src/AST/types.rs:651 and :745 (Display-style `\"[{}: {}]\"` helpers used for type-name strings in diagnostic/error text) and update those to `\"[{}:{}]\"` too, for I4 consistency between formatter output and diagnostic type-name rendering -- confirm both are type-position only (not literal-position) before touching them.\n\nSyntax.rs: the map-type decision lives in crates/jet-foundation/src/Syntax/math_layout.rs:139-143 (TYPE_MAP comment references D-LISTMAP-CANON1=A and spells `[K: V]` in the comment; no literal string constant exists to edit). Update the comment to `[K:V]` and add 'amended by D-MAPSPACE1=A (2026-08-06)'.\n\nsyntax-decisions.md: two spots reference the canonical map-type spelling -- :906-907 (D-TYPE-ALIAS-CANON1 + D-LISTMAP-CANON1=A summary line) and :952-954 (S64, 'Map shorthand & entry iteration', the primary decision text). Update both to `[K:V]`; append a new dated log entry recording D-MAPSPACE1=A amending D-LISTMAP-CANON1/S64.\n\nMigration (greenfield, one change): after the formatter lands, run the repo's fmt-write path over every in-repo .jet file so type-position map colons collapse to `[K:V]`. This does NOT touch docs/**/*.md (formatter doesn't reformat markdown) or value-position literals -- hand-fix those. Migration surface (ballpark rg, needs manual triage to exclude value-position `[\"key\": value]` and field-declaration false positives): ~33 occurrences across ~20 .jet files (examples/features/collections/{wordcount,map_merge,map_surface,map_key}.jet, examples/features/basics/{loop_values,loop_forms}.jet, docs/reference/syntax-surface.jet, tests/ui/bad_map_key.jet, tests/fixtures/jetpack-project/functional-env.jet, others) and ~43 occurrences across docs/**/*.md.\n\nGrammar: editors/tree-sitter/grammar.js:564-566 `map_type: ($) => seq(\"[\", $._type, \":\", $._type, \"]\")` is whitespace-agnostic already -- only its comment (`[K: V]` -> `[K:V]`) needs updating, mirrored in editors/zed/grammar-repo/grammar.js and editors/zed/grammars/jet/grammar.js. Regen: `tree-sitter generate` (in editors/tree-sitter/); Zed rebuild per editors/zed/install.sh (`tree-sitter generate` + `tree-sitter build --wasm`).\n\nTests: fmt stability home is tests/fmt.rs -- existing map-type fixtures at :556 (`typed_lookup :: [String: Int].{`) and :822/830 (`counts: [String: Int]`) need their expected output updated to `[String:Int]`; extend/add a case asserting the formatter emits no space and output is idempotent on a second pass.\n\nTest commands: `scripts/agent/jet-env cargo test --test fmt`; `scripts/agent/jet-env cargo test --test grammar`; a final `scripts/agent/jet-env rg` sweep across examples/, tests/, docs/reference/*.jet confirming zero remaining `[Type: Type]`-shaped map TYPE occurrences (value-position literals/fields excluded by hand review).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-fmt; implementing canonical map type spacing."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -92405,8 +92460,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:18:21.080Z",
-      "updated": "2026-08-12T18:13:31.759Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:33:08.333Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1090
     },
     {
@@ -92663,7 +92718,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implements D-CONF-PLANE1, D-CONF-READ1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [
@@ -92671,6 +92726,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-facts; implementing the registered @build fact resolver with all-tier folding."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -92788,8 +92848,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:08.991Z",
-      "updated": "2026-08-12T18:10:59.340Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:29:44.934Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 460
     },
     {
@@ -93082,12 +93142,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Implements D-CONF-ENTRY1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-entry; implementing shared fn run/fn build discovery and workspace behavior."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -93186,8 +93251,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:19.346Z",
-      "updated": "2026-08-12T18:13:35.624Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:30:04.836Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 900
     },
     {
@@ -93295,12 +93360,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implements D-CONF-GENSPELL1, D-META-MODNAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-genmod; implementing canonical generic-module spelling and instance members."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93393,8 +93464,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:24.662Z",
-      "updated": "2026-08-12T18:11:02.219Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:30:17.006Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 490
     },
     {
@@ -93531,7 +93602,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Implements D-CONF-STAMP1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [
@@ -93539,6 +93610,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-facts after the shared resolver; implementing lock-replayed build stamp facts."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -93633,8 +93709,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:30.674Z",
-      "updated": "2026-08-12T18:13:38.630Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:29:52.449Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 930
     },
     {
@@ -106102,12 +106178,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "crates/jet-cli/src/CLI.rs registers serve in COMMANDS (~lines 288-292), feeding help/completions/man page, though its only behavior is a teaching refusal (\"Use jet dev --swap instead\"); Source/main.rs usage() (~lines 378-493) still advertises jet serve and the retired jet store fetch/verify/generations/rollback/gc/lock family; Help/mod.rs (~lines 111-112) lists serve and fetch too — three hand-copied surfaces disagreeing. The 2026-08-07 corpus reconciliation routes this through card #1659 (\"jet CLI speaks from one table\"): land the retired-verb removal on that single command table instead of editing usage(), Help/mod.rs, and CLI.rs COMMANDS separately, so help/man/completions render from one declaration. Take the retirement's error text, rewrite behavior, and ratchet enforcement from ratified ballot D-ONCE-RETIRE1=C (card #1656): category the retirement (serve/store-* are semantic removals, not mechanical renames, so they hard-error per the C split) and add the zero-count ratchet test the ballot specifies. Keep the typo-teaching refusal reachable (serve still resolves to the \"use jet dev --swap\" message) but remove it from the generated COMMANDS/usage/help listings. Prove with a targeted CLI test asserting serve/store fetch/etc. do not appear in jet --help, jet help, completions, or the man page, while still resolving to the teaching error when typed.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 CLI truth lane in bd-wave-m07-clitruth; completing retired route/help contracts."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -106170,8 +106251,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T18:09:55.493Z",
-      "updated": "2026-08-12T18:11:20.299Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:28:08.994Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c02z5lgc",
@@ -106182,12 +106263,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "docs/spec/spec.md:2233 says jet bench owns the optimized benchmark profile; Source/CmdDevTools.rs passes BuildProfile::Default at three call sites (~lines 2476, 2584, 2794), so bench numbers come from the debug tier with nothing telling the user. All D-CLAIM-BENCH1 ballot options (ratified =A per card #1641) adopt this fix regardless of the wider bench-remodel outcome, so it can land now unblocked. Change those three call sites to run the optimized build profile, and print the tier label (e.g. \"profile: release\") in every result line and every bench artifact (JSON/machine report included, per D-REPORT-MACHINE1 rails). Prove with a targeted test asserting jet bench compiles/runs under the optimized profile (not Default) and that the label appears in both human and --json output; red before the fix (Default profile, no label), green after.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 benchmark lane in bd-wave-m07-bench; completing release-profile truth."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -106233,8 +106320,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T18:09:55.837Z",
-      "updated": "2026-08-12T18:11:20.867Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:28:13.303Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c08tmpv3",
@@ -110761,12 +110848,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m06-names-core",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "D-ONCE-LAW1=A (the corpus law with mandatory guards) governs this card: build one data table keyed by (module, member) holding signature, fallibility, effect, sink class, and the one Prelude jet_* symbol, and make every consumer read it instead of hand-copying. The eleven partial copies to replace or generate from that table are: the sema fixed-sig table, the TIR coverage gate (crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:27), AOT emit, the interpreter, comptime's Methods/core_calls.rs (321 arms) and CorePureParity.rs (98 arms), and crates/jet-jit's lower_ctx (36 core.* arms) — cards #1635, #1631, #1634 and #1657 each already fix one coat, so this card owns only the shared table those cards can then point at (coordinate rather than duplicate their edits). Put the table in crates/jet-foundation/src/Syntax/ (mirroring how retirements.rs and effects_surface.rs already hold this kind of one-home table) and delete CorePureParity.rs and the hand-written comptime arms once they read from it, replacing jet-jit's per-module hand table with straight marshalling into the same Prelude symbols. Add a test that adds one new fake Core member to the table only and asserts sema, TIR subset, comptime, and jet-jit all see it with zero new Rust match arms, and a second test that fails when a consumer's known-call set disagrees with the table (catches an entry a consumer has but the table doesn't, or vice versa). Prove with `scripts/agent/jet-env cargo test --test core_call_table` (new, red until the table and its consumers exist) plus `scripts/agent/jet-env cargo test --test corelib` to confirm no coverage regressed.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M06 canonical core-call follow-on in bd-wave-m06-corecalls; completing one-home effects/sinks and JIT proof."
+        },
         {
           "at": "2026-08-10",
           "by": "e3-burndown",
@@ -110902,8 +110994,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T22:18:25.956Z",
-      "updated": "2026-08-12T18:11:09.550Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:28:05.649Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 251
     },
     {
@@ -112079,12 +112171,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m06-names-core",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Four Core layering drifts to close per card #1579's layering law (all existing Core APIs that break it get a drift card, none grandfathered): (1) core.crypto.expert.hkdf_sha256 (locate in crates/jet-codegen/src/Prelude/CoreLib) takes raw bytes where its sibling takes typed keys with no ratified split — either make it a rung of the same ladder (typed-key wrapper) or write a ratified, example-taught split like D-RANDSPLIT1 (core.random vs core.crypto.random, docs/spec) governs; the same for core.http.client vs core.http.get (crates/jet-codegen/src/Prelude/CoreLib/Top/... — locate with `rg -l 'http.client|http_client'`), which grew from one function to a configurable client with no documented rung boundary. (2) Delete jet.time.now and its format twin (crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs area, plus any jet.time module — locate with `rg -rn 'jet.time' crates`), leaving core.time.now / core.time.now_utc (MathRandomTime.rs:321) as the one clock door; route any jet.time caller through the retirement mechanism (Syntax::RETIREMENTS + tests/retirement_ratchet.rs) since jet.time.now retiring is a rename if meaning is identical. (3) core.mem's import-gated vs #Unsafe-gated split (crates/jet-codegen/src/Prelude/CoreLib — locate `core.mem` module) needs one sentence at the module's gate documenting which constants need which gate, instead of the rule being discoverable only per constant. Prove each with the golden example the card asks for (crypto.expert split) and a compile check that jet.time.now no longer resolves (or resolves only through the teaching error).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M06 Prelude layering work in bd-wave-m06-layering; completing rungs, goldens, and ledger losses."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -112157,8 +112254,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T22:19:43.118Z",
-      "updated": "2026-08-12T18:18:01.037Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-13T20:28:06.312Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 268
     },
     {
@@ -115543,12 +115640,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Retire the '\\0jet.defer.close' string sentinel into a typed statement. Parser still manufactures a call to the reserved sentinel (crates/jet-parser/src/Parser/Statements/control.rs:1700), sema recognizes it by string (crates/jet-sema/src/Sema/CheckerCore/statements.rs:1194), and the syntax table defines it (crates/jet-foundation/src/Syntax/core_surface.rs:349); TIR already has the real TStmt::DeferClose (Codegen/TIR/mod.rs:2453) with downstream emit (TIR/emit/statements.rs:765) and JIT handling (lower_ctx.rs:3363). Add a typed AST variant at crates/jet-foundation/src/AST/statements.rs:99 (+span at :419) modeled on Shield (:194); emit it in the parser, format it (Formatter/Statements.rs:242), check it structurally in sema, lower via TIR/subset/statements.rs:154 and TIR/lower/statements.rs:1834; delete the sentinel row from core_surface.rs:349. Pure internal representation cleanup: no user-facing syntax change, no grammar regen.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m08-defer; replacing defer-close string sentinel with typed statement."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -115609,8 +115711,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T13:17:22.931Z",
-      "updated": "2026-08-12T18:11:31.996Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:33:14.700Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0gq3vxb",
@@ -115801,12 +115903,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Fix the comptime-binding lifetime defect that kills computed generic modules. The fixture (examples/features/modules/generic_modules.jet:7) chains @base into @computed_size (spelled $ today; build in @ per D-ONCE-AT1=D — the mechanism is glyph-neutral); the ledger row is tests/jit_gaps.txt:254 and the dedicated test tolerates frontend rejection instead of proving parity (tests/dev.rs:6661; current failure is E0857 per its comment, not the filed E0956/E0107 — retarget the card text to the live failure). Fix: preserve earlier comptime bindings while registering module items at crates/jet-sema/src/Sema/Registration/Items.rs:238, carry them through generic-module expansion (Sema/Bundle/GenericModules.rs), and resolve fragment comptime bindings during TIR lowering at Codegen/TIR/lower/expressions.rs:653 (fallback comptime evaluation adjacent at :668).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna active in bd-m05-genmod; fixing comptime binding survival and unconditional tier parity."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -115890,8 +115997,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T14:03:32.616Z",
-      "updated": "2026-08-12T18:11:04.876Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:30:31.314Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0u1wtix",
@@ -124396,12 +124503,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 CLI truth lane in bd-wave-m07-clitruth; completing registry-owned CLI surface."
+        },
         {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
@@ -124454,8 +124566,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:06:30.122Z",
-      "updated": "2026-08-12T18:18:20.456Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:28:10.283Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0o10ve3",
@@ -124513,12 +124625,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-13",
+          "by": "fable-e3-burndown",
+          "text": "Luna resumed preserved M07 CLI truth lane in bd-wave-m07-clitruth; completing target parsing/dev parity."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -124547,8 +124665,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:06:38.718Z",
-      "updated": "2026-08-12T18:11:24.390Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-13T20:28:11.384Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0ldymj4",
@@ -171047,6 +171165,174 @@
   ],
   "events": [
     {
+      "at": "2026-08-13T20:33:14.701Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0011pqw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:33:08.333Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c00zqair",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:33:04.786Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0vh9xhx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:32:59.962Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pxsuic",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:32:55.131Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ej2y7w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:32:51.102Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0b6szun",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:32:44.783Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:32:38.742Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nnhbti",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:30:31.314Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dk0p73",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:30:17.007Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04ku6ov",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:30:04.836Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0onpxuj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:29:52.449Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0w07otg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:29:44.934Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xenv6u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:29:38.202Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nwijdh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:13.303Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02z5lgc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:12.544Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c01pwyjw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:11.384Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ybltrw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:10.283Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c005rd0v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:08.994Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xa53la",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:07.492Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04zqxw1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:06.312Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0575mwu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:05.649Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0p2qj4i",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:28:04.754Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c024dgns",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-13T20:25:09.139Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-13T20:25:09.139Z"
+    },
+    {
       "at": "2026-08-13T20:23:21.222Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -174383,174 +174669,6 @@
       "action": "card.criteria-meet",
       "ref": "c0es3ork",
       "note": "#5"
-    },
-    {
-      "at": "2026-08-13T13:37:45.620Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0es3ork",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-13T13:37:45.152Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0es3ork",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-13T13:37:44.663Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0es3ork",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-13T13:37:44.155Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0es3ork",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-13T13:37:21.377Z",
-      "by": "orchestrator",
-      "action": "card.add",
-      "ref": "c0maz8wl",
-      "note": "Generated task-group crate name contains a dot and rustc rejects it (I2)"
-    },
-    {
-      "at": "2026-08-13T13:06:17.245Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-13T13:06:17.245Z"
-    },
-    {
-      "at": "2026-08-13T12:39:23.864Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0mjxw0l",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T12:39:23.045Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-13T12:39:22.426Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-13T12:39:21.824Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-13T12:39:21.364Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-13T12:39:20.937Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-13T12:39:20.492Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-13T12:39:20.032Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-13T12:39:19.600Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-13T12:39:19.160Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-13T12:39:18.680Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-13T12:30:44.066Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-13T12:30:44.066Z"
-    },
-    {
-      "at": "2026-08-13T12:14:20.612Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0cqliqk",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-13T12:14:19.759Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0cqliqk",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-13T12:14:18.930Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0cqliqk",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-13T12:14:18.246Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0cqliqk",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-13T12:14:17.524Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0cqliqk",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-13T12:14:17.080Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0cqliqk",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
