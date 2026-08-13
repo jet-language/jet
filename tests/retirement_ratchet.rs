@@ -39,6 +39,9 @@ const CEILINGS: &[(&str, usize)] = &[
     ("manifest-identity", 7),
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
+    ("core-io-println", 0),
+    ("core-io-sprint", 0),
+    ("core-io-repr", 0),
     ("comptime-mark", 0),
     ("set-take", 0),
     ("map-replace", 0),
@@ -238,6 +241,20 @@ fn tally_collection_example(path_suffix: &str, retired_form: &str, canonical_for
             )
         })
 }
+
+fn tally_print_family(retired_form: &str, canonical_form: &str) -> (usize, usize) {
+    content_files()
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jet"))
+        .filter_map(|path| read(&path))
+        .fold((0, 0), |(retired, canonical), text| {
+            (
+                retired + usize::from(text.contains(retired_form)),
+                canonical + usize::from(text.contains(canonical_form)),
+            )
+        })
+}
+
 /// Files on the retired form and files on the canonical form, for one row.
 fn tally(row: &Retirement) -> (usize, usize) {
     match row.id {
@@ -358,6 +375,9 @@ fn tally(row: &Retirement) -> (usize, usize) {
             ".replace(",
             ".add(",
         ),
+        "core-io-println" => tally_print_family("io.println", "io.print"),
+        "core-io-sprint" => tally_print_family("io.sprint", "{value}"),
+        "core-io-repr" => tally_print_family("io.repr", "{value:Debug}"),
         "core-path-free-functions" => {
             let mut retired = 0;
             let mut canonical = 0;

@@ -2883,7 +2883,7 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
-        ("core.io", "print" | "println") => format!("println!(\"{{}}\", ({}).jet_show())", arg(0)),
+        ("core.io", "print") => format!("println!(\"{{}}\", ({}).jet_show())", arg(0)),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         
         // D-FIDELITY-API1=A: runtime-global fidelity signal.

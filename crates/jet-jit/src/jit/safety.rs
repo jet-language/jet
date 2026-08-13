@@ -1127,7 +1127,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             if module == "core.io" {
                 return match method.as_str() {
                     "args" | "readline" | "buffered" => args.is_empty(),
-                    "print" | "println" | "eprint" | "sprint" | "repr" | "take"
+                    "print" | "eprint" | "take"
                     | "read_until" | "binread" | "input" | "confirm" | "input_secret"
                     | "read_all_input" | "stdin" | "stdout" | "stderr"
                     | "terminal_width" | "terminal_height" => {

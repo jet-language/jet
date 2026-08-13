@@ -346,8 +346,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.io", "read_until", "jet_std_io_read_until", true, &[true]),
     CoreCallRecord::new("core.io", "take", "jet_std_io_take", true, &[false]),
     CoreCallRecord::new("core.io", "buffered", "jet_std_io_buffered", true, &[]),
-    CoreCallRecord::new("core.io", "sprint", "jet_std_io_sprint", true, &[true]),
-    CoreCallRecord::new("core.io", "repr", "jet_std_io_repr", true, &[true]),
     CoreCallRecord::new("core.io", "binread", "jet_std_io_binread", true, &[true]),
     CoreCallRecord::new("core.io", "binwrite", "jet_std_io_binwrite", true, &[true, true]),
     CoreCallRecord::new("core.io", "stdin", "jet_std_io_stdin", true, &[]), // D-STDIN1=A: io.stdin() → JetStdinReader handle.

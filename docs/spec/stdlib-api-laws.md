@@ -101,6 +101,21 @@ or source-qualified spelling for the same conversion.
 - Convenience shorthand methods are acceptable if they compose existing primitives
   without adding new capability (e.g. `slice.first()` over `slice[0]?`).
 
+### Print family (D-ONCE-PRINT1=A)
+
+The family has one job per spelling. Beginners learn ambient `print` first.
+
+| Spelling | Job | Status and default |
+| --- | --- | --- |
+| `print(value)` | Display a value and end the line. | Beginner default; no import. |
+| `io.print(value)` | The same line-ending print through `core.io`. | Qualified twin for `#NoPrelude` files. |
+| `io.println(value)` | No distinct job from `io.print`. | Retired; `jet fmt` and `jet fix` rewrite it to `io.print`. |
+| `io.sprint(value)` | No distinct job from interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value}"`. |
+| `io.repr(value)` | No distinct job from debug interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value:Debug}"`. |
+
+Interpolation is the string-building mechanism. `:Debug` selects the existing
+debug representation selector; it is not a second print API.
+
 ---
 
 ## Review template

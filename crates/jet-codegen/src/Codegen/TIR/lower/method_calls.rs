@@ -2367,11 +2367,10 @@ fn lower_method_call_impl(
                         return source_call;
                     }
                 }
-                // D-VERDICT-1321-1: variadic io.print/io.println/io.eprint — join the
+                // D-VERDICT-1321-1: variadic io.print/io.eprint — join the
                 // arguments with newlines so the engines keep one-value calls.
-                // #1480: println is the peer spelling of print.
                 if module == "core.io"
-                    && matches!(method, "print" | "println" | "eprint")
+                    && matches!(method, "print" | "eprint")
                     && args.len() > 1
                 {                    let joined = crate::Codegen::TIR::lower::join_print_args(args, cx, env);
                     return TExpr {

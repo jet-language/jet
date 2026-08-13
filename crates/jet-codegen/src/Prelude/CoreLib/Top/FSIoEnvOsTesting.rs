@@ -372,7 +372,7 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
     }
 }
 
-// #1480: readline / read_until / take / sprint / repr moved to
+// #1480: readline / read_until / take moved to
 // IoLineStream.rs so the JIT host can `include!` the same Prelude source.
 
 fn jet_std_io_buffered() -> JetStdinReader {

@@ -1021,9 +1021,7 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `choose(prompt, items)` | `String ? IOError` | Number the strings and re-prompt until the user makes a valid choice |
 | `input_secret(prompt)` | `String ? IOError` | Read one line without echo; return an error when stdin is not a terminal |
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
-| `print(value…)` / `println(value…)` | nothing | Print each value on its own line (`println` is the peer spelling of `print`) |
-| `sprint(text)` | `String` | Identity format-to-string for a `String` (use `"{x}"` for other values) |
-| `repr(text)` | `String` | Debug representation of a `String` |
+| `print(value…)` | nothing | Print each value on its own line |
 | `binread(path)` | `[U8] ? IOError` | Read a file as raw bytes |
 | `binwrite(path, bytes)` | `() ? IOError` | Atomically write raw bytes to a file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
@@ -1040,12 +1038,12 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
 | `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
-`print` stays in the core prelude (no `use` needed). `io.print` / `io.println`
-are the qualified twins for `#NoPrelude` files — same newline-per-value
-behavior. Use `io.eprint` for stderr. Use `input` or `readline` for public
-text and scripts. Use `input_secret` for passwords and tokens. It never falls
-back to an echoed read when stdin is redirected. `sprint` / `repr` take a
-`String`; format other values with interpolation first. `buffered()` is an
+`print` stays in the core prelude (no `use` needed). `io.print` is its
+qualified twin for `#NoPrelude` files — it has the same newline-per-value
+behavior. Use interpolation to build text and `:Debug` to select a debug
+representation. Use `io.eprint` for stderr. Use `input` or `readline` for
+public text and scripts. Use `input_secret` for passwords and tokens. It never
+falls back to an echoed read when stdin is redirected. `buffered()` is an
 alias of `stdin()` — Jet already buffers stdin. `core.term` still owns
 `live { ... }` and `term.read_key()` for direct raw-key input; it is the
 shipped raw-mode/key-event bridge under D-TERM1.

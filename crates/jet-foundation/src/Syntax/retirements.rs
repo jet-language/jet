@@ -21,8 +21,9 @@
 //! still on the retired form. That count may fall and never rise, and the
 //! retirement is finished only when it reaches zero.
 //!
-//! The spellings are read from the constants that already own them. This table
-//! pairs them; it never restates them.
+//! The spellings are read from the constants that already own them where one
+//! exists. Qualified legacy spellings without a surface constant are listed
+//! here, beside their replacement, so this table remains the one registry.
 
 use super::{
     COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, LEGACY_ENTRY_FILE,
@@ -105,6 +106,33 @@ pub const RETIREMENTS: &[Retirement] = &[
         kind: RetirementKind::Rename,
         decision: "D-ONCE-HASH1",
         since: "2026-08-07",
+        code: None,
+    },
+    Retirement {
+        id: "core-io-println",
+        retired: "io.println",
+        canonical: "io.print",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-PRINT1",
+        since: "2026-08-08",
+        code: None,
+    },
+    Retirement {
+        id: "core-io-sprint",
+        retired: "io.sprint",
+        canonical: "{value}",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-PRINT1",
+        since: "2026-08-08",
+        code: None,
+    },
+    Retirement {
+        id: "core-io-repr",
+        retired: "io.repr",
+        canonical: "{value:Debug}",
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-PRINT1",
+        since: "2026-08-08",
         code: None,
     },
     Retirement {
@@ -272,6 +300,9 @@ mod tests {
             Some(INTERPOLATION_SELECTOR_EXAMPLE)
         );
         assert_eq!(rename_target(RETIRED_COMPTIME_MARK), Some(COMPTIME_MARK));
+        assert_eq!(rename_target("io.println"), Some("io.print"));
+        assert_eq!(rename_target("io.sprint"), Some("{value}"));
+        assert_eq!(rename_target("io.repr"), Some("{value:Debug}"));
         assert_eq!(rename_target("payload: {"), None);
         assert_eq!(rename_target("provider@target"), None);
     }

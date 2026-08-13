@@ -121,7 +121,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
-            | ("core.io", "println")
             | ("core.io", "progress")
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
@@ -325,9 +324,6 @@ pub fn core_fixed_sig(
             Some(result_ty(list_u8.clone(), io_error_ty())),
         )),
         ("core.io", "buffered") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
-        ("core.io", "sprint" | "repr") => {
-            Some((vec![(read, Type::String)], Some(Type::String)))
-        }
         ("core.io", "binread") => Some((
             vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
             Some(result_ty(list_u8.clone(), io_error_ty())),

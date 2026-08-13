@@ -77,6 +77,14 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                 edit,
             }),
     );
+    fixes.extend(
+        crate::Formatter::retired_print_family_edits(text)
+            .into_iter()
+            .map(|edit| Fix {
+                title: "rewrite retired print-family spelling (D-ONCE-PRINT1)".to_string(),
+                edit,
+            }),
+    );
     fixes
 }
 

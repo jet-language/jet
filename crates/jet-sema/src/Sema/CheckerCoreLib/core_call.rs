@@ -2244,10 +2244,9 @@ impl<'a> Checker<'a> {
                     let _ = alias_span;
                     return Some(Type::Int);
                 }
-                ("core.io", "print" | "println") => {
+                ("core.io", "print") => {
                     // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
                     // D-VERDICT-1321-1: variadic — each argument prints on its own line.
-                    // #1480: `println` is the peer spelling; same mechanism as `print`.
                     if args.is_empty() {
                         self.diags.push(Diagnostic::error(
                             "E0103",

@@ -13,6 +13,7 @@ use crate::Diagnostics::{Span, TextEdit};
 use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{BinOp, Func, Item, LValue, Program, Stmt};
+use std::collections::BTreeSet;
 
 const INDENT: usize = 4;
 
@@ -80,6 +81,204 @@ pub fn retired_interpolation_selector_edits(src: &str) -> Vec<TextEdit> {
     let mut edits = Vec::new();
     collect_retired_selector_edits(&tokens, &mut edits);
     edits
+}
+
+/// D-ONCE-RETIRE1=C / D-ONCE-PRINT1=A: collect the mechanical migrations for
+/// the retired qualified print family. `println` is a spelling rename;
+/// `sprint` and `repr` become the existing interpolation forms. The import
+/// binding check keeps an unrelated user method with the same name untouched.
+pub fn retired_print_family_edits(src: &str) -> Vec<TextEdit> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let Ok(prog) = crate::Parser::parse_for_fmt(&tokens) else {
+        return Vec::new();
+    };
+    let aliases: BTreeSet<String> = prog
+        .imports
+        .iter()
+        .flat_map(|import| import.walk_bindings())
+        .filter(|binding| binding.path() == "core.io")
+        .map(|binding| binding.local)
+        .collect();
+    if aliases.is_empty() {
+        return Vec::new();
+    }
+    let mut calls = Vec::new();
+    collect_retired_print_calls(&tokens, &aliases, &mut calls);
+    print_family_edits(src, &aliases, &calls)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RetiredPrintKind {
+    Println,
+    Sprint,
+    Repr,
+}
+
+#[derive(Clone, Copy)]
+struct RetiredPrintCall {
+    receiver_start: usize,
+    method_span: Span,
+    open_span: Span,
+    close_span: Span,
+    kind: RetiredPrintKind,
+}
+
+fn collect_retired_print_calls(
+    tokens: &[Token],
+    aliases: &BTreeSet<String>,
+    calls: &mut Vec<RetiredPrintCall>,
+) {
+    let code: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| !crate::Lexer::is_comment(&token.kind))
+        .collect();
+    for index in 0..code.len().saturating_sub(3) {
+        let TokKind::Ident(alias) = &code[index].kind else {
+            continue;
+        };
+        if !aliases.contains(alias)
+            || (index > 0
+                && matches!(&code[index - 1].kind, TokKind::Dot | TokKind::QuestionDot))
+        {
+            continue;
+        }
+        if !matches!(&code[index + 1].kind, TokKind::Dot) {
+            continue;
+        }
+        let TokKind::Ident(method) = &code[index + 2].kind else {
+            continue;
+        };
+        let Some(kind) = retired_print_kind(method) else {
+            continue;
+        };
+        if !matches!(&code[index + 3].kind, TokKind::LParen) {
+            continue;
+        }
+        let Some(close_index) = matching_call_close(&code, index + 3) else {
+            continue;
+        };
+        calls.push(RetiredPrintCall {
+            receiver_start: code[index].span.start,
+            method_span: code[index + 2].span,
+            open_span: code[index + 3].span,
+            close_span: code[close_index].span,
+            kind,
+        });
+    }
+    for token in tokens {
+        let TokKind::Str(parts) = &token.kind else {
+            continue;
+        };
+        for part in parts {
+            let StrTokPart::Interp(inner) = part else {
+                continue;
+            };
+            collect_retired_print_calls(inner, aliases, calls);
+        }
+    }
+}
+
+fn matching_call_close(tokens: &[&Token], open_index: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_index) {
+        match &(*token).kind {
+            TokKind::LParen => depth += 1,
+            TokKind::RParen => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn retired_print_kind(method: &str) -> Option<RetiredPrintKind> {
+    match Syntax::rename_target(&format!("io.{method}"))? {
+        "io.print" => Some(RetiredPrintKind::Println),
+        "{value}" => Some(RetiredPrintKind::Sprint),
+        "{value:Debug}" => Some(RetiredPrintKind::Repr),
+        _ => None,
+    }
+}
+
+fn print_family_edits(
+    src: &str,
+    aliases: &BTreeSet<String>,
+    calls: &[RetiredPrintCall],
+) -> Vec<TextEdit> {
+    let mut edits = Vec::new();
+    for call in calls {
+        let inside_replacement = calls.iter().any(|outer| {
+            matches!(outer.kind, RetiredPrintKind::Sprint | RetiredPrintKind::Repr)
+                && outer.receiver_start < call.receiver_start
+                && outer.close_span.end >= call.close_span.end
+        });
+        match call.kind {
+            RetiredPrintKind::Println if !inside_replacement => edits.push(TextEdit {
+                span: call.method_span,
+                new_text: "print".to_string(),
+            }),
+            RetiredPrintKind::Sprint | RetiredPrintKind::Repr if !inside_replacement => {
+                let argument = src[call.open_span.end..call.close_span.start].trim();
+                if argument.is_empty() {
+                    continue;
+                }
+                let argument = rewrite_print_family_fragment(argument, aliases);
+                let format = match call.kind {
+                    RetiredPrintKind::Sprint => "",
+                    RetiredPrintKind::Repr => ":Debug",
+                    RetiredPrintKind::Println => unreachable!(),
+                };
+                edits.push(TextEdit {
+                    span: Span {
+                        start: call.receiver_start,
+                        end: call.close_span.end,
+                    },
+                    new_text: format!("\"{{{argument}{format}}}\""),
+                });
+            }
+            RetiredPrintKind::Println
+            | RetiredPrintKind::Sprint
+            | RetiredPrintKind::Repr => {}
+        }
+    }
+    edits.sort_by_key(|edit| edit.span.start);
+    edits
+}
+
+fn rewrite_print_family_fragment(src: &str, aliases: &BTreeSet<String>) -> String {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return src.to_string();
+    }
+    let mut calls = Vec::new();
+    collect_retired_print_calls(&tokens, aliases, &mut calls);
+    let edits = print_family_edits(src, aliases, &calls);
+    apply_source_edits(src, &edits).unwrap_or_else(|| src.to_string())
+}
+
+fn apply_source_edits(src: &str, edits: &[TextEdit]) -> Option<String> {
+    let mut ordered = edits.to_vec();
+    ordered.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    let mut out = src.to_string();
+    let mut replaced_start = usize::MAX;
+    for edit in ordered {
+        if edit.span.end > src.len()
+            || edit.span.start > edit.span.end
+            || edit.span.end > replaced_start
+        {
+            return None;
+        }
+        out.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+        replaced_start = edit.span.start;
+    }
+    Some(out)
 }
 
 fn collect_retired_selector_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
@@ -1225,7 +1424,9 @@ pub(super) fn escape_str_lit(s: &str) -> String {
 
 /// Lex + parse + format. Parse errors propagate; sema is not required.
 pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+    let print_edits = retired_print_family_edits(src);
+    let migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
+    let (toks, lex_diags) = crate::Lexer::lex(&migrated);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
@@ -1240,7 +1441,7 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagno
         })
         .cloned()
         .collect();
-    Ok(format_program_with_tokens(&prog, src, &comment_toks, &toks))
+    Ok(format_program_with_tokens(&prog, &migrated, &comment_toks, &toks))
 }
 
 /// Simple unified diff for `jet fmt --check`.

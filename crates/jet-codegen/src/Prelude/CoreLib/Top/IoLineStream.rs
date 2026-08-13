@@ -1,4 +1,4 @@
-// #1480: line/byte stdin primitives + trivial text passthroughs, split out of
+// #1480: line/byte stdin primitives, split out of
 // FSIoEnvOsTesting.rs so the JIT host (`crates/jet-jit/src/IO.rs`) can
 // `include!` this exact source instead of re-encoding the logic in Rust a
 // second time (I9 — semantics live only in Prelude/**; JIT hosts marshal
@@ -88,12 +88,4 @@ fn jet_std_io_take(n: i64) -> Result<Vec<u8>, jet_std::IOError> {
         .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
     buf.truncate(read);
     Ok(buf)
-}
-
-fn jet_std_io_sprint(text: &String) -> String {
-    text.clone()
-}
-
-fn jet_std_io_repr(text: &String) -> String {
-    format!("{text:?}")
 }

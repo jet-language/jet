@@ -1,10 +1,15 @@
-// ledger #1480: remaining core.io ledger gaps — thin wrappers over existing IO.
+// Qualified Core IO remains available for #NoPrelude and explicit IO work.
 use core.io as io
 
 fn run() {
-    print(io.sprint("sprint-ok"))
-    print(io.repr("repr"))
-    io.println("println-ok")
+    // `print` is the beginner default. `io.print` is its #NoPrelude twin.
+    print("print-ok")
+    io.print("qualified-ok")
+
+    // Interpolation builds text; `Debug` selects the representation form.
+    value :: "sprint-ok"
+    print("{value}")
+    print("{value:Debug}")
 
     path :: "/tmp/jet_1480_io_surface.bin"
     io.binwrite(path, [65, 66, 67]) ?? panic("binwrite")

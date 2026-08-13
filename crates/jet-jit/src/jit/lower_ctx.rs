@@ -11809,10 +11809,6 @@ impl LowerCtx<'_, '_> {
                     self.emit_print(&args[0])?;
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
-                if module == "core.io" && method == "println" && args.len() == 1 {
-                    self.emit_print(&args[0])?;
-                    return Ok(self.b.ins().iconst(types::I8, 0));
-                }
                 if module == "core.io" && method == "readline" && args.is_empty() {
                     // #1480: dedicated host — marshals only, calls the same
                     // `jet_std_io_readline` Prelude symbol AOT emits (I9).
@@ -11918,12 +11914,6 @@ impl LowerCtx<'_, '_> {
                             vec![self.lower_expr(&args[0])?],
                         ),
                         "buffered" if args.is_empty() => (self.host.io.stdin, Vec::new()),
-                        "sprint" if args.len() == 1 => {
-                            (self.host.io.sprint, vec![self.lower_expr(&args[0])?])
-                        }
-                        "repr" if args.len() == 1 => {
-                            (self.host.io.repr, vec![self.lower_expr(&args[0])?])
-                        }
                         "take" if args.len() == 1 => {
                             (self.host.io.take, vec![self.lower_expr(&args[0])?])
                         }

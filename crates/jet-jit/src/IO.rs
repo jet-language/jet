@@ -19,8 +19,7 @@ mod progress_semantics {
     include!("../../jet-codegen/src/Prelude/Core/Progress.rs");
 }
 
-// #1480: literal Prelude source for line/byte stdin primitives + trivial
-// text passthroughs (readline/read_until/take/sprint/repr). The extern "C"
+// #1480: literal Prelude source for line/byte stdin primitives. The extern "C"
 // wrappers below only marshal jit heap i64 handles to/from Rust values and
 // call these included functions — no logic is re-encoded here (I9). The
 // nested `jet_std` mirrors only the IOError shape these functions construct
@@ -59,18 +58,6 @@ mod io_line_stream {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
-
-    pub(super) extern "C" fn jet_jit_io_sprint(text: i64) -> i64 {
-        let s = super::clone_string(text);
-        let out = jet_std_io_sprint(&s);
-        super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
-    }
-
-    pub(super) extern "C" fn jet_jit_io_repr(text: i64) -> i64 {
-        let s = super::clone_string(text);
-        let out = jet_std_io_repr(&s);
-        super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
-    }
 
     pub(super) extern "C" fn jet_jit_io_take(n: i64) -> i64 {
         match jet_std_io_take(n) {
@@ -1362,8 +1349,6 @@ host_fns! {
     confirm: "jet_jit_io_confirm" => jet_jit_io_confirm: unary_i8;
     choose: "jet_jit_io_choose" => jet_jit_io_choose: binary;
     input_secret: "jet_jit_io_input_secret" => jet_jit_io_input_secret: unary;
-    sprint: "jet_jit_io_sprint" => io_line_stream::jet_jit_io_sprint: unary;
-    repr: "jet_jit_io_repr" => io_line_stream::jet_jit_io_repr: unary;
     take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
     read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
     readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
@@ -1376,7 +1361,6 @@ host_fns! {
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
 }
-
 
 
 
