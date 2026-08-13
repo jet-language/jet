@@ -229,8 +229,13 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
         }
         Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _)
-        | Expr::Try(inner, _, _) => rewrite_field_refs(inner, names, receiver),
+        | Expr::Present(inner, _) => rewrite_field_refs(inner, names, receiver),
+        Expr::Try(inner, _, _, note) => {
+            rewrite_field_refs(inner, names, receiver);
+            if let Some(note) = note {
+                rewrite_field_refs(note, names, receiver);
+            }
+        }
         Expr::OptField { base, .. } => rewrite_field_refs(base, names, receiver),
         Expr::MethodCall { receiver: recv, args, .. } => {
             rewrite_field_refs(recv, names, receiver);

@@ -5,7 +5,7 @@ use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
-    AccessConvention, CtValue, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type,
+    AccessConvention, ContractClause, CtValue, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type,
     VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
@@ -83,6 +83,9 @@ fn unit_fact(
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
+    /// D-FAIL-TIER1: callable contract clauses, kept beside the callable
+    /// signature so call lowering can place `#Pre` at the caller.
+    pub(crate) contract_sigs: HashMap<String, (Vec<ContractClause>, Vec<ContractClause>)>,
     /// Top-level function name -> function value type (M8).
     pub(crate) fn_types: HashMap<String, Type>,
     /// Function name -> source parameter names for labeled compute transforms.
@@ -3041,6 +3044,12 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                         })
                         .collect()
                 });
+                cx.contract_sigs
+                    .entry(format!("{}::{}", owner, method.name))
+                    .or_insert_with(|| (method.pre.clone(), method.post.clone()));
+                cx.fn_param_names
+                    .entry(format!("{}::{}", owner, method.name))
+                    .or_insert_with(|| method.params.iter().map(|param| param.name.clone()).collect());
                 cx.method_rets
                     .entry(key)
                     .or_insert_with(|| {
@@ -3292,6 +3301,7 @@ pub(crate) fn build_cx_items(
 ) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),
+        contract_sigs: HashMap::new(),
         fn_types: HashMap::new(),
         fn_param_names: HashMap::new(),
         method_sigs: HashMap::new(),
@@ -3620,6 +3630,8 @@ pub(crate) fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
+                cx.contract_sigs
+                    .insert(f.name.clone(), (f.pre.clone(), f.post.clone()));
                 cx.fn_param_names.insert(
                     f.name.clone(),
                     f.params.iter().map(|param| param.name.clone()).collect(),
@@ -4022,6 +4034,8 @@ pub(crate) fn build_cx_items(
                     for inner in body {
                         if let Item::Func(f) = inner {
                             let mangled = jet_foundation::Names::member_name(&cm.name, &f.name);
+                            cx.contract_sigs
+                                .insert(mangled.clone(), (f.pre.clone(), f.post.clone()));
                             cx.fn_type_params.insert(
                                 mangled.clone(),
                                 f.type_params.iter().map(|param| param.name.clone()).collect(),
@@ -4482,6 +4496,14 @@ fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
         .insert(key.clone(), method.type_params.clone());
     cx.method_rets
         .insert(key.clone(), method.return_type.clone());
+    cx.contract_sigs.insert(
+        format!("{}::{}", owner, method.name),
+        (method.pre.clone(), method.post.clone()),
+    );
+    cx.fn_param_names.insert(
+        format!("{}::{}", owner, method.name),
+        method.params.iter().map(|param| param.name.clone()).collect(),
+    );
     // S62: track trait-impl methods so call sites know not to mangle.
     if is_trait {
         cx.trait_methods.insert(key);

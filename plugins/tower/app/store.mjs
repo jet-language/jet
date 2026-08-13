@@ -520,7 +520,7 @@ export function radarData(s, historyCards = []) {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
     const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
     const done = all.filter(c => c.phase === 'done');
-    const milestones = s.milestones.filter(m => m.epochId === e.id).map(m => {
+    const milestones = s.milestones.filter(m => m.epochId === e.id && !m.archived).map(m => {
       const progress = milestoneProgress(m, s.cards, historyCards);
       return { id: m.id, title: m.title, goal: m.goal, status: m.status, met: progress.met,
         ...progress, stalledDays: milestoneStallDays(m, s.cards, s.events) };
@@ -1631,6 +1631,7 @@ export function updateMilestone(s, id, patch, by) {
     clearMilestoneVerification(m);
   }
   for (const k of ['title', 'goal', 'epochId']) if (k in patch) m[k] = patch[k];
+  if ('archived' in patch) m.archived = !!patch.archived;
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.update', ref: m.id });
   return m;

@@ -177,15 +177,9 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             let arg_str = args
                 .iter()
                 .enumerate()
-                .map(|(i, a)| match a {
+                .map(|(_i, a)| match a {
                     THostArg::Expr(e) => {
-                        let s = emit_tir_expr(e, cx);
-                        // D-ERRCTX1: jet_context(recv, || msg)
-                        if helper.ends_with("jet_context") && i == 1 {
-                            format!("|| {s}")
-                        } else {
-                            s
-                        }
+                        emit_tir_expr(e, cx)
                     }
                     THostArg::Borrow(e) => format!("&({})", emit_tir_expr(e, cx)),
                     THostArg::Lambda(lam) => {
@@ -2976,36 +2970,40 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // were pre-escaped at lowering; `line` is plain.
         TExprKind::Try {
             inner,
+            note,
             convert,
             file,
             line,
             fn_name,
         } => {
             let v = emit_tir_expr(inner, cx);
-            match convert {
+            let propagated = match convert {
                 TTryConvert::DefaultErr => format!(
-                    "jet_trace_err({}.map_err(jet_err_from_message), {}, {}, {})?",
-                    v, file, line, fn_name
+                    "{}.map_err(jet_err_from_message)",
+                    v
                 ),
-                // S80/D-LIB3: error implements Fallible → `.map_err(|e| e.to_error())`.
-                TTryConvert::Fallible => format!(
-                    "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
-                    v, file, line, fn_name
-                ),
+
                 // D-ERR-CONV: declared `impl Source => Target` → `.map_err(<fn>)`.
-                TTryConvert::Typed(conv_fn) => format!(
-                    "jet_trace_err({}.map_err({}), {}, {}, {})?",
-                    v, conv_fn, file, line, fn_name
-                ),
+                TTryConvert::Typed(conv_fn) => format!("{}.map_err({})", v, conv_fn),
                 // D-UNIONTYPE1=A: member error → anonymous union wrap.
-                TTryConvert::WidenUnion { enum_name, tag } => format!(
-                    "jet_trace_err({}.map_err(|e| {}::{tag}(e)), {}, {}, {})?",
-                    v, mangle_path(enum_name), file, line, fn_name
-                ),
+                TTryConvert::WidenUnion { enum_name, tag } =>
+                    format!("{}.map_err(|e| {}::{tag}(e))", v, mangle_path(enum_name)),
                 // Error types match — bare propagate.
-                TTryConvert::None => {
-                    format!("jet_trace_err({}, {}, {}, {})?", v, file, line, fn_name)
-                }
+                TTryConvert::None => v,
+            };
+            match note {
+                Some(note) => format!(
+                    "jet_trace_err_note({}, {}, {}, {}, || {{ {} }})?",
+                    propagated,
+                    file,
+                    line,
+                    fn_name,
+                    emit_tir_expr(note, cx)
+                ),
+                None => format!(
+                    "jet_trace_err({}, {}, {}, {})?",
+                    propagated, file, line, fn_name
+                ),
             }
         }
         // c109 Phase 8: the `??` fallback operator. Mirrors `emit_or_fallback`

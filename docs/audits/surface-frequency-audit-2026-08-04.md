@@ -57,7 +57,7 @@ source: `go.networking.education` and `rust.systems.mature-oss`.
 | 2 | Optional chaining `?.` | 30% of TypeScript absence sites; 95% of TypeScript projects; zero Jet examples | Moderate | Add examples |
 | 3 | Immutable-default binding | Densest operation; 75–92% of bindings are immutable where the choice exists | Moderate | Keep |
 | 4 | Absence handling `??` | 100% of projects; fifth densest operation; Jet is the cheapest sound form | Moderate | Keep |
-| 5 | Fallible signature and `?` | Rust `?` in 100% of Rust projects; Jet beats every sound peer | Weak | Keep |
+| 5 | Failure-returning signature and `?` | Rust `?` in 100% of Rust projects; Jet beats every sound peer | Weak | Keep |
 | 6 | Unified `if x == { … }` | `if` is 45–95% of branch sites; Python `match` unused | Moderate | Keep |
 | 7 | Error-swallowing diagnostics | Broad `except` in 70% of Python projects, heaviest in one-off and education code | Moderate | Study |
 | 8 | `#Test` blocks | 87% of projects declare tests | Moderate | Keep |
@@ -332,7 +332,7 @@ three are Keep items with no measured friction.
 
 - `::` and `:=` bare bindings with an immutable default.
 - The `??` fallback family, including `?? next`, `?? break`, and `?? return`.
-- Fallible return types `=> T ? E` with postfix `?`.
+- Failure-returning types `=> T ? E` with postfix `?`.
 - One branch mechanism, `if x == { … }`, with pattern arms.
 - The conditional expression `if c -> a else -> b`.
 - `struct`, `enum`, `trait`, and `Type.{ … }` construction.

@@ -290,12 +290,21 @@ impl<'a> Fmt<'a> {
                     f.write(&format!(" =[{}]=>", list));
                 } else if m.is_pure {
                     f.write(" =[]=>");
-                } else if m.return_type.is_some() {
+                } else if m.return_type.is_some()
+                    && !m
+                        .return_type
+                        .as_ref()
+                        .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+                {
                     f.write(" =>");
                 }
                 if let Some(ret) = &m.return_type {
-                    f.write(" ");
-                    f.fmt_return_type(ret);
+                    if Self::is_unit_fallible_type(ret) {
+                        f.fmt_unit_fallible_return(ret);
+                    } else {
+                        f.write(" ");
+                        f.fmt_return_type(ret);
+                    }
                 }
                 if let Some(map) = &m.declared_return_view_provenance {
                     f.fmt_declared_return_view_from(map, &m.params);
@@ -342,8 +351,12 @@ impl<'a> Fmt<'a> {
         self.fmt_param_list(&ef.params);
         self.write(")");
         if let Some(ret) = &ef.return_type {
-            self.write(" => ");
-            self.fmt_return_type(ret);
+            if Self::is_unit_fallible_type(ret) {
+                self.fmt_unit_fallible_return(ret);
+            } else {
+                self.write(" => ");
+                self.fmt_return_type(ret);
+            }
         }
         self.write(" = \"");
         self.write(&ef.rust_path);
@@ -622,12 +635,24 @@ impl<'a> Fmt<'a> {
             self.write(param);
             self.write("]=>");
         }
-        if f.declared_effects.is_none() && f.effect_via.is_none() && f.return_type.is_some() {
+        let unit_fallible = f
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| Self::is_unit_fallible_type(ty));
+        if f.declared_effects.is_none()
+            && f.effect_via.is_none()
+            && f.return_type.is_some()
+            && !unit_fallible
+        {
             self.write(" =>");
         }
         if let Some(ret) = &f.return_type {
-            self.write(" ");
-            self.fmt_return_type(ret);
+            if unit_fallible {
+                self.fmt_unit_fallible_return(ret);
+            } else {
+                self.write(" ");
+                self.fmt_return_type(ret);
+            }
         }
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);

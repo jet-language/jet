@@ -162,8 +162,13 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => collect_tuple_shapes_from_expr(inner, out),
+        | Expr::Err(inner, _) => collect_tuple_shapes_from_expr(inner, out),
+        Expr::Try(inner, _, _, note) => {
+            collect_tuple_shapes_from_expr(inner, out);
+            if let Some(note) = note {
+                collect_tuple_shapes_from_expr(note, out);
+            }
+        }
         Expr::Binary(_, l, r, _) => {
             collect_tuple_shapes_from_expr(l, out);
             collect_tuple_shapes_from_expr(r, out);

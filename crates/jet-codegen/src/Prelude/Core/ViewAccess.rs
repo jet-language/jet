@@ -5,10 +5,7 @@
 fn jet_view_address(len: usize, index: i64) -> Result<usize, String> {
     let len = i64::try_from(len).unwrap_or(i64::MAX);
     if index < 0 || index >= len {
-        return Err(format!(
-            "the list has {} items, so position {} doesn't exist",
-            len, index
-        ));
+        return Err(jet_list_bounds_message(len, index));
     }
     Ok(index as usize)
 }

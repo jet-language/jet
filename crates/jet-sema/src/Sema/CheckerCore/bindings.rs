@@ -367,6 +367,7 @@ impl<'a> Checker<'a> {
                     task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
+                    invalid: false,
                 },
             );
             self.flow.uninit.set(&b.name, state);
@@ -961,6 +962,7 @@ impl<'a> Checker<'a> {
                     task_lint_span,
                     single_use_span,
                     constant_value,
+                    invalid: init_has_error,
                 },
             );
             if b.reactive_shared() && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {

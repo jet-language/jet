@@ -1355,6 +1355,67 @@ fn notify(ready: Bool) =[Net]=> () {
         );
     }
 
+    #[test]
+    fn unit_fallible_signatures_use_the_post_parameter_question() {
+        let parsed = program(
+            "fn save(path: String) ? IOError {}\n\
+             fn sync() ? {}\n\
+             fn bounded() =[FS]=> ? IOError {}\n\
+             fn load() => Config ? IOError {}\n",
+        );
+        let find = |name| {
+            parsed.items.iter().find_map(|item| match item {
+                crate::AST::Item::Func(func) if func.name == name => Some(func),
+                _ => None,
+            })
+        };
+        let save = find("save").expect("save");
+        assert!(matches!(save.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+        let sync = find("sync").expect("sync");
+        assert!(matches!(sync.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)));
+        let bounded = find("bounded").expect("bounded");
+        assert!(matches!(bounded.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+        let load = find("load").expect("load");
+        assert!(matches!(load.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "Config")
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+    }
+
+    #[test]
+    fn unit_fallible_signatures_format_without_arrow() {
+        use crate::Formatter::format_source;
+
+        let source =
+            "fn save(path: String) ? IOError {}\nfn sync() ? {}\nfn bounded() =[FS]=> ? IOError {}\n";
+        let once = format_source(source).expect("unit-fallible signatures format");
+        assert!(once.contains("fn save(path: String) ? IOError"), "{once}");
+        assert!(once.contains("fn sync() ?"), "{once}");
+        assert!(once.contains("fn bounded() =[FS]=> ? IOError"), "{once}");
+        assert_eq!(once, format_source(&once).expect("formatted form is stable"));
+    }
+
+    #[test]
+    fn retired_unit_fallible_arrow_form_teaches_the_new_signature() {
+        let source = format!(
+            "fn save() {} () ? IOError {{ return }}\n",
+            Syntax::OP_CALLABLE_ARROW
+        );
+        let (tokens, lex_diagnostics) = lex(&source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("the arrow-and-unit form is retired");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0003")
+            .expect("E0003");
+        assert!(diagnostic.fix.contains("fn save(path: String) ? IOError"));
+    }
+
     /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.
     #[test]
     fn member_spread_parses() {

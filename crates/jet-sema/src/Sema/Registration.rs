@@ -230,6 +230,7 @@ impl<'a> Checker<'a> {
                             task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
+                            invalid: false,
                         },
                     );
                 }
@@ -286,6 +287,7 @@ impl<'a> Checker<'a> {
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
+                        invalid: false,
                     },
                 );
             }
@@ -397,6 +399,7 @@ impl<'a> Checker<'a> {
                     task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
+                    invalid: false,
                 },
             );
             for clause in &mut f.post {
@@ -698,8 +701,13 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => expr_uses(inner, name, other),
+        | Expr::Err(inner, _) => expr_uses(inner, name, other),
+        Expr::Try(inner, _, _, note) => {
+            expr_uses(inner, name, other);
+            if let Some(note) = note {
+                expr_uses(note, name, other);
+            }
+        }
         Expr::OptField { base, .. } => expr_uses(base, name, other),
         Expr::Index { base, index, .. } => {
             expr_uses(base, name, other);

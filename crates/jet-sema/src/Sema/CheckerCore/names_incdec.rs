@@ -29,6 +29,7 @@ impl<'a> Checker<'a> {
                     task_lint_span,
                     single_use_span,
                     constant_value: None,
+                    invalid: false,
                 },
             );
         }

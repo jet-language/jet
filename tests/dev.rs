@@ -3947,7 +3947,7 @@ fn physical_quantities_run_in_resident_jit_without_fallback() {
     thirdish(scale: 2/3)
 }
 #UnitFamily(Time) { second }
-fn run() => () ? {
+fn run() ? {
     distance :: 12meter
     elapsed :: 3second
     speed :: distance / elapsed
@@ -3966,7 +3966,7 @@ fn run() => () ? {
     meter
     thirdish(scale: 2/3)
 }
-fn run() => () ? {
+fn run() ? {
     Meter.from_thirdish(1thirdish)?
 }
 "#, "physical_quantity_inexact");
@@ -3980,7 +3980,7 @@ fn run() => () ? {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
-fn run() => () ? {
+fn run() ? {
     Meter.from_almost(1almost)?
 }
 "#, "physical_quantity_exact_rational_edge");
@@ -4003,7 +4003,7 @@ fn run() => () ? {
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
-fn run() => () ? {
+fn run() ? {
     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
     negative_source :: ThreeHalves.from_float(-1.0)
@@ -4024,7 +4024,7 @@ fn run() => () ? {
 
     let overflow = r#"
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
-fn run() => () ? {
+fn run() ? {
     source :: Double.from_float(1.7976931348623157e308)
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
@@ -4055,7 +4055,7 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
-fn run() => () ? {
+fn run() ? {
     positive :: Half.from_float(5.0)
     negative :: Half.from_float(-5.0)
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
@@ -4464,7 +4464,7 @@ fn forward() => Float ? String {
     return Ok(value + 0.25)
 }
 
-fn run() => () ? {
+fn run() ? {
     print(forward()?)
 }
 "#;
@@ -4507,7 +4507,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => () ? {
+fn run() ? {
     print(direct_ok()?)
     stop :: false
     if stop {
@@ -4521,7 +4521,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => () ? {
+fn run() ? {
     print(direct_ok()?)
     outer :: true
     inner :: false
@@ -4538,7 +4538,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => () ? {
+fn run() ? {
     print(direct_ok()?)
     if true {
         print("left continues")
@@ -4553,7 +4553,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => () ? {
+fn run() ? {
     print(direct_ok()?)
     if true {
         return Err("left branch")
@@ -4612,7 +4612,7 @@ fn resident_jit_fidelity_matches_runtime_contract() {
     let valid = r#"
 use core.perf as perf
 
-fn run() => () ? {
+fn run() ? {
     perf.reset_fidelity()
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
@@ -4647,7 +4647,7 @@ fn run() => () ? {
     ] {
         let src = format!(
             r#"use core.perf as perf
-fn run() => () ? {{
+fn run() ? {{
     perf.reset_fidelity()
     perf.override_fidelity(0.375)?
     perf.override_fidelity({value})?
@@ -4920,6 +4920,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "errors/panic",
         "errors/rollback_trait",
         "errors/transact",
+        "errors/default_error_conversion",
         "errors/typed_error_families",
     ];
     let mut failures = Vec::new();

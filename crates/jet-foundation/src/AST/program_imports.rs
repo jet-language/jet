@@ -694,8 +694,6 @@ pub enum TryConvert {
     /// D-FAIL-ERROR1=A: a legacy string-shaped failure becomes the default
     /// `Err` value at the propagation seam.
     DefaultErr,
-    /// The source error implements `Fallible`; call `.to_error()` (D-ERR2).
-    Fallible,
     /// Declared `impl Source => Target { … }` conversion (D-ERR-CONV).
     /// Holds the mangled Rust function name emitted by codegen.
     Typed(String),

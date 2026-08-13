@@ -1213,8 +1213,13 @@ fn collect_capture_expr(
         | Expr::Present(base, _)
         | Expr::Ok(base, _)
         | Expr::Err(base, _)
-        | Expr::Try(base, _, _)
         | Expr::Paren(base, _) => collect_capture_expr(base, aliases, local_functions, sites),
+        Expr::Try(base, _, _, note) => {
+            collect_capture_expr(base, aliases, local_functions, sites);
+            if let Some(note) = note {
+                collect_capture_expr(note, aliases, local_functions, sites);
+            }
+        }
         Expr::MapLit(entries, _) => {
             for (key, value) in entries {
                 collect_capture_expr(key, aliases, local_functions, sites);

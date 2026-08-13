@@ -114,7 +114,17 @@ impl<'a> Checker<'a> {
         inner: &mut Box<Expr>,
         span: Span,
         convert: &mut TryConvert,
+        note: &mut Option<Box<Expr>>,
     ) -> Option<Type> {
+        if let Some(note) = note.as_mut() {
+            let saved = self.expected_type.clone();
+            self.expected_type = Some(Type::String);
+            let note_ty = self.infer(note);
+            self.expected_type = saved;
+            if let Some(note_ty) = note_ty {
+                self.check_type_assignable(&Type::String, &note_ty, note.span());
+            }
+        }
         if let Expr::Call(call) = inner.as_mut() {
             if self.registry.distinct_range(&call.name).is_some() {
                 call.range_checked = true;
@@ -165,37 +175,25 @@ impl<'a> Checker<'a> {
                             return Some((*ok).clone());
                         }
 
-                        // S80/D-LIB3: check if the error type implements `Fallible`
-                        // and the return error is the default `Err`.
                         if is_default_error(ret_err) {
-                            if self
-                                .trait_reg
-                                .implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE)
-                            {
-                                // Mark the Try node for Fallible conversion in codegen.
-                                *convert = TryConvert::Fallible;
-                                return Some((*ok).clone());
-                            }
-                            // E2402: return is `Err` but the error type has no Fallible impl.
                             let err_name = err.name();
                             self.diags.push(Diagnostic::error(
                                 "E2402",
                                 format!(
-                                    "`?` can't convert `{}` into `{}`",
+                                    "`?` can't convert `{}` into `{}` — no declared conversion exists",
                                     err_name,
                                     Syntax::TYPE_ERR
                                 ),
                                 format!(
-                                    "`{}` has no path to `{}`; implement `impl {}: {}` to enable conversion",
+                                    "`?` uses the declared conversion rail; `{}` can reach `{}` only through `impl {} => {}`",
                                     err_name,
                                     Syntax::TYPE_ERR,
                                     err_name,
-                                    Syntax::TRAIT_FALLIBLE
+                                    Syntax::TYPE_ERR
                                 ),
                                 format!(
-                                    "add `impl {}: {} {{ fn to_error(self) => {} {{ … }} }}`, or change the return type",
+                                    "add `impl {} => {} {{ … }}` before this function, or change the return type",
                                     err_name,
-                                    Syntax::TRAIT_FALLIBLE,
                                     Syntax::TYPE_ERR
                                 ),
                                 Some(span),

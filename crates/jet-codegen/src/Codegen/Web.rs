@@ -43,6 +43,8 @@ pub struct WebArtifacts {
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
 const JS_EXECUTION_PRELUDE: &str = concat!(
+    include_str!("../Prelude/Core/RuntimeStop.js"),
+    "\n",
     include_str!("../Prelude/Core/Option.js"),
     "\n",
     include_str!("../Prelude/Core/FixedList.js"),
@@ -664,6 +666,9 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Present(inner)
         | TIR::TExprKind::Ok(inner)
         | TIR::TExprKind::Err(inner) => {
+            web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::Try { inner, .. } => {
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Absent => true,
@@ -2251,6 +2256,15 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut cx, bundle, module_index);
+        // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
+        // bodies as native emission. The web expression emitter only marshals
+        // the call at the `?` site; it does not recreate the conversion body.
+        for item in &module.items {
+            if let Item::ErrorConv(conversion) = item {
+                let tir = TIR::lower_error_conv(conversion, &cx);
+                TIR::emit_tir_func(&tir, &cx, &mut out);
+            }
+        }
         for item in &module.items {
             if let Item::Impl(implementation) = item {
                 if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
@@ -2424,6 +2438,11 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
     }
     out.push_str("{\n");
     out.push_str(&format!("    // jet:source-map source={}\n", f.source_name));
+    let source_file = mangle_generated("source_file");
+    out.push_str(&format!(
+        "    let {source_file}: &str = {:?};\n",
+        f.source_name
+    ));
     emit_wasm_body(
         &f.tir.body,
         out,
@@ -2459,6 +2478,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
 fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
+        Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Int | Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
@@ -2491,6 +2511,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
 fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
+        Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
@@ -3547,9 +3568,9 @@ fn wasm_emit_expr(
             } => {
                 let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
                 let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
-                let file = file_prefix.unwrap_or_default();
+                let file = mangle_generated("source_file");
                 jet_format!(
-                    "{{ let {jet_prefix}fixed = ({base}); jet_fixed_list_index({jet_prefix}fixed.len(), ({index}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_panic({file:?}, {line}, &{jet_prefix}error.message())) }}"
+                    "{{ let {jet_prefix}fixed = ({base}); jet_fixed_list_index({jet_prefix}fixed.len(), ({index}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_arithmetic_stop({file}, {line}, &{jet_prefix}error.message())) }}"
                 )
             }
             _ => return Err(()),
@@ -3567,6 +3588,25 @@ fn wasm_emit_expr(
             "Err({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
+        // D-FAIL-CONV1: sema/TIR has already selected the one conversion rail.
+        // Web only marshals that fact through the same Result operation as the
+        // native emitter; conversion policy stays in the declared Prelude body.
+        TIR::TExprKind::Try { inner, convert, .. } => {
+            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            match convert {
+                TIR::TTryConvert::DefaultErr => {
+                    format!("({value}).map_err(jet_err_from_message)?")
+                }
+                TIR::TTryConvert::Typed(conv_fn) => {
+                    format!("({value}).map_err({conv_fn})?")
+                }
+                TIR::TTryConvert::WidenUnion { enum_name, tag } => format!(
+                    "({value}).map_err(|e| {}::{tag}(e))?",
+                    mangle_path(enum_name)
+                ),
+                TIR::TTryConvert::None => format!("({value})?"),
+            }
+        }
         TIR::TExprKind::DistinctConvert {
             name,
             arg,
@@ -3667,18 +3707,23 @@ fn wasm_emit_expr(
             base,
             index,
             is_map: true,
+            line,
             ..
-        } => format!(
-            "({}).get(&({})).cloned().expect(\"index miss\")",
-            wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
-            wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
-        ),
+        } => {
+            let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
+            let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
+            format!(
+                "{{ let __jet_map = &({base}); let __jet_key = &({index}); __jet_map.get(__jet_key).cloned().unwrap_or_else(|| jet_panic({}, {}, &jet_missing_map_key_value(__jet_key))) }}",
+                mangle_generated("source_file"),
+                line,
+            )
+        }
         TIR::TExprKind::Index {
             base,
             index,
             is_map: false,
             uninit_fixed,
-            ..
+            line,
         } => {
             let base = match &base.kind {
                 TIR::TExprKind::Local(local) if *uninit_fixed && local.uninit_fixed => {
@@ -3686,9 +3731,10 @@ fn wasm_emit_expr(
                 }
                 _ => wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
             };
+            let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
+            let file = mangle_generated("source_file");
             format!(
-                "({base})[{} as usize].clone()",
-                wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
+                "{{ let __jet_list = ({base}); jet_fixed_list_index(__jet_list.len(), ({index}), |__jet_i| __jet_list[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_arithmetic_stop({file}, {line}, &__jet_error.message())) }}",
             )
         }
         TIR::TExprKind::Call { name, args, .. } => {
@@ -3919,6 +3965,11 @@ fn emit_js_app(
                 json_quote("run")
             ));
             out.push_str("  try {\n");
+            let source_file = mangle_generated("source_file");
+            out.push_str(&format!(
+                "    const {source_file} = {};\n",
+                json_quote(&main_fn.source_name)
+            ));
             let mut body = String::new();
             body.push_str(&format!(
                 "    {source_marker} file {}\n",
@@ -4003,6 +4054,11 @@ fn emit_js_fn(
         json_quote(&f.key)
     ));
     out.push_str("  try {\n");
+    let source_file = mangle_generated("source_file");
+    out.push_str(&format!(
+        "    const {source_file} = {};\n",
+        json_quote(&f.source_name)
+    ));
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
@@ -4516,13 +4572,15 @@ fn emit_tir_js_body(
                 out.push_str(&format!("{pad}{source_marker} line {line}\n"));
             }
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
-            TIR::TStmt::Assign { place, op, value, .. } => {
+            TIR::TStmt::Assign { place, op, value, line, .. } => {
                 let target = web_tir_place(place)?;
                 let v = tir_js_expr(value, funcs, file_prefix)?;
                 // D-EXPSEM1=A / D-FLOORDIV1=A: JavaScript's `**=` is the
                 // floating-point power and it has no rounding division at all,
                 // so those compounds read the place and call the JS preamble.
-                if let Some(call) = op.and_then(|op| js_prelude_call(op, &target, &v, &value.ty)) {
+                if let Some(call) = op.and_then(|op| {
+                    js_prelude_call(op, &target, &v, &value.ty, file_prefix, *line)
+                }) {
                     out.push_str(&format!("{pad}{target} = {call};\n"));
                 } else if matches!(value.ty, Type::Float | Type::Float32) {
                     // Float compound assigns leave BigInt land (D-INTDIV1).
@@ -5022,7 +5080,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 "jet_fixed_list_index({}, {}, {}, {})",
                 tir_js_expr(base, funcs, file_prefix)?,
                 tir_js_expr(index, funcs, file_prefix)?,
-                json_quote(file_prefix.unwrap_or_default()),
+                mangle_generated("source_file"),
                 line
             ),
             _ => return Err(()),
@@ -5036,12 +5094,15 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 | crate::AST::BinOp::Rem),
             lhs,
             rhs,
+            line,
             ..
         } => js_prelude_call(
             *op,
             &tir_js_expr(lhs, funcs, file_prefix)?,
             &tir_js_expr(rhs, funcs, file_prefix)?,
             &expr.ty,
+            file_prefix,
+            *line,
         )
         .expect("the match arm admits only Prelude-carried operators"),
         // Float results (D-INTDIV1 `Int / Int` → Float, float arithmetic) leave
@@ -5191,15 +5252,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             base,
             index,
             is_map,
+            line,
             ..
         } => {
             let b = tir_js_expr(base, funcs, file_prefix)?;
             let i = tir_js_expr(index, funcs, file_prefix)?;
+            let file = mangle_generated("source_file");
             if *is_map {
-                format!("{b}.get({i})")
+                format!("jet_map_get({b}, {i}, {file}, {line})")
             } else {
-                // JS array indices are ordinary numbers; BigInt keys throw.
-                format!("{b}[Number({i})]")
+                format!("jet_list_get({b}, {i}, {file}, {line})")
             }
         },
         E::Call { name, args, .. } => {
@@ -5518,11 +5580,18 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
 
 /// D-EXPOP1=A / D-EXPSEM1=A / D-FLOORDIV1=A: the wasm module runs the same
 /// arithmetic source as the native Prelude — the very same files, included
-/// verbatim. `jet_panic` is the only tier-local piece: the wasm module has no
-/// runtime reporter, so a trap is a wasm panic.
+/// verbatim. The two adapter doors below marshal a rendered report into the
+/// host's termination mechanism; they do not create a second report shape.
 const WASM_ARITH_PRELUDE: &str = concat!(
+    "fn jet_runtime_stop(code: &'static str, file: &str, line: u32, message: &str) -> ! {\n",
+    "    let report = jet_render_runtime_stop(code, file, line, \"\", \"\", 1, 1, message, \"\");\n",
+    "    std::panic::panic_any(report.rendered)\n",
+    "}\n\n",
+    "fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {\n",
+    "    jet_runtime_stop(\"E3010\", file, line, message)\n",
+    "}\n\n",
     "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
-    "    panic!(\"{}:{}: {}\", file, line, message)\n",
+    "    jet_runtime_stop(\"E3001\", file, line, message)\n",
     "}\n\n",
     // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
     // first, so `T?` and `T ? E` mean one thing on the web tier too.
@@ -5552,19 +5621,19 @@ fn wasm_prelude_call(
     lhs: &str,
     rhs: &str,
     ty: &Type,
-    file_prefix: Option<&str>,
+    _file_prefix: Option<&str>,
     line: u32,
 ) -> Option<String> {
     use crate::AST::BinOp;
     let float = matches!(ty, Type::Float | Type::Float32);
-    let file = file_prefix.unwrap_or_default();
+    let file = mangle_generated("source_file");
     Some(match op {
         BinOp::Pow if float => format!("({lhs}).jet_pow({rhs})"),
-        BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file:?}, {line})"),
+        BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file}, {line})"),
         BinOp::FloorDiv if float => format!("({lhs}).jet_floordiv({rhs})"),
-        BinOp::FloorDiv => format!("({lhs}).jet_floordiv({rhs}, {file:?}, {line})"),
-        BinOp::Mod => format!("({lhs}).jet_mod({rhs}, {file:?}, {line})"),
-        BinOp::Rem => format!("({lhs}).jet_trunc_rem({rhs}, {file:?}, {line})"),
+        BinOp::FloorDiv => format!("({lhs}).jet_floordiv({rhs}, {file}, {line})"),
+        BinOp::Mod => format!("({lhs}).jet_mod({rhs}, {file}, {line})"),
+        BinOp::Rem => format!("({lhs}).jet_trunc_rem({rhs}, {file}, {line})"),
         _ => return None,
     })
 }
@@ -5586,23 +5655,23 @@ const JS_POWER_PRELUDE: &str = concat!(
     // `Number(value)` silently rounded every answer above 2^53.
     "const JET_I64_MIN = -(2n ** 63n);\n",
     "const JET_I64_MAX = 2n ** 63n - 1n;\n",
-    "function jet_i64(value, message) {\n",
-    "  if (value < JET_I64_MIN || value > JET_I64_MAX) throw new Error(message);\n",
+    "function jet_i64(value, message, file, line) {\n",
+    "  if (value < JET_I64_MIN || value > JET_I64_MAX) jet_runtime_stop(\"E3010\", file, line, message);\n",
     "  return value;\n",
     "}\n\n",
-    "function jet_pow(base, exponent) {\n",
+    "function jet_pow(base, exponent, file, line) {\n",
     "  const e = BigInt(exponent);\n",
     "  if (e < 0n) {\n",
-    "    throw new Error(\"a negative exponent has no whole-number result ",
+    "    jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result ",
     "(make the base a Float to raise it to a negative power)\");\n",
     "  }\n",
     "  const overflow = \"this power overflows the value's type ",
     "(the result is outside its range)\";\n",
     "  const b = BigInt(base);\n",
     "  if (b !== 0n && b !== 1n && b !== -1n && e > 63n) {\n",
-    "    throw new Error(overflow);\n",
+    "    jet_runtime_stop(\"E3010\", file, line, overflow);\n",
     "  }\n",
-    "  return jet_i64(b ** e, overflow);\n",
+    "  return jet_i64(b ** e, overflow, file, line);\n",
     "}\n\n",
     // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
     // JavaScript's `~` works on 32 bits, so it is not the same operation.
@@ -5613,14 +5682,14 @@ const JS_POWER_PRELUDE: &str = concat!(
     // D-FLOORDIV1=A: the JS tier's copy of the one floor-division rule
     // (`Prelude/Core/Division.rs`). Whole numbers trap on a zero divisor, the
     // same as `/`, and on the one pair whose quotient leaves the range.
-    "function jet_floordiv(left, right) {\n",
+    "function jet_floordiv(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
     "  let quotient = a / b;\n",
     "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
     "  return jet_i64(quotient, \"this division overflows the value's type ",
-    "(the result is outside its range)\");\n",
+    "(the result is outside its range)\", file, line);\n",
     "}\n\n",
     // Floats round down with no trap: a zero divisor gives an infinity, exactly
     // as `/` does.
@@ -5630,19 +5699,19 @@ const JS_POWER_PRELUDE: &str = concat!(
     // D-MODSEM1=A: the floored modulo. JavaScript's `%` is the truncated
     // remainder, which Jet spells `%%`, so the answer is corrected onto the
     // divisor's side of zero.
-    "function jet_mod(left, right) {\n",
+    "function jet_mod(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
     "  let remainder = a % b;\n",
     "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
     "  return BigInt.asIntN(64, remainder);\n",
     "}\n\n",
     // D-MODSEM1=A: the truncated remainder, which is the sign JavaScript's own
     // `%` already gives — this adds the zero-divisor trap and the 64-bit range.
-    "function jet_trunc_rem(left, right) {\n",
+    "function jet_trunc_rem(left, right, file, line) {\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
     "  return BigInt.asIntN(64, BigInt(left) % b);\n",
     "}\n\n"
 );
@@ -5650,18 +5719,26 @@ const JS_POWER_PRELUDE: &str = concat!(
 /// D-EXPSEM1=A: one call shape for `^` in the JS tier. Floats take the
 /// JavaScript power, which agrees with the Prelude float power; whole numbers
 /// take `jet_pow`, which carries the exact, trapping rule.
-fn js_prelude_call(op: crate::AST::BinOp, lhs: &str, rhs: &str, ty: &Type) -> Option<String> {
+fn js_prelude_call(
+    op: crate::AST::BinOp,
+    lhs: &str,
+    rhs: &str,
+    ty: &Type,
+    _file_prefix: Option<&str>,
+    line: u32,
+) -> Option<String> {
     use crate::AST::BinOp;
     let float = matches!(ty, Type::Float | Type::Float32);
+    let file = mangle_generated("source_file");
     Some(match op {
         BinOp::Pow if float => format!("Math.pow(Number({lhs}), Number({rhs}))"),
-        BinOp::Pow => format!("jet_pow({lhs}, {rhs})"),
+        BinOp::Pow => format!("jet_pow({lhs}, {rhs}, {file}, {line})"),
         // A float divisor of zero gives an infinity, exactly as `/` does, so
         // only the whole-number helper traps.
         BinOp::FloorDiv if float => format!("jet_floordiv_float({lhs}, {rhs})"),
-        BinOp::FloorDiv => format!("jet_floordiv({lhs}, {rhs})"),
-        BinOp::Mod => format!("jet_mod({lhs}, {rhs})"),
-        BinOp::Rem => format!("jet_trunc_rem({lhs}, {rhs})"),
+        BinOp::FloorDiv => format!("jet_floordiv({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Mod => format!("jet_mod({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Rem => format!("jet_trunc_rem({lhs}, {rhs}, {file}, {line})"),
         _ => return None,
     })
 }

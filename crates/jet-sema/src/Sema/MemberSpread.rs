@@ -243,10 +243,15 @@ fn desugar_expr(expr: &mut Expr) {
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _)
         | Expr::Tainted(inner, _, _)
         | Expr::Field(inner, _, _)
         | Expr::Place(inner, _, _) => desugar_expr(inner),
+        Expr::Try(inner, _, _, note) => {
+            desugar_expr(inner);
+            if let Some(note) = note {
+                desugar_expr(note);
+            }
+        }
         Expr::Binary(_, a, b, _) => {
             desugar_expr(a);
             desugar_expr(b);

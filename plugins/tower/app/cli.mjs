@@ -58,7 +58,7 @@ const COMMAND_FLAGS = {
   papercut: ['card', 'text', 'open'],
   idea: ['title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note', 'all'],
   epoch: ['name', 'goal', 'status'],
-  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'expectRev', 'list'],
+  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'expectRev', 'list', 'archive', 'unarchive', 'archived'],
   next: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'],
   brief: ['agent', 'noClaim'],
   lint: ['docs', 'docsRoot'],
@@ -571,8 +571,9 @@ function cmdMilestone(store, { pos, flags }) {
       const s = store.project();
       let ms = s.milestones;
       if (flags.epoch) ms = ms.filter(m => m.epochId === flags.epoch);
+      if (!flags.archived) ms = ms.filter(m => !m.archived);
       if (flags.json) return out(flags, null, ms);
-      for (const m of ms) console.log(`${m.id.padEnd(12)} ${m.epochId.padEnd(6)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}`);
+      for (const m of ms) console.log(`${m.id.padEnd(12)} ${m.epochId.padEnd(6)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}${m.archived ? '  [archived]' : ''}`);
       if (!ms.length) console.log('(no milestones)');
       return;
     }
@@ -610,6 +611,8 @@ function cmdMilestone(store, { pos, flags }) {
       const patch = {};
       for (const [f, k] of [['title', 'title'], ['goal', 'goal'], ['criteria', 'criteria'], ['status', 'status'], ['epoch', 'epochId']])
         if (flags[f] !== undefined) patch[k] = flags[f];
+      if (flags.archive) patch.archived = true;
+      if (flags.unarchive) patch.archived = false;
       Object.assign(patch, p);
       if (flags.criteria !== undefined) patch.criteria = flags.criteria;
       if (flags.epoch !== undefined) patch.epochId = flags.epoch;

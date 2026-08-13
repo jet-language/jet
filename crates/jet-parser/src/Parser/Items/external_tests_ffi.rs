@@ -610,7 +610,9 @@ impl<'a> Parser<'a> {
     
             let mut return_type = None;
             let mut return_type_span = None;
+            let mut arrow_return = false;
             if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+                arrow_return = true;
                 let arrow = self.bump();
                 if matches!(arrow.kind, TokKind::Arrow) {
                     self.diags.push(Self::retired_callable_arrow(arrow.span));
@@ -618,6 +620,18 @@ impl<'a> Parser<'a> {
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                return_type = Some(ty);
+                return_type_span = Some(span);
+            }
+            if arrow_return
+                && return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+            {
+                self.diags.push(Self::retired_unit_fallible_signature(
+                    return_type_span.unwrap_or(self.peek().span),
+                ));
             }
     
             self.expect(TokKind::Eq, "before the Rust path")?;

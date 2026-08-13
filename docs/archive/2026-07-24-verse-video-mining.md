@@ -14,7 +14,7 @@
 Verse is a functional-logic language with a rich static type system. Core mechanics:
 - **Effect system.** Functions carry effect specifiers (`computes` = pure; default = `reads`/`writes`/`allocates` heap effects). Compiler enforces them and exploits purity (CSE, memoization). Full function-type variance over effects.
 - **`decides` effect = fallibility.** Failure lives in the *effect system*, not the return type — a fallible fn still returns plain `int`, just "sometimes fails." No throw/return; failure short-circuits. Transcript (03:31) + comments confirm a failing path **rolls back all its state mutations** (transactional memory).
-- **Dual call syntax.** Fallible fns called with `[]`, infallible with `()`. Array/map indexing reuses `[]` because they're *partial functions* key→value; compiler enforces bounds/absence safety. This "derived square brackets from first principles" is the video's payoff moment.
+- **Dual call syntax.** Failure-returning fns called with `[]`, infallible with `()`. Array/map indexing reuses `[]` because they're *partial functions* key→value; compiler enforces bounds/absence safety. This "derived square brackets from first principles" is the video's payoff moment.
 - **`if` is effect control flow** (runs a fallible expr, branches on success/fail — like try/catch); `logic` is the boolean type; `?` converts a logic value to success/fail; failure↔Optional is isomorphic via an `option` constructor.
 - **Framing thesis:** LLMs are obsoleting hand-written code; a text language like Verse may end up mostly AI-authored.
 

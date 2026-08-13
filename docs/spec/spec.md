@@ -151,7 +151,7 @@ expr     = precedence climbing over:
   value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
-  `fn run() => () ?` for top-level error propagation, or a single typed CLI
+  `fn run() ?` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
@@ -952,14 +952,18 @@ impl Circle {
 
 ## M4 — errors as values (done)
 
-Fallible functions return **`T ? E`** (S34): `T` is the success payload,
+Failure-returning functions return **`T ? E`** (S34): `T` is the success payload,
 `E` is any enum, struct, `String`, or the default **`Err`** type. Omitting
 the error side in a function return — **`T ?`** — means **`T ? Err`**.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
-Cross-type **`?`** conversion supports two forms:
-- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) => Err { Err(str(self)) } }` — converts a typed error to the default `Err`. Prelude types implement `Fallible` by default.
-- **Declared typed conversion** (D-ERR-CONV): `impl Source => Target { Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
+Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
+`impl Source => Target { … }` converts a `Source` error into `Target`, including
+the default `Err` target; `?` applies it automatically. A conversion into
+`Err` may name a foreign source type, while typed targets keep the orphan rule
+(S28). `E2402` fires when `?` would need an undeclared conversion; `E2405`
+fires on duplicate declarations; `E2406` fires on typed-target orphan-rule
+violations.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
@@ -978,7 +982,7 @@ Cross-type **`?`** conversion supports two forms:
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** may stay bare for beginner programs. Use
-  **`fn run() => () ?`** only when the entry itself propagates errors with
+  **`fn run() ?`** only when the entry itself propagates errors with
   **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
@@ -3329,8 +3333,8 @@ api: Output :: .Service.{ name: "todo-api", entry: serve };
 release: Output :: .Check.{ name: "release", entry: verify_release };
 
 fn launch() {}
-fn serve() => () ? {}
-fn verify_release() => () ? {}
+fn serve() ? {}
+fn verify_release() ? {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,

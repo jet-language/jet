@@ -5376,9 +5376,8 @@ impl<'a> EvalCtx<'a> {
                                 self.runtime_index_stop(
                                     "E3001",
                                     *line as u32,
-                                    &format!(
-                                        "the map has no entry for key {:?}",
-                                        key.to_value().jet_show()
+                                    &jet_foundation::Outcome::jet_missing_map_key_value(
+                                        key.to_value().jet_show(),
                                     ),
                                 )
                             }),
@@ -5413,9 +5412,8 @@ impl<'a> EvalCtx<'a> {
                                 return Err(self.runtime_index_stop(
                                     "E3010",
                                     *line as u32,
-                                    &format!(
-                                        "the list has {} items, so position {} doesn't exist",
-                                        xs.len(), idx
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        xs.len(), idx,
                                     ),
                                 ));
                             }
@@ -5441,9 +5439,8 @@ impl<'a> EvalCtx<'a> {
                                 Err(self.runtime_index_stop(
                                     "E3010",
                                     *line as u32,
-                                    &format!(
-                                        "the list has {} items, so position {} doesn't exist",
-                                        xs.len(), idx
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        xs.len(), idx,
                                     ),
                                 ))
                             } else {
@@ -5455,9 +5452,8 @@ impl<'a> EvalCtx<'a> {
                                 Err(self.runtime_index_stop(
                                     "E3010",
                                     *line as u32,
-                                    &format!(
-                                        "the byte list has {} items, so position {} doesn't exist",
-                                        bs.len(), idx
+                                    &jet_foundation::Outcome::jet_list_bounds_message(
+                                        bs.len(), idx,
                                     ),
                                 ))
                             } else {
@@ -5843,6 +5839,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Try {
                 inner,
+                note,
                 convert,
                 file,
                 line,
@@ -5850,40 +5847,69 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let v = self.eval_expr_child(inner, scope)?;
                 match v {
-                    CtValue::Present(inner) => Ok(*inner),
+                    CtValue::Present(inner) => {
+                        jet_foundation::Outcome::jet_journey_reset();
+                        Ok(*inner)
+                    }
                     CtValue::Failed(CtReport::Told(e)) => {
-                        // D-ERRCTX1: match AOT `jet_trace_err` / JIT host (dev builds).
+                        // D-FAIL-CTX1: evaluate the hop note only on a failed
+                        // propagation path, then use the shared journey renderer.
                         let file = file.trim_matches('"');
                         let fn_name = fn_name.trim_matches('"');
-                        let frame = format!(
-                            "error propagated from: {fn_name} ({file}:{line}) via ?\n"
-                        );
-                        if let Some(sink) = self.sink.as_ref() {
-                            let mut sink = sink.lock().expect("evaluator sink poisoned");
-                            let skip = sink
-                                .stderr
-                                .ends_with(&frame);
-                            if !skip {
+                        let note = if let Some(note) = note {
+                            match self.eval_expr_child(note, scope)? {
+                                CtValue::Str(note) => note,
+                                other => other.jet_show(),
+                            }
+                        } else {
+                            String::new()
+                        };
+                        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+                            file,
+                            *line as u32,
+                            fn_name,
+                            || note,
+                        ) {
+                            if let Some(sink) = self.sink.as_ref() {
+                                let mut sink = sink.lock().expect("evaluator sink poisoned");
                                 sink.stderr.push_str(&frame);
                             }
                         }
                         // D-FAIL-ERROR1=A: the evaluator marshals the same
-                        // String-to-Err conversion selected by sema.
-                        let e = if matches!(convert, crate::Codegen::TIR::TTryConvert::DefaultErr) {
-                            match *e {
-                                CtValue::Str(message) => Box::new(CtValue::from_jet_err(
-                                    &jet_foundation::Outcome::jet_err_from_message(message),
-                                )),
-                                other => Box::new(other),
+                        // String-to-Err conversion selected by sema. Declared
+                        // conversions run their lowered body, so the evaluator
+                        // cannot invent a second conversion policy.
+                        let converted = match convert {
+                            crate::Codegen::TIR::TTryConvert::DefaultErr => {
+                                let e = match *e {
+                                    CtValue::Str(message) => Box::new(CtValue::from_jet_err(
+                                        &jet_foundation::Outcome::jet_err_from_message(message),
+                                    )),
+                                    other => Box::new(other),
+                                };
+                                CtValue::failed(e)
                             }
-                        } else {
-                            e
+                            crate::Codegen::TIR::TTryConvert::Typed(conv_fn) => {
+                                let func = self.funcs.get(conv_fn).copied().ok_or_else(|| {
+                                    unsupported(
+                                        &format!("error conversion `{conv_fn}`"),
+                                        self.span(),
+                                    )
+                                })?;
+                                let mut child = HashMap::new();
+                                match self.run_func(func, vec![*e], &mut child)? {
+                                    CtValue::Failed(report) => CtValue::Failed(report),
+                                    other => CtValue::failed(Box::new(other)),
+                                }
+                            }
+                            _ => CtValue::failed(e),
                         };
-                        // Propagate as a function return of the error value.
-                        self.pending_return = Some(CtValue::failed(e));
+                        // Propagate as a function return of the converted error value.
+                        self.pending_return = Some(converted);
                         Ok(CtValue::Unit)
                     }
                     CtValue::Failed(CtReport::Clean(_)) => {
+                        jet_foundation::Outcome::jet_journey_reset();
                         self.pending_return = Some(CtValue::absent(crate::AST::Type::Int));
                         Ok(CtValue::Unit)
                     }
@@ -6467,28 +6493,6 @@ impl<'a> EvalCtx<'a> {
                         return Ok(CtValue::Struct {
                             type_name: crate::Syntax::CLOCK_TYPE.to_string(),
                             fields: vec![("now".to_string(), CtValue::Int(0))],
-                        });
-                    }
-                    // D-ERRCTX1: `.context(msg)` — the engine only marshals;
-                    // Outcome.rs owns the cause-chain meaning.
-                    if leaf == "jet_context" || leaf.ends_with("jet_context") {
-                        let msg = match argv.get(1) {
-                            Some(CtValue::Str(s)) => s.clone(),
-                            Some(other) => other.jet_show(),
-                            None => String::new(),
-                        };
-                        return Ok(match argv.first() {
-                            Some(CtValue::Present(v)) => CtValue::Present(v.clone()),
-                            Some(CtValue::Failed(CtReport::Told(err))) => err
-                                .to_jet_err()
-                                .map(|error| {
-                                    CtValue::failed(Box::new(CtValue::from_jet_err(
-                                        &jet_foundation::Outcome::jet_err_context(error, msg),
-                                    )))
-                                })
-                                .unwrap_or_else(|| CtValue::failed(err.clone())),
-                            Some(other) => other.clone(),
-                            None => CtValue::Unit,
                         });
                     }
                     Err(unsupported(
@@ -7192,9 +7196,10 @@ impl<'a> EvalCtx<'a> {
                     Err(self.runtime_stop(
                         "E3011",
                         *line as u32,
-                        &format!(
-                            "#Todo at {}:{} — expected {expected_type}",
-                            self.source_file, line
+                        &jet_foundation::Outcome::jet_todo_message(
+                            &self.source_file,
+                            *line as u32,
+                            expected_type,
                         ),
                     ))
                 } else {

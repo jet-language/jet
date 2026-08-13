@@ -148,7 +148,8 @@ pub const META_FIELD_MATURITY: &str = "maturity";
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";
 
-/// S7 (ratified M4): propagates a fallible result from the callee.
+/// S7 (ratified M4), D-FAIL-CTX1=A: propagates a fallible result from the
+/// callee; a same-line string immediately after `?` is its lazy hop note.
 pub const OP_TRY_SUFFIX: &str = "?";
 
 /// S5 (ratified): line comments run from this prefix to end of line.

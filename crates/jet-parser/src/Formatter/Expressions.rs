@@ -425,11 +425,16 @@ impl<'a> Fmt<'a> {
                     self.write("]=>");
                 }
                 if let Some(r) = ret {
-                    if effect_bound.is_none() {
+                    let unit_fallible = Self::is_unit_fallible_type(r);
+                    if effect_bound.is_none() && !unit_fallible {
                         self.write(" =>");
                     }
-                    self.write(" ");
-                    self.fmt_type(r);
+                    if unit_fallible {
+                        self.fmt_unit_fallible_return(r);
+                    } else {
+                        self.write(" ");
+                        self.fmt_type(r);
+                    }
                 }
                 if let Some(map) = return_view_provenance {
                     // Function types do not retain surface parameter names; emit
@@ -569,6 +574,25 @@ impl<'a> Fmt<'a> {
                     self.fmt_type(m);
                 }
             }
+        }
+    }
+
+    pub(super) fn is_unit_fallible_type(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Result { ok, .. }
+                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+        )
+    }
+
+    pub(super) fn fmt_unit_fallible_return(&mut self, ty: &Type) {
+        let Type::Result { err, .. } = ty else {
+            unreachable!("unit-fallible return formatter received a non-result type");
+        };
+        self.write(" ?");
+        if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_ERR) {
+            self.write(" ");
+            self.fmt_type(err);
         }
     }
 
@@ -1299,9 +1323,13 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
-            Expr::Try(inner, _, _) => {
+            Expr::Try(inner, _, _, note) => {
                 self.fmt_expr(inner, Prec::Postfix);
                 self.write("?");
+                if let Some(note) = note {
+                    self.write(" ");
+                    self.fmt_expr(note, Prec::Postfix);
+                }
             }
             Expr::OrFallback {
                 value, fallback, ..

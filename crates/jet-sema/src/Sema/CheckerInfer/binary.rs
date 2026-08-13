@@ -1503,6 +1503,14 @@ impl<'a> Checker<'a> {
                 ),
                 "choose the result type and convert the other side into it".to_string(),
             )
+        } else if lt == rt {
+            (
+                format!("{} is not defined for {}", operator_label(op), lt.show()),
+                format!(
+                    "use an operation supported by {}, or call a named method",
+                    lt.show()
+                ),
+            )
         } else {
             (
                 "the two sides of an operator must be the same type".to_string(),

@@ -529,8 +529,13 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => collect_expr_idents(inner, out),
+        | Expr::Err(inner, _) => collect_expr_idents(inner, out),
+        Expr::Try(inner, _, _, note) => {
+            collect_expr_idents(inner, out);
+            if let Some(note) = note {
+                collect_expr_idents(note, out);
+            }
+        }
         Expr::OptField { base, .. } => collect_expr_idents(base, out),
         Expr::Index { base, index, .. } => {
             collect_expr_idents(base, out);

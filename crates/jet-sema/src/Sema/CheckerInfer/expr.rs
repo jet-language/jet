@@ -1327,6 +1327,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if self.lookup(name).is_some_and(|info| info.invalid) {
+                    return None;
+                }
                 let moved_expr = Expr::Ident(name.clone(), *span);
                 if self.reject_moved_expr_use(&moved_expr, *span) {
                     return None;
@@ -2382,7 +2385,7 @@ impl<'a> Checker<'a> {
             }
             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
             Expr::Err(inner, span) => self.infer_err(inner, *span),
-            Expr::Try(inner, span, convert) => self.infer_try(inner, *span, convert),
+            Expr::Try(inner, span, convert, note) => self.infer_try(inner, *span, convert, note),
             Expr::OrFallback {
                 value,
                 fallback,

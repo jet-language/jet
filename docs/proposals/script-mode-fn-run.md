@@ -38,7 +38,7 @@ Hello World
 
 ## The design
 
-**The law.** Bare statements in a file are the body of an implicit `fn run()`. Declarations stay declarations. `jet run` treats the implicit entry exactly like an explicit one: same sema, same diagnostics, same meaning on AOT, JIT, interpreter, and web (I9). The implicit entry is the fallible form (`fn run() => () ?`, D-S80-RUN1), so `?` works at a script's top level and a failure stops the script with the standard report (proposed). This spelling desugars, so nothing about `fn run` changes:
+**The law.** Bare statements in a file are the body of an implicit `fn run()`. Declarations stay declarations. `jet run` treats the implicit entry exactly like an explicit one: same sema, same diagnostics, same meaning on AOT, JIT, interpreter, and web (I9). The implicit entry is the fallible form (`fn run() ?`, D-S80-RUN1), so `?` works at a script's top level and a failure stops the script with the standard report (proposed). This spelling desugars, so nothing about `fn run` changes:
 
 ```jet
 // script spelling                 // means exactly

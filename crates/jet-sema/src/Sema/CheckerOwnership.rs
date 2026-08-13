@@ -1158,9 +1158,14 @@ impl<'a> Checker<'a> {
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _)
             | Expr::Paren(inner, _) => {
                 self.collect_evaluated_expr_accesses(inner, mode, bound, out);
+            }
+            Expr::Try(inner, _, _, note) => {
+                self.collect_evaluated_expr_accesses(inner, mode, bound, out);
+                if let Some(note) = note {
+                    self.collect_evaluated_expr_accesses(note, mode, bound, out);
+                }
             }
             Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
@@ -2430,7 +2435,7 @@ impl<'a> Checker<'a> {
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
         let init = init.without_parens();
-        if let Expr::Copy(inner, _) | Expr::Try(inner, _, _) = init {
+        if let Expr::Copy(inner, _) | Expr::Try(inner, _, _, _) = init {
             return self.view_call_sources(inner);
         }
         if let Expr::Ident(name, _) = init {

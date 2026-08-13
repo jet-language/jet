@@ -413,10 +413,7 @@ fn trap_index(len: i64, index: i64, line: u32) {
         rt.set_runtime_stop(
             "E3010",
             line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, index
-            ),
+            &jet_foundation::Outcome::jet_list_bounds_message(len, index),
         );
     });
 }
@@ -568,10 +565,9 @@ extern "C" fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
             rt.set_runtime_stop(
                 "E3010",
                 line,
-                &format!(
-                    "the list has {} items, so position {} doesn't exist",
+                &jet_foundation::Outcome::jet_list_bounds_message(
                     rt.heap.list_len(list).unwrap_or_default(),
-                    idx
+                    idx,
                 ),
             );
             0
@@ -593,10 +589,9 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
                 rt.set_runtime_stop(
                     "E3010",
                     line,
-                    &format!(
-                        "the list has {} items, so position {} doesn't exist",
+                    &jet_foundation::Outcome::jet_list_bounds_message(
                         rt.heap.list_len(list).unwrap_or_default(),
-                        idx
+                        idx,
                     ),
                 );
                 0.0
@@ -653,10 +648,9 @@ fn jet_jit_list_get_range(list: i64, idx: i64, line: u32) -> (i64, i64, bool) {
             rt.set_runtime_stop(
                 "E3010",
                 line,
-                &format!(
-                    "the list has {} items, so position {} doesn't exist",
+                &jet_foundation::Outcome::jet_list_bounds_message(
                     rt.heap.list_len(list).unwrap_or_default(),
-                    idx
+                    idx,
                 ),
             );
             (0, 0, false)
@@ -1088,11 +1082,10 @@ extern "C" fn jet_jit_map_get(map: i64, key: i64, line: u32) -> i64 {
             if rt.heap.map_len(map).is_none() {
                 jet_foundation::ice!(None, "jit map get: bad handle");
             }
-            let key_text = rt
-                .heap
-                .clone_string(key)
-                .map(|value| format!("the map has no entry for key {:?}", value))
-                .unwrap_or_else(|| "the map has no entry for this key".to_string());
+            let key_text = match rt.heap.clone_string(key) {
+                Some(key) => jet_foundation::Outcome::jet_missing_map_key_value(key),
+                None => jet_foundation::Outcome::jet_missing_map_key_message(None),
+            };
             rt.set_runtime_stop("E3001", line, &key_text);
             0
         }
@@ -2015,9 +2008,11 @@ extern "C" fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
         };
         let len = xs.len() as i64;
         if idx < 0 || idx > len {
-            rt.set_trap(&format!(
-                "the list has {len} items, so position {idx} doesn't exist"
-            ));
+            rt.set_runtime_stop(
+                "E3010",
+                0,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
             return;
         }
         xs.insert(idx as usize, jet_rt::JetVal::Int(v));
@@ -2038,9 +2033,11 @@ extern "C" fn jet_jit_list_remove(list: i64, idx: i64) -> i64 {
         };
         let len = xs.len() as i64;
         if idx < 0 || idx >= len {
-            rt.set_trap(&format!(
-                "the list has {len} items, so position {idx} doesn't exist"
-            ));
+            rt.set_runtime_stop(
+                "E3010",
+                0,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
             return 0;
         }
         match xs.remove(idx as usize) {

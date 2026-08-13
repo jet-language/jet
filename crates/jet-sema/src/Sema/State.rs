@@ -649,8 +649,13 @@ impl<'a> StateCtx<'a> {
             | Expr::Field(inner, _, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
-            | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => self.check_expr(inner),
+            | Expr::Err(inner, _) => self.check_expr(inner),
+            Expr::Try(inner, _, _, note) => {
+                self.check_expr(inner);
+                if let Some(note) = note {
+                    self.check_expr(note);
+                }
+            }
             Expr::Binary(_, l, r, _) => {
                 self.check_expr(l);
                 self.check_expr(r);

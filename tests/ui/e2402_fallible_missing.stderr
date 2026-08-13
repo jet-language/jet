@@ -1,7 +1,7 @@
-Error [E2402]: `?` can't convert `MyError` into `Err`
+Error [E2402]: `?` can't convert `MyError` into `Err` — no declared conversion exists
   --> tests/ui/e2402_fallible_missing.jet:7:10
     |
   7 |     x :: inner()?
     |          ^^^^^^^^
- Why: `MyError` has no path to `Err`; implement `impl MyError: Fallible` to enable conversion
- Fix: add `impl MyError: Fallible { fn to_error(self) => Err { … } }`, or change the return type
+ Why: `?` uses the declared conversion rail; `MyError` can reach `Err` only through `impl MyError => Err`
+ Fix: add `impl MyError => Err { … }` before this function, or change the return type

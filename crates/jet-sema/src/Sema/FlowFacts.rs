@@ -386,6 +386,7 @@ impl Plane for Binding {
                 // the Send-safe representation.
                 joined.interrupt_sendable =
                     left.interrupt_sendable && right.interrupt_sendable;
+                joined.invalid = left.invalid || right.invalid;
                 Some(joined)
             }
             (Some(one), None) | (None, Some(one)) => {
@@ -417,6 +418,7 @@ impl Plane for Narrow {
                 // both reaching refinements carry the canonical Send form.
                 joined.interrupt_sendable =
                     left.interrupt_sendable && right.interrupt_sendable;
+                joined.invalid = left.invalid || right.invalid;
                 Some(joined)
             }
             _ => None,

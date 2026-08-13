@@ -7,7 +7,10 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
+use tir_support::{
+    build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi,
+    compile, have_rustc, interpreter_run, jit_run,
+};
 
 /// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
 /// interpreter path behind it. Runtime constructors remain ordinary parsers;
@@ -462,6 +465,197 @@ fn run() {
         .filter(|diagnostic| diagnostic.code == "E0135")
         .count();
     assert_eq!(range_errors, 4, "diagnostics: {diagnostics:#?}");
+}
+
+fn normalize_contract_source_arrow(stderr: &str) -> String {
+    let mut normalized = stderr
+        .lines()
+        .map(|line| {
+            let Some(index) = line.find("  --> ") else {
+                return line.to_string();
+            };
+            let location = &line[index + "  --> ".len()..];
+            let line_number = location.rsplit_once(':').map_or("?", |(_, number)| number);
+            format!("{}  --> <source>:{line_number}", &line[..index])
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if stderr.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn generated_function<'a>(rust: &'a str, name: &str) -> &'a str {
+    let signature = format!("pub fn {name}");
+    let start = rust.find(&signature).expect("generated function");
+    let end = rust[start..]
+        .find("\npub fn __jet_run")
+        .map_or(rust.len(), |offset| start + offset);
+    &rust[start..end]
+}
+
+fn generated_run_function<'a>(rust: &'a str) -> &'a str {
+    let start = rust.find("pub fn __jet_run").expect("run function");
+    &rust[start..]
+}
+
+fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) {
+    let (aot_code, aot_stdout, aot_stderr) = build_and_run_full(
+        "jet_contract_tiers",
+        name,
+        src,
+    );
+    let (jit_code, jit_stdout, jit_stderr) = jit_run(name, src);
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, src);
+    let (release_code, release_stdout, release_stderr) = build_and_run_full_with_cfg(
+        "jet_contract_release",
+        name,
+        src,
+        "jet_release",
+    );
+
+    assert_eq!(aot_code, 70);
+    assert_eq!(jit_code, aot_code, "default `jet run` exit drifted");
+    assert_eq!(interpreter_code, aot_code, "forced interpreter exit drifted");
+    assert_eq!(release_code, aot_code, "release AOT exit drifted");
+    assert_eq!(aot_stdout, "");
+    assert_eq!(jit_stdout, aot_stdout);
+    assert_eq!(interpreter_stdout, aot_stdout);
+    assert_eq!(release_stdout, aot_stdout);
+    let expected = normalize_contract_source_arrow(&aot_stderr);
+    assert_eq!(normalize_contract_source_arrow(&jit_stderr), expected);
+    assert_eq!(normalize_contract_source_arrow(&interpreter_stderr), expected);
+    assert_eq!(normalize_contract_source_arrow(&release_stderr), expected);
+    assert!(expected.contains(&format!("#{marker} contract failed")));
+    assert!(expected.contains(&format!("  --> <source>:{line}")), "wrong contract arrow: {expected}");
+}
+
+#[test]
+fn contract_breach_output_matches_aot_jit_and_interpreter() {
+    assert_contract_breach_tiers(
+        "contract_pre_failure",
+        r#"
+#Pre(value > 0, "positive") fn checked(value: Int) => Int {
+    return value
+}
+
+fn run() {
+    print(checked(0))
+}
+"#,
+        "Pre",
+        7,
+    );
+    assert_contract_breach_tiers(
+        "contract_post_failure",
+        r#"
+#Post(result == 99, "must equal 99")
+fn get() => Int {
+    return 1
+}
+
+fn run() {
+    print(get())
+}
+"#,
+        "Post",
+        2,
+    );
+}
+
+#[test]
+fn contract_interval_proof_erases_only_the_runtime_check() {
+    let unproven = r#"
+#Pre(value > 0, "positive") fn checked(value: Int) => Int {
+    return value
+}
+
+fn run() {
+    print(checked(1))
+}
+"#;
+    let proven = r#"
+#Numeric Positive :: distinct Int(1..10)
+#Pre(value.raw() > 0, "positive") fn checked(value: Positive) => Int {
+    return value.raw()
+}
+
+fn run() {
+    value :: Positive.from_int(1)
+    print(checked(value))
+}
+"#;
+    let unproven_rust = compile("contract_unproven", unproven);
+    let proven_rust = compile("contract_proven", proven);
+    let unproven_checked = generated_function(&unproven_rust, "__jet_checked");
+    let proven_checked = generated_function(&proven_rust, "__jet_checked");
+    let unproven_run = generated_run_function(&unproven_rust);
+    let proven_run = generated_run_function(&proven_rust);
+    assert!(
+        !unproven_checked.contains("jet_contract_check")
+            && unproven_run.contains("jet_contract_check"),
+        "unproven call-site contract lost its runtime check"
+    );
+    assert_eq!(
+        unproven_run.matches("jet_contract_check").count(),
+        1,
+        "the call-site contract must not be duplicated in the callee"
+    );
+    assert!(
+        !proven_checked.contains("jet_contract_check")
+            && !proven_run.contains("jet_contract_check"),
+        "range fact did not erase the proven contract: {proven_checked}"
+    );
+}
+
+#[test]
+fn method_precondition_reports_the_call_site() {
+    assert_contract_breach_tiers(
+        "contract_method_pre_failure",
+        r#"
+struct Boxed {
+    value: Int
+}
+
+impl Boxed {
+    #Pre(self.value > 0, "positive") fn get(self) => Int {
+        return self.value
+    }
+}
+
+fn run() {
+    item :: Boxed.{value: 0}
+    print(item.get())
+}
+"#,
+        "Pre",
+        14,
+    );
+}
+
+#[test]
+fn static_method_precondition_reports_the_call_site() {
+    assert_contract_breach_tiers(
+        "contract_static_method_pre_failure",
+        r#"
+struct Boxed {
+    value: Int
+}
+
+impl Boxed {
+    #Pre(value > 0, "positive") fn make(value: Int) => Boxed {
+        return Boxed.{value: value}
+    }
+}
+
+fn run() {
+    print(Boxed.make(0).value)
+}
+"#,
+        "Pre",
+        13,
+    );
 }
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated

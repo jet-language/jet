@@ -208,7 +208,7 @@ After — proposed: one report schema on every command that talks JSON:
 
 ```text
 $ jet test orders.jet --json
-{"schema":"jet.report/v1","moment":"test","severity":"stop","code":"E3001","what":"expected 100, got 101","why":"...","fix":"...","detail":null,"file":"tests/orders.jet","line":14,"col":5,"span":{"start":210,"end":238},"fix_edits":[],"cause":[]}
+{"schema":"jet.report/v1","moment":"test","severity":"stop","code":"E3001","what":"expected 100, got 101","why":"...","fix":"...","detail":null,"file":"tests/orders.jet","line":14,"col":5,"span":{"start":210,"end":238},"fix_edits":[],"cause":[],"clears":0}
 ```
 
 One shape for compile, run (dev loop), test, fmt, and jetpack. Ledger and status payloads (`"status":"ok"`, pass counts) keep their small command envelopes; every *report* inside any envelope is this one object. The two extra live shapes are deleted; `Source/DiagnosticsJSON.rs` and its orphan goldens are deleted; the spec's JSON chapter is regenerated from the real schema. Gate audits (D-FACT-GATE1) and future inspect surfaces emit their findings in the same shape.

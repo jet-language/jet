@@ -504,7 +504,7 @@ renumbered, and no new `W` code may be allocated.
 | E0770 | parser | two parameters publish the same call label, so the second could never be called (D-APILABEL1) |
 | E0771 | sema   | a function value's public call labels or parameter zones do not satisfy the expected function type (D-APILABEL1) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
-| E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
+| E3002 | runtime | error-return journey frame on a `?`-propagated failure, with an optional hop note (E2-M12, D-OBS1, D-FAIL-CTX1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
 | E3004 | runtime | task cancelled at a cooperative wait point (D-CANCELMODEL1) |
 | E3005 | runtime | a `#Pre`/`#Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
@@ -698,7 +698,7 @@ renumbered, and no new `W` code may be allocated.
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
 | E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `TaskGroup` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | a parallel collection adapter captures mutable state or crosses a worker boundary with a non-shareable value (D-PARCAPTURE1=D) |
-| E1112 | sema  | `task.all`, `task.race`, or `task.any` has no task branch (D-CONCSELECT1) |
+| E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
 | E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
@@ -1070,7 +1070,7 @@ CLI.
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
 | E1110 | `task` has no lexical or parameter task group, uses the wrong lexical group, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical `task.group` or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` in the active group, or pass the group to `fn helper(group: TaskGroup)`; do not store or capture it. |
 | E1111 | A `para_*` callback changes captured state, hides capture facts, or its items, captures, or results cannot safely cross worker boundaries. | Parallel workers run without a hidden shared-mutation or merge rule; their callbacks, inputs, and outputs must expose thread-safe owned values. | Write the callback inline or use a top-level function; return extra data, use `para_partition`/`para_fold`, copy into plain owned data, or keep the operation sequential. |
-| E1112 | A task combinator has no task branch. | `task.all`, `task.race`, and `task.any` need at least one child so the shared selection policy has a value to join or select. | Write one or more task branches inside the combinator. |
+| E1112 | `{method}` needs at least one task branch | a task combinator must have a child to join or select | write {method} {{ work() }} with one or more branches |
 
 ### E1130 — safe kernel proof (D-COMPUTE-KERNEL-SURFACE1=B)
 
@@ -1116,18 +1116,18 @@ named cell.
 
 ## Library authoring diagnostics (E2-M6)
 
-S61 (argument labels/defaults), S62 (trait delegation), D-LIB3 (Fallible `?`
+S61 (argument labels/defaults), S62 (trait delegation), D-ERR-CONV (`?`
 conversion), and S77 (field punning) introduce these codes. E24xx is the
 block reserved for M6.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
-| E2402 | `?` can't convert `{err}` into `Err` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Err` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Err`. | Add `impl {err}: Fallible { fn to_error(self) => Err { Err(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
+| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} => Err`. | Add `impl {err} => Err { … }` before this function, or change the return type to `T ? {err}`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source => Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} => {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} => {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … => …` blocks. |
-| E2406 | Can't declare `impl {Source} => {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
+| E2406 | Can't declare `impl {Source} => {Target}` — neither type is defined in this program. | Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source. | Define one of these types locally, or convert the foreign source into `Err`. |
 | E2407 | `#Rename(...)` needs a string literal. | The wire key a `#Codable` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#Rename("wire_name")`. |
 | E2408 | `#Flatten` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#Codable` struct — not a primitive, list, or map. | Give `{field}` a `#Codable` struct type, or drop `#Flatten`. |
 | E2409 | `#RenameAll({style})` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
@@ -1374,7 +1374,7 @@ span is embedded in the message (Jet file + line + function name).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled `CryptoError` at `fn run` instead reports `unhandled cryptographic error` plus its stable redacted Display text. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup. |
-| E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
+| E3002 | `error propagated from: {fn} ({file}:{line}) via ?` with an optional `: {note}` suffix — one journey frame appended when a `?` re-raises an error. | Each failed `?` joins the failure's journey, with or without a note, making the full error path visible. | Follow the journey from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result). |
@@ -1925,13 +1925,22 @@ Every report has these fields:
 | `line` / `col` | integer or null | One-based source position. |
 | `span` | object or null | Byte range with `start` and `end`. |
 | `fix_edits` | array | Machine-applicable replacements. |
-| `cause` | array | Causal report chain. |
+| `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
+| `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
 Example; real output stays on one line:
 
 ```json
-{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[]}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
 ```
+
+`cause` is machine data, not a second prose channel. A root report has an empty
+array. A dependent report lists the report codes that led to it, nearest cause
+first; a chain such as `["E0109","E0108"]` therefore identifies both links
+without requiring a consumer to parse What/Why/Fix text. `clears` counts every
+report in the same batch whose explicit chain names this report, including
+transitive dependents. A consumer can rank root reports by this count without
+walking or guessing the graph.
 
 Command status and ledger objects can keep their command schemas. Any report
 inside them uses `jet.report/v1`. No consumer of the shared renderer retains

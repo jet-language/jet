@@ -1397,7 +1397,9 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         }
         Expr::Field(receiver, _, _) if is_bare_handle(receiver, handle) => None,
         Expr::OptField { base, .. } if is_bare_handle(base, handle) => None,
-        Expr::Try(receiver, _, _) if is_bare_handle(receiver, handle) => None,
+        Expr::Try(receiver, _, _, note) if is_bare_handle(receiver, handle) => {
+            note.as_deref().and_then(|note| expr_handle_escape(note, handle))
+        }
         Expr::Deref(receiver, _) if is_bare_handle(receiver, handle) => None,
         Expr::Index { base, index, .. } if is_bare_handle(base, handle) => {
             expr_handle_escape(index, handle)
@@ -1410,7 +1412,10 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Place(inner, _, _)
         | Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
+        | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
+        Expr::Try(inner, _, _, note) => expr_handle_escape(inner, handle).or_else(|| {
+            note.as_deref().and_then(|note| expr_handle_escape(note, handle))
+        }),
         Expr::MemberSpread { base, .. } => expr_handle_escape(base, handle),
         Expr::OptField { base, .. } => expr_handle_escape(base, handle),
         Expr::Binary(_, l, r, _) => {

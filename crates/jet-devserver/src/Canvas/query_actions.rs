@@ -1202,7 +1202,7 @@ fn canvas_structural_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
         ("branch", "Branch", "insert_branch"),
         ("dispatch", "Switch", "insert_switch"),
         ("loop", "Loop", "insert_loop"),
-        ("fallible", "Fallible", "insert_fallible_rail"),
+        ("fallible", "Failure rail", "insert_fallible_rail"),
     ]
     .into_iter()
     .map(|(name, title, transaction)| {

@@ -381,6 +381,70 @@ fn emit_tir_if(
     );
 }
 
+fn contract_keyword(kind: crate::Codegen::TIR::TContractKind) -> &'static str {
+    match kind {
+        crate::Codegen::TIR::TContractKind::Pre => "Pre",
+        crate::Codegen::TIR::TContractKind::Post => "Post",
+    }
+}
+
+fn emit_contract_check(
+    contract: &crate::Codegen::TIR::TContract,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+) {
+    if contract.disposition != crate::Codegen::TIR::TContractDisposition::Check {
+        return;
+    }
+    let pad = "    ".repeat(indent);
+    let keyword = contract_keyword(contract.kind);
+    let cond = emit_tir_expr(&contract.condition, cx);
+    let msg = emit_tir_expr(&contract.message, cx);
+    out.push_str(&jet_format!(
+        "{pad}let {jet_prefix}contract_ok = jet_contract_check({cond});\n{pad}jet_proof_record(1, if {jet_prefix}contract_ok {{ 0 }} else {{ 1 }}, {keyword:?}, &({msg}), {file:?}, {line});\n{pad}if !{jet_prefix}contract_ok {{ jet_contract_fail({file:?}, {line}, {keyword:?}, &({msg})); }}\n",
+        cond = cond,
+        keyword = keyword,
+        file = contract.file,
+        line = contract.line,
+        msg = msg,
+    ));
+}
+
+fn emit_contract_scope(
+    pre: &[crate::Codegen::TIR::TContract],
+    body: &[TStmt],
+    post: &[crate::Codegen::TIR::TContract],
+    ret: &Option<Type>,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &[ActiveCleanup],
+) {
+    for contract in pre {
+        emit_contract_check(contract, cx, out, indent);
+    }
+    if post.is_empty() {
+        emit_tir_stmts_nested(body, cx, out, indent, active_deferred_closes);
+        return;
+    }
+    let ret_ty = ret
+        .clone()
+        .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()));
+    let ret_annot = crate::Codegen::rust_return_type(cx, &ret_ty);
+    let pad = "    ".repeat(indent);
+    out.push_str(&jet_format!(
+        "{pad}let {jet_prefix}result = (|| -> {ret_annot} {{\n",
+        ret_annot = ret_annot,
+    ));
+    emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
+    out.push_str(&format!("{pad}}})();\n"));
+    for contract in post {
+        emit_contract_check(contract, cx, out, indent);
+    }
+    out.push_str(&jet_format!("{pad}{jet_prefix}result\n"));
+}
+
 fn emit_tir_stmt(
     s: &TStmt,
     cx: &Cx,
@@ -390,6 +454,17 @@ fn emit_tir_stmt(
 ) {
     let pad = "    ".repeat(indent);
     match s {
+        TStmt::Contract { contract } => {
+            emit_contract_check(contract, cx, out, indent);
+        }
+        TStmt::ContractScope {
+            pre,
+            body,
+            post,
+            ret,
+        } => {
+            emit_contract_scope(pre, body, post, ret, cx, out, indent, active_deferred_closes);
+        }
         TStmt::Let {
             name,
             kw,

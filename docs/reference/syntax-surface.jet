@@ -254,7 +254,7 @@ fn nested(r: Shape ? Error) => Bool {
 // ============================================================================
 // ERRORS, RESULT & OPTION
 // ============================================================================
-// Fallible return is `T ? E` (S34). Present/absent optionals are `T?` (S32).
+// Failure-returning return is `T ? E` (S34). Present/absent optionals are `T?` (S32).
 
 enum ParseError { Empty }
 
@@ -278,25 +278,19 @@ fn optionals(user: User?) => String {
     return city ?? "unknown"
 }
 
-// Error conversion: opt-in via the `Fallible` trait; `?` applies it (S80/D-ERR-CONV).
-//<<< Owner Trait Implementation Syntax: Update trait implementation syntax
-// HAVE:
-impl FileErr.Fallible {
-    fn to_error(self) => Error = Error
+// Error conversion: declare one `Source => Target` rail; `?` applies it
+// (D-FAIL-CONV1).
+impl FileErr => Err {
+    return Err("file error")
 }
-// WANT:
-impl FileErr.Fallible {
-    fn to_error(self) => Error = Error
+// A foreign source may target the default `Err`; typed targets keep the orphan rule.
+impl String => Err {
+    return Err(self)
 }
-//>>> tracked: #33 D-IMPLDOT1
-// # RATIFIED, NOT YET IMPLEMENTED (S80)
-// Rich default `Error` carrier (message + optional code + optional source) and a
-// fallible `fn run() => () ?`. (The `Fallible` conversion above ships; the
-// structured carrier is still pending.)
 // fn load() => Config ? {
 //     return Err(Error.message("bad config").code(2).with_source(io_err))
 // }
-// fn run() => () ? {
+// fn run() ? {
 //     cfg :: load()?
 // }
 

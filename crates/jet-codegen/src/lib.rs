@@ -52,6 +52,8 @@ pub mod option_lift2 {
 /// D-FIXARR1: checked fixed-list indexing shared by all execution adapters.
 pub mod fixed_list {
     include!("Prelude/Core/FixedList.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::jet_list_bounds_message;
 }
 /// D-FLOAT-ORIGIN: tracked-float provenance rendering shared by all tiers.
 pub mod float_provenance {

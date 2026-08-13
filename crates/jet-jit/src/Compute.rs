@@ -11,6 +11,7 @@ use super::Concurrency;
 #[allow(dead_code, unused_imports)]
 mod semantics {
     use crate::JetShow;
+    use jet_foundation::Outcome::jet_list_bounds_message;
     use jet_foundation::StructuralDebug::jet_debug_range;
 
     fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {

@@ -137,7 +137,7 @@ pub(super) fn expr_title(expr: &Expr) -> &'static str {
         Expr::Deref(_, _) | Expr::RawOf(_, _) | Expr::PtrFromAddr { .. } => "unsafe expr",
         Expr::OrFallback { .. } => "fallback",
         Expr::PatternTest { .. } => "pattern test",
-        Expr::Try(_, _, _) => "fallible",
+        Expr::Try(_, _, _, _) => "fallible",
         _ => "expression",
     }
 }
@@ -177,7 +177,7 @@ pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> Stri
             .as_ref()
             .map(AST::Type::name)
             .unwrap_or_else(|| "unknown".to_string()),
-        Expr::Try(inner, _, _) => expr_type(g, index, inner).trim_end_matches('?').to_string(),
+        Expr::Try(inner, _, _, _) => expr_type(g, index, inner).trim_end_matches('?').to_string(),
         _ => "unknown".to_string(),
     }
 }

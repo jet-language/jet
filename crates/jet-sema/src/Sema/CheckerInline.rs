@@ -372,7 +372,12 @@ impl<'a> InlineAlwaysScan<'a> {
             Expr::ReduceMarker(_, _) => {}
             Expr::PatternTest { subject, .. } => self.scan_expr(subject),
             Expr::Ok(inner, _) | Expr::Err(inner, _) => self.scan_expr(inner),
-            Expr::Try(inner, _, _) => self.scan_expr(inner),
+            Expr::Try(inner, _, _, note) => {
+                self.scan_expr(inner);
+                if let Some(note) = note {
+                    self.scan_expr(note);
+                }
+            }
             Expr::OrFallback {
                 value, fallback, ..
             } => {

@@ -513,7 +513,7 @@ fn jet_stack_enter(
             line,
             fn_name,
             src_line,
-            &format!("stack overflow in `{fn_name}`"),
+            &jet_stack_overflow_message(fn_name),
         );
     }
     JetStackFrame
@@ -650,7 +650,7 @@ fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {
         "E3011",
         file,
         line,
-        &format!("#Todo at {file}:{line} — expected {expected_type}"),
+        &jet_todo_message(file, line, expected_type),
     )
 }
 
@@ -811,7 +811,7 @@ fn jet_panic_rich(
     eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
-/// E3002 / D-ERRCTX1=D: `?`-propagation trace in **dev** builds.
+/// E3002 / D-FAIL-CTX1: `?`-propagation trace in **dev** builds.
 ///
 /// Gate is `not(jet_release)` (set by `--release` / `--profile=release`), not
 /// `debug_assertions`: the default `jet run` profile passes `-O`, which turns
@@ -819,31 +819,33 @@ fn jet_panic_rich(
 ///
 /// Consecutive identical frames (same fn + file + line) collapse — Go wrap-noise
 /// lesson — while each distinct site keeps its identity (Elixir lesson).
-thread_local! {
-    static JET_ERR_TRACE_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
-        const { std::cell::RefCell::new(None) };
-}
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if cfg!(not(jet_release)) {
         if r.is_err() {
-            let site = (fn_name.to_string(), file.to_string(), line);
-            let fresh = JET_ERR_TRACE_LAST.with(|last| {
-                let mut slot = last.borrow_mut();
-                if slot.as_ref() == Some(&site) {
-                    false
-                } else {
-                    *slot = Some(site);
-                    true
-                }
-            });
-            if fresh {
-                eprintln!(
-                    "error propagated from: {} ({}:{}) via ?",
-                    fn_name, file, line
-                );
+            if let Some(frame) = jet_journey_frame(file, line, fn_name, || String::new()) {
+                eprint!("{frame}");
             }
         } else {
-            JET_ERR_TRACE_LAST.with(|last| *last.borrow_mut() = None);
+            jet_journey_reset();
+        }
+    }
+    r
+}
+
+fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
+    r: Result<T, E>,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    note: F,
+) -> Result<T, E> {
+    if cfg!(not(jet_release)) {
+        if r.is_err() {
+            if let Some(frame) = jet_journey_frame(file, line, fn_name, note) {
+                eprint!("{frame}");
+            }
+        } else {
+            jet_journey_reset();
         }
     }
     r
@@ -1203,7 +1205,7 @@ fn jet_index_map<K: Ord + Clone + JetShow, V: Clone>(
             src_line,
             col,
             caret_len,
-            &format!("the map has no entry for key {:?}", k.jet_show()),
+            &jet_missing_map_key_value(k.jet_show()),
             "",
         ),
     }
@@ -1326,14 +1328,7 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
 fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "the list has {} items, so position {} doesn't exist",
-                len, i
-            ),
-        );
+        jet_arithmetic_stop(file, line, &jet_list_bounds_message(len, i));
     }
     Ok(xs.remove(i as usize))
 }

@@ -443,6 +443,7 @@ use std::collections::HashSet;
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
+                        invalid: false,
                     },
                 );
             }

@@ -1,6 +1,7 @@
 use crate::jet_generated_format as jet_format;
 use crate::AST::{
-    AccessConvention, BinOp, CallArg, EnumLitArg, Expr, IndexKind, OrFallback, Stmt, StrPart,
+    AccessConvention, BinOp, Call, CallArg, ContractClause, EnumLitArg, Expr, IndexKind, OrFallback,
+    Stmt, StrPart,
     TryConvert, Type, TypedLitBody,
 };
 use crate::Codegen::Cx;
@@ -25,6 +26,7 @@ use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
+use crate::Codegen::TIR::lower::contract_expr_proven;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
@@ -39,6 +41,8 @@ use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
@@ -184,6 +188,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             lowered_receiver,
             method_sig.as_deref(),
         );
+        let lowered = lower_method_pre_contracts(call, lowered, cx, env);
         // D-APILABEL1=A: a method whose labels reordered its arguments keeps
         // the same source evaluation order as a free call.
         lowered_receiver = Some(match source_arg_order(args) {
@@ -322,6 +327,268 @@ fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         } => lower_or_fallback(value, fallback, cx, env),
         _ => lower_expr_inner(e, cx, env),
     })
+}
+
+/// Lower callee preconditions at the call site.  The argument values are
+/// pinned once into compiler-owned locals, then both the condition and the
+/// eventual call read those locals.  Borrowed arguments stay borrowed through
+/// the temp, so this does not turn a read/write convention into an ownership
+/// move.
+fn lower_pre_contracts_for_args(
+    call_span: Span,
+    args: &mut [TCallArg],
+    param_names: &[String],
+    sig: Option<&[(AccessConvention, Type)]>,
+    clauses: &[ContractClause],
+    cx: &Cx,
+    caller_env: &LowerEnv,
+) -> (Vec<TStmt>, Vec<TContract>) {
+    if clauses.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut contract_env = LowerEnv::new(caller_env.fn_name.clone());
+    let mut proof_bindings = HashMap::new();
+    let mut bindings = Vec::new();
+    for (index, arg) in args.iter_mut().enumerate() {
+        let Some(param_name) = param_names.get(index) else {
+            break;
+        };
+        let ty = sig
+            .and_then(|params| params.get(index))
+            .map(|(_, ty)| ty.clone())
+            .unwrap_or_else(|| arg.value.ty.clone());
+        let temp = format!(
+            "{}contract_arg_{}_{}",
+            crate::Syntax::GENERATED_NAME_PREFIX,
+            call_span.start,
+            index
+        );
+        let original = std::mem::replace(
+            &mut arg.value,
+            TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Unit,
+            },
+        );
+        let mut init = original;
+        let actual_ty = init.ty.clone();
+        if arg.clone || arg.arc_clone {
+            init = TExpr {
+                ty: init.ty.clone(),
+                kind: TExprKind::Clone(Box::new(init)),
+            };
+            arg.clone = false;
+            arg.arc_clone = false;
+        }
+        let local = if arg.borrow || arg.mut_borrow {
+            let mutable = arg.mut_borrow;
+            init = TExpr {
+                ty: init.ty.clone(),
+                kind: TExprKind::Borrow {
+                    place: Box::new(init),
+                    mutable,
+                },
+            };
+            TLocal::user(&temp).through_ref()
+        } else {
+            TLocal::user(&temp)
+        };
+        arg.value = TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::Local(local.clone()),
+        };
+        contract_env.bind(param_name, local, Some(ty.clone()));
+        proof_bindings.insert(param_name.clone(), actual_ty);
+        bindings.push(TStmt::Let {
+            name: temp,
+            kw: "let",
+            let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+            init,
+            gc_promotion: None,
+            gc_transferred: false,
+        });
+    }
+    let (_, line, _) = crate::Codegen::TIR::tir_src_line_at(&cx.src, call_span.start);
+    let mut lowered = Vec::with_capacity(clauses.len());
+    for clause in clauses {
+        let condition = lower_expr(&clause.cond, cx, &mut contract_env);
+        let message = lower_expr(&clause.message_expr, cx, &mut contract_env);
+        lowered.push(TContract {
+            kind: TContractKind::Pre,
+            condition,
+            message,
+            file: cx.file.clone(),
+            line,
+            span: call_span,
+            disposition: if contract_expr_proven(&clause.cond, &proof_bindings, cx) {
+                TContractDisposition::Proven
+            } else {
+                TContractDisposition::Check
+            },
+        });
+    }
+    (bindings, lowered)
+}
+
+fn lower_call_pre_contracts(
+    call: &Call,
+    args: &mut [TCallArg],
+    clauses: &[ContractClause],
+    cx: &Cx,
+    caller_env: &LowerEnv,
+) -> (Vec<TStmt>, Vec<TContract>) {
+    let Some(param_names) = cx.fn_param_names.get(&call.name) else {
+        return (Vec::new(), Vec::new());
+    };
+    lower_pre_contracts_for_args(
+        call.name_span,
+        args,
+        param_names,
+        cx.sigs.get(&call.name).map(Vec::as_slice),
+        clauses,
+        cx,
+        caller_env,
+    )
+}
+
+/// Pin a user method's receiver and arguments before checking its preconditions.
+/// The method lowering already resolved dispatch and argument ownership; this
+/// pass only replaces each evaluated value with a local so the contract and the
+/// eventual call observe one value on every tier.
+fn lower_method_pre_contracts(
+    call: &Expr,
+    mut lowered: TExpr,
+    cx: &Cx,
+    caller_env: &LowerEnv,
+) -> TExpr {
+    let Expr::MethodCall {
+        method,
+        method_span,
+        recv_type,
+        ..
+    } = call
+    else {
+        return lowered;
+    };
+    let owner = recv_type
+        .as_deref()
+        .map(|name| name.rsplit_once('.').map_or(name, |(_, leaf)| leaf));
+    let (owner, clauses, param_names) = match &lowered.kind {
+        TExprKind::MethodCall { .. } => {
+            let Some(owner) = owner else {
+                return lowered;
+            };
+            let key = format!("{owner}::{method}");
+            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+                return lowered;
+            };
+            let Some(param_names) = cx.fn_param_names.get(&key) else {
+                return lowered;
+            };
+            (key, pre.clone(), param_names.clone())
+        }
+        TExprKind::StaticCall {
+            owner: TStaticOwner::User(owner),
+            ..
+        } => {
+            let key = format!("{owner}::{method}");
+            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+                return lowered;
+            };
+            let Some(param_names) = cx.fn_param_names.get(&key) else {
+                return lowered;
+            };
+            (key, pre.clone(), param_names.clone())
+        }
+        _ => return lowered,
+    };
+    if clauses.is_empty() {
+        return lowered;
+    }
+
+    let (bindings, contracts) = match &mut lowered.kind {
+        TExprKind::MethodCall { recv, args, .. } => {
+            let recv_value = std::mem::replace(
+                recv,
+                Box::new(TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::Unit,
+                }),
+            );
+            let type_name = owner
+                .split_once("::")
+                .map_or(owner.as_str(), |(type_name, _)| type_name);
+            let self_conv = cx
+                .method_self_convs
+                .get(&(type_name.to_string(), method.to_string()))
+                .copied()
+                .unwrap_or(AccessConvention::Read);
+            let self_ty = recv_value.ty.clone();
+            let receiver = TCallArg {
+                borrow: self_conv == AccessConvention::Read && !self_ty.is_scalar(),
+                mut_borrow: self_conv == AccessConvention::Write,
+                value: *recv_value,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+            };
+            let method_sig = cx
+                .method_sigs
+                .get(&(type_name.to_string(), method.to_string()));
+            let mut sig = Vec::with_capacity(method_sig.map_or(0, |sig| sig.len()) + 1);
+            sig.push((self_conv, self_ty));
+            if let Some(method_sig) = method_sig {
+                sig.extend(method_sig.iter().cloned());
+            }
+            let mut all_args = Vec::with_capacity(args.len() + 1);
+            all_args.push(receiver);
+            all_args.append(args);
+            let result = lower_pre_contracts_for_args(
+                *method_span,
+                &mut all_args,
+                &param_names,
+                Some(&sig),
+                &clauses,
+                cx,
+                caller_env,
+            );
+            let receiver = all_args.remove(0);
+            *recv = Box::new(receiver.value);
+            *args = all_args;
+            result
+        }
+        TExprKind::StaticCall { args, .. } => {
+            let type_name = owner
+                .split_once("::")
+                .map_or(owner.as_str(), |(type_name, _)| type_name);
+            let method_sig = cx
+                .method_sigs
+                .get(&(type_name.to_string(), method.to_string()));
+            lower_pre_contracts_for_args(
+                *method_span,
+                args,
+                &param_names,
+                method_sig.map(Vec::as_slice),
+                &clauses,
+                cx,
+                caller_env,
+            )
+        }
+        _ => unreachable!("method contract dispatch changed during lowering"),
+    };
+    if contracts.is_empty() {
+        return lowered;
+    }
+    let ty = lowered.ty.clone();
+    let mut stmts = bindings;
+    stmts.extend(contracts.into_iter().map(|contract| TStmt::Contract { contract }));
+    stmts.push(TStmt::ExprStmt(lowered));
+    TExpr {
+        ty,
+        kind: TExprKind::InlineBlock(stmts),
+    }
 }
 
 /// D-QUAL4/I9: user tags are compile-time facts. Remove them at the shared TIR
@@ -546,8 +813,10 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
         | Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => vec![inner.as_ref()],
+        | Expr::Err(inner, _) => vec![inner.as_ref()],
+        Expr::Try(inner, _, _, note) => std::iter::once(inner.as_ref())
+            .chain(note.as_deref())
+            .collect(),
         Expr::MapLit(entries, _) => entries
             .iter()
             .flat_map(|(key, value)| [key, value])
@@ -2756,7 +3025,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 );
             let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
-            let lowered = TExpr {
+            let mut lowered = TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
                     name: cx.jit_local_call_prefix.as_ref().map_or_else(
@@ -2767,6 +3036,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     args,
                 },
             };
+            if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
+                let (bindings, contracts) =
+                    lower_call_pre_contracts(call, match &mut lowered.kind {
+                        TExprKind::Call { args, .. } => args,
+                        _ => unreachable!("plain call lowering produces a Call node"),
+                    }, pre, cx, env);
+                if !contracts.is_empty() {
+                    let mut stmts = bindings;
+                    stmts.extend(
+                        contracts
+                            .into_iter()
+                            .map(|contract| TStmt::Contract { contract }),
+                    );
+                    let call_ty = lowered.ty.clone();
+                    stmts.push(TStmt::ExprStmt(lowered));
+                    lowered = TExpr {
+                        ty: call_ty,
+                        kind: TExprKind::InlineBlock(stmts),
+                    };
+                }
+            }
             match source_arg_order(&call.args) {
                 Some(order) => preserve_source_arg_order(lowered, &order, call.args.len(), call.name_span.start as u32),
                 None => lowered,
@@ -3822,7 +4112,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
             // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
             // new `TExprKind` needed for a single free-function call, same as the
-            // `SQL.raw`/`.context` escapes in `lower_method_call` below.
+            // `SQL.raw` escape in `lower_method_call` below.
             if matches!(kind, IndexKind::Pool) {
                 let elem_ty = match base_ty {
                     Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
@@ -4004,11 +4294,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is the
-        // total sema fact — reproduce it exactly (none/Fallible/Typed). The result
+        // total sema fact — reproduce it exactly (none/Typed). The result
         // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
-        Expr::Try(inner, span, convert) => {
+        Expr::Try(inner, span, convert, note) => {
             let inner_t = lower_expr(inner, cx, env);
+            let note_t = note
+                .as_ref()
+                .map(|note| Box::new(lower_expr(note, cx, env)));
             // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
             // resolved to a Result, take its ok type; else fall back to the inner type
             // (never load-bearing in the covered subset — a `?` result feeds a binding
@@ -4020,7 +4313,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let tconvert = match convert {
                 TryConvert::None => TTryConvert::None,
                 TryConvert::DefaultErr => TTryConvert::DefaultErr,
-                TryConvert::Fallible => TTryConvert::Fallible,
                 TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
                 TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
                     enum_name: enum_name.clone(),
@@ -4032,6 +4324,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: result_ty,
                 kind: TExprKind::Try {
                     inner: Box::new(inner_t),
+                    note: note_t,
                     convert: tconvert,
                     file: escape_rust_str(&cx.file),
                     line,

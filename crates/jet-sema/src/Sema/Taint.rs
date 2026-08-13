@@ -176,8 +176,8 @@ impl<'a> TaintCtx<'a> {
             | Expr::Copy(inner, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
-            | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => self.type_of(inner),
+            | Expr::Err(inner, _) => self.type_of(inner),
+            Expr::Try(inner, _, _, _) => self.type_of(inner),
             _ => None,
         }
     }
@@ -252,9 +252,15 @@ impl<'a> TaintCtx<'a> {
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _)
             | Expr::Paren(inner, _)
             | Expr::Spread(inner, _) => self.tags_of(inner),
+            Expr::Try(inner, _, _, note) => {
+                let mut tags = self.tags_of(inner);
+                if let Some(note) = note {
+                    tags.extend(self.tags_of(note));
+                }
+                tags
+            }
             Expr::MemberSpread { base, .. } => self.tags_of(base),
             Expr::OptField { base, member, .. } => {
                 let mut tags = self.tags_of(base);
@@ -430,8 +436,13 @@ impl<'a> TaintCtx<'a> {
             | Expr::Field(inner, _, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
-            | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => self.check_expr(inner),
+            | Expr::Err(inner, _) => self.check_expr(inner),
+            Expr::Try(inner, _, _, note) => {
+                self.check_expr(inner);
+                if let Some(note) = note {
+                    self.check_expr(note);
+                }
+            }
             Expr::OptField { base, .. } => self.check_expr(base),
             Expr::Index { base, index, .. } => {
                 self.check_expr(base);

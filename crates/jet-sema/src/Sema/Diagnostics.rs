@@ -21,6 +21,11 @@ pub fn render_registered(
     Diagnostic::error(code, what, why, fix, span)
 }
 
+/// E1112 for an empty task combinator. The row owns the report wording.
+pub fn e1112(method: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E1112", &[("method", method)], Some(span))
+}
+
 /// Internal evaluator control-flow sentinel. It is not a user diagnostic row.
 pub fn soft_exit(what: String, why: String, span: Option<Span>) -> Diagnostic {
     Diagnostic::soft_exit(what, why, span)
