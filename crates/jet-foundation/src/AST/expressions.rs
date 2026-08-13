@@ -648,7 +648,8 @@ pub enum Expr {
     TupleLit(Vec<(String, Expr)>, Span, Option<Type>),
     /// S46 (M8): `(params) => expr` or block body.
     Lambda(Lambda),
-    /// S47: call any function-valued expression: `f(args)`.
+    /// S47 / D-CALLVALUE1=B: direct call of a function-valued expression such
+    /// as a lambda, field, or index; a returned call result uses `.call(args)`.
     CallValue {
         callee: Box<Expr>,
         args: Vec<CallArg>,

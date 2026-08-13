@@ -106,8 +106,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0803",
                     format!("this is {}, not a function", callee_ty.show()),
-                    "only a function value can be called with `(…)`".to_string(),
-                    "call a defined `fn` by name, or store a lambda in a binding first".to_string(),
+                    "only a function value can be called with `.call(…)`".to_string(),
+                    "call a defined `fn` by name, or store a lambda in a binding before `.call(…)`".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {

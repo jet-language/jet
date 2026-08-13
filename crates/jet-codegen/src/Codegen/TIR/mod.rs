@@ -3908,7 +3908,7 @@ pub enum TExprKind {
     },
     /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
     /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value
-    /// (`Expr::CallValue` — `(f)(args)`). A bare fn-name value emits the
+    /// (`Expr::CallValue` / sema's `.call(args)` projection). A bare fn-name value emits the
     /// `Box::new(move |…| name(…)) as <fn-type>` wrapper (`emit_named_fn_value`,
     /// Source/Codegen/Statement.rs), resolved at lowering into `wrapper`. A
     /// `CallValue` emits `({callee})({args})` with the args lowered PLAINLY (the AST
@@ -4035,7 +4035,7 @@ pub enum TFnValueKind {
         name: Option<String>,
         lambda: Option<Box<TLambda>>,
     },
-    /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
+    /// A call through a fn-value. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
     Call {
         callee: Box<TExpr>,

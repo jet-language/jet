@@ -603,6 +603,7 @@ renumbered, and no new `W` code may be allocated.
 | E1803 | repl  | a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied |
 | E0801 | sema  | lambda parameter type unknown |
 | E0803 | sema  | calling a value that isn't a function |
+| E-CALL-VALUE | parse | function values use `.call(…)`, not the retired adjacent-call spelling `)(` (D-CALLVALUE1=B) |
 | E0804 | sema  | self-recursive lambda binding |
 | E0850 | sema  | D-CONF-GENSPELL1=A: module alias target not found in scope |
 | E0851 | sema  | D-CONF-GENSPELL1=A: wrong number of type/value arguments to module alias |
@@ -917,6 +918,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
 | E0335 | A bare `{ }` follows a call. | Code arguments are ordinary `() => { … }` lambdas inside the call's parentheses (D-TRAILBLOCK2). Trailing `{ }` sugar after a call is gone. | Write `callee(() => { … })`. Put each statement on its own line inside the block. |
+| E-CALL-VALUE | A function value is invoked with the retired adjacent-call spelling. | Named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B). | Write `callee.call(…)`. |
 | E0366 | A pattern arm sits under a non-`==` distributed `if` table. | Structural patterns bind under `if subject == { … }` only. Other markers (`<`, `!=`, …) distribute bare values, not shapes. | Write `if subject == { … }` for pattern arms, or use a Bool head. |
 
 ## Editions and release policy (E2-M2)

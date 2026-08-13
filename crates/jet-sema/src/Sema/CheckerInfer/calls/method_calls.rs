@@ -1984,6 +1984,49 @@ impl<'a> Checker<'a> {
                 Type::Tagged { inner, .. } => *inner,
                 other => other,
             };
+            // D-CALLVALUE1=B: `.call(...)` is the builtin projection for a
+            // function-typed receiver. Keep a struct member named `call` on the
+            // ordinary lookup path below, so user fields and methods shadow the
+            // projection as promised by the surface decision.
+            if method == Syntax::METHOD_CALL {
+                let has_user_call_member = match &recv_ty {
+                    Type::Named(name) => {
+                        self.struct_fields_for_type_name(name).is_some_and(|fields| {
+                            fields.iter().any(|(field, _, _)| field == Syntax::METHOD_CALL)
+                        }) || self.resolve_method_sig(name, Syntax::METHOD_CALL).is_some()
+                    }
+                    Type::Apply { name, args } => {
+                        self.struct_fields_for_type_name(name).is_some_and(|fields| {
+                            fields.iter().any(|(field, _, _)| field == Syntax::METHOD_CALL)
+                        }) || self.resolve_method_sig(name, Syntax::METHOD_CALL).is_some()
+                            || core_generic_struct_field(name, Syntax::METHOD_CALL, args).is_some()
+                    }
+                    Type::TraitObject(traits) => traits.iter().any(|trait_name| {
+                        self.trait_reg
+                            .traits
+                            .get(trait_name)
+                            .is_some_and(|trait_def| {
+                                trait_def.methods.contains_key(Syntax::METHOD_CALL)
+                            })
+                    }),
+                    _ => false,
+                };
+                if !matches!(&recv_ty, Type::Fn { .. }) && !has_user_call_member {
+                    let mut callee = receiver.clone();
+                    let end = args.last().map(|arg| arg.expr.span().end).unwrap_or(span.end);
+                    return self.infer_call_value(
+                        &mut callee,
+                        args,
+                        Span::new(receiver.span().start, end),
+                    );
+                }
+                if matches!(&recv_ty, Type::Fn { .. }) {
+                    *recv_type_out = Some(Syntax::INTERNAL_CALL_VALUE.to_string());
+                    let end = args.last().map(|arg| arg.expr.span().end).unwrap_or(span.end);
+                    let call_span = Span::new(receiver.span().start, end);
+                    return self.infer_call_value(receiver, args, call_span);
+                }
+            }
             // D-CALLDUAL1=E: a `#Root` free function is the one sanctioned
             // receiver-first spelling. Resolve it before ordinary method
             // lookup so the same function body handles both call forms.

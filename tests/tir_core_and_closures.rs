@@ -656,8 +656,8 @@ fn run() {
 
 /// c109 Phase 13: fn-typed values. A fn with a `fn(Int)=>Int` parameter routes
 /// through the TIR (the Box-coercion arg form); a bare fn-name value, a lambda arg,
-/// and a call through the fn-value (`f(x)` where `f` is the local param) all lower in
-/// subset. Proves the `Box::new(…) as <fn-type>` coercion + the `(f)(args)` call.
+/// and a direct call through the fn-value (`f(x)` where `f` is the local param) all lower
+/// in subset. Proves the `Box::new(…) as <fn-type>` coercion + the fn-value call.
 #[test]
 fn fn_typed_values() {
     if !have_rustc() {
@@ -683,9 +683,10 @@ fn run() {
     assert_eq!(stdout, "12\n7\n16\n");
 }
 
-/// c109 Phase 13: a struct field call through a fn-typed field is an `Expr::CallValue`
-/// (`(w.step)(x)`). The struct's fn field, the `apply_twice((x)=>…, …)` call site,
-/// and a fn-value stored in a local then called all route through TIR.
+/// c109 Phase 13: a struct field call through a fn-typed field uses the existing
+/// function-value lowering (`w.step(x)`). The struct's fn field, the
+/// `apply_twice((x)=>…, …)` call site, and a fn-value stored in a local then called all
+/// route through TIR.
 #[test]
 fn fn_value_call_through_local() {
     if !have_rustc() {

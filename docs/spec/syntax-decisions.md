@@ -246,6 +246,17 @@ the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
 
+**D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
+2026-08-13)*: a direct named or method call keeps its ordinary spelling
+(`f(...)` or `value.method(...)`). A call result that is itself a function is
+invoked with `callee.call(...)`. Function-typed receivers gain the builtin
+projection, but a struct field or method literally named `call` shadows it.
+Direct calls on plain names, fields, indexes, and lambdas remain valid. The retired
+adjacent-call spelling `)(` has no compatibility parser; it receives the registered
+diagnostic
+`E-CALL-VALUE` and does not enter sema or TIR. `.call(...)` uses the existing
+function-value binder and one TIR function-value lowering on every execution tier.
+
 **S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
 D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
 **name**. A call may skip a default and write its labelled arguments in any
@@ -7002,6 +7013,12 @@ items. A checked text block uses the closed `#Name { … }` boundary and resolve
 the name through the declaration registry; `#SQL<Row>` and `#HTML { … }` now
 use their declared `.Block` rows. The old marker-only DSL whitelist is retired
 by the syntax-chore lane.
+
+**2026-08-13 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
+use `.call(...)`; direct named, method, field, index, and lambda calls keep their
+existing spelling. The retired adjacent-call form `)(` is rejected with
+`E-CALL-VALUE`, and the function-value projection is lowered through the
+shared callable path on every execution tier.
 
 **2026-08-13 — D-CONF-MODULE1=A implementation log** *(card #1524)*.
 Declared profile settings now seed the shared typed build-fact snapshot. A

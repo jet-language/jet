@@ -1,7 +1,7 @@
 Warning [L1141] (inline_autodiff): an autodiff transform result is called inline
-  --> tests/ui_lint/compute_transform_inline.jet:10:39
+  --> tests/ui_lint/compute_transform_inline.jet:10:17
     |
- 10 |     (dw, dx) :: compute.gradient(loss)(w, x)
-    |                                       ^^^^^^
+ 10 |     (dw, dx) :: compute.gradient(loss).call(w, x)
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: the transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested
  Fix: bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`

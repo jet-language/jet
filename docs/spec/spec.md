@@ -2068,6 +2068,14 @@ without a call only if every parameter also has plain read access. Functions wit
 write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
 those requirements.
 
+**Function-value calls (D-CALLVALUE1=B):** direct named and method calls keep
+`f(…)` and `value.method(…)`. A call result that is itself a function is invoked
+with `callee.call(…)`. Function-typed receivers gain this builtin projection,
+while a struct field or method literally named `call` shadows it. Direct calls
+on plain names, fields, indexes, and lambdas remain valid. The same
+function-value binder and lowering serve every execution tier; the retired
+adjacent-call spelling `)(` is rejected with **E-CALL-VALUE**.
+
 **Capture rules (S47):** shared read for names only read; mutable borrow for
 names written (a `:=` binding required, else **E0111**). Escaping lambdas (stored in a
 binding, returned, in a struct field, or passed to a `^T` parameter) must own

@@ -72,6 +72,7 @@ use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower_method_args;
 use crate::Codegen::TIR::lower_module_args;
 use crate::Codegen::TIR::lower_one_call_arg;
+use crate::Codegen::TIR::lower_fn_value_call;
 use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
@@ -961,6 +962,20 @@ fn lower_method_call_impl(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    // D-CALLVALUE1=B: sema proved this `.call(...)` receiver is a function
+    // value. Lower it through the same TIR function-value node as `Expr::CallValue`.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
+        let callee = lowered_receiver
+            .unwrap_or_else(|| crate::Codegen::TIR::lower_expr(receiver, cx, env));
+        return lower_fn_value_call(
+            receiver,
+            callee,
+            args,
+            receiver.span().start as u32,
+            cx,
+            env,
+        );
+    }
     // D-CALLDUAL1=E: sema has already selected one `#Root` function. Lower
     // the receiver as argument zero and keep the callee on the ordinary
     // direct/module-call TIR path so AOT, JIT, interpreter, and web share it.

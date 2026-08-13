@@ -241,6 +241,11 @@ pub const INTERNAL_ROOT_CALL_LOCAL: &str = "__jet_root_call_local";
 pub const INTERNAL_ROOT_CALL_IMPORT_PREFIX: &str = "__jet_root_call_import:";
 pub const INTERNAL_ROOT_CALL_CORE_PREFIX: &str = "__jet_root_call_core:";
 
+/// D-CALLVALUE1=B: sema-only marker for the builtin function-value `.call(...)`
+/// projection. It is never a source spelling; TIR lowers it to the same
+/// function-value call node as `Expr::CallValue`.
+pub const INTERNAL_CALL_VALUE: &str = "__jet_call_value";
+
 // D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from
 // D-AUTOPAR1's provisional `par_` spellings; there are no aliases.

@@ -237,6 +237,7 @@ impl Diagnostic {
                     crate::Registry::StructuredFix::GeneratedMarkerGroup
                         | crate::Registry::StructuredFix::GeneratedMissingArms
                         | crate::Registry::StructuredFix::GeneratedScriptRun
+                        | crate::Registry::StructuredFix::GeneratedCallValue
                 )
             ),
             "diagnostic `{}` has no row-owned generated structured fix",
@@ -692,7 +693,8 @@ fn row_edit(row: &crate::Registry::DiagnosticRow, span: Option<Span>) -> Option<
         crate::Registry::StructuredFix::CryptoMisuse
         | crate::Registry::StructuredFix::GeneratedMarkerGroup
         | crate::Registry::StructuredFix::GeneratedMissingArms
-        | crate::Registry::StructuredFix::GeneratedScriptRun => None,
+        | crate::Registry::StructuredFix::GeneratedScriptRun
+        | crate::Registry::StructuredFix::GeneratedCallValue => None,
     }
 }
 

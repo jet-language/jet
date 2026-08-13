@@ -2,6 +2,14 @@ use super::super::{
     AccessConvention, CallArg, Diagnostic, Expr, LValue, Parser, Span, Syntax, TokKind, TryConvert,
 };
 
+fn is_adjacent_call_result(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => is_adjacent_call_result(inner),
+        Expr::Call(_) | Expr::CallValue { .. } | Expr::MethodCall { .. } => true,
+        _ => false,
+    }
+}
+
 impl<'a> Parser<'a> {
         pub(super) fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut expr = self.expr_primary(allow_struct_lit)?;
@@ -210,6 +218,23 @@ impl<'a> Parser<'a> {
                         };
                     }
                     TokKind::LParen => {
+                        let open = self.peek().span;
+                        if is_adjacent_call_result(&expr) {
+                            let mut diagnostic = Diagnostic::error(
+                                "E-CALL-VALUE",
+                                "function values use `.call(…)`, not the retired adjacent-call form"
+                                    .to_string(),
+                                "named functions use `f(…)`; a returned or stored function value uses `.call(…)` so the value and invocation stay explicit"
+                                    .to_string(),
+                                "write `callee.call(…)`".to_string(),
+                                Some(open),
+                            );
+                            diagnostic.set_structured_edit(crate::Diagnostics::TextEdit {
+                                span: Span::new(open.start, open.start),
+                                new_text: format!(".{}", Syntax::METHOD_CALL),
+                            });
+                            return Err(diagnostic);
+                        }
                         let open = self.bump().span;
                         let mut args = Vec::new();
                         if !matches!(self.peek().kind, TokKind::RParen) {

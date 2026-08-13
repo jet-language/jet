@@ -823,7 +823,7 @@ fn both(values: &[Int], count: Int) { values.push(count) }
 
 fn run() {
     values := [1, 2]
-    both(&values, (() => values.len())())
+    both(&values, (() => values.len()).call())
 }
 "#;
     let diags = jet::compile(immediate_callee)
@@ -1133,7 +1133,7 @@ fn run() {
     let transitive = r#"
 fn both(value: &String, callback: fn() => fn() => String) {
     print(value)
-    print(callback()())
+    print(callback().call())
 }
 fn run() {
     value := "jet"

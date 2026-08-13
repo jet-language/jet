@@ -95,6 +95,20 @@ impl<'a> Interp<'a> {
                 _ => None,
             }
         });
+        // D-CALLVALUE1=B: the method-shaped spelling is sema's marker for a
+        // function value. Evaluate it through the existing closure seam so
+        // comptime/interpreter execution has the same call meaning as TIR.
+        if recv_type == Some(crate::Syntax::INTERNAL_CALL_VALUE) {
+            let recv = match evaluated_receiver.take() {
+                Some(value) => value,
+                None => self.eval(receiver, scope)?,
+            };
+            let mut argv = Vec::with_capacity(args.len());
+            for arg in args {
+                argv.push(self.eval(&arg.expr, scope)?);
+            }
+            return self.call_inline_closure(&recv, argv, span, scope);
+        }
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
         // D-JSONCANON1=A: EncodingLimits.safe() for edition-2027 defaults.
         if method == "safe" && args.is_empty() {

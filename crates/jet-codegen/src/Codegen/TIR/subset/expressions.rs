@@ -846,7 +846,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // (lowered on the outer scope extended with the lambda's params + cloned
         // captures) and every capture/escape decision is a total `Lambda.meta` fact.
         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
-        // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`).
+        // c109 Phase 13: a direct call THROUGH a fn-value (`Expr::CallValue`).
+        // Sema's `.call(args)` projection joins the same TIR function-value path.
         // Covered when the callee is in-subset (a fn-typed local, a fn-name value, or
         // a lambda) and every arg is in-subset. The AST path emits `({callee})({args})`
         // with args lowered plainly (`emit_call_args(.., None, ..)`), so no convention

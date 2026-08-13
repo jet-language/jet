@@ -52,6 +52,21 @@ fn fmt_preserves_script_and_declaration_source_order() {
 }
 
 #[test]
+fn fmt_returned_function_calls_use_call_and_are_stable() {
+    let source = r#"
+fn make_adder() => fn(Int) => Int = (value: Int) => value + 1
+
+fn run() {
+    result :: make_adder().call(2)
+}
+"#;
+    let once = jet::format_source(source).expect("returned function call should format");
+    assert!(once.contains("make_adder().call(2)"), "formatter lost `.call`:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted returned function call should reformat");
+    assert_eq!(once, twice, "returned function call formatting must be stable");
+}
+
+#[test]
 fn package_formatter_fails_closed_on_comments() {
     let error = jet::Package::format_source(
         "name: \"demo\" // comment ownership is not typed yet\n",

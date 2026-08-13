@@ -438,7 +438,7 @@ fn run() {}
 fn run() {
     cell :: Cell.new(1)
     guard :: cell.guard_read()
-    read :: (() => guard.get())()
+    read :: (() => guard.get()).call()
 }
 "#,
         ),

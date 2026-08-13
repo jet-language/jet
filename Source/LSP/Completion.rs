@@ -243,6 +243,24 @@ fn semantic_completion_kind(symbol: &jet_semindex::SemanticSymbol) -> u8 {
     }
 }
 
+/// D-CALLVALUE1=B: a function-typed local or parameter exposes the builtin
+/// method-shaped invocation member. Struct members still come from the
+/// semantic index and therefore keep their ordinary shadowing behavior.
+fn function_value_call_completion(prefix: &str) -> Option<CompletionItem> {
+    if !Syntax::METHOD_CALL.starts_with(prefix) {
+        return None;
+    }
+    Some(CompletionItem {
+        label: Syntax::METHOD_CALL.to_string(),
+        kind: ck::METHOD,
+        detail: Some("call(...)".to_string()),
+        documentation: Some("Invoke this function value.".to_string()),
+        insert_text: None,
+        insert_text_format: 1,
+        auto_import: None,
+    })
+}
+
 pub(crate) fn compute_completions(
     db: &SymbolDB,
     src: &str,
@@ -324,6 +342,23 @@ pub(crate) fn compute_completions(
     }
 
     if let Some(receiver_name) = context_is_member_access(src, offset) {
+        let prefix = current_identifier_prefix(src, offset);
+        let function_value = db
+            .defs
+            .iter()
+            .find(|def| def.name == receiver_name)
+            .is_some_and(|def| match &def.kind {
+                SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => {
+                    matches!(ty, AST::Type::Fn { .. })
+                }
+                _ => false,
+            });
+        if function_value {
+            if let Some(item) = function_value_call_completion(&prefix) {
+                items.push(item);
+            }
+            return items;
+        }
         let owner = if receiver_name == crate::Syntax::DURATION_TYPE
             || crate::AST::numeric_type_from_name(&receiver_name).is_some()
         {
@@ -338,7 +373,6 @@ pub(crate) fn compute_completions(
             })
         };
         if let Some(owner) = owner {
-            let prefix = current_identifier_prefix(src, offset);
             for symbol in db.symbols.complete_visible_at(
                 &prefix,
                 Some(&owner),

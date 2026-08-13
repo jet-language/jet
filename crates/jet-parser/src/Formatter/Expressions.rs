@@ -1402,6 +1402,9 @@ impl<'a> Fmt<'a> {
                 debug_assert!(args.is_empty());
             }
             Expr::CallValue { callee, args, .. } => {
+                // D-CALLVALUE1=B: direct calls on lambdas, fields, and indexes
+                // keep their existing spelling. A canonical `.call(...)` parses
+                // as `Expr::MethodCall` and is formatted by that branch above.
                 if prec > Prec::Postfix {
                     self.write("(");
                 }

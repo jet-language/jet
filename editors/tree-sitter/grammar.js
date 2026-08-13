@@ -1157,7 +1157,8 @@ module.exports = grammar({
         seq("(", $._expr, ",", commaSep1($._expr), ")"),
       ),
 
-    // `recv.method(…)` and qualified constructor `Enum.Variant(…)` /
+    // `recv.method(…)` (including the canonical function-value `.call(…)`)
+    // and qualified constructor `Enum.Variant(…)` /
     // `mod.Type.new(…)` — the member may be lower (method) or Upper (variant).
     method_call_expr: ($) =>
       prec.left(

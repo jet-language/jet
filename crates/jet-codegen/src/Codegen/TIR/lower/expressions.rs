@@ -74,6 +74,86 @@ fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// Lower one function-value invocation. Both the explicit AST node and sema's
+/// builtin `.call(...)` method marker use this path, so argument conventions,
+/// callback representation, and source-order preservation stay one mechanism.
+pub(crate) fn lower_fn_value_call(
+    callee_expr: &Expr,
+    mut callee_t: TExpr,
+    args: &[CallArg],
+    site: u32,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    if interrupt_callback_ident(callee_expr)
+        .is_some_and(|name| env.is_send_fn(name))
+        && matches!(&callee_t.ty, Type::Fn { .. })
+    {
+        // A callback-safe local is stored in the canonical callback
+        // representation. Mark call-through uses too, so the JIT invokes its
+        // `(function, environment)` record instead of treating the record
+        // handle as a raw function address.
+        let ty = callee_t.ty.clone();
+        callee_t = TExpr {
+            ty,
+            kind: TExprKind::FnValue {
+                kind: TFnValueKind::Interrupt {
+                    value: Box::new(callee_t),
+                },
+            },
+        };
+    }
+    let ret_ty = match &callee_t.ty {
+        Type::Fn { ret: Some(ret), .. } => (**ret).clone(),
+        _ => unit_type(),
+    };
+    let params = match &callee_t.ty {
+        Type::Fn { params, .. } => Some(params.as_slice()),
+        _ => None,
+    };
+    let conventions = match &callee_t.ty {
+        Type::Fn {
+            call_metadata: Some(metadata),
+            ..
+        } => Some(metadata.conventions.as_slice()),
+        _ => None,
+    };
+    let targs = args
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            let conv = params
+                .and_then(|params| params.get(index))
+                .cloned()
+                .map(|ty| {
+                    (
+                        conventions
+                            .and_then(|row| row.get(index))
+                            .copied()
+                            .unwrap_or(AccessConvention::Read),
+                        ty,
+                    )
+                });
+            lower_one_call_arg(arg, conv, env, cx)
+        })
+        .collect();
+    let lowered = TExpr {
+        ty: ret_ty,
+        kind: TExprKind::FnValue {
+            kind: TFnValueKind::Call {
+                callee: Box::new(callee_t),
+                args: targs,
+            },
+        },
+    };
+    // D-APILABEL1=A: a function type may declare a call contract, so a call
+    // through the value can reorder just like a named one.
+    match source_arg_order(args) {
+        Some(order) => preserve_source_arg_order(lowered, &order, args.len(), site),
+        None => lowered,
+    }
+}
+
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
 /// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the
@@ -2014,78 +2094,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
         },
-        // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
-        // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
-        Expr::CallValue { callee, args, .. } => {
-            let mut callee_t = lower_expr(callee, cx, env);
-            if interrupt_callback_ident(callee)
-                .is_some_and(|name| env.is_send_fn(name))
-                && matches!(&callee_t.ty, Type::Fn { .. })
-            {
-                // A callback-safe local is stored in the canonical callback
-                // representation. Mark call-through uses too, so the JIT
-                // invokes its `(function, environment)` record instead of
-                // treating the record handle as a raw function address.
-                let ty = callee_t.ty.clone();
-                callee_t = TExpr {
-                    ty,
-                    kind: TExprKind::FnValue {
-                        kind: TFnValueKind::Interrupt {
-                            value: Box::new(callee_t),
-                        },
-                    },
-                };
-            }
-            let ret_ty = match &callee_t.ty {
-                Type::Fn { ret: Some(r), .. } => (**r).clone(),
-                _ => unit_type(),
-            };
-            let params = match &callee_t.ty {
-                Type::Fn { params, .. } => Some(params.as_slice()),
-                _ => None,
-            };
-            let conventions = match &callee_t.ty {
-                Type::Fn {
-                    call_metadata: Some(metadata),
-                    ..
-                } => Some(metadata.conventions.as_slice()),
-                _ => None,
-            };
-            let targs = args
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    let conv = params
-                        .and_then(|ps| ps.get(i))
-                        .cloned()
-                        .map(|ty| {
-                            (
-                                conventions
-                                    .and_then(|cs| cs.get(i))
-                                    .copied()
-                                    .unwrap_or(AccessConvention::Read),
-                                ty,
-                            )
-                        });
-                    lower_one_call_arg(a, conv, env, cx)
-                })
-                .collect();
-            let lowered = TExpr {
-                ty: ret_ty,
-                kind: TExprKind::FnValue {
-                    kind: TFnValueKind::Call {
-                        callee: Box::new(callee_t),
-                        args: targs,
-                    },
-                },
-            };
-            // D-APILABEL1=A: a function type may declare a call contract, so a
-            // call through the value can reorder just like a named one.
-            match source_arg_order(args) {
-                Some(order) => preserve_source_arg_order(lowered, &order, args.len(), e.span().start as u32),
-                None => lowered,
-            }
-        }
+        // c109 Phase 13: a direct call THROUGH a fn-value (`Expr::CallValue`).
+        // Sema's `.call(args)` projection joins this helper below. Function-type
+        // parameters are unmarked, therefore Read under D-MEM-PARAM1.
+        Expr::CallValue { callee, args, span } => lower_fn_value_call(
+            callee,
+            lower_expr(callee, cx, env),
+            args,
+            span.start as u32,
+            cx,
+            env,
+        ),
         Expr::Unary(op, inner, _) => {
             let operand = lower_expr(inner, cx, env);
             let ty = operand.ty.clone();

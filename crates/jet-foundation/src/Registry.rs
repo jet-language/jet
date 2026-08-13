@@ -479,6 +479,7 @@ pub enum StructuredFix {
     GeneratedMarkerGroup,
     GeneratedMissingArms,
     GeneratedScriptRun,
+    GeneratedCallValue,
 }
 
 impl StructuredFix {
@@ -490,6 +491,7 @@ impl StructuredFix {
             Self::GeneratedMarkerGroup => "generated:marker_group".to_string(),
             Self::GeneratedMissingArms => "generated:missing_arms".to_string(),
             Self::GeneratedScriptRun => "generated:script_run".to_string(),
+            Self::GeneratedCallValue => "generated:call_value".to_string(),
         }
     }
 }
@@ -770,6 +772,7 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             "marker_group" => StructuredFix::GeneratedMarkerGroup,
             "missing_arms" => StructuredFix::GeneratedMissingArms,
             "script_run" => StructuredFix::GeneratedScriptRun,
+            "call_value" => StructuredFix::GeneratedCallValue,
             _ => panic!("unknown generated structured fix `{kind}` in {line}"),
         };
     }
