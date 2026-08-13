@@ -42,6 +42,8 @@ pub struct JetTestFailure {
     pub source_line: String,
     pub col: u32,
     pub caret: u32,
+    pub cause: Vec<String>,
+    pub clears: usize,
 }
 
 impl JetTestFailure {
@@ -64,6 +66,8 @@ impl JetTestFailure {
             source_line: source_line.to_string(),
             col,
             caret,
+            cause: Vec::new(),
+            clears: 0,
         }
     }
 
@@ -102,6 +106,12 @@ impl JetTestFailure {
     }
 
     pub fn json(&self) -> String {
+        let cause = self
+            .cause
+            .iter()
+            .map(|code| jet_test_json_string(code))
+            .collect::<Vec<_>>()
+            .join(",");
         let file = if self.file.is_empty() {
             "null".to_string()
         } else {
@@ -118,7 +128,7 @@ impl JetTestFailure {
             self.col.to_string()
         };
         format!(
-            "{{\"schema\":\"jet.report/v1\",\"moment\":\"test\",\"severity\":\"stop\",\"code\":{},\"what\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":{},\"line\":{},\"col\":{},\"span\":null,\"fix_edits\":[],\"cause\":[]}}",
+            "{{\"schema\":\"jet.report/v1\",\"moment\":\"test\",\"severity\":\"stop\",\"code\":{},\"what\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":{},\"line\":{},\"col\":{},\"span\":null,\"fix_edits\":[],\"cause\":[{cause}],\"clears\":{clears}}}",
             jet_test_json_string(&self.code),
             jet_test_json_string(&self.message),
             jet_test_json_string("a checked test assertion evaluated false"),
@@ -126,7 +136,36 @@ impl JetTestFailure {
             file,
             line,
             col,
+            cause = cause,
+            clears = self.clears,
         )
+    }
+
+    pub fn with_causes(mut self, cause: Vec<String>) -> Self {
+        self.cause = cause;
+        self
+    }
+
+    pub fn with_clears(mut self, clears: usize) -> Self {
+        self.clears = clears;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JetTestFailure;
+
+    #[test]
+    fn json_carries_causes_and_clear_count() {
+        let report = JetTestFailure::new("E3001", "failed", "x.jet", 1, "run", "", 1, 1)
+            .with_causes(vec!["E0109".into(), "E0108".into()])
+            .with_clears(3);
+        assert!(
+            report
+                .json()
+                .contains("\"cause\":[\"E0109\",\"E0108\"],\"clears\":3")
+        );
     }
 }
 

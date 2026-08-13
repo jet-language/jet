@@ -1327,6 +1327,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if self.lookup(name).is_some_and(|info| info.invalid) {
+                    return None;
+                }
                 let moved_expr = Expr::Ident(name.clone(), *span);
                 if self.reject_moved_expr_use(&moved_expr, *span) {
                     return None;

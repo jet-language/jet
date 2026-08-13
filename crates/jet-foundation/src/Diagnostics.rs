@@ -159,6 +159,8 @@ pub struct Diagnostic {
     pub why: String,
     pub fix: String,
     pub span: Option<Span>,
+    /// Ordered report codes that caused this report. Root reports carry none.
+    pub cause: Vec<String>,
     /// Mechanical fix projected from the diagnostic row's structured-fix
     /// metadata (S14).
     pub edit: Option<TextEdit>,
@@ -215,6 +217,7 @@ impl Diagnostic {
             why: rendered.why,
             fix: rendered.fix,
             span,
+            cause: Vec::new(),
             edit: row_edit(row, span),
             detail: None,
             structured: None,
@@ -263,6 +266,7 @@ impl Diagnostic {
             why,
             fix,
             span,
+            cause: Vec::new(),
             edit: row_edit(row, span),
             detail: None,
             structured: None,
@@ -297,6 +301,7 @@ impl Diagnostic {
             why,
             fix,
             span,
+            cause: Vec::new(),
             edit: row_edit(row, span),
             detail: None,
             structured: None,
@@ -323,6 +328,7 @@ impl Diagnostic {
             why,
             fix: String::new(),
             span,
+            cause: Vec::new(),
             edit: None,
             detail: None,
             structured: None,
@@ -394,6 +400,7 @@ impl Diagnostic {
             why,
             fix,
             span,
+            cause: Vec::new(),
             edit: row_edit(row, span),
             detail: None,
             structured: None,
@@ -402,6 +409,20 @@ impl Diagnostic {
 
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
+        self
+    }
+
+    /// Attach the ordered report-code chain that caused this report.
+    pub fn with_causes(mut self, cause: Vec<String>) -> Self {
+        self.cause = cause;
+        self
+    }
+
+    /// Put the nearest wrapped report first, followed by its own causes.
+    pub fn caused_by(mut self, cause: &Self) -> Self {
+        self.cause.reserve(cause.cause.len() + 1);
+        self.cause.push(cause.code.clone());
+        self.cause.extend(cause.cause.iter().cloned());
         self
     }
 
@@ -560,12 +581,18 @@ impl Diagnostic {
     ///   "file": "a.jet", "line": 2, "col": 5,
     ///   "span": { "start": 12, "end": 17 } | null,
     ///   "fix_edits": [{ "file": "a.jet", "span": {…}, "new_text": "…" }],
-    ///   "cause": []
+    ///   "cause": ["E0109", "E0108"],
+    ///   "clears": 2
     /// }
     /// ```
     ///
     /// `fix_edits` holds the machine-applicable fix the LSP / fix engine consumes.
     pub fn to_json(&self, file: &str, src: &str) -> String {
+        self.to_json_with_clears(file, src, 0)
+    }
+
+    /// Render one report with its batch-derived dependent count.
+    pub fn to_json_with_clears(&self, file: &str, src: &str, clears: usize) -> String {
         let report_file = machine_report_path(file);
         let mut o = String::from("{");
         o.push_str(&format!("\"schema\":{}", json_str(REPORT_SCHEMA)));
@@ -614,7 +641,15 @@ impl Diagnostic {
             }
             None => {}
         }
-        o.push_str("],\"cause\":[]");
+        o.push_str("],\"cause\":[");
+        for (index, cause) in self.cause.iter().enumerate() {
+            if index > 0 {
+                o.push(',');
+            }
+            o.push_str(&json_str(cause));
+        }
+        o.push(']');
+        o.push_str(&format!(",\"clears\":{clears}"));
         if let Some(StructuredDiagnostic::CryptoMisuse {
             reason,
             operation,
@@ -695,11 +730,35 @@ pub fn json_str(s: &str) -> String {
 /// Render reports as JSON Lines. An empty batch emits no bytes.
 pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     let mut out = String::new();
-    for d in diags {
-        out.push_str(&d.to_json(file, src));
+    let clears = report_clear_counts(diags);
+    for (d, clears) in diags.iter().zip(clears) {
+        out.push_str(&d.to_json_with_clears(file, src, clears));
         out.push('\n');
     }
     out
+}
+
+/// Count reports whose explicit cause chain names each report. A transitive
+/// dependent counts once, so a consumer can rank root reports without
+/// rebuilding the graph from report text.
+pub fn report_clear_counts(diags: &[Diagnostic]) -> Vec<usize> {
+    diags
+        .iter()
+        .enumerate()
+        .map(|(index, diagnostic)| {
+            diags
+                .iter()
+                .enumerate()
+                .filter(|(dependent_index, dependent)| {
+                    *dependent_index != index
+                        && dependent
+                            .cause
+                            .iter()
+                            .any(|cause| cause == &diagnostic.code)
+                })
+                .count()
+        })
+        .collect()
 }
 
 /// Color-aware batch render, blank line between each. Plain when `color` is
@@ -1127,7 +1186,7 @@ mod crypto_diagnostic_contract_tests {
                 "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\",",
                 "\"fix\":\"pass an output length from 0 through 8160 bytes\",",
                 "\"detail\":null,\"file\":\"secret-name.jet\",\"line\":1,\"col\":5,",
-                "\"span\":{\"start\":4,\"end\":8},\"fix_edits\":[],\"cause\":[],",
+                "\"span\":{\"start\":4,\"end\":8},\"fix_edits\":[],\"cause\":[],\"clears\":0,",
                 "\"reason\":\"output_length\",\"operation\":\"hkdf_sha256\",",
                 "\"expected\":\"0..8160\",\"actual\":8161}\n"
             )
@@ -1151,6 +1210,50 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
         assert_eq!(render_all_json("x.jet", "", &[]), "");
+    }
+
+    #[test]
+    fn report_json_preserves_a_multi_link_cause_chain() {
+        let root = Diagnostic::error(
+            "E0109",
+            "root".into(),
+            "test".into(),
+            "fix root".into(),
+            None,
+        );
+        let middle = Diagnostic::error(
+            "E0108",
+            "middle".into(),
+            "test".into(),
+            "fix middle".into(),
+            None,
+        )
+        .caused_by(&root);
+        let leaf = Diagnostic::error(
+            "E2710",
+            "leaf".into(),
+            "test".into(),
+            "fix leaf".into(),
+            None,
+        )
+        .caused_by(&middle);
+        let sibling = Diagnostic::error(
+            "E0001",
+            "sibling".into(),
+            "test".into(),
+            "fix sibling".into(),
+            None,
+        )
+        .caused_by(&root);
+        let json = render_all_json("x.jet", "", &[root, middle, leaf, sibling]);
+        let lines = json.lines().collect::<Vec<_>>();
+        assert!(lines[0].contains("\"cause\":[],\"clears\":3"), "{json}");
+        assert!(lines[1].contains("\"cause\":[\"E0109\"],\"clears\":1"), "{json}");
+        assert!(
+            lines[2].contains("\"cause\":[\"E0108\",\"E0109\"],\"clears\":0"),
+            "{json}"
+        );
+        assert!(lines[3].contains("\"cause\":[\"E0109\"],\"clears\":0"), "{json}");
     }
 
     #[test]

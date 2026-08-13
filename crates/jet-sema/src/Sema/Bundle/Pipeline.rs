@@ -673,7 +673,7 @@ fn check_bundle_opts_for_output_inner(
                                     why,
                                     fix,
                                     Some(*derive_span),
-                                ));
+                                ).caused_by(&inner));
                             }
                         }
                     }

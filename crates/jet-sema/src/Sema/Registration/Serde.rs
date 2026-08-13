@@ -418,7 +418,7 @@ pub(crate) fn parse_generated_fragment(
                 .first()
                 .map(|d| format!("{} at {:?}", d.what, d.span))
                 .unwrap_or_else(|| "generated codec source was invalid".to_string());
-            diags.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "E2710",
                 what,
                 format!(
@@ -426,7 +426,12 @@ pub(crate) fn parse_generated_fragment(
                 ),
                 fix,
                 Some(trigger_span),
-            ));
+            );
+            if let Some(cause) = errors.first() {
+                diags.push(diagnostic.caused_by(cause));
+            } else {
+                diags.push(diagnostic);
+            }
             None
         }
     }

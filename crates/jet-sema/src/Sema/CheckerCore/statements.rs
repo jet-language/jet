@@ -1831,6 +1831,7 @@ impl<'a> Checker<'a> {
                                     task_lint_span: None,
                                     single_use_span: None,
                                     constant_value: None,
+                                    invalid: false,
                                 },
                             );
                             self.memory_control_multiplier = loop_multiplier;
@@ -2390,6 +2391,7 @@ impl<'a> Checker<'a> {
                             task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
+                            invalid: false,
                         },
                     );
                     self.taskgroup_stack
@@ -2432,6 +2434,7 @@ impl<'a> Checker<'a> {
                             task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
+                            invalid: false,
                         },
                     );
                     self.push_scope();

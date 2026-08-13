@@ -220,6 +220,7 @@ impl<'a> Checker<'a> {
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
+                        invalid: false,
                     },
                 );
             }

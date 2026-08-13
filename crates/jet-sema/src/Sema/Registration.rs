@@ -230,6 +230,7 @@ impl<'a> Checker<'a> {
                             task_lint_span: None,
                             single_use_span: None,
                             constant_value: None,
+                            invalid: false,
                         },
                     );
                 }
@@ -286,6 +287,7 @@ impl<'a> Checker<'a> {
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,
+                        invalid: false,
                     },
                 );
             }
@@ -397,6 +399,7 @@ impl<'a> Checker<'a> {
                     task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
+                    invalid: false,
                 },
             );
             for clause in &mut f.post {

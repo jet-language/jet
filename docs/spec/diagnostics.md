@@ -1919,13 +1919,22 @@ Every report has these fields:
 | `line` / `col` | integer or null | One-based source position. |
 | `span` | object or null | Byte range with `start` and `end`. |
 | `fix_edits` | array | Machine-applicable replacements. |
-| `cause` | array | Causal report chain. |
+| `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
+| `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
 Example; real output stays on one line:
 
 ```json
-{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[]}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
 ```
+
+`cause` is machine data, not a second prose channel. A root report has an empty
+array. A dependent report lists the report codes that led to it, nearest cause
+first; a chain such as `["E0109","E0108"]` therefore identifies both links
+without requiring a consumer to parse What/Why/Fix text. `clears` counts every
+report in the same batch whose explicit chain names this report, including
+transitive dependents. A consumer can rank root reports by this count without
+walking or guessing the graph.
 
 Command status and ledger objects can keep their command schemas. Any report
 inside them uses `jet.report/v1`. No consumer of the shared renderer retains
