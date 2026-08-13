@@ -26,8 +26,8 @@
 
 use super::{
     COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, LEGACY_ENTRY_FILE,
-    PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK,
-    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE,
+    PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK, RETIRED_TARGET_PLUGIN,
+    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, TARGET_SANDBOX,
 };
 
 /// How the compiler answers a file still written in the retired form.
@@ -160,6 +160,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         decision: "D-CORE-PATH1",
         since: "2026-08-06",
         code: Some("E1001"),
+    },
+    Retirement {
+        id: "target-plugin",
+        retired: RETIRED_TARGET_PLUGIN,
+        canonical: TARGET_SANDBOX,
+        kind: RetirementKind::Rename,
+        decision: "D-ONCE-SANDBOX1=A",
+        since: "2026-08-07",
+        code: None,
     },
 ];
 

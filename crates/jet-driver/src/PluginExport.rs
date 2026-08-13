@@ -1,5 +1,5 @@
 //! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
-//! (c81): the driver-layer half of `target: plugin` — resolving the manifest
+//! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
 //! `export:` name, validating the exported `pub fn` surface (v1: `Int`/`Float`
 //! scalars only), and the ApiFreeze-based version handshake.
 //!
@@ -53,20 +53,20 @@ fn resolve_version(bundle: &ProgramBundle) -> String {
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 
-/// E1260: a plugin's exported `pub fn` isn't Int/Float-only (v1 scope; see
+/// E1260: a sandbox's exported `pub fn` isn't Int/Float-only (v1 scope; see
 /// `Codegen::Plugin` module doc for why — Bool needs no new work, Text needs
 /// the Component Model's memory-based string ABI, a real follow-on).
 fn e1260(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1260",
-        "a plugin's exported function has an unsupported signature".to_string(),
+        "a sandbox's exported function has an unsupported signature".to_string(),
         detail.to_string(),
-        "every parameter and the return type must be all `Int` or all `Float` (v1 plugin scope) — narrow the signature, or drop `pub` if this function isn't meant to be called across the plugin boundary".to_string(),
+        "every parameter and the return type must be all `Int` or all `Float` (v1 sandbox scope) — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
         None,
     )
 }
 
-/// Validate the entry module's `pub fn` surface for a `target: plugin` build.
+/// Validate the entry module's `pub fn` surface for a `target: sandbox` build.
 /// Every `pub fn` must be exportable (`Codegen::plugin_export_shape`); a
 /// non-conforming one is E1260, not a silent skip (I3/I4 — codegen's own skip
 /// is a defensive fallback, this is the real enforcement point).
@@ -87,15 +87,15 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     diags
 }
 
-/// E1257: the plugin's exported interface changed incompatibly since the last
+/// E1257: the sandbox's exported interface changed incompatibly since the last
 /// build (D-PLUGIN-VERSION1=A). `delta` names what changed — a removed export
 /// or a changed signature; adding a new export is always compatible.
 fn e1257(delta: &str) -> Diagnostic {
     Diagnostic::error(
         "E1257",
-        "this plugin's exported interface changed incompatibly".to_string(),
+        "this sandbox's exported interface changed incompatibly".to_string(),
         format!(
-            "a plugin's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1) — {delta}"
+            "a sandbox's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1) — {delta}"
         ),
         "restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot under `.jet/cache/api/` to re-freeze)".to_string(),
         None,

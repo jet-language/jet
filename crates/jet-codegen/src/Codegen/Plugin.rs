@@ -1,4 +1,4 @@
-//! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): `target: plugin`
+//! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): `target: sandbox`
 //! guest artifacts — the wasm32 Component Model side of the sandboxed plugin
 //! loader (the host side lives in `crates/jet-driver/src/Prelude/Plugin.rs`,
 //! embedded via the FFI bridge). Reuses the ordinary whole-program `emit_bundle`
@@ -52,7 +52,7 @@ impl PluginScalar {
     }
 }
 
-/// The guest-side artifacts for a `target: plugin` build.
+/// The guest-side artifacts for a `target: sandbox` build.
 #[derive(Debug, Clone)]
 pub struct PluginArtifacts {
     /// The full `.wit` world text, e.g. `package jet:mathkit@0.1.0; world
@@ -142,7 +142,7 @@ fn sanitize_package_name(name: &str) -> String {
     }
 }
 
-/// Build the guest artifacts for a `target: plugin` package. `export_name` is
+/// Build the guest artifacts for a `target: sandbox` package. `export_name` is
 /// the manifest `export:` field value, or the package/payload name when
 /// omitted (resolved by the caller — driver-layer manifest lookup, not
 /// codegen's concern, I3).

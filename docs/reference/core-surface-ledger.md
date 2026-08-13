@@ -9,6 +9,8 @@ hand-written workflow inventory.
 
 Generated on: 2026-08-13
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## What decides a row
 
 - What Jet ships comes from the compiler tables: module_items.rs,

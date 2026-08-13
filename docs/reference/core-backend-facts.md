@@ -1,5 +1,7 @@
 # Core backend facts
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Published ownership, effect, failure, blocking, platform, and backend facts for
 compiler-known Core modules (R10 / #1134). Accelerated backends must
 differentially conform to these facts against the CPU/oracle path. `core.archive`

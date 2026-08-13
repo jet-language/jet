@@ -951,10 +951,10 @@ impl<'a> Checker<'a> {
                             } else {
                                 self.diags.push(Diagnostic::error(
                                     "E0074",
-                                    "this yielding loop produces incompatible item types"
+                                    "this collecting loop produces incompatible item types"
                                         .to_string(),
                                     format!(
-                                        "one yielding loop builds one List, but these paths produce {} and {}",
+                                        "one collecting loop builds one List, but these paths produce {} and {}",
                                         a.show(),
                                         b.show()
                                     ),

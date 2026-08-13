@@ -1,5 +1,7 @@
 # Maturity metadata
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 `#Meta(maturity: …)` tells readers how stable a public API is without changing
 compiler behavior.
 

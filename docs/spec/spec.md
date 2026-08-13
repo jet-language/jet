@@ -1710,7 +1710,7 @@ becomes the browser API checker.
 `use core.event as event` exposes the first compiler-known event family as
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
-- `event.new<T>() => Event<T>` creates a typed many-subscriber occurrence stream.
+- `event.new<T>() => Event<T>` creates a typed many-subscriber event source.
 - `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ? String`
   creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
   for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
@@ -3824,13 +3824,13 @@ edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
 written `package.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
 (vision.md's ladder) without discarding what it already declared.
 
-## `target: plugin` — sandboxed WASM Component Model plugins (c81, D-PLUGIN1=B, D-DEP-WASM1=A)
+## `target: sandbox` — isolated WASM Component Model packages (c81, D-PLUGIN1=B, D-DEP-WASM1=A)
 
-A package built `target: plugin` compiles to a sandboxed `wasm32` Component
+A package built `target: sandbox` compiles to an isolated `wasm32` Component
 Model module instead of a native binary. A host program loads and calls it —
 safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
 sandbox is the safety boundary, by construction. This is a general
-application-plugin substrate (WIT world `jetplugin`), distinct from PATH
+application-sandbox substrate (WIT world `jetplugin`), distinct from PATH
 `jet-*` helpers (D-DX5) and from the compiler-extension API (Tower #549,
 D-DX5-HOOK1=A: typed read-only post-sema snapshot in world
 `compiler-extension-v1`, same wasmtime substrate, separate host) — don't
@@ -3843,13 +3843,13 @@ version: "0.1.0"
 ```
 
 ```jet
-// main.jet — the plugin's own source, no `fn run()` (it's loaded, not run)
+// main.jet — the sandbox's own source, no `fn run()` (it's loaded, not run)
 pub fn scale(a: Float, b: Float) => Float {
     return a * b
 }
 ```
 
-`jet build main.jet --target=plugin` writes a `.wit` world (generated from
+`jet build main.jet --target=sandbox` writes a `.wit` world (generated from
 the entry file's top-level `pub fn` surface) plus the wasm32 guest Rust, then
 shells out to `rustc --target wasm32-unknown-unknown --crate-type cdylib`
 followed by `wasm-tools component embed`/`component new` (D-DEP-WASM1=A) —
@@ -3876,22 +3876,22 @@ E1260; Bool is a trivial follow-on, Text needs the Component Model's
 memory-based string ABI, a real future increment). The wasmtime host embedded
 via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
 runtime-side only, I6) registers **zero host imports** — deny-by-default
-capabilities: a plugin that tried to touch the filesystem, network, or clock
+capabilities: a sandbox that tried to touch the filesystem, network, or clock
 simply fails to instantiate at load time, reported as a clean `Err`, never a
-crash (I2). A plugin's own code may not use any effect either — caught at
+crash (I2). A sandbox's own code may not use any effect either — caught at
 build time as E1258, not deferred to that runtime failure.
 
 D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
-target field (`plugin { export: "mathkit" }`), defaulting to the package
+target field (`sandbox { export: "mathkit" }`), defaulting to the package
 name. D-PLUGIN-VERSION1=A: the exported interface is frozen via
 `Sema::ApiFreeze`'s pub-metadata semver-snapshot mechanism (the same one an
 ordinary library's public API uses, E1218/E2601) — keyed `plugin__<export>`
 in `.jet/cache/api/` so it never collides with a library's own frozen API in
-the same project. Rebuilding a plugin with an unchanged interface freezes
+the same project. Rebuilding a sandbox with an unchanged interface freezes
 silently; removing or changing an export is E1257, naming the exact delta.
 
-Full worked example: `examples/features/packages/plugin_mathkit/` (a
-`plugin_src/` package + a host `main.jet`; golden-enforced, I5). New
+Full worked example: `examples/features/packages/sandbox_mathkit/` (a
+`sandbox_src/` package + a host `main.jet`; golden-enforced, I5). New
 diagnostics: E1257 (interface changed incompatibly), E1258 (capability
 denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
 shape) — see docs/spec/diagnostics.md.
@@ -4042,7 +4042,7 @@ these operations in deterministic JSON with `schema_version: 1` and
 `api_version: 1`; runtime calls are E0956.
 
 The selected target source/dependency closure plus generated modules becomes a
-fresh runtime bundle. Native, cross, web, plugin, and freestanding lowering all
+fresh runtime bundle. Native, cross, web, sandbox, and freestanding lowering all
 consume that same checked bundle. `--locked` compares generated input/output
 hashes before committing provenance; drift is E3512 and action outputs roll
 back.

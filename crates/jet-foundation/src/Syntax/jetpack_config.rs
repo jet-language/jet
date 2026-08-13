@@ -619,7 +619,7 @@ pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 /// removed `kind:` (U10). The six shipped targets — `library` is imported for its
 /// code, `executable` installs a binary on PATH, `test`/`example` build their own
 /// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry,
-/// `plugin` (c81, D-PLUGIN1/D-DEP-WASM1) builds a sandboxed WASM Component Model
+/// `sandbox` (c81, D-PLUGIN1/D-DEP-WASM1) builds an isolated WASM Component Model
 /// module. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
 /// `{ targets: [ … ] }` list.
 pub const TARGET_LIBRARY: &str = "library";
@@ -631,16 +631,19 @@ pub const TARGET_EXAMPLE: &str = "example";
 /// `jet bench file.jet`, now addressable from a `packages:` declaration.
 pub const TARGET_BENCHMARK: &str = "benchmark";
 /// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
-/// package built as `plugin` compiles to a sandboxed `wasm32` Component Model
+/// package built as `sandbox` compiles to an isolated `wasm32` Component Model
 /// module (wasmtime host, typed `.wit` contract) instead of a native binary.
 /// Safe by default — no `#Unsafe` gate (I1 holds by construction: the sandbox
 /// is the safety boundary). Its exported surface is named by the `export:`
 /// target field (`TARGET_FIELD_EXPORT`, D-PLUGIN-EXPORT1).
-pub const TARGET_PLUGIN: &str = "plugin";
+pub const TARGET_SANDBOX: &str = "sandbox";
+/// D-ONCE-SANDBOX1=A: the former package target spelling. `jet fmt` and
+/// `jet fix` rewrite it to `TARGET_SANDBOX` and print the retirement notice.
+pub const RETIRED_TARGET_PLUGIN: &str = "plugin";
 
 /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
 /// recognized but rejected (no backend yet) until their tooling lands.
-/// `benchmark` shipped (c80); `plugin` shipped (c81). Empty until the next
+/// `benchmark` shipped (c80); `sandbox` shipped (c81). Empty until the next
 /// reserved target is proposed.
 pub const TARGET_RESERVED: &[&str] = &[];
 
@@ -661,8 +664,8 @@ pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
 /// unknown-field error like any other typo'd key.
 pub const TARGET_FIELD_ENTRY: &str = "entry";
 pub const TARGET_FIELD_NAME: &str = "name";
-/// D-PLUGIN-EXPORT1=A (ratified 2026-06-25): names a `plugin` target's exported
-/// surface (the `.wit` world name). Only meaningful on `plugin { export: "…" }`;
+/// D-PLUGIN-EXPORT1=A (ratified 2026-06-25): names a `sandbox` target's exported
+/// surface (the `.wit` world name). Only meaningful on `sandbox { export: "…" }`;
 /// defaults to the package name when omitted.
 pub const TARGET_FIELD_EXPORT: &str = "export";
 

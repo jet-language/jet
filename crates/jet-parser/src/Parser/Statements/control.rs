@@ -42,11 +42,11 @@ impl<'a> Parser<'a> {
         if !finite_header {
             return Err(Diagnostic::error(
                 "E0072",
-                "this loop cannot yield a List because it has no finite exhaustion edge"
+                "this collecting loop cannot return a List because it has no finite exhaustion edge"
                     .to_string(),
-                "bare infinite and condition-only loops do not provide the boundary a yielding loop needs"
+                "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary"
                     .to_string(),
-                "remove `->`, or iterate a finite source; use `break value` for one final ordinary-loop result"
+                "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
                     .to_string(),
                 Some(start),
             ));
@@ -240,10 +240,10 @@ impl<'a> Parser<'a> {
         let Some(last) = body.pop() else {
             return Err(Diagnostic::error(
                 "E0073",
-                "this yielding loop path produces no item".to_string(),
-                "every accepted iteration must contribute one value unless `next` omits it"
+                "this collecting loop path produces no item".to_string(),
+                "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it"
                     .to_string(),
-                "add a final value, or remove `->`".to_string(),
+                "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects".to_string(),
                 Some(start),
             ));
         };
@@ -253,9 +253,9 @@ impl<'a> Parser<'a> {
                 body.push(other);
                 return Err(Diagnostic::error(
                     "E0073",
-                    "this yielding loop path produces no item".to_string(),
-                    "a multiline yielding body uses its final expression as the item".to_string(),
-                    "add a final value, or use `next` to omit this iteration".to_string(),
+                    "this collecting loop path produces no item".to_string(),
+                    "a multiline collecting body uses its final expression as the item".to_string(),
+                    "return a value on this path, or use `next` to omit this iteration".to_string(),
                     Some(start),
                 ));
             }

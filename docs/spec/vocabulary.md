@@ -68,11 +68,12 @@ must reject the three retired senses in the table. Its hostile fixtures are:
 2. an event called a stream;
 3. a collecting loop called yielding.
 
-The vocabulary page and this rule are reference documents only on card #1732. The
-executable lint and its truthfulness test remain implementation work.
+The vocabulary page and this rule are checked by
+`vocabulary_page_has_one_definition_and_no_retired_senses` in
+`tests/truthfulness.rs`; the truth row is registered in the corpus table.
 
 ## Corpus truth row
 
 | Truth | Home | Renderers | Guard |
 |---|---|---|---|
-| D-ONCE-WORD1 vocabulary | this page | Markdown pages that use these words | doc lint and truthfulness test, follow-up to the truth registry |
+| D-ONCE-WORD1 vocabulary | this page | Markdown pages that use these words | doc lint and truthfulness test |

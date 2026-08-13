@@ -1,5 +1,7 @@
 # Performance budget decisions
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 This document is the durable current law for nine ratified performance-budget decisions. SURFACE1, BASELINE1, GRAMMAR1, REPORT1, OUTPUT1, GAMEMIGRATE1, PROVIDER1, and INTEGRATION1 selected A; BENCHMIGRATE1 selected B. Later implementation must preserve this law as one evaluator and one report model; illustrative text from rejected options is not law.
 
 ## Declaration surface and baseline policy

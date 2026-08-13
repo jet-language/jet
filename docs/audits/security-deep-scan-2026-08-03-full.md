@@ -2,6 +2,8 @@
 
 Reducer: `dedup-0015`
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 Canonical candidates: 134. Authoritative source ledgers: 1046.
 
 ## zip-resident-unbounded-output — Resident ZIP inflater accepts attacker-declared output without the codec limit

@@ -1,5 +1,7 @@
 # Type-unification audit — 2026-07-28
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 **Status:** first run of a new audit kind (owner-directed). The question:
 which of Jet's traits, tags, markers, and keyword constructs are secretly
 types? Where would honest types buy clarity, functionality, magic, or

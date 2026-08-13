@@ -1,5 +1,7 @@
 # Web backend: JS DOM ops for views + WASM for logic (card #123)
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 **Status:** PARTIAL — hybrid backend ships for the checked TIR + D-JSBIND1 ABI
 surface. Umbrella criteria 1–4 closed on child cards #701–#704 (2026-07-24).
 Criterion 5 (this doc, examples, focused tests, scoped proof) is card #705.

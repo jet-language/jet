@@ -4,7 +4,7 @@
 // Ownership: lives in jet-pkg-model next to the application `core.plugin`
 // runtime (`Prelude/Plugin.rs`). Reuses the same wasmtime Component Model
 // substrate and crate pin (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1=A). This is
-// NOT application `target: plugin` and NOT PATH `jet-*` helpers (I8).
+// NOT application `target: sandbox` and NOT PATH `jet-*` helpers (I8).
 //
 // World: `compiler-extension-v1` (see `crate::CompilerExtension::wit_world`).
 // Application plugins use the fixed world `jetplugin` instead.

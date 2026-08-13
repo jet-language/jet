@@ -10,6 +10,8 @@ Jai import reports. Ratified law lives only in
 `docs/spec/syntax-decisions.md`; where §§1–13 show illustrative syntax it is
 flagged, but §15 tracks the ratified option shapes exactly.
 
+Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
+
 **The slogan: Jai power, Jet authority model.**
 
 ---

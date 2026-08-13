@@ -232,7 +232,7 @@ fn ui_snapshots() {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("generated_cffi_"));
         // D-PLUGIN1=B (c81): files marked `// @plugin_target` compile via
-        // `jet build --target=plugin`'s front end so plugin-only diagnostics
+        // `jet build --target=sandbox`'s front end so sandbox-only diagnostics
         // (E1257-E1260) can exercise the gate.
         let plugin_target = src.lines().any(|l| l.trim() == "// @plugin_target");
         // D-WEBTIR1=A: files marked `// @web_target` compile through the web

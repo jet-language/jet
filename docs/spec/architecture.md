@@ -418,7 +418,7 @@ every response and remains the only semantic authority (I2/I3).
   export `analyze`). Distinct from application plugins' fixed world
   `jetplugin` (D-PLUGIN1 / D-PLUGIN-EXPORT1).
 - **Not:** PATH-discovered `jet-*` helpers (D-DX5 in `Source/main.rs`), and
-  not `target: plugin` / `core.plugin` application loaders.
+  not `target: sandbox` / `core.plugin` application loaders.
 - **V1 stage:** `typed` only. Later parse/codegen observation extends the same
   capability-negotiated protocol (I8 — one mechanism).
 

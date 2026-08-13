@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
             match kind {
                 LoopValueKind::Collecting => self.diags.push(Diagnostic::error(
                     "E0075",
-                    "this yielding loop cannot use a break payload".to_string(),
+                    "this collecting loop cannot use a break payload".to_string(),
                     "its result is already the accumulated List, so a second payload would give one exit two result channels".to_string(),
                     "write `break` to return the accumulated list".to_string(),
                     Some(span),
@@ -1631,7 +1631,7 @@ impl<'a> Checker<'a> {
                             if matches!(&got, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) {
                                 self.diags.push(Diagnostic::error(
                                     "E0073",
-                                    "this yielding loop path produces no item".to_string(),
+                                    "this collecting loop path produces no item".to_string(),
                                     "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
                                     "return a value on this path, or remove `->`".to_string(),
                                     Some(e.span()),
@@ -1644,8 +1644,8 @@ impl<'a> Checker<'a> {
                                 } else if got != want {
                                     self.diags.push(Diagnostic::error(
                                         "E0074",
-                                        "this yielding loop produces incompatible item types".to_string(),
-                                        format!("one yielding loop builds one `[{}]`, but this item is {}", want.show(), got.show()),
+                                        "this collecting loop produces incompatible item types".to_string(),
+                                        format!("one collecting loop builds one `[{}]`, but this item is {}", want.show(), got.show()),
                                         "convert every item to one type, or split the loops".to_string(),
                                         Some(e.span()),
                                     ));

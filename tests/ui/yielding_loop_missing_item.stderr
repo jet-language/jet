@@ -1,7 +1,7 @@
-Error [E0073]: this yielding loop path produces no item
+Error [E0073]: this collecting loop path produces no item
   --> tests/ui/yielding_loop_missing_item.jet:2:15
     |
   2 |     values :: loop x, [1, 2] -> {}
     |               ^^^^
- Why: every accepted iteration must contribute one value unless `next` omits it
- Fix: add a final value, or remove `->`
+ Why: every accepted iteration must contribute one non-unit value unless `next` explicitly omits it
+ Fix: return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects

@@ -3,6 +3,8 @@
 Date: 2026-07-26  
 Revision: owner feedback on compact braces, batteries, comprehensions, and examples
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Decision
 
 Jet should make source brevity a product requirement.

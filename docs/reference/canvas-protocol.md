@@ -5,6 +5,8 @@ semantic source of truth. Clients may cache viewport state locally, but graph
 facts and edits come from checked Jet source. Current AST coverage status is
 ratcheted in [`canvas-parity.md`](canvas-parity.md).
 
+Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
+
 ## Project Document V1
 
 Endpoint: `GET /__jet_canvas/project` or `GET /canvas/project`.
