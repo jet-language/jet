@@ -18,6 +18,10 @@ mod duration_semantics {
 mod loadable_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
 }
+mod string_concat_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/StringConcat.rs");
+}
+
 use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
@@ -87,6 +91,9 @@ pub fn eval_binop(
 ) -> Result<CtValue, Diagnostic> {
     use CtValue::*;
     match (op, l, r) {
+        (BinOp::Add, Str(left), Str(right)) => Ok(Str(
+            string_concat_semantics::jet_string_concat(&left, &right),
+        )),
         (BinOp::Add, Int(a), Int(b)) => a
             .checked_add(b)
             .map(Int)
@@ -231,6 +238,20 @@ mod tests {
             variant: variant.to_string(),
             args: Vec::new(),
         }
+    }
+
+    #[test]
+    fn string_add_uses_the_shared_prelude_kernel() {
+        assert_eq!(
+            eval_binop(
+                BinOp::Add,
+                CtValue::Str("base".to_string()),
+                CtValue::Str("AAA".to_string()),
+                Span::new(0, 0),
+            )
+            .unwrap(),
+            CtValue::Str("baseAAA".to_string())
+        );
     }
 
     #[test]

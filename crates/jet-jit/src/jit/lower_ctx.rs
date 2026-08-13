@@ -8939,6 +8939,9 @@ impl LowerCtx<'_, '_> {
             return self.lower_prelude_binop(op, &rhs_ty, current, rhs, line);
         }
         Ok(match (op, &rhs_ty) {
+            (BinOp::Add, Type::String) => {
+                self.call_host(self.host.math.str_concat, &[current, rhs])
+            }
             (BinOp::Add, Type::Int) => self.b.ins().iadd(current, rhs),
             (BinOp::Sub, Type::Int) => self.b.ins().isub(current, rhs),
             (BinOp::Mul, Type::Int) => self.b.ins().imul(current, rhs),
@@ -22948,6 +22951,11 @@ impl LowerCtx<'_, '_> {
         let l = self.lower_expr(lhs)?;
         let r = self.lower_expr(rhs)?;
         let rhs_ty = self.expr_arith_type(rhs);
+        if matches!((&lhs_ty, &rhs_ty), (Type::String, Type::String))
+            && matches!(op, BinOp::Add)
+        {
+            return Ok(self.call_host(self.host.math.str_concat, &[l, r]));
+        }
         // ProcessResult.signal uses the legacy packed Option carrier
         // (0 = None, payload + 1 = Some). TIR reports CORE fields as Int;
         // compare only this exact carrier so repeated signaled waits preserve

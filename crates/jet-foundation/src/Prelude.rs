@@ -211,7 +211,10 @@ mod tests {
                 error.why,
                 "the canonical TIR evaluator doesn't cover this construct yet"
             );
-            assert_eq!(error.fix, "use a simpler form, or run via `jet build` / `jet run`");
+            assert_eq!(
+                error.fix,
+                "use a simpler form, or use `jet build` for the full evaluator"
+            );
         }
     }
 

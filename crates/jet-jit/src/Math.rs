@@ -15,6 +15,10 @@ mod typed_text_semantics {
     include!("../../jet-codegen/src/Prelude/TypedText.rs");
 }
 
+mod string_concat_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
+}
+
 #[derive(Clone, Copy)]
 struct F32x4([f32; 4]);
 #[derive(Clone, Copy)]
@@ -743,9 +747,9 @@ extern "C" fn jet_jit_html_escape(s: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
-    let mut s = clone_string(a);
-    s.push_str(&clone_string(b));
-    alloc_string(s)
+    let left = clone_string(a);
+    let right = clone_string(b);
+    alloc_string(string_concat_semantics::jet_string_concat(&left, &right))
 }
 
 pub(crate) fn clear_math_values() {
@@ -796,5 +800,4 @@ host_fns! {
     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
 }
-
 

@@ -160,6 +160,9 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/FixedList.rs"),
     include_str!("../Prelude/Core/FloatProvenance.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
+    // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
+    // execution tier; the evaluator and JIT include this same source.
+    include_str!("../Prelude/Core/StringConcat.rs"),
     include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
@@ -2399,6 +2402,8 @@ mod tests {
         .unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
+        let string_concat =
+            std::fs::read_to_string(root.join("src/Prelude/Core/StringConcat.rs")).unwrap();
         let loadable =
             std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
@@ -2458,6 +2463,7 @@ mod tests {
                 float_provenance.as_str(),
             ),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
+            ("src/Prelude/Core/StringConcat.rs", string_concat.as_str()),
             ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
@@ -2469,7 +2475,10 @@ mod tests {
             ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
             ("src/Prelude/Core/Duration.rs", duration.as_str()),
             ("src/Prelude/Core/Measurement.rs", measurement.as_str()),
-            ("src/Prelude/Core/TimeMonotonic.rs", time_monotonic.as_str()),
+            (
+                "src/Prelude/Core/TimeMonotonic.rs",
+                time_monotonic.as_str(),
+            ),
             ("src/Prelude/Core/Time.rs", time.as_str()),
             ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
             ("src/Prelude/Core/Contracts.rs", contracts.as_str()),
@@ -2531,6 +2540,9 @@ mod tests {
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
             .unwrap();
+        let string_concat_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/StringConcat.rs\")")
+            .unwrap();
         let loadable_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Loadable.rs\")")
             .unwrap();
@@ -2554,6 +2566,9 @@ mod tests {
             .unwrap();
         let measurement_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Measurement.rs\")")
+            .unwrap();
+        let time_monotonic_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/TimeMonotonic.rs\")")
             .unwrap();
         let time_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Time.rs\")")
@@ -2600,6 +2615,8 @@ mod tests {
                 && fixed_list_pos < float_provenance_pos
                 && float_provenance_pos < unicode_pos
                 && unicode_pos < loadable_pos
+                && unicode_pos < string_concat_pos
+                && string_concat_pos < loadable_pos
                 && loadable_pos < values_pos
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
@@ -2634,6 +2651,7 @@ mod tests {
                 fixed_list.as_str(),
                 float_provenance.as_str(),
                 unicode.as_str(),
+                string_concat.as_str(),
                 loadable.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
@@ -2674,6 +2692,7 @@ mod tests {
             fixed_list.as_str(),
             float_provenance.as_str(),
             unicode.as_str(),
+            string_concat.as_str(),
             loadable.as_str(),
             values.as_str(),
             range_bounds.as_str(),
@@ -2707,10 +2726,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 401_284, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 407_169, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "b2a2b5715dccc72f89f8dd36a03cc8c946cff8a528f2f34a13b741d4d9664909",
+            "4c8f22c0585ae088291188c5c78b656e7ae91d886cc9b22d96bcf7a336eb80f2",
             "split changed prelude bytes, order, or boundary newline"
         );
     }

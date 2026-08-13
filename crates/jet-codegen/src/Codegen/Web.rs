@@ -51,6 +51,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Collections.js"),
     "\n",
+    include_str!("../Prelude/Core/StringConcat.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
@@ -3607,12 +3609,12 @@ fn wasm_emit_expr(
                 "{{ let __jet_compare_left = {l}; let __jet_compare_right = {r}; if (__jet_compare_left) < (__jet_compare_right) {{ {less} }} else if (__jet_compare_left) > (__jet_compare_right) {{ {greater} }} else {{ {equal} }} }}"
             )
         }
-        TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
-            "({} {} {})",
-            wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
-            binop(op).ok_or(())?,
-            wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?
-        ),
+        TIR::TExprKind::Binary { op, lhs, rhs, line, .. } => {
+            let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
+            let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
+            wasm_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
+                .unwrap_or_else(|| format!("({l} {} {r})", binop(op).expect("ordinary wasm binary operator")))
+        }
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Clone(inner) | TIR::TExprKind::ExplicitCopy(inner) => format!(
             "({}).clone()",
@@ -5393,7 +5395,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 "((left, right) => (left < right ? {{ tag: \"Less\", values: [] }} : left > right ? {{ tag: \"Greater\", values: [] }} : {{ tag: \"Equal\", values: [] }}))({l}, {r})"
             )
         }
-        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op).ok_or(())?, tir_js_expr(rhs, funcs, file_prefix)?),
+        E::Binary { op, lhs, rhs, line, .. } => {
+            let l = tir_js_expr(lhs, funcs, file_prefix)?;
+            let r = tir_js_expr(rhs, funcs, file_prefix)?;
+            js_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
+                .unwrap_or_else(|| format!("({l} {} {r})", binop(op).expect("ordinary JS binary operator")))
+        }
         E::Unary { op, operand } => js_unary_call(
             op,
             &operand.ty,
@@ -6050,13 +6057,16 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Power.rs"),
     "\n",
     include_str!("../Prelude/Core/Division.rs"),
+    "\n",
+    include_str!("../Prelude/Core/StringConcat.rs"),
     "\n"
 );
 
-/// D-EXPSEM1=A / D-FLOORDIV1=A: the operators Rust has no symbol for. Each one
-/// calls the same Prelude helper the native build calls, from the copy of that
-/// Prelude file the wasm module includes. `None` means the operator is an
-/// ordinary Rust one and the caller emits it directly.
+/// D-EXPSEM1=A / D-FLOORDIV1=A: operators whose Rust spelling or ownership
+/// rules do not directly carry Jet's meaning. Each one calls the same Prelude
+/// helper the native build calls, from the copy of that Prelude file the wasm
+/// module includes. `None` means the operator is an ordinary Rust one and the
+/// caller emits it directly.
 ///
 /// The whole-number helpers carry the source position so their trap can name
 /// the line the author wrote; the float helpers never trap and take neither.
@@ -6072,6 +6082,9 @@ fn wasm_prelude_call(
     let float = matches!(ty, Type::Float | Type::Float32);
     let file = mangle_generated("source_file");
     Some(match op {
+        BinOp::Add if matches!(ty, Type::String) => {
+            format!("jet_string_concat(&({lhs}), &({rhs}))")
+        }
         BinOp::Pow if float => format!("({lhs}).jet_pow({rhs})"),
         BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file}, {line})"),
         BinOp::FloorDiv if float => format!("({lhs}).jet_floordiv({rhs})"),
@@ -6160,9 +6173,10 @@ const JS_POWER_PRELUDE: &str = concat!(
     "}\n\n"
 );
 
-/// D-EXPSEM1=A: one call shape for `^` in the JS tier. Floats take the
-/// JavaScript power, which agrees with the Prelude float power; whole numbers
-/// take `jet_pow`, which carries the exact, trapping rule.
+/// D-EXPSEM1=A / D-STR-CONCAT1: one call shape for operators whose JS spelling
+/// must be wrapped to preserve Jet's rule. Floats take the JavaScript power,
+/// which agrees with the Prelude float power; whole numbers take `jet_pow`,
+/// which carries the exact, trapping rule.
 fn js_prelude_call(
     op: crate::AST::BinOp,
     lhs: &str,
@@ -6175,6 +6189,9 @@ fn js_prelude_call(
     let float = matches!(ty, Type::Float | Type::Float32);
     let file = mangle_generated("source_file");
     Some(match op {
+        BinOp::Add if matches!(ty, Type::String) => {
+            format!("jet_string_concat({lhs}, {rhs})")
+        }
         BinOp::Pow if float => format!("Math.pow(Number({lhs}), Number({rhs}))"),
         BinOp::Pow => format!("jet_pow({lhs}, {rhs}, {file}, {line})"),
         // A float divisor of zero gives an infinity, exactly as `/` does, so

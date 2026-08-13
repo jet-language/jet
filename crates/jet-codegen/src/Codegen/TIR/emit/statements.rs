@@ -26,10 +26,10 @@ use crate::AST::Type;
 pub(crate) const PRELUDE_CARRIED: &str =
     "this operator has no Rust spelling and is emitted as a Prelude call";
 
-/// D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` have no Rust operator, so a
-/// compound assignment cannot become `place OP= value`. This builds the one
-/// Prelude call that replaces it. `None` means the operator is an ordinary
-/// Rust compound and the caller emits `place OP= value` as before.
+/// D-EXPSEM1=A / D-FLOORDIV1=A / D-STR-CONCAT1: these compound operations
+/// cannot use Rust's direct `place OP= value` form for Jet's meaning. This
+/// builds the one Prelude call that replaces it. `None` means the operator is
+/// an ordinary Rust compound and the caller emits it directly.
 ///
 /// The whole-number helpers carry the source position so their trap can name
 /// the line the author wrote; the float helpers never trap and take neither.
@@ -43,6 +43,9 @@ fn prelude_compound_call(
 ) -> Option<String> {
     let float = matches!(ty, Type::Float | Type::Float32);
     Some(match op {
+        BinOp::Add if matches!(ty, Type::String) => {
+            format!("jet_string_concat(&({place}), &({value}))")
+        }
         BinOp::Pow if float => format!("({place}).jet_pow({value})"),
         BinOp::Pow => format!("({place}).jet_pow(({value}) as i128, {file:?}, {line})"),
         BinOp::FloorDiv if float => format!("({place}).jet_floordiv({value})"),

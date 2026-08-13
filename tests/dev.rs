@@ -1978,6 +1978,58 @@ fn value_loop_named_routes_match_interpreter_default_jit_and_aot() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// E0956 regression: String field `+=` uses one owned concat operation on the
+/// evaluator, resident JIT, and AOT paths.
+#[test]
+fn string_field_compound_append_matches_interpreter_default_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let dir = common::unique_tmp("jet_dev_string_field_compound");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("string_field_compound.jet");
+    fs::write(
+        &file,
+        "struct Packet {\n    source: String\n}\nfn run() {\n    p := Packet.{ source: \"base\" }\n    p.source += \"AAA\"\n    print(p.source)\n}\n",
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+    let expected = ProgramOutput::ran("baseAAA\n".into(), String::new(), 0);
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("String field interpreter failed: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("String field default run failed: {diags:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "String field compound append must execute in the resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "String field compound append must not raise E0956 through interpreter fallback"
+    );
+    let aot = compiled_binary_output(&dir, "string_field_compound", 0, "string_field_compound", &shown);
+
+    assert_eq!(interpreted, expected, "String field interpreter route drift");
+    assert_eq!(default, expected, "String field default JIT route drift");
+    assert_eq!(aot, expected, "String field AOT route drift");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// c728 C6: one-shot `jet dev` deopts on a JIT gap and exits 0.
 #[test]
 fn one_shot_dev_deopts_on_jit_gap() {

@@ -3390,6 +3390,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             | BinOp::FloorDiv
                     )
                 }
+                Type::String => matches!(op, BinOp::Add),
                 _ => false,
             });
             let local = place.as_local().is_some_and(|local| {

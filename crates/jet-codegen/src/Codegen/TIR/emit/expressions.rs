@@ -2123,6 +2123,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     rs,
                 );
             }
+            if matches!((&lhs.ty, &rhs.ty), (Type::String, Type::String))
+                && matches!(op, BinOp::Add)
+            {
+                return format!("jet_string_concat(&({ls}), &({rs}))");
+            }
             // Unit-family arithmetic is a synthetic trait operation. Keep the
             // operands borrowed exactly as the generated `__jet_*` trait
             // requires; emitting Rust's value operator here moves a repeated
