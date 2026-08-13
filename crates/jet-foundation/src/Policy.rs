@@ -1,6 +1,7 @@
 //! Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1).
 
 use crate::Diagnostics::Span;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -598,13 +599,36 @@ pub fn active_rule_names() -> Vec<String> {
 /// compiler keeps no second registry of marker names.
 #[derive(Debug, Clone, Default)]
 pub struct MarkerVocabulary {
-    declared: std::collections::BTreeSet<String>,
+    declared: BTreeSet<String>,
+    /// Source declarations are retained in the same bundle-local vocabulary
+    /// as derive providers. Consumers that need the declaration body (sema
+    /// expansion and reflection) read this map; name-only consumers read the
+    /// set above.
+    declarations: BTreeMap<String, crate::AST::MarkerDecl>,
 }
 
 impl MarkerVocabulary {
     /// The registry, plus the derive providers visible to this build.
     pub fn with_derives(names: impl IntoIterator<Item = String>) -> Self {
-        Self { declared: names.into_iter().collect() }
+        Self {
+            declared: names.into_iter().collect(),
+            declarations: BTreeMap::new(),
+        }
+    }
+
+    /// Add source-declared rules to the same registry as derive providers.
+    pub fn with_derives_and_declarations(
+        names: impl IntoIterator<Item = String>,
+        declarations: impl IntoIterator<Item = crate::AST::MarkerDecl>,
+    ) -> Self {
+        let mut vocabulary = Self::with_derives(names);
+        for declaration in declarations {
+            vocabulary.declared.insert(declaration.name.clone());
+            vocabulary
+                .declarations
+                .insert(declaration.name.clone(), declaration);
+        }
+        vocabulary
     }
 
     /// True when a writer may spell this name as a marker.
@@ -615,6 +639,18 @@ impl MarkerVocabulary {
     /// Every spellable name, for a nearest-spelling suggestion.
     pub fn names(&self) -> Vec<String> {
         active_rule_names().into_iter().chain(self.declared.iter().cloned()).collect()
+    }
+
+    /// Return the source declaration for a user rule, if this build supplied
+    /// one. Built-in rows remain in `APPLIED_RULES` and intentionally return
+    /// `None` here.
+    pub fn declaration(&self, name: &str) -> Option<&crate::AST::MarkerDecl> {
+        self.declarations.get(name)
+    }
+
+    /// Source-declared rule rows in deterministic name order.
+    pub fn declarations(&self) -> impl Iterator<Item = &crate::AST::MarkerDecl> {
+        self.declarations.values()
     }
 
     /// The one unknown-marker diagnostic. No caller writes its own.

@@ -85,6 +85,7 @@ pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,
+    project_rejection,
 };
 
 /// D-DATAFLOW1=A / #778: TIR deopt path for `core.data.csv` reuses the same
@@ -251,8 +252,9 @@ pub use Purity::{
 };
 pub use Reflect::{
     build_distinct_type_info, build_distinct_type_info_with_path, build_enum_layout_info,
-    build_program_info, build_struct_layout_info, build_struct_type_info,
-    build_struct_type_info_with_path, build_struct_type_info_with_states, ProgramSemanticFacts,
+    build_function_type_info, build_program_info, build_struct_layout_info, build_struct_type_info,
+    build_struct_type_info_with_path, build_struct_type_info_with_path_and_vocabulary,
+    build_struct_type_info_with_states, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 

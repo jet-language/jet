@@ -366,7 +366,10 @@ pub(crate) fn comptime_context_from_items(
     let mut funcs = HashMap::new();
     let mut externs = HashSet::new();
     let mut globals = HashMap::new();
-    for item in items {
+    for item in items
+        .iter()
+        .filter(|item| !matches!(item, Item::MarkerDecl(_) | Item::FactDecl(_)))
+    {
         match item {
             Item::Func(f) => {
                 funcs.insert(f.name.clone(), f.clone());
@@ -402,8 +405,6 @@ pub(crate) fn comptime_context_from_items(
                 }
             }
             Item::EffectDecl(_)
-            | Item::MarkerDecl(_)
-            | Item::FactDecl(_)
             | Item::Test(_)
             | Item::Bench(_)
             | Item::Const(_)
@@ -421,6 +422,9 @@ pub(crate) fn comptime_context_from_items(
             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
             | Item::GenericModule(_) // D-GENMOD2=A: template — erases
             | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+            Item::MarkerDecl(_) | Item::FactDecl(_) => {
+                unreachable!("declaration items are consumed by the bundle registry")
+            }
         }
     }
     (funcs, externs, globals)

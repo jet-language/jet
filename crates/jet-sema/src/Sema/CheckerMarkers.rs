@@ -637,11 +637,40 @@ fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
         let (type_markers, member_markers): (&[Marker], Vec<&Marker>) = match item {
             Item::Struct(s) => (
                 &s.type_markers,
-                s.fields.iter().flat_map(|f| f.serde_markers.iter()).collect(),
+                s.fields
+                    .iter()
+                    .flat_map(|field| field.serde_markers.iter())
+                    .chain(s.methods.iter().flat_map(|method| method.markers.iter()))
+                    .chain(s.trait_impls.iter().flat_map(|implementation| {
+                        implementation
+                            .methods
+                            .iter()
+                            .flat_map(|method| method.markers.iter())
+                    }))
+                    .collect(),
             ),
             Item::Enum(e) => (
                 &e.type_markers,
-                e.variants.iter().flat_map(|v| v.serde_markers.iter()).collect(),
+                e.variants
+                    .iter()
+                    .flat_map(|variant| variant.serde_markers.iter())
+                    .chain(e.methods.iter().flat_map(|method| method.markers.iter()))
+                    .chain(e.trait_impls.iter().flat_map(|implementation| {
+                        implementation
+                            .methods
+                            .iter()
+                            .flat_map(|method| method.markers.iter())
+                    }))
+                    .collect(),
+            ),
+            Item::Distinct(d) => (&d.type_markers, Vec::new()),
+            Item::Func(f) => (&f.markers, Vec::new()),
+            Item::Impl(i) => (
+                &[],
+                i.methods
+                    .iter()
+                    .flat_map(|method| method.markers.iter())
+                    .collect(),
             ),
             _ => (&[], Vec::new()),
         };
@@ -671,4 +700,228 @@ pub(crate) fn check_marker_vocabulary(
         })
         .map(|marker| vocabulary.unknown(&marker.name, marker.name_span))
         .collect()
+}
+
+/// Validate the four declaration checks for source-authored marker rules. The
+/// parser can only consult compiler rows while it reads one file; this bundle
+/// pass sees declarations from every loaded module and applies the same site,
+/// signature, and repeat rules to them.
+pub(crate) fn check_declared_rule_facts(
+    facts: &[crate::AST::AppliedRuleApplication],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut seen: HashMap<(Option<crate::Diagnostics::Span>, String), crate::Diagnostics::Span> =
+        HashMap::new();
+    for application in facts {
+        let Some(declaration) = vocabulary.declaration(&application.marker.name) else {
+            if crate::Policy::applied_rule(&application.marker.name).is_none()
+                && !matches!(
+                    application.site,
+                    Some(
+                        crate::Policy::RuleSite::Type
+                            | crate::Policy::RuleSite::Field
+                            | crate::Policy::RuleSite::Variant
+                            | crate::Policy::RuleSite::Function
+                            | crate::Policy::RuleSite::Method
+                    )
+                )
+            {
+                diagnostics.push(vocabulary.unknown(
+                    &application.marker.name,
+                    application.marker.name_span,
+                ));
+            }
+            continue;
+        };
+        if !declared_rule_arguments_match(&application.marker, declaration) {
+            diagnostics.push(declared_rule_argument_shape_error(
+                &application.marker.name,
+                declaration,
+                application.marker.span,
+            ));
+        }
+        let sites = declared_rule_sites(declaration);
+        if application.site.is_some_and(|site| !sites.contains(&site)) {
+            diagnostics.push(Diagnostic::error(
+                "E0355",
+                format!("`#{}` cannot attach at this site", application.marker.name),
+                format!(
+                    "the declared rule allows only these sites: {}",
+                    sites.iter().map(|site| format!(".{:?}", site)).collect::<Vec<_>>().join(", ")
+                ),
+                "remove the marker or move it to one of its declared sites".to_string(),
+                Some(application.marker.span),
+            ));
+        }
+        if !declared_rule_repeatable(declaration) {
+            let key = (application.target, application.marker.name.clone());
+            if let Some(previous) = seen.insert(key, application.marker.span) {
+                diagnostics.push(crate::Policy::marker_repeated_error(
+                    &application.marker.name,
+                    "target",
+                    application.marker.span,
+                ).with_detail(format!(
+                    "first application span: {}..{}\nsecond application span: {}..{}",
+                    previous.start,
+                    previous.end,
+                    application.marker.span.start,
+                    application.marker.span.end,
+                )));
+            }
+        }
+    }
+    diagnostics
+}
+
+fn declared_rule_arguments_match(
+    marker: &Marker,
+    declaration: &crate::AST::MarkerDecl,
+) -> bool {
+    let params: Vec<_> = declaration
+        .params
+        .iter()
+        .filter(|param| !param.name.starts_with('$'))
+        .collect();
+    let mut supplied = vec![false; params.len()];
+    let mut next_positional = 0usize;
+    let mut saw_named = false;
+    for (index, _argument) in marker.args.iter().enumerate() {
+        let parameter = if let Some((label, _)) = marker.arg_labels.get(index).and_then(Option::as_ref) {
+            saw_named = true;
+            params.iter().position(|param| param.name == *label)
+        } else if saw_named {
+            return false;
+        } else if next_positional < params.len() {
+            let position = next_positional;
+            next_positional += 1;
+            Some(position)
+        } else if params.iter().any(|param| param.variadic) {
+            Some(params.len().saturating_sub(1))
+        } else {
+            None
+        };
+        let Some(parameter) = parameter else {
+            return false;
+        };
+        if supplied[parameter] && !params[parameter].variadic {
+            return false;
+        }
+        if declared_argument_type_mismatch(
+            &marker.args[index],
+            params[parameter],
+        ) {
+            return false;
+        }
+        supplied[parameter] = true;
+    }
+    params.iter().enumerate().all(|(index, parameter)| {
+        supplied[index] || parameter.value.is_some() || parameter.variadic
+    })
+}
+
+fn declared_rule_argument_shape_error(
+    name: &str,
+    declaration: &crate::AST::MarkerDecl,
+    span: crate::Diagnostics::Span,
+) -> Diagnostic {
+    let expected = declaration
+        .params
+        .iter()
+        .filter(|parameter| !parameter.name.starts_with('$'))
+        .map(|parameter| {
+            let ty = parameter
+                .ty
+                .as_ref()
+                .map(crate::AST::Type::name)
+                .unwrap_or_else(|| "Value".to_string());
+            let variadic = parameter.variadic.then_some("...").unwrap_or("");
+            let default = parameter
+                .value
+                .as_deref()
+                .map(|_| " = …".to_string())
+                .unwrap_or_default();
+            format!("{}: {variadic}{ty}{default}", parameter.name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Diagnostic::error(
+        "E0930",
+        format!("`#{name}` arguments do not match `{name}({expected})`"),
+        "marker arguments use the same call grammar and typed signature as function arguments"
+            .to_string(),
+        format!("match the declared signature `{name}({expected})`"),
+        Some(span),
+    )
+}
+
+/// Reject only a type mismatch that the source expression proves by itself.
+/// Names and calls stay open for ordinary sema inference; this pass owns the
+/// declaration contract, not a second expression type checker.
+fn declared_argument_type_mismatch(
+    expression: &crate::AST::Expr,
+    parameter: &crate::AST::MarkerDeclParam,
+) -> bool {
+    let Some(expected) = parameter.ty.as_ref() else {
+        return false;
+    };
+    let actual = match expression {
+        crate::AST::Expr::Str(..) => Some("String"),
+        crate::AST::Expr::Int(..) => Some("Int"),
+        crate::AST::Expr::Float(..) => Some("Float"),
+        crate::AST::Expr::Bool(..) => Some("Bool"),
+        crate::AST::Expr::Char(..) => Some("Char"),
+        crate::AST::Expr::ListLit(..) => Some("List"),
+        crate::AST::Expr::MapLit(..) => Some("Map"),
+        _ => None,
+    };
+    let expected = match expected {
+        crate::AST::Type::String => Some("String"),
+        crate::AST::Type::Int => Some("Int"),
+        crate::AST::Type::Float => Some("Float"),
+        crate::AST::Type::Bool => Some("Bool"),
+        crate::AST::Type::Char => Some("Char"),
+        crate::AST::Type::List(..) => Some("List"),
+        crate::AST::Type::Map { .. } => Some("Map"),
+        _ => None,
+    };
+    expected.zip(actual).is_some_and(|(expected, actual)| expected != actual)
+}
+
+fn declared_rule_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::RuleSite> {
+    declaration
+        .params
+        .iter()
+        .find(|param| param.name == "$sites")
+        .and_then(|param| param.value.as_deref())
+        .and_then(|value| match value {
+            crate::AST::Expr::ListLit(values, _) => Some(values.as_slice()),
+            _ => None,
+        })
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(declared_site)
+                .filter_map(|name| crate::Policy::RuleSite::ALL.iter().copied().find(|site| site.name() == name))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn declared_site(value: &crate::AST::Expr) -> Option<String> {
+    match value {
+        crate::AST::Expr::Ident(name, _) => Some(name.trim_start_matches('.').to_string()),
+        crate::AST::Expr::Field(_, member, _) => Some(member.clone()),
+        crate::AST::Expr::EnumLit { variant, .. } => Some(variant.clone()),
+        _ => None,
+    }
+}
+
+fn declared_rule_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
+    declaration
+        .params
+        .iter()
+        .find(|param| param.name == "$repeatable")
+        .and_then(|param| param.value.as_deref())
+        .is_some_and(|value| matches!(value, crate::AST::Expr::Bool(true, _)))
 }

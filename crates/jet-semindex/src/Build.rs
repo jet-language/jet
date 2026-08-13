@@ -1073,7 +1073,28 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     );
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match item {
-        Item::EffectDecl(_) | Item::MarkerDecl(_) | Item::FactDecl(_) => {}
+        Item::EffectDecl(_) => {}
+        // D-META-USER1=A: marker and fact declarations are first-class
+        // registry entries. Keep them in the shared inspection index so
+        // `jet inspect` exposes the same names sema checked for legality.
+        Item::MarkerDecl(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("rule:{}::{}", ctx.scope_identity, value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
+        }
+        Item::FactDecl(value) => {
+            ctx.db.defs.push(SymDef {
+                identity: format!("fact:{}::{}", ctx.scope_identity, value.name),
+                name: value.name.clone(),
+                def_span: value.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Type,
+            });
+        }
         Item::Func(f) => {
             record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);

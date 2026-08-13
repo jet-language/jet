@@ -74,6 +74,37 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
+/// D-META-USER1=A: turn the four declared rejection fields into the one
+/// registered project diagnostic used by both comptime evaluators.
+pub fn project_rejection(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let [
+        CtValue::Str(code),
+        CtValue::Str(what),
+        CtValue::Str(why),
+        CtValue::Str(fix),
+    ] = args
+    else {
+        return Err(unsupported(
+            "`reject` requires String code, what, why, and fix arguments",
+            span,
+        ));
+    };
+    if jet_foundation::Registry::diagnostic(code).is_none() {
+        return Err(unsupported(
+            &format!("`reject` uses unregistered diagnostic `{code}`"),
+            span,
+        ));
+    }
+    Err(Diagnostic::project_error(
+        code.clone(),
+        what.clone(),
+        why.clone(),
+        fix.clone(),
+        Some(span),
+    )
+    .expect("registered rule diagnostic"))
+}
+
 pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
     // `app.live(…)` and friends are the web module's live-query registry under
     // the entry alias; resolve the alias before asking for the fact.
@@ -843,6 +874,43 @@ impl<'a> Interp<'a> {
         }
         if name == "require" || name == "require_eq" {
             return self.eval_require(name, args, span, scope);
+        }
+        // D-META-USER1=A: a checked rule may reject with a registered
+        // project diagnostic. Labels keep the product fields explicit; the
+        // registry still owns the code's severity and rendering metadata.
+        if name == "reject" {
+            let mut values = HashMap::new();
+            for argument in args {
+                let Some((label, _)) = &argument.label else {
+                    return Err(unsupported(
+                        "`reject` requires code, what, why, and fix labels",
+                        span,
+                    ));
+                };
+                values.insert(label.as_str(), self.eval(&argument.expr, scope)?);
+            }
+            let text = |name: &str| -> Result<String, Diagnostic> {
+                match values.get(name) {
+                    Some(CtValue::Str(value)) => Ok(value.clone()),
+                    _ => Err(unsupported(
+                        &format!("`reject` requires a String `{name}` argument"),
+                        span,
+                    )),
+                }
+            };
+            let code = text("code")?;
+            let what = text("what")?;
+            let why = text("why")?;
+            let fix = text("fix")?;
+            return project_rejection(
+                &[
+                    CtValue::Str(code),
+                    CtValue::Str(what),
+                    CtValue::Str(why),
+                    CtValue::Str(fix),
+                ],
+                span,
+            );
         }
         // D-METADERIVE1=A: `emit(source_string)` — push a re-entry fragment.
         if name == "emit" {

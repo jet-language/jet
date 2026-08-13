@@ -181,6 +181,257 @@ fn every_fact_row_carries_its_law_columns() {
     }
 }
 
+/// D-META-USER1=A: source rows join the same checked vocabulary that drives
+/// marker legality, and a body can return an additive member through the
+/// existing generated-fragment path.
+#[test]
+fn source_rules_record_facts_and_add_checked_members() {
+    let source = r#"
+marker Recorded($sites: [.Type])
+
+marker AddGreeting($sites: [.Type]) {
+    tname :: target.name
+    emit("""
+impl $tname {{
+    fn greeting(self) => String {{
+        return "hello"
+    }}
+}}
+""")
+}
+
+#[Recorded, AddGreeting]
+struct Person { name: String }
+
+fn run() {
+    person :: Person.{name: "ada"}
+    print(person.greeting())
+}
+"#;
+    jet::compile(source).expect("source marker facts and additive bodies should compile");
+
+    let parsed = declarations(source);
+    let recorded = parsed
+        .iter()
+        .find_map(|item| match item {
+            Item::MarkerDecl(declaration) if declaration.name == "Recorded" => Some(declaration),
+            _ => None,
+        })
+        .expect("bodyless source rule");
+    let additive = parsed
+        .iter()
+        .find_map(|item| match item {
+            Item::MarkerDecl(declaration) if declaration.name == "AddGreeting" => Some(declaration),
+            _ => None,
+        })
+        .expect("bodyful source rule");
+    assert!(recorded.body.is_none());
+    assert!(additive.body.is_some());
+
+    let source_declarations: Vec<_> = parsed
+        .iter()
+        .filter_map(|item| match item {
+            Item::MarkerDecl(declaration) => Some(declaration.clone()),
+            _ => None,
+        })
+        .collect();
+    let vocabulary = Policy::MarkerVocabulary::with_derives_and_declarations(
+        std::iter::empty(),
+        source_declarations,
+    );
+    let person = parsed
+        .iter()
+        .find_map(|item| match item {
+            Item::Struct(definition) => Some(definition),
+            _ => None,
+        })
+        .expect("reflected target type");
+    let reflection = jet::Comptime::build_struct_type_info_with_path_and_vocabulary(
+        person,
+        &[],
+        "Person",
+        Some(&vocabulary),
+    );
+    let jet::AST::CtValue::Struct { fields, .. } = reflection else {
+        panic!("TypeInfo must be a struct value");
+    };
+    let Some((_, jet::AST::CtValue::List(markers))) =
+        fields.iter().find(|(name, _)| name == "markers")
+    else {
+        panic!("TypeInfo must expose marker facts");
+    };
+    assert!(markers.iter().any(|marker| {
+        matches!(
+            marker,
+            jet::AST::CtValue::Struct { fields, .. }
+                if fields.iter().any(|(name, value)| {
+                    name == "name"
+                        && matches!(value, jet::AST::CtValue::Str(value) if value == "Recorded")
+                })
+        )
+    }));
+}
+
+/// D-MARK-FORM1=A: a source rule keeps typed signature checking rather than
+/// accepting an arity-only marker call.
+#[test]
+fn source_rule_rejects_a_wrong_typed_argument() {
+    let diagnostics = jet::compile(
+        "marker NeedsName(name: String, $sites: [.Type])\n#NeedsName(7)\nstruct Person { id: Int }\n",
+    )
+    .expect_err("a source rule must check its typed argument");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930"),
+        "expected E0930: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn unknown_callable_rule_is_checked_against_the_bundle_registry() {
+    let diagnostics = jet::compile(
+        "#MissingRule fn work() {}\nfn run() {}\n",
+    )
+    .expect_err("an undeclared callable rule must not remain a silent marker");
+    assert_eq!(
+        diagnostics.iter().filter(|diagnostic| diagnostic.code == "E0927").count(),
+        1,
+        "expected one registered unknown-rule diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn source_rule_rejects_a_site_not_in_its_declared_facts() {
+    let diagnostics = jet::compile(
+        "marker TypeOnly($sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n",
+    )
+    .expect_err("a source rule must enforce its declared legal sites");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0355"),
+        "expected the registered site diagnostic: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn source_rule_rejects_a_non_repeatable_duplicate() {
+    let diagnostics = jet::compile(
+        "marker Once($sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n",
+    )
+    .expect_err("a non-repeatable source rule must reject a duplicate");
+    let duplicate = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0999")
+        .expect("duplicate rule diagnostic");
+    let detail = duplicate.detail.as_deref().unwrap_or("");
+    assert!(detail.contains("first application span"), "{duplicate:?}");
+    assert!(detail.contains("second application span"), "{duplicate:?}");
+}
+
+/// D-META-USER1=A: the same body path applies to a callable target, including
+/// a registered diagnostic raised by the rule itself.
+#[test]
+fn source_rule_body_can_reject_a_function_target() {
+    let diagnostics = jet::compile(
+        r#"
+marker RejectsFunction($sites: [.Function]) {
+    reject(
+        code: "E0927",
+        what: "the function is not allowed",
+        why: "the test rule rejects this declaration",
+        fix: "remove the marker"
+    )
+}
+
+#RejectsFunction
+fn run() {}
+"#,
+    )
+    .expect_err("a function-site rule must run its checked body");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E2710"),
+        "expected the function rule wrapper: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.cause.iter().any(|code| code == "E0927")),
+        "expected the registered function-rule cause: {diagnostics:?}"
+    );
+}
+
+/// D-META-USER1=A / Law 1: generated members cannot change or shadow a
+/// user-written member, and the error preserves both source locations.
+#[test]
+fn source_rule_collision_names_generated_and_written_spans() {
+    let diagnostics = jet::compile(
+        r#"
+marker AddGreeting($sites: [.Type]) {
+    tname :: target.name
+    emit("""
+impl $tname {{
+    fn greeting(self) => String {{
+        return "generated"
+    }}
+}}
+""")
+}
+
+#AddGreeting
+struct Person { name: String }
+
+impl Person {
+    fn greeting(self) => String {
+        return "written"
+    }
+}
+"#,
+    )
+    .expect_err("a source rule must not shadow a written member");
+    let collision = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0105")
+        .expect("collision diagnostic");
+    assert!(collision.what.contains("generated member"), "{collision:?}");
+    let detail = collision.detail.as_deref().unwrap_or("");
+    assert!(detail.contains("generated rule"), "{collision:?}");
+    assert!(detail.contains("existing member"), "{collision:?}");
+}
+
+/// D-META-USER1=A / I4: a rule body can reject through the registered
+/// diagnostic constructor instead of smuggling an unregistered compiler error.
+#[test]
+fn source_rule_rejection_keeps_the_registered_cause() {
+    let diagnostics = jet::compile(
+        r#"
+marker Rejects($sites: [.Type]) {
+    reject(
+        code: "E0927",
+        what: "the rule rejected this type",
+        why: "the test rule is deliberately strict",
+        fix: "remove the marker"
+    )
+}
+
+#Rejects
+struct Person { id: Int }
+
+fn run() {}
+"#,
+    )
+    .expect_err("a rule rejection must stop compilation");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2710"),
+        "expected the registered rule-body wrapper: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.cause.iter().any(|code| code == "E0927")),
+        "expected E0927 as the causal registered diagnostic: {diagnostics:?}"
+    );
+}
+
 /// Rust files under the compiler, scanned for a second copy of the declaration
 /// rows. Marker and fact rows may be built only where their declarations are
 /// read; the retired effect-root array may not come back anywhere.
