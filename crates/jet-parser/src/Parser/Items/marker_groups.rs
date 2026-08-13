@@ -227,21 +227,25 @@ impl<'a> Parser<'a> {
             }
         }
 
+        pub(in crate::Parser) fn record_rule_fact(
+            &mut self,
+            marker: Marker,
+            target: Option<Span>,
+            site: crate::Policy::RuleSite,
+        ) {
+            self.rule_facts.push(crate::AST::AppliedRuleApplication {
+                marker,
+                target,
+                site: Some(site),
+            });
+        }
+
         fn wrong_rule_site(
             marker: &Marker,
             site: crate::Policy::RuleSite,
-            noun: &str,
+            _noun: &str,
         ) -> Diagnostic {
-            Diagnostic::error(
-                "E0355",
-                format!("`#{}` cannot attach to this {noun}", marker.name),
-                format!(
-                    "the applied-rule registry does not allow `#{}` at the {site:?} site",
-                    marker.name
-                ),
-                "remove the marker or move it to one of its registered sites".to_string(),
-                Some(marker.span),
-            )
+            crate::Policy::marker_wrong_site_error(&marker.name, site, marker.span)
         }
 
         fn validate_registered_rule_marker(
@@ -345,6 +349,70 @@ impl<'a> Parser<'a> {
             Ok(marker)
         }
 
+        /// Bind and validate a marker at a site whose parser has no semantic
+        /// applicator of its own. Type-site derives remain open to user
+        /// declarations; every other direct site is closed here by the same
+        /// registry row used by the dedicated applicators.
+        pub(in crate::Parser) fn parse_registered_marker_at_site(
+            &mut self,
+            site: crate::Policy::RuleSite,
+        ) -> Result<Marker, Diagnostic> {
+            let marker = self.parse_rule_marker()?;
+            // The caller owns the target span. Bind the site now so comptime
+            // resolution sees the row even for a parser-specific projection;
+            // the enclosing parser fills in the block/item span once it has
+            // consumed the target.
+            self.bind_rule_fact(marker.name_span, None, site);
+            let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+                return Err(crate::Policy::marker_unknown_error(
+                    &marker.name,
+                    &crate::Policy::active_rule_names(),
+                    marker.name_span,
+                ));
+            };
+            if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
+                return Err(crate::Policy::marker_unknown_error(
+                    &marker.name,
+                    &crate::Policy::active_rule_names(),
+                    marker.name_span,
+                ));
+            }
+            if !crate::Policy::rule_allows(&marker.name, site) {
+                return Err(crate::Policy::marker_wrong_site_error(
+                    &marker.name,
+                    site,
+                    marker.span,
+                ));
+            }
+            Ok(marker)
+        }
+
+        /// True when the current token starts a marker whose ordinary call
+        /// arguments are followed by a block. This keeps unknown and
+        /// wrong-site block spellings on the marker diagnostic family instead
+        /// of letting the statement parser report a generic E0003.
+        pub(in crate::Parser) fn marker_head_is_followed_by(
+            &self,
+            expected: TokKind,
+        ) -> bool {
+            self.skip_bare_marker(self.pos)
+                .and_then(|index| self.toks.get(index))
+                .is_some_and(|token| token.kind == expected)
+        }
+
+        pub(in crate::Parser) fn marker_head_is_followed_by_comptime_target(&self) -> bool {
+            self.skip_bare_marker(self.pos)
+                .and_then(|index| self.toks.get(index))
+                .is_some_and(|token| {
+                    matches!(token.kind, TokKind::KwComptime)
+                        || matches!(&token.kind, TokKind::Ident(name) if Syntax::is_comptime_name(name))
+                })
+        }
+
+        pub(in crate::Parser) fn at_marker_head(&self) -> bool {
+            self.marker_name_at(self.pos).is_some()
+        }
+
         fn marker_fix_source(marker: &Marker) -> Option<String> {
             fn expr_source(expr: &crate::AST::Expr) -> Option<String> {
                 match expr {
@@ -424,7 +492,9 @@ impl<'a> Parser<'a> {
             let close = self.peek().span;
             self.expect(TokKind::RBracket, "to close an `#[…]` rule list")?;
             for marker in &group {
-                if crate::Policy::applied_rule(&marker.name).is_some()
+                if crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                    matches!(rule.status, crate::Policy::RuleStatus::Active)
+                })
                     && !crate::Policy::rule_allows_with_companions(
                         &marker.name,
                         site,
@@ -493,7 +563,9 @@ impl<'a> Parser<'a> {
                 }
                 let Some(name) = self.marker_name_at(self.pos).map(str::to_string) else { break };
                 if !markers.is_empty()
-                    && crate::Policy::applied_rule(&name).is_some()
+                    && crate::Policy::applied_rule(&name).is_some_and(|rule| {
+                        matches!(rule.status, crate::Policy::RuleStatus::Active)
+                    })
                     && !crate::Policy::rule_allows(&name, site)
                 {
                     break;
@@ -501,10 +573,10 @@ impl<'a> Parser<'a> {
                 chunks += 1;
                 let marker = self.parse_rule_marker()?;
                 self.bind_rule_fact(marker.name_span, None, site);
-                if crate::Policy::applied_rule(&name).is_some()
+                if crate::Policy::applied_rule(&name).is_some_and(|rule| {
+                    matches!(rule.status, crate::Policy::RuleStatus::Active)
+                })
                     && !crate::Policy::rule_allows(&name, site)
-                    && !(site == crate::Policy::RuleSite::Method
-                        && matches!(name.as_str(), Syntax::KW_JOB | Syntax::MARKER_EVERY))
                 {
                     return Err(Self::wrong_rule_site(&marker, site, noun));
                 }
@@ -636,7 +708,7 @@ impl<'a> Parser<'a> {
                 || segments.ends_with(&["Target", Syntax::WEB_TARGET_DEFAULT_WEB])
         }
 
-        fn skip_bare_marker(&self, index: usize) -> Option<usize> {
+        pub(in crate::Parser) fn skip_bare_marker(&self, index: usize) -> Option<usize> {
             if !matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Hash)) {
                 return None;
             }
@@ -909,17 +981,6 @@ impl<'a> Parser<'a> {
                         ordered_markers.iter().map(|other| other.name.as_str()),
                     )
                 {
-                    if site == crate::Policy::RuleSite::Method
-                        && matches!(marker.name.as_str(), Syntax::KW_JOB | Syntax::MARKER_EVERY)
-                    {
-                        return Err(Diagnostic::error(
-                            "E0925",
-                            "`#Job`/`#Every(…)` only mark a top-level function".to_string(),
-                            "a task needs a free-standing name for `jet run --task <name> <entry>` — a method has no such name, so it can't be one (D-JPK-TASKRUN1).".to_string(),
-                            "move this function to the top level, beside `fn run()`.".to_string(),
-                            Some(marker.span),
-                        ));
-                    }
                     return Err(Self::wrong_rule_site(
                         &marker,
                         site,
@@ -955,19 +1016,6 @@ impl<'a> Parser<'a> {
                         &marker.name,
                         &crate::Policy::active_rule_names(),
                         marker.name_span,
-                    ));
-                }
-                if !Self::function_marker_has_applicator(&marker.name) {
-                    return Err(Diagnostic::error(
-                        "E0355",
-                        format!(
-                            "`#{}` cannot attach through this function marker list",
-                            marker.name
-                        ),
-                        "the marker registry gives every marker exact sites and a typed signature"
-                            .to_string(),
-                        "remove the marker or move it to its registered site".to_string(),
-                        Some(marker.span),
                     ));
                 }
                 if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
@@ -1219,16 +1267,10 @@ impl<'a> Parser<'a> {
                             Some(marker.span),
                         ));
                     }
-                    _ => {
-                        return Err(Diagnostic::error(
-                            "E0355",
-                            format!("`#{}` cannot attach through this function marker list", marker.name),
-                            "the marker registry gives every marker exact sites and a typed signature"
-                                .to_string(),
-                            "remove the marker or move it to its registered site".to_string(),
-                            Some(marker.span),
-                        ));
-                    }
+                    // The registry has already checked the site and the
+                    // signature. A registered marker with no AST projection
+                    // remains an ordinary applied-rule fact.
+                    _ => {}
                 }
             }
             for declaration in &mut policy {
@@ -1275,33 +1317,6 @@ impl<'a> Parser<'a> {
                     }),
             );
             Ok(function)
-        }
-
-        pub(in crate::Parser) fn function_marker_has_applicator(name: &str) -> bool {
-            matches!(
-                name,
-                Syntax::MARKER_POLICY
-                    | Syntax::KW_UNSAFE
-                    | Syntax::KW_SCRUB
-                    | Syntax::MARKER_PRE
-                    | Syntax::MARKER_POST
-                    | Syntax::MARKER_INLINE
-                    | Syntax::MARKER_KERNEL
-                    | Syntax::MARKER_DOC
-                    | Syntax::KW_JOB
-                    | Syntax::MARKER_EVERY
-                    | Syntax::MARKER_REPLAYABLE
-                    | Syntax::MARKER_WASM_EXPORT
-                    | Syntax::KW_STATE
-                    | Syntax::KW_TRANSITION
-                    | Syntax::MARKER_FFI
-                    | Syntax::MARKER_UNDO
-                    | Syntax::MARKER_ABI
-                    | Syntax::MARKER_MUST_USE
-                    | Syntax::MARKER_META
-                    | Syntax::KW_REACTIVE
-                    | Syntax::MARKER_TARGET
-            )
         }
 
         pub(in crate::Parser) fn apply_unsafe_function_marker(

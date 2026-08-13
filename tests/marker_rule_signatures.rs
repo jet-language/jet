@@ -135,7 +135,7 @@ fn run() {}
     );
 
     let wrong = parse_codes("struct Bad { #Job fn work(self) {} }\nfn run() {}");
-    assert_eq!(wrong.iter().filter(|code| *code == "E0925").count(), 1);
+    assert_eq!(wrong.iter().filter(|code| *code == "E0355").count(), 1);
 }
 
 #[test]

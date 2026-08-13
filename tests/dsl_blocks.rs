@@ -8,7 +8,7 @@ fn sql_and_html_blocks_compile_and_formatter_round_trip() {
     let source = r#"
     struct User { id: Int }
     fn run() {
-    #SQL<User> {
+    #SQL(User) {
         query :: SQL.{"select id from users"}
         print(query.template())
     }
@@ -20,7 +20,7 @@ fn sql_and_html_blocks_compile_and_formatter_round_trip() {
 "#;
     let _compiled = jet::compile(source).expect("stdlib DSL blocks should compile");
     let formatted = jet::format_source(source).expect("DSL blocks should format");
-    assert!(formatted.contains("#SQL<User>"));
+    assert!(formatted.contains("#SQL(User)"));
     assert!(formatted.contains("#HTML {"));
     assert_eq!(
         jet::format_source(&formatted).unwrap(),
@@ -105,7 +105,7 @@ fn run() {
 
 #[test]
 fn sql_row_header_is_a_real_declared_type_position() {
-    let error = jet::compile("fn run() { #SQL<MissingRow> {} }\n").unwrap_err();
+    let error = jet::compile("fn run() { #SQL(MissingRow) {} }\n").unwrap_err();
     assert!(
         error.iter().any(|diagnostic| {
             diagnostic.what.contains("MissingRow")

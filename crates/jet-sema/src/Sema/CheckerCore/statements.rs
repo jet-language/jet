@@ -2724,7 +2724,14 @@ impl<'a> Checker<'a> {
                     // the ordinary declared-type rules so local, imported,
                     // generic, alias, and unknown names all receive the same
                     // visibility and teaching diagnostics as any other type.
-                    if name == Syntax::DSL_BLOCK_SQL {
+                    let has_type_parameter = crate::Policy::applied_rule(name)
+                        .is_some_and(|row| {
+                            row.signature
+                                .params
+                                .first()
+                                .is_some_and(|parameter| parameter.source_type == "Type")
+                        });
+                    if has_type_parameter {
                         if let [Expr::Ident(type_name, type_span)] = args.as_slice() {
                             self.check_declared_type_rules(
                                 &Type::Named(type_name.clone()),

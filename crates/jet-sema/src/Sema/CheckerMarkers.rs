@@ -205,21 +205,22 @@ fn validate_rule_arguments(
     })
 }
 
-fn static_rule_site(site: Option<crate::Policy::RuleSite>) -> bool {
+/// Static products need an actual compile-time value (for example `#HTML` or
+/// `#Test`). Other sites still run through the same comptime evaluator below,
+/// but their arguments may name locals or parameters, so signature diagnostics
+/// remain in the ordinary sema pass where those bindings exist.
+fn static_product_site(site: crate::Policy::RuleSite) -> bool {
     matches!(
         site,
-        Some(
-            crate::Policy::RuleSite::Package
-                | crate::Policy::RuleSite::File
-                | crate::Policy::RuleSite::Module
-                | crate::Policy::RuleSite::Type
-                | crate::Policy::RuleSite::Declaration
-                | crate::Policy::RuleSite::Constant
-                | crate::Policy::RuleSite::Field
-                | crate::Policy::RuleSite::Variant
-                | crate::Policy::RuleSite::Test
-                | crate::Policy::RuleSite::Bench
-        )
+        crate::Policy::RuleSite::Package
+            | crate::Policy::RuleSite::File
+            | crate::Policy::RuleSite::Module
+            | crate::Policy::RuleSite::Type
+            | crate::Policy::RuleSite::Constant
+            | crate::Policy::RuleSite::Field
+            | crate::Policy::RuleSite::Variant
+            | crate::Policy::RuleSite::Test
+            | crate::Policy::RuleSite::Bench
     )
 }
 
@@ -252,6 +253,14 @@ fn materialize_static_marker_values(
                 for field in &mut item.fields {
                     apply_all(&mut field.serde_markers, validated, invalid);
                 }
+                for function in &mut item.methods {
+                    apply_all(&mut function.markers, validated, invalid);
+                }
+                for implementation in &mut item.trait_impls {
+                    for function in &mut implementation.methods {
+                        apply_all(&mut function.markers, validated, invalid);
+                    }
+                }
             }
             Item::Enum(item) => {
                 apply_all(&mut item.type_markers, validated, invalid);
@@ -259,8 +268,22 @@ fn materialize_static_marker_values(
                 for variant in &mut item.variants {
                     apply_all(&mut variant.serde_markers, validated, invalid);
                 }
+                for function in &mut item.methods {
+                    apply_all(&mut function.markers, validated, invalid);
+                }
+                for implementation in &mut item.trait_impls {
+                    for function in &mut implementation.methods {
+                        apply_all(&mut function.markers, validated, invalid);
+                    }
+                }
             }
             Item::Distinct(item) => apply_all(&mut item.type_markers, validated, invalid),
+            Item::Func(item) => apply_all(&mut item.markers, validated, invalid),
+            Item::Impl(item) => {
+                for function in &mut item.methods {
+                    apply_all(&mut function.markers, validated, invalid);
+                }
+            }
             _ => {}
         }
     }
@@ -326,22 +349,41 @@ pub(crate) fn resolve_static_rule_products(
         let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
             continue;
         };
-        if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. })
-            || !static_rule_site(application.site)
-        {
+        if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
             continue;
         }
+        let Some(site) = application.site else {
+            continue;
+        };
         if application
             .site
-            .is_some_and(|site| !crate::Policy::rule_allows(&marker.name, site))
+            .is_some_and(|_| !crate::Policy::rule_allows(&marker.name, site))
         {
-            diags.push(Diagnostic::error(
-                "E0355",
-                format!("`#{}` cannot attach at this site", marker.name),
-                "the applied-rule registry gives every rule exact attachment sites".to_string(),
-                "remove the marker or move it to one of its registered sites".to_string(),
-                Some(marker.span),
+            diags.push(crate::Policy::marker_wrong_site_error(
+                &marker.name,
+                site,
+                marker.span,
             ));
+            continue;
+        }
+        if !static_product_site(site) {
+            // D-VERDICT-1455-1: site binding is no longer optional. Run the
+            // comptime evaluator for dynamic sites too, but defer any type
+            // error until ordinary sema can see locals and parameters.
+            for expression in &marker.args {
+                let mut expression = expression.clone();
+                let _ = crate::Comptime::evaluate_with_imports_opts_collecting(
+                    &mut expression,
+                    &funcs,
+                    &externs,
+                    base_dir,
+                    &globals,
+                    core_imports,
+                    false,
+                    0,
+                    None,
+                );
+            }
             continue;
         }
         let mut evaluated_marker = marker.clone();
@@ -611,7 +653,12 @@ impl<'a> crate::Sema::Checker<'a> {
         target: crate::Diagnostics::Span,
     ) -> Option<Marker> {
         let index = self.rule_facts.iter().position(|application| {
-            application.target.is_none()
+            matches!(
+                application.site,
+                Some(crate::Policy::RuleSite::Block | crate::Policy::RuleSite::Statement)
+            )
+                && (application.target.is_none()
+                    || application.target == Some(target))
                 && application.marker.span.start <= target.start.saturating_add(1)
                 && target.start <= application.marker.span.start
                 && !matches!(
@@ -635,13 +682,41 @@ impl<'a> crate::Sema::Checker<'a> {
 fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
     items.iter().flat_map(|item| {
         let (type_markers, member_markers): (&[Marker], Vec<&Marker>) = match item {
-            Item::Struct(s) => (
-                &s.type_markers,
-                s.fields.iter().flat_map(|f| f.serde_markers.iter()).collect(),
-            ),
-            Item::Enum(e) => (
-                &e.type_markers,
-                e.variants.iter().flat_map(|v| v.serde_markers.iter()).collect(),
+            Item::Struct(s) => {
+                let mut members = s
+                    .fields
+                    .iter()
+                    .flat_map(|field| field.serde_markers.iter())
+                    .collect::<Vec<_>>();
+                members.extend(s.methods.iter().flat_map(|function| function.markers.iter()));
+                members.extend(s.trait_impls.iter().flat_map(|implementation| {
+                    implementation
+                        .methods
+                        .iter()
+                        .flat_map(|function| function.markers.iter())
+                }));
+                (&s.type_markers, members)
+            }
+            Item::Enum(e) => {
+                let mut members = e
+                    .variants
+                    .iter()
+                    .flat_map(|variant| variant.serde_markers.iter())
+                    .collect::<Vec<_>>();
+                members.extend(e.methods.iter().flat_map(|function| function.markers.iter()));
+                members.extend(e.trait_impls.iter().flat_map(|implementation| {
+                    implementation
+                        .methods
+                        .iter()
+                        .flat_map(|function| function.markers.iter())
+                }));
+                (&e.type_markers, members)
+            }
+            Item::Distinct(d) => (&d.type_markers, Vec::new()),
+            Item::Func(f) => (&f.markers, Vec::new()),
+            Item::Impl(i) => (
+                &[],
+                i.methods.iter().flat_map(|f| f.markers.iter()).collect(),
             ),
             _ => (&[], Vec::new()),
         };
@@ -656,19 +731,47 @@ fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
 /// derive is never a false unknown).
 pub(crate) fn check_marker_vocabulary(
     items: &[Item],
+    rule_facts: &[crate::AST::AppliedRuleApplication],
     vocabulary: &crate::Policy::MarkerVocabulary,
 ) -> Vec<Diagnostic> {
-    markers_in(items)
-        .filter(|marker| {
-            // A name known on the OTHER plane already got E0062/E0063 from the
-            // parser's shared marker reader — never double-report. Retired
-            // `Debug` is E0922's business for the same reason.
-            let e0922_owns_debug = crate::Policy::applied_rule(&marker.name).is_some_and(|row| {
-                row.name == "Debug"
-                    && matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
-            });
-            !e0922_owns_debug && !vocabulary.knows(&marker.name)
-        })
-        .map(|marker| vocabulary.unknown(&marker.name, marker.name_span))
-        .collect()
+    let mut diagnostics = Vec::new();
+    let mut seen = HashSet::new();
+    for marker in markers_in(items).chain(
+        rule_facts
+            .iter()
+            .filter(|fact| fact.target.is_some())
+            .map(|fact| &fact.marker),
+    ) {
+        if !seen.insert(marker.name_span.start) {
+            continue;
+        }
+        // A retired row already received its teaching diagnostic in the
+        // parser's shared marker reader. The sema vocabulary walk must not
+        // echo it when the retained AST/fact is still present for recovery.
+        if crate::Policy::applied_rule(&marker.name)
+            .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Retired { .. }))
+        {
+            continue;
+        }
+        // A name known on the OTHER plane already got E0062/E0063 from the
+        // parser's shared marker reader — never double-report.
+        if !vocabulary.knows(&marker.name) {
+            diagnostics.push(vocabulary.unknown(&marker.name, marker.name_span));
+            continue;
+        }
+        if let Some(site) = rule_facts
+            .iter()
+            .find(|fact| fact.marker.name_span == marker.name_span)
+            .and_then(|fact| fact.site)
+        {
+            if !crate::Policy::rule_allows(&marker.name, site) {
+                diagnostics.push(crate::Policy::marker_wrong_site_error(
+                    &marker.name,
+                    site,
+                    marker.span,
+                ));
+            }
+        }
+    }
+    diagnostics
 }

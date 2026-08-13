@@ -22,7 +22,6 @@ impl<'a> Parser<'a> {
         pub(super) fn at_html_marker(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_HTML)
-                && matches!(self.peek3().kind, TokKind::LParen)
         }
     
         /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML("path.html")` — the file's
@@ -30,12 +29,7 @@ impl<'a> Parser<'a> {
         pub(super) fn parse_html_marker(
             &mut self,
         ) -> Result<(crate::AST::Marker, Option<String>), Diagnostic> {
-            let marker = self.parse_rule_marker()?;
-            self.bind_rule_fact(
-                marker.name_span,
-                None,
-                crate::Policy::RuleSite::File,
-            );
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)?;
             let path = self.html_from_marker(&marker)?;
             Ok((marker, path))
         }
@@ -46,7 +40,7 @@ impl<'a> Parser<'a> {
         ) -> Result<Option<String>, Diagnostic> {
             let arguments = self.bound_registered_rule_arguments(marker)?;
             let Some(path) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_HTML, marker.span));
+                return Ok(None);
             };
             match path {
                 crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
@@ -61,7 +55,7 @@ impl<'a> Parser<'a> {
         /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
         /// backend — a different axis, same marker).
         pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::File)?;
             self.web_target_from_marker(&marker)
         }
 

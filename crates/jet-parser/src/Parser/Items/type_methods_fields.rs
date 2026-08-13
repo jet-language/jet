@@ -86,7 +86,18 @@ impl<'a> Parser<'a> {
         /// S27: method inside a type body or `impl` block.
         pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
             let markers = if matches!(self.peek().kind, TokKind::Hash) {
-                self.parse_method_marker_sequence()?
+                match self.parse_method_marker_sequence() {
+                    Ok(markers) => markers,
+                    Err(diagnostic) => {
+                        // Keep the method as the recovery target. The shared
+                        // marker gate already emitted the useful vocabulary
+                        // or site diagnostic; bubbling the error to the type
+                        // parser loses `fn` and creates a secondary E0003 at
+                        // the enclosing `}`.
+                        self.diags.push(diagnostic);
+                        Vec::new()
+                    }
+                }
             } else {
                 Vec::new()
             };
@@ -182,11 +193,7 @@ impl<'a> Parser<'a> {
         /// immediately before a comptime binding.
         pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Hash)
-                && matches!(
-                    &self.peek2().kind,
-                    TokKind::Ident(n)
-                        if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
-                )
+                && self.marker_head_is_followed_by_comptime_target()
         }
 
         /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
@@ -201,7 +208,7 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn persist_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
-                let meta = self.parse_meta_attr()?;
+                let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Declaration)?;
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
@@ -209,9 +216,10 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            let sigil = self.bump(); // `#`
-            let name_tok = self.bump(); // `Persist`
-            let persist_span = Span::new(sigil.span.start, name_tok.span.end);
+            let marker = self.parse_registered_marker_at_site(
+                crate::Policy::RuleSite::Declaration,
+            )?;
+            let persist_span = marker.span;
             if matches!(self.peek().kind, TokKind::KwConst | TokKind::KwComptime) {
                 let bad = self.bump();
                 return Err(Diagnostic::error(
@@ -288,15 +296,13 @@ impl<'a> Parser<'a> {
 
         fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
             let mut attrs = Vec::new();
-            while matches!(self.peek().kind, TokKind::Hash)
-                && matches!(
-                    &self.peek2().kind,
-                    TokKind::Ident(n)
-                        if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
-                )
+            while self.at_marker_head()
+                && self.marker_head_is_followed_by_comptime_target()
             {
-                self.bump();
-                let (attr_name, _) = self.expect_ident("after `#`")?;
+                let marker = self.parse_registered_marker_at_site(
+                    crate::Policy::RuleSite::Constant,
+                )?;
+                let attr_name = marker.name.clone();
                 match attr_name.as_str() {
                     "Static" => attrs.push(ConstAttr::ForceStatic),
                     "Inline" => attrs.push(ConstAttr::ForceInline),
@@ -315,7 +321,7 @@ impl<'a> Parser<'a> {
                             "comptime markers use the same PascalCase marker plane as other declarations"
                                 .to_string(),
                             format!("write `{replacement}`"),
-                            Some(self.toks[self.pos.saturating_sub(1)].span),
+                            Some(marker.span),
                         ));
                         attrs.push(if attr_name == "static" {
                             ConstAttr::ForceStatic
@@ -323,16 +329,7 @@ impl<'a> Parser<'a> {
                             ConstAttr::ForceInline
                         });
                     }
-                    other => {
-                        return Err(Diagnostic::error(
-                            "E0003",
-                            format!("`#{}` isn't a known rule on a comptime binding", other),
-                            "only `#Static` and `#Inline` are supported on comptime declarations"
-                                .to_string(),
-                            "remove the rule or use `#Static` or `#Inline`".to_string(),
-                            Some(self.peek().span),
-                        ));
-                    }
+                    _ => unreachable!("the constant marker registry accepts only static attributes"),
                 }
             }
             Ok(attrs)
@@ -398,7 +395,7 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
-                let meta = self.parse_meta_attr()?;
+                let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Constant)?;
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }

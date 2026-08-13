@@ -4182,7 +4182,7 @@ component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAP
 `core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
 value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
 AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
-directive DSL blocks such as `#SQL<Row> { ... }` and `#HTML { ... }` are a
+directive DSL blocks such as `#SQL(Row) { ... }` and `#HTML { ... }` are a
 fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
@@ -6795,3 +6795,14 @@ finite-source finding form above. This section records the other outcomes.
   named thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, parameter defaults, field defaults, and enum discriminants
   keep `=`.
+
+**M03 marker ballot migration — D-MARK-FORM1=A, D-MARK-REPEAT1=A,
+D-IMPURE-REASON1=B, D-SQL-ARG1=B, and D-HTML-NAME1=B** *(cards #1457 and
+#1461)*: marker declarations use one ordinary named parameter list. `#Impure`
+keeps an optional `reason: String`; a bare `#Impure { … }` is valid. The SQL
+row type is an ordinary argument: `#SQL(Row) { … }`; the retired angle form
+is rejected with a teaching fix. `#HTML` keeps one name with a site-dependent
+registry signature: `#HTML(path)` at file sites and bare `#HTML { … }` at block
+sites. Duplicate applications remain E0999 unless the registry row is
+repeatable. These rows are declared in `Prelude/Markers.jet` and read through
+the shared registry.

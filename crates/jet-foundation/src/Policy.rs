@@ -609,7 +609,8 @@ impl MarkerVocabulary {
 
     /// True when a writer may spell this name as a marker.
     pub fn knows(&self, name: &str) -> bool {
-        crate::Syntax::is_applied_rule(name) || self.declared.contains(name)
+        applied_rule(name).is_some_and(|row| matches!(row.status, RuleStatus::Active))
+            || self.declared.contains(name)
     }
 
     /// Every spellable name, for a nearest-spelling suggestion.
@@ -625,6 +626,48 @@ impl MarkerVocabulary {
     ) -> crate::Diagnostics::Diagnostic {
         marker_unknown_error(name, &self.names(), span)
     }
+}
+
+/// D-VERDICT-1455-1: every registered wrong-site report names the legal sites
+/// from the row that caused it. Parser and sema use this constructor instead
+/// of keeping site prose beside a marker-name branch.
+pub fn marker_wrong_site_error(
+    name: &str,
+    site: RuleSite,
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    let legal = applied_rule(name)
+        .map(|row| {
+            let mut sites = row
+                .sites
+                .iter()
+                .map(|site| site.name().to_string())
+                .collect::<Vec<_>>();
+            if let Some(companion) = row.companion_site {
+                sites.push(format!(
+                    "{} with companion `#{}`",
+                    companion.site.name(), companion.rule
+                ));
+            }
+            sites
+        })
+        .unwrap_or_default();
+    let legal = if legal.is_empty() {
+        "no active attachment sites".to_string()
+    } else {
+        legal
+            .into_iter()
+            .map(|site| format!("`{site}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    crate::Diagnostics::Diagnostic::error(
+        "E0355",
+        format!("`#{name}` cannot attach at the {} site", site.name()),
+        format!("the registry allows `#{name}` only at: {legal}"),
+        format!("move `#{name}` to one of its registered sites"),
+        Some(span),
+    )
 }
 
 /// D-VERDICT-1455-1: one E0927 family for an unregistered or retired marker

@@ -585,19 +585,17 @@ impl<'a> Parser<'a> {
         }
 
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
-            let root = if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_ROOT)
+            let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(_))
             {
-                let marker = self.parse_rule_marker()?;
-                self.bind_rule_fact(
-                    marker.name_span,
-                    None,
+                let marker = self.parse_registered_marker_at_site(
                     crate::Policy::RuleSite::Parameter,
-                );
-                true
+                )?;
+                (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
             } else {
-                false
+                None
             };
+            let root = root_marker_span.is_some();
             let mut convention = self.parse_access_prefix();
             let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
                 let span = self.bump().span;
@@ -695,7 +693,7 @@ impl<'a> Parser<'a> {
                     Some(name_span),
                 ));
             }
-            Ok(Param {
+            let param = Param {
                 convention,
                 root,
                 name,
@@ -710,7 +708,15 @@ impl<'a> Parser<'a> {
                 variadic,
                 variadic_bound_list,
                 declared_view_from_names,
-            })
+            };
+            if let Some(marker_span) = root_marker_span {
+                self.bind_rule_fact(
+                    marker_span,
+                    Some(param.name_span),
+                    crate::Policy::RuleSite::Parameter,
+                );
+            }
+            Ok(param)
         }
     
         /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
