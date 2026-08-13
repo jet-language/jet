@@ -1,23 +1,43 @@
-// Taint tracking (D-TAINT1). An untrusted value carries a `#Input` tag; the
-// tag spreads to anything derived from it. A `#Scrub(Input) fn` is the one declared
-// way to clear it — its return value is trusted by contract. A tainted value
-// reaching a sink effect (a database query, subprocess command, or network
-// request) without being sanitized is the error E0721 (see the ui snapshot
-// taint_sink_unsanitized for the rejected case).
-use core.process as process
+// D-BOUND-TAINT1=A: external values carry origin facts until a typed decode or
+// an explicit #Scrub gate clears them. Raw sinks reject the uncleared value;
+// the rejected SQL.raw line below is executable in tests/taint.rs.
+use core.encoding.json as json
+
+#Codable
+struct Config {
+    name: String
+}
 
 // The audited cleaning step: takes untrusted text, returns a value the rest of
 // the program may trust. A real sanitizer would reject shell metacharacters; here
 // it keeps only the part before any space, which is enough to make the point.
 #Scrub(Input) fn shell_arg(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
 
+fn failed_decode() => String {
+    result :: json.decode<Config>("not-json")
+    if result == {
+        .Err(_) -> return "decode failed"
+        else -> return "decode unexpectedly succeeded"
+    }
+}
+
+fn typed_decode() => String {
+    config :: json.decode<Config>("{{\"name\":\"Ada\"}}") ?? return "typed decode failed"
+    return "typed decode: {config.name}"
+}
+
 fn run() {
+    print(failed_decode())
+    print(typed_decode())
+
+    // `SQL.raw(raw)` is rejected with E0721 while `raw` carries its origin
+    // fact. The checked test keeps this refusal live without making the example
+    // itself fail to compile.
+    print("raw sink refused: E0721")
+
     // Untrusted input, marked at its source. Taint spreads through the binding.
     name :: #Input "world danger; rm -rf /"
-    // Clean it. The sanitizer's result is trusted, so it may reach the sink.
+    // Clean it. The sanitizer's result is trusted after the explicit gate.
     safe :: shell_arg(name)
-    // A subprocess command is an `Exec` sink. The argument is sanitized, so this
-    // is accepted. (Using the tainted `name` here directly would be E0721.)
-    result :: process.run(["echo", safe]) ?? return
-    print(result.output.trim())
+    print("#Scrub: {safe}")
 }

@@ -69,6 +69,10 @@ mod codec_rt {
     include!("../../../Prelude/Core/Codec.rs");
 }
 
+mod wire_order_rt {
+    include!("../../../Prelude/CoreLib/JetStd/WireOrder.rs");
+}
+
 fn progress_parts(
     value: &CtValue,
 ) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
@@ -2157,13 +2161,17 @@ impl<'a> EvalCtx<'a> {
         text: String,
         span: Span,
     ) -> Result<Result<(CtValue, CtValue), CtValue>, Diagnostic> {
-        let parsed = apply_core_call(
-            module,
-            "parse",
-            vec![CtValue::Str(text)],
-            span,
-            self.repl_mode,
-        )?;
+        let parsed = if module == "core.encoding.json" {
+            Ok(crate::Comptime::parse_ordered_json_for_tir(&text))
+        } else {
+            apply_core_call(
+                module,
+                "parse",
+                vec![CtValue::Str(text)],
+                span,
+                self.repl_mode,
+            )
+        }?;
         let tree = match parsed {
             CtValue::Present(tree) => *tree,
             CtValue::Failed(CtReport::Told(error)) => {
@@ -3601,6 +3609,25 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         self.burn()?;
+        if module == "core.encoding" && method == "__published_schema_empty" {
+            return Ok(datatree("Object", Some(CtValue::Struct {
+                type_name: "JSONObject".to_string(),
+                fields: Vec::new(),
+            })));
+        }
+        if module == "core.encoding" && method == "__published_schema_merge" && args.len() == 2 {
+            let known = self.eval_expr_child(&args[0], scope)?;
+            let original = self.eval_expr_child(&args[1], scope)?;
+            let Some(known) = datatree_object_pairs(&known) else {
+                return Ok(known);
+            };
+            let Some(original) = datatree_object_pairs(&original) else {
+                return Ok(datatree_object(known));
+            };
+            return Ok(datatree_object(wire_order_rt::jet_wire_order_merge(
+                &known, &original,
+            )));
+        }
         if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
             if !row.accepts_arity(args.len()) {
                 return Err(unsupported(

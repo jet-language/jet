@@ -21,6 +21,7 @@ fn json_err(line: i64, message: impl Into<String>) -> JSONError {
 struct Parser {
     chars: Vec<char>,
     pos: usize,
+    ordered: bool,
 }
 
 impl Parser {
@@ -206,10 +207,15 @@ impl Parser {
     fn object(&mut self) -> Result<CtValue, JSONError> {
         self.pos += 1;
         let mut map = BTreeMap::new();
+        let mut fields = Vec::new();
         self.ws();
         if self.peek() == Some('}') {
             self.pos += 1;
-            return Ok(json_variant("Object", Some(CtValue::Map(map))));
+            return Ok(if self.ordered {
+                json_object(fields)
+            } else {
+                json_variant("Object", Some(CtValue::Map(map)))
+            });
         }
         loop {
             self.ws();
@@ -223,7 +229,15 @@ impl Parser {
             }
             self.pos += 1;
             let val = self.parse_value()?;
-            map.insert(CtKey::Str(key), val);
+            if self.ordered {
+                if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
+                    *current = val;
+                } else {
+                    fields.push((key, val));
+                }
+            } else {
+                map.insert(CtKey::Str(key), val);
+            }
             self.ws();
             match self.peek() {
                 Some(',') => {
@@ -237,8 +251,22 @@ impl Parser {
                 _ => return Err(self.err("expected `,` or `}` in object")),
             }
         }
-        Ok(json_variant("Object", Some(CtValue::Map(map))))
+        Ok(if self.ordered {
+            json_object(fields)
+        } else {
+            json_variant("Object", Some(CtValue::Map(map)))
+        })
     }
+}
+
+fn json_object(fields: Vec<(String, CtValue)>) -> CtValue {
+    json_variant(
+        "Object",
+        Some(CtValue::Struct {
+            type_name: "JSONObject".to_string(),
+            fields,
+        }),
+    )
 }
 
 /// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the `JSON`/`Data`
@@ -272,9 +300,18 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
 }
 
 pub(super) fn parse_json(text: &str) -> Result<CtValue, JSONError> {
+    parse_json_with_order(text, false)
+}
+
+pub(super) fn parse_json_ordered(text: &str) -> Result<CtValue, JSONError> {
+    parse_json_with_order(text, true)
+}
+
+fn parse_json_with_order(text: &str, ordered: bool) -> Result<CtValue, JSONError> {
     let mut p = Parser {
         chars: text.chars().collect(),
         pos: 0,
+        ordered,
     };
     let v = p.parse_value()?;
     p.ws();
@@ -304,6 +341,97 @@ pub(super) fn json_error_value_at_line(e: JSONError, line_offset: i64) -> CtValu
         line: line_offset + e.line,
         message: e.message,
     })
+}
+
+/// Render the ordered `DataTree` representation used by typed codecs. Dynamic
+/// JSON keeps the canonical BTreeMap renderer below; published-schema output
+/// must retain the wire order stored in `JSONObject`.
+pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> String {
+    match v {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if matches!(
+            type_name.as_str(),
+            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+        ) => match variant.as_str() {
+            "Null" => "null".to_string(),
+            _ => args
+                .first()
+                .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
+                .unwrap_or_else(|| "null".to_string()),
+        },
+        CtValue::List(items) => {
+            if items.is_empty() {
+                return "[]".to_string();
+            }
+            if !pretty {
+                return format!(
+                    "[{}]",
+                    items
+                        .iter()
+                        .map(|item| render_ordered_datatree(item, false, depth))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            }
+            let pad = "  ".repeat(depth + 1);
+            let end = "  ".repeat(depth);
+            let parts = items
+                .iter()
+                .map(|item| {
+                    format!(
+                        "{}{}",
+                        pad,
+                        render_ordered_datatree(item, true, depth + 1)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("[\n{}\n{}]", parts.join(",\n"), end)
+        }
+        CtValue::Struct {
+            type_name,
+            fields,
+        } if type_name == "JSONObject" => render_ordered_object(fields, pretty, depth),
+        _ => render_json_pretty(v, pretty, depth),
+    }
+}
+
+fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usize) -> String {
+    if fields.is_empty() {
+        return "{}".to_string();
+    }
+    if !pretty {
+        return format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}:{}",
+                        quote_json(key),
+                        render_ordered_datatree(value, false, depth)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    let pad = "  ".repeat(depth + 1);
+    let end = "  ".repeat(depth);
+    let parts = fields
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "{}{}: {}",
+                pad,
+                quote_json(key),
+                render_ordered_datatree(value, true, depth + 1)
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("{{\n{}\n{}}}", parts.join(",\n"), end)
 }
 
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {

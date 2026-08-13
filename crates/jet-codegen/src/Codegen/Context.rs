@@ -123,6 +123,9 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// D-BOUND-EVOLVE1=A: published records carry one compiler-owned wire
+    /// holder. The holder is not part of the Jet source schema.
+    pub(crate) published_schemas: HashSet<String>,
     /// Canonical typeable paths for reflectable nominal types. This is a
     /// projection cache seeded only from the sema name ledger.
     pub(crate) reflect_paths: HashMap<String, String>,
@@ -3394,6 +3397,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        published_schemas: HashSet::new(),
         reflect_paths: HashMap::new(),
         serde_wire_params: HashMap::new(),
         enum_variants: HashMap::new(),
@@ -3786,6 +3790,9 @@ pub(crate) fn build_cx_items(
             }
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());
+                if s.is_published_schema {
+                    cx.published_schemas.insert(s.name.clone());
+                }
                 let param_names = s.type_params.iter().map(|p| p.name.as_str()).collect::<HashSet<_>>();
                 let mut wire = HashSet::new();
                 for field in s.fields.iter().filter(|f| f.computed.is_none()
@@ -4745,6 +4752,13 @@ pub(crate) fn field_type_rust_eq_compatible(
 }
 
 pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+    // D-BOUND-EVOLVE1=A: published records carry an ordered DataTree holder.
+    // DataTree intentionally has no Eq/Hash contract (it can contain Float),
+    // so the hidden holder must not make the source record claim those Rust
+    // storage traits.
+    if s.is_published_schema {
+        return false;
+    }
     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()

@@ -521,6 +521,17 @@ pub(crate) fn emit_tir_core_call(
         regex_fn("jet_crypto_email_ed25519_sign_impl"),
         cx.root_prefix,
     );
+    if module == "core.encoding" && method == "__published_schema_empty" {
+        return format!("{}jet_std::DataTree::Object(Vec::new())", cx.root_prefix);
+    }
+    if module == "core.encoding" && method == "__published_schema_merge" {
+        return format!(
+            "{}jet_std::jet_datatree_merge_wire_order(&({}), &({}))",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        );
+    }
     if module == "core.compute" {
         if let Some(rendered) = emit_compute_transform_call(method, args, ret_ty, cx) {
             return rendered;

@@ -102,6 +102,7 @@ pub(crate) mod json_rt {
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -178,6 +179,10 @@ pub(crate) mod json_rt {
 
     pub fn parse_datatree(text: &str) -> Result<DataTree, JSONError> {
         parse_json(text).map(|j| datatree_from_json(&j))
+    }
+
+    pub fn parse_datatree_ordered(text: &str) -> Result<DataTree, JSONError> {
+        parse_json_datatree(text)
     }
 
     pub fn decode_lenient(text: &str) -> Result<DataTree, JSONError> {
@@ -880,6 +885,13 @@ extern "C" fn jet_jit_uuid_v7(clock: i64) -> i64 {
 
 extern "C" fn jet_jit_json_parse(text: i64) -> i64 {
     match json_rt::parse_datatree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+        Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
+    }
+}
+
+extern "C" fn jet_jit_json_parse_ordered(text: i64) -> i64 {
+    match json_rt::parse_datatree_ordered(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
@@ -1992,6 +2004,7 @@ host_fns! {
     uuid_v5: "jet_jit_uuid_v5" => jet_jit_uuid_v5: sig_binary;
     uuid_parse: "jet_jit_uuid_parse" => jet_jit_uuid_parse: sig_unary;
     json_parse: "jet_jit_json_parse" => jet_jit_json_parse: sig_unary;
+    json_parse_ordered: "jet_jit_json_parse_ordered" => jet_jit_json_parse_ordered: sig_unary;
     json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
     json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
@@ -2035,6 +2048,8 @@ host_fns! {
     datatree_bool: "jet_jit_datatree_bool" => jet_jit_datatree_bool: sig_unary;
     datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
     datatree_pack: "jet_jit_datatree_pack" => jet_jit_datatree_pack: sig_binary;
+    published_schema_empty: "jet_jit_published_schema_empty" => jet_jit_published_schema_empty: sig_nullary;
+    published_schema_merge: "jet_jit_published_schema_merge" => jet_jit_published_schema_merge: sig_binary;
     object_from_map: "jet_jit_object_from_map" => jet_jit_object_from_map: sig_unary;
     object_entries_to_map: "jet_jit_object_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     datatree_migrate: "jet_jit_datatree_migrate" => jet_jit_datatree_migrate: sig_binary;
@@ -2051,6 +2066,20 @@ host_fns! {
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
+}
+
+extern "C" fn jet_jit_published_schema_empty() -> i64 {
+    alloc_datatree(&json_rt::DataTree::Object(Vec::new()))
+}
+
+extern "C" fn jet_jit_published_schema_merge(known: i64, original: i64) -> i64 {
+    let Some(known) = read_datatree(known) else {
+        return 0;
+    };
+    let Some(original) = read_datatree(original) else {
+        return 0;
+    };
+    alloc_datatree(&json_rt::jet_datatree_merge_wire_order(&known, &original))
 }
 
 /// `DataTree.Object(map)` when the payload is a computed Map: snapshot entries in

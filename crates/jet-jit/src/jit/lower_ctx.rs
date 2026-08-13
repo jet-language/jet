@@ -1880,7 +1880,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_typed_json_decode(&mut self, text: &TExpr, ok_ty: &Type) -> Result<Value, String> {
-        self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse)
+        self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse_ordered)
     }
 
     /// D-HTTP-JSON1=A: body text under `limit`, then typed `#Codable` JSON decode.
@@ -1915,7 +1915,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(ok_block);
         let text = self.result_payload(text_r, &Type::String)?;
         let decoded =
-            self.lower_typed_tree_decode_values(&[text], ok_ty, self.host.encoding.json_parse, None)?;
+            self.lower_typed_tree_decode_values(&[text], ok_ty, self.host.encoding.json_parse_ordered, None)?;
         let project = self.module.declare_func_in_func(
             self.host.net_http.http_project_json_decode_error,
             self.b.func,
@@ -1950,7 +1950,7 @@ impl LowerCtx<'_, '_> {
             }
         };
         let text_v = self.lower_expr(text)?;
-        let parsed = self.call_host(self.host.encoding.json_parse, &[text_v]);
+        let parsed = self.call_host(self.host.encoding.json_parse_ordered, &[text_v]);
         let is_ok = self.call_host(self.host.result_is_ok, &[parsed]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
@@ -11363,6 +11363,28 @@ impl LowerCtx<'_, '_> {
     /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
     fn lower_expr_core(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
+            TExprKind::CoreCall {
+                module,
+                method,
+                ..
+            } if module == "core.encoding" && method == "__published_schema_empty" => {
+                Ok(self.call_host(self.host.encoding.published_schema_empty, &[]))
+            }
+            TExprKind::CoreCall {
+                module,
+                method,
+                args,
+                ..
+            } if module == "core.encoding"
+                && method == "__published_schema_merge"
+                && args.len() == 2 => {
+                let known = self.lower_expr(&args[0])?;
+                let original = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.encoding.published_schema_merge,
+                    &[known, original],
+                ))
+            }
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
             TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
                 (*v as f32) as f64

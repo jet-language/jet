@@ -176,6 +176,22 @@ pub struct JitProgram {
         std::collections::HashMap<(String, String), Type>,
 }
 
+fn published_schema_unknown_field(s: &crate::AST::StructDef) -> bool {
+    s.is_published_schema
+}
+
+fn add_published_schema_field(s: &crate::AST::StructDef, fields: &mut Vec<String>) {
+    if published_schema_unknown_field(s) {
+        fields.push(crate::Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string());
+    }
+}
+
+fn add_published_schema_field_type(s: &crate::AST::StructDef, types: &mut Vec<Type>) {
+    if published_schema_unknown_field(s) {
+        types.push(Type::Named(crate::Syntax::TYPE_DATA.to_string()));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TCodecMigrationPlan {
     pub historical_shapes: Vec<Vec<String>>,
@@ -1537,14 +1553,23 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 );
                 struct_fields.insert(
                     s.name.clone(),
-                    s.fields
-                        .iter()
-                        .map(|f| mangle(&f.name))
-                        .collect(),
+                    {
+                        let mut fields = s
+                            .fields
+                            .iter()
+                            .map(|f| mangle(&f.name))
+                            .collect::<Vec<_>>();
+                        add_published_schema_field(s, &mut fields);
+                        fields
+                    },
                 );
                 struct_field_types.insert(
                     s.name.clone(),
-                    s.fields.iter().map(|f| f.ty.clone()).collect(),
+                    {
+                        let mut types = s.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+                        add_published_schema_field_type(s, &mut types);
+                        types
+                    },
                 );
                 for field in &s.fields {
                     register_union_type(
@@ -1611,14 +1636,27 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 };
                                 struct_fields.insert(
                                     name.clone(),
-                                    s.fields
-                                        .iter()
-                                        .map(|f| mangle(&f.name))
-                                        .collect(),
+                                    {
+                                        let mut fields = s
+                                            .fields
+                                            .iter()
+                                            .map(|f| mangle(&f.name))
+                                            .collect::<Vec<_>>();
+                                        add_published_schema_field(s, &mut fields);
+                                        fields
+                                    },
                                 );
                                 struct_field_types.insert(
                                     name,
-                                    s.fields.iter().map(|f| f.ty.clone()).collect(),
+                                    {
+                                        let mut types = s
+                                            .fields
+                                            .iter()
+                                            .map(|f| f.ty.clone())
+                                            .collect::<Vec<_>>();
+                                        add_published_schema_field_type(s, &mut types);
+                                        types
+                                    },
                                 );
                             }
                             Item::Enum(e) if e.type_params.is_empty() => {
@@ -1678,24 +1716,34 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         );
                         struct_fields.insert(
                             name.clone(),
-                            s.fields
-                                .iter()
-                                .map(|field| mangle(&field.name))
-                                .collect(),
+                            {
+                                let mut fields = s
+                                    .fields
+                                    .iter()
+                                    .map(|field| mangle(&field.name))
+                                    .collect::<Vec<_>>();
+                                add_published_schema_field(s, &mut fields);
+                                fields
+                            },
                         );
                         struct_field_types.insert(
                             name,
-                            s.fields
-                                .iter()
-                                .map(|field| {
-                                    crate::Codegen::TIR::qualify_imported_type(
-                                        bundle,
-                                        module_idx,
-                                        &owner,
-                                        &field.ty,
-                                    )
-                                })
-                                .collect(),
+                            {
+                                let mut types = s
+                                    .fields
+                                    .iter()
+                                    .map(|field| {
+                                        crate::Codegen::TIR::qualify_imported_type(
+                                            bundle,
+                                            module_idx,
+                                            &owner,
+                                            &field.ty,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>();
+                                add_published_schema_field_type(s, &mut types);
+                                types
+                            },
                         );
                     }
                     for field in &s.fields {

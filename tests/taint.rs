@@ -12,6 +12,146 @@ fn codes(src: &str) -> Vec<String> {
 }
 
 #[test]
+fn origin_facts_clear_only_after_typed_decode() {
+    let rejected_before_decode = r#"
+use core.files as files
+fn run() {
+    raw :: files.read("config.json") ?? return
+    SQL.raw(raw)
+}
+"#;
+    assert!(
+        codes(rejected_before_decode).iter().any(|code| code == "E0721"),
+        "external text must stay origin-marked before validation: {:?}",
+        codes(rejected_before_decode)
+    );
+
+    let accepted_after_decode = r#"
+use core.files as files
+use core.encoding.json as json
+
+#Codable
+struct Config {
+    name: String
+}
+
+fn run() {
+    raw :: files.read("config.json") ?? return
+    config :: json.decode<Config>(raw) ?? return
+    SQL.raw(config.name)
+}
+"#;
+    assert!(
+        !codes(accepted_after_decode).iter().any(|code| code == "E0721"),
+        "successful typed decode must clear origin facts: {:?}",
+        codes(accepted_after_decode)
+    );
+}
+
+#[test]
+fn origin_marked_text_rejects_raw_sinks() {
+    let src = r#"
+use core.files as files
+fn run() {
+    raw :: files.read("payload.txt") ?? return
+    SQL.raw(raw)
+    HTML.raw(raw)
+    Sh.raw(raw)
+}
+"#;
+    let found = codes(src);
+    assert_eq!(
+        found.iter().filter(|code| code.as_str() == "E0721").count(),
+        3,
+        "all audited raw sinks must reject origin text: {found:?}"
+    );
+}
+
+#[test]
+fn origin_facts_clear_through_scrub_gate() {
+    let src = r#"
+use core.files as files
+#Scrub(Input) fn clean(raw: #Input String) => String { return ~raw }
+fn run() {
+    raw :: files.read("payload.txt") ?? return
+    safe :: clean(raw)
+    SQL.raw(safe)
+}
+"#;
+    assert!(
+        codes(src).is_empty(),
+        "an audited scrub gate must clear an origin fact: {:?}",
+        codes(src)
+    );
+}
+
+#[test]
+fn external_boundaries_seed_origin_facts() {
+    let cases = [
+        (
+            "fs",
+            r#"
+use core.files as files
+fn run() {
+    value :: files.read("payload.txt") ?? return
+    SQL.raw(value)
+}
+"#,
+        ),
+        (
+            "env",
+            r#"
+use core.env as env
+fn run() {
+    value :: env.get("PAYLOAD") ?? return
+    SQL.raw(value)
+}
+"#,
+        ),
+        (
+            "process",
+            r#"
+use core.process as process
+fn run() {
+    result :: process.run(["echo", "payload"]) ?? return
+    SQL.raw(result.output)
+}
+"#,
+        ),
+        (
+            "net",
+            r#"
+use core.net as net
+fn run() {
+    stream :: net.tcp_connect("example.invalid:80") ?? return
+    value :: net.tcp_read_text(stream, 1) ?? return
+    SQL.raw(value)
+}
+"#,
+        ),
+        (
+            "ffi",
+            r#"
+extern rust "std" {
+    fn identity(value: String) => String = "std::convert::identity";
+}
+fn run() {
+    value :: identity("payload")
+    SQL.raw(value)
+}
+"#,
+        ),
+    ];
+    for (source, program) in cases {
+        let found = codes(program);
+        assert!(
+            found.iter().any(|code| code == "E0721"),
+            "{source} boundary must seed an origin fact: {found:?}"
+        );
+    }
+}
+
+#[test]
 fn declared_tag_sources_and_destinations_drive_dataflow() {
     let src = r#"
 use core.process as process

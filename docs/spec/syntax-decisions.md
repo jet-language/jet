@@ -1098,6 +1098,31 @@ DateTime head cannot contain holes. Runtime strings keep the existing
 fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
 and D-CORE-PATH1; no compatibility spelling is retained.
 
+**D-BOUND-LAW1=A — one crossing law** (ratified 2026-08-07, card #1813):
+nothing foreign becomes Jet silently. Every comptime, build, link, and runtime
+crossing names its schema and leaves its fact. Boundary planning uses the
+five-column grid in spec.md: time, schema, checker, evolution, and fact. The
+literal, manifest, dependency, link, wire, validation, migration, fact, trust,
+and error rules are instances of the same grid, not separate mechanisms.
+
+**D-BOUND-TAINT1=A — origin facts clear on typed decode** (ratified
+2026-08-07, card #1817): external net, file, environment, process, and FFI
+returns seed compiler-owned origin facts in the existing taint flow store.
+Facts propagate through ordinary expressions and clear only after successful
+typed validation, including typed codec decode and typed construction. The
+existing SQL.raw, HTML.raw, and Sh.raw gates reject origin-marked text.
+Existing #Scrub functions and the jet inspect gates remain the explicit
+audited escapes. Grid cell: run / wire value. The fact is sema-only and is
+erased before every execution tier.
+
+**D-BOUND-EVOLVE1=A — published schemas preserve unknown wire fields**
+(ratified 2026-08-07, card #1818): a PublishedSchema codec retains unknown
+wire fields and re-emits them in their original order. Plain Codable keeps its
+drop behavior. DenyUnknownFields still refuses unknown fields with E2412.
+The holder extends D-MIGRATE1/D-MIGRATE4 bookkeeping and does not change
+known-field decoding, marker behavior, or FieldError diagnostics. Grid cell:
+run / wire value.
+
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a

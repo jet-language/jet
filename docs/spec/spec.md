@@ -952,6 +952,44 @@ impl Circle {
   fixed-size arrays `[T#N]` are allowed. Reserved variants (`packed`, `align(N)`,
   `columnar`) parse but error with **E1105** until their milestones ship.
 
+## Boundary crossings — one law (D-BOUND-LAW1=A)
+
+Nothing foreign becomes Jet silently. Every crossing names its schema, and every
+crossing leaves its fact. This is one law for comptime, build, link, and run
+boundaries. A new boundary feature must name one row and fill all five columns:
+time, schema, checker, evolution, and fact. A proposal that needs a new row or
+column returns to design review; it does not create a second boundary mechanism.
+
+| Time | Schema named by | Checked by | Evolves by | Fact left |
+| --- | --- | --- | --- | --- |
+| comptime — literal | the typed head from D-UNIFYLIT1 | the head checker and E0152 | source edits | the typed source expression; no runtime origin is needed |
+| build — manifest | the closed manifest vocabulary from D-CONF | manifest validation and its registered errors | editions and explicit manifest changes | parsed manifest identity and its provenance |
+| build — dependency | the lockfile entry and content hash | E1204 hash verification and the trust gate | re-resolution, lockfile update, or edition change | locked bytes, hash, and trust decision |
+| link — foreign signature | the binder descriptor from D-FFI-UNIFY1 | the language binder and link checks | explicit rebind or descriptor change | the foreign effect leaf and link provenance |
+| run — wire value | the target type with D-SERDE1 / D-ENC1 | typed decode and D-VALIDATE-DECODE1 FieldError values | named migration steps from D-MIGRATE1 and D-MIGRATE4 | the origin fact until successful typed decode |
+
+The ratified rules are instances of this same grid:
+
+| Instance | Grid cell | Existing rule |
+| --- | --- | --- |
+| literal | comptime / typed literal | D-UNIFYLIT1 and E0152 reject unchecked typed-head text |
+| manifest | build / manifest | D-CONF names the accepted fields and manifest diagnostics reject other shapes |
+| dependency | build / dependency | E1204 binds the resolved bytes to the lockfile hash; the trust commands record the grant decision |
+| link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect root |
+| wire | run / wire value | D-SERDE1 and D-ENC1 use DataTree and one typed codec path |
+| validation | run / wire value | D-VALIDATE1 accumulates FieldError values; D-VALIDATE-DECODE1 gives decode failures one shape |
+| migration | run / wire value | D-MIGRATE1 and D-MIGRATE4 apply named schema operations and report migration status |
+| fact | all rows / fact | D-FACT-LAW1 and D-FACT-FLOW1 keep dataflow facts in the shared sema ledger |
+| trust | build / dependency | D-JPK-GRANTCMD1 and D-JPK-GRANTSCHEMA1 make authority explicit, reviewable, and revocable |
+| error | the checker column of every row | registered E-codes, FieldError values, and typed foreign errors name what failed and its repair path |
+
+The grid is a planning and proof obligation, not a new runtime layer. Sema
+owns the checks and facts; the Prelude owns runtime boundary meaning. AOT
+emission, Cranelift, and interpreter paths marshal the same typed result and
+fact semantics. Boundary work is complete only when the same cell is proven
+through AOT, default jet run, and interpreter execution where the cell has a
+runtime path.
+
 ## M4 — errors as values (done)
 
 Failure-returning functions return **`T ? E`** (S34): `T` is the success payload,
