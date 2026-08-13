@@ -582,14 +582,14 @@ let radarMilestone = null;   // milestone id — drills the board down to one mi
 let radarSort = { col: 'workflow', dir: 'asc' };
 
 const milestoneById = (id) => (S.milestones || []).find(m => m.id === id) || null;
-// Counting the work left is the whole point of the drill-down, so a milestone
-// filter always shows its closed cards too.
+// A milestone filter narrows to that milestone's cards; done cards stay
+// hidden unless Show closed is on — the filter bar still counts them.
 function radarMatches(c, needle) {
   return cardMatches(c, {
     text: needle,
     workflow: radarWorkflow,
     priority: radarPriority,
-    showClosed: radarShowClosed || !!radarMilestone,
+    showClosed: radarShowClosed,
     milestone: radarMilestone,
   });
 }
@@ -953,7 +953,7 @@ function showDetail(id) {
         <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${p.id}" ${p.id === c.phase ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Track</div>${sel('track', CFG().tracks || ['epoch', 'sidequest'], c.track)}</div>
         <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${e.id}" ${e.id === c.epoch ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
-        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => !c.epoch || x.epochId === c.epoch).map(x => `<option value="${x.id}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${x.id}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
         <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—"></div>
