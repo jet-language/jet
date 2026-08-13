@@ -585,7 +585,7 @@ impl Diagnostic {
 
     /// Render one report with its batch-derived dependent count.
     pub fn to_json_with_clears(&self, file: &str, src: &str, clears: usize) -> String {
-        let report_file = machine_report_path(file);
+        let report_file = file;
         let mut o = String::from("{");
         o.push_str(&format!("\"schema\":{}", json_str(REPORT_SCHEMA)));
         o.push_str(&format!(",\"moment\":{}", json_str(self.moment.as_str())));
@@ -681,23 +681,6 @@ fn row_edit(row: &crate::Registry::DiagnosticRow, span: Option<Span>) -> Option<
     }
 }
 
-fn machine_report_path(file: &str) -> String {
-    let path = std::path::Path::new(file);
-    if file.is_empty() || !path.is_absolute() {
-        return file.to_string();
-    }
-    for root in path.ancestors().skip(1) {
-        if root.join(".git").exists() {
-            if let Ok(relative) = path.strip_prefix(root) {
-                return relative.display().to_string();
-            }
-        }
-    }
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
 pub fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -735,7 +718,7 @@ pub fn render_success_json(file: &str) -> String {
     format!(
         "{{\"schema\":{},\"moment\":\"compile\",\"status\":\"ok\",\"ok\":true,\"diagnostics\":[],\"file\":{}}}\n",
         json_str(REPORT_SCHEMA),
-        json_str(&machine_report_path(file)),
+        json_str(file),
     )
 }
 

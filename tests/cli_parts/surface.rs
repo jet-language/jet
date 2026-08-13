@@ -498,6 +498,117 @@ fn check_json_golden() {
 }
 
 #[test]
+fn machine_report_paths stay_resolvable_across_repository_layouts() {
+    let dir = isolated_cwd("machine_report_paths");
+    let runner = dir.join("runner");
+    fs::create_dir_all(&runner).unwrap();
+
+    let report = |path: &Path| {
+        let output = Command::new(jet())
+            .args(["check", path.to_str().unwrap(), "--json"])
+            .current_dir(&runner)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(stderr.lines().count(), 1, "{stderr}");
+        parse_json(stderr.trim()).unwrap_or_else(|_| panic!("invalid diagnostic JSON: {stderr}"))
+    };
+    let report_file = |value: &jet_foundation::JSON::JSONValue| {
+        jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(value, "file").unwrap(),
+        )
+        .unwrap()
+        .to_string()
+    };
+
+    let outside = dir.join("outside/bad.jet");
+    fs::create_dir_all(outside.parent().unwrap()).unwrap();
+    fs::write(&outside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
+    assert_eq!(report_file(&report(&outside)), outside.display().to_string());
+
+    let inside = dir.join("repo/src/bad.jet");
+    fs::create_dir_all(inside.parent().unwrap()).unwrap();
+    fs::create_dir_all(dir.join("repo/.git")).unwrap();
+    fs::write(&inside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
+    assert_eq!(report_file(&report(&inside)), inside.display().to_string());
+
+    let stray_root = dir.join("stray");
+    let stray = stray_root.join("nested/bad.jet");
+    fs::create_dir_all(stray.parent().unwrap()).unwrap();
+    fs::create_dir_all(stray_root.join(".git")).unwrap();
+    fs::write(&stray, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
+    let with_ancestor_git = report_file(&report(&stray));
+    fs::remove_dir(stray_root.join(".git")).unwrap();
+    let without_ancestor_git = report_file(&report(&stray));
+    assert_eq!(with_ancestor_git, without_ancestor_git);
+    assert_eq!(without_ancestor_git, stray.display().to_string());
+
+    let fix = dir.join("fix/bad.jet");
+    fs::create_dir_all(fix.parent().unwrap()).unwrap();
+    fs::write(&fix, "fn run() {\n    println(\"hi\")\n}\n").unwrap();
+    let fix_report = report(&fix);
+    let fix_file = report_file(&fix_report);
+    let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
+        jet_foundation::JSON::JSONValue::Array(edits) => edits,
+        _ => panic!("fix_edits is not an array"),
+    };
+    assert_eq!(edits.len(), 1);
+    let edit = match &edits[0] {
+        jet_foundation::JSON::JSONValue::Object(edit) => edit,
+        _ => panic!("fix edit is not an object"),
+    };
+    let edit_file = jet_foundation::JSON::json_str(
+        jet_foundation::JSON::json_get(&edits[0], "file").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(fix_file, edit_file);
+    let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
+        jet_foundation::JSON::JSONValue::Object(span) => span,
+        _ => panic!("fix span is not an object"),
+    };
+    let start = jet_foundation::JSON::json_int(
+        jet_foundation::JSON::json_get(span, "start").unwrap(),
+    )
+    .unwrap() as usize;
+    let end = jet_foundation::JSON::json_int(
+        jet_foundation::JSON::json_get(span, "end").unwrap(),
+    )
+    .unwrap() as usize;
+    let new_text = jet_foundation::JSON::json_str(
+        jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
+    )
+    .unwrap();
+    let mut fixed = fs::read_to_string(edit_file).unwrap();
+    fixed.replace_range(start..end, new_text);
+    fs::write(edit_file, &fixed).unwrap();
+    assert_eq!(fs::read_to_string(&fix).unwrap(), fixed);
+    assert!(!fixed.contains("println"));
+
+    let left = dir.join("left/bad.jet");
+    let right = dir.join("right/bad.jet");
+    fs::create_dir_all(left.parent().unwrap()).unwrap();
+    fs::create_dir_all(right.parent().unwrap()).unwrap();
+    fs::write(&left, "fn run( {\n").unwrap();
+    fs::write(&right, "fn run( {\n").unwrap();
+    let output = Command::new(jet())
+        .args(["fmt", left.to_str().unwrap(), right.to_str().unwrap(), "--json"])
+        .current_dir(&runner)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{}", String::from_utf8_lossy(&output.stderr));
+    let reports = String::from_utf8(output.stderr).unwrap();
+    let files = reports
+        .lines()
+        .map(|line| report_file(&parse_json(line).unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(files, vec![left.display().to_string(), right.display().to_string()]);
+}
+
+#[test]
 fn clean_check_json_golden() {
     let dir = isolated_cwd("check_json_clean");
     fs::write(dir.join("clean.jet"), "fn run() {}\n").unwrap();
