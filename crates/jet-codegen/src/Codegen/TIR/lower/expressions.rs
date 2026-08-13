@@ -35,6 +35,7 @@ use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower_panic_stop;
 use crate::Codegen::TIR::lower_require_eq_stop;
 use crate::Codegen::TIR::lower_require_stop;
+use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TCallArg;
@@ -167,7 +168,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
-        let method_sig = expr_cache_take_method_sig(call);
+        let method_sig = expr_cache_take_method_sig(call, cx);
         let lowered = lower_method_call_with_sig(
             receiver,
             method,
@@ -196,9 +197,9 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 
 struct ExprWorklistCache {
     active: bool,
-    values: HashMap<usize, VecDeque<TExpr>>,
-    types: HashMap<usize, Type>,
-    method_sigs: HashMap<usize, VecDeque<Vec<(AccessConvention, Type)>>>,
+    values: HashMap<(usize, usize), VecDeque<TExpr>>,
+    types: HashMap<(usize, usize), Type>,
+    method_sigs: HashMap<(usize, usize), VecDeque<Vec<(AccessConvention, Type)>>>,
 }
 
 impl Default for ExprWorklistCache {
@@ -217,8 +218,8 @@ thread_local! {
         RefCell::new(ExprWorklistCache::default());
 }
 
-fn expr_key(expr: &Expr) -> usize {
-    expr as *const Expr as usize
+fn expr_key(expr: &Expr, cx: &Cx) -> (usize, usize) {
+    (expr as *const Expr as usize, cx as *const Cx as usize)
 }
 
 fn strip_expr_parens(mut expr: &Expr) -> &Expr {
@@ -372,13 +373,13 @@ impl Drop for ExprCacheOwner {
     }
 }
 
-fn expr_cache_take(expr: &Expr) -> Option<TExpr> {
+fn expr_cache_take(expr: &Expr, cx: &Cx) -> Option<TExpr> {
     EXPR_WORKLIST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.active {
             return None;
         }
-        let key = expr_key(expr);
+        let key = expr_key(expr, cx);
         let value = cache
             .values
             .get_mut(&key)
@@ -394,44 +395,54 @@ fn expr_cache_take(expr: &Expr) -> Option<TExpr> {
     })
 }
 
-fn expr_cache_put(expr: &Expr, value: TExpr) {
+fn expr_cache_put(expr: &Expr, value: TExpr, cx: &Cx) {
     EXPR_WORKLIST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        cache.types.insert(expr_key(expr), value.ty.clone());
+        cache.types.insert(expr_key(expr, cx), value.ty.clone());
         cache
             .values
-            .entry(expr_key(expr))
+            .entry(expr_key(expr, cx))
             .or_default()
             .push_back(value);
     });
 }
 
-fn expr_cache_type(expr: &Expr) -> Option<Type> {
+fn expr_cache_type(expr: &Expr, cx: &Cx) -> Option<Type> {
     let expr = strip_expr_parens(expr);
     EXPR_WORKLIST_CACHE.with(|cache| {
         let cache = cache.borrow();
-        cache.active.then(|| cache.types.get(&expr_key(expr)).cloned()).flatten()
+        cache
+            .active
+            .then(|| cache.types.get(&expr_key(expr, cx)).cloned())
+            .flatten()
     })
 }
 
-fn expr_cache_put_method_sig(expr: &Expr, sig: Vec<(AccessConvention, Type)>) {
+fn expr_cache_put_method_sig(
+    expr: &Expr,
+    sig: Vec<(AccessConvention, Type)>,
+    cx: &Cx,
+) {
     EXPR_WORKLIST_CACHE.with(|cache| {
         cache
             .borrow_mut()
             .method_sigs
-            .entry(expr_key(expr))
+            .entry(expr_key(expr, cx))
             .or_default()
             .push_back(sig);
     });
 }
 
-fn expr_cache_take_method_sig(expr: &Expr) -> Option<Vec<(AccessConvention, Type)>> {
+fn expr_cache_take_method_sig(
+    expr: &Expr,
+    cx: &Cx,
+) -> Option<Vec<(AccessConvention, Type)>> {
     EXPR_WORKLIST_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if !cache.active {
             return None;
         }
-        let key = expr_key(expr);
+        let key = expr_key(expr, cx);
         let sig = cache
             .method_sigs
             .get_mut(&key)
@@ -447,19 +458,21 @@ fn expr_cache_take_method_sig(expr: &Expr) -> Option<Vec<(AccessConvention, Type
     })
 }
 
-pub(crate) fn take_scheduled_expr(expr: &Expr) -> Option<TExpr> {
-    expr_cache_take(expr).or_else(|| {
+pub(crate) fn take_scheduled_expr(expr: &Expr, cx: &Cx) -> Option<TExpr> {
+    expr_cache_take(expr, cx).or_else(|| {
         let stripped = strip_expr_parens(expr);
-        (!std::ptr::eq(expr, stripped)).then(|| expr_cache_take(stripped)).flatten()
+        (!std::ptr::eq(expr, stripped))
+            .then(|| expr_cache_take(stripped, cx))
+            .flatten()
     })
 }
 
 /// Lower one expression after its work-item children are ready. A condition
 /// builder uses this instead of reopening a nested expression segment, so a
 /// value is consumed from the cache exactly once.
-pub(crate) fn lower_cached_expr(expr: &Expr, _cx: &Cx, _env: &mut LowerEnv) -> TExpr {
+pub(crate) fn lower_cached_expr(expr: &Expr, cx: &Cx, _env: &mut LowerEnv) -> TExpr {
     let expr = strip_expr_parens(expr);
-    take_scheduled_expr(expr).expect("condition child missing from expression worklist")
+    take_scheduled_expr(expr, cx).expect("condition child missing from expression worklist")
 }
 
 /// Return the non-call children of an expression. Calls use the unified work
@@ -791,7 +804,7 @@ fn expr_children<'a>(expr: &'a Expr, cx: &Cx, env: &LowerEnv) -> Vec<ExprWorkChi
                     cx,
                 );
                 if let Some(contract) = contract.as_ref() {
-                    expr_cache_put_method_sig(call, contract.clone());
+                    expr_cache_put_method_sig(call, contract.clone(), cx);
                 }
                 children.extend(source_arg_indices(args).into_iter().map(|index| {
                     ExprWorkChild::Arg(ExprWorkArg {
@@ -925,7 +938,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 push_expr_work(&mut work, expr, cx, env);
             }
             ExprWork::Build(expr) => {
-                expr_cache_put(expr, lower_expr_node(expr, cx, env));
+                expr_cache_put(expr, lower_expr_node(expr, cx, env), cx);
             }
             ExprWork::EnterArg(arg) => {
                 let expr = strip_expr_parens(&arg.arg.expr);
@@ -960,7 +973,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                         crate::Codegen::TIR::lower_call_arg_value(arg.arg, conv, env, cx)
                     }
                     ExprArgMode::CallValue { callee, index } => {
-                        let conv = expr_cache_type(callee).and_then(|ty| match ty {
+                        let conv = expr_cache_type(callee, cx).and_then(|ty| match ty {
                             Type::Fn { params, .. } => params
                                 .get(index)
                                 .cloned()
@@ -978,6 +991,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 expr_cache_put(
                     strip_expr_parens(&arg.arg.expr),
                     canonicalize_pre_tier_expr(value),
+                    cx,
                 );
             }
             ExprWork::LowerInlineLoop { expr, body } => {
@@ -1002,6 +1016,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                         ty,
                         kind: TExprKind::InlineBlock(lowered),
                     }),
+                    cx,
                 );
             }
             ExprWork::BuildIf(expr) => {
@@ -1112,7 +1127,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
             }
             ExprWork::LowerIfThenValue(mut state) => {
                 state.then_value_lowered = Some(
-                    expr_cache_take(state.then_value)
+                    expr_cache_take(state.then_value, cx)
                         .expect("if then value was lowered exactly once"),
                 );
                 state.then_env = Some(clone_env(env));
@@ -1126,7 +1141,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 work.push(ExprWork::Enter(else_value));
             }
             ExprWork::LowerIfElseValue(state) => {
-                let else_value = expr_cache_take(state.else_value)
+                let else_value = expr_cache_take(state.else_value, cx)
                     .expect("if else value was lowered exactly once");
                 let then_value = state
                     .then_value_lowered
@@ -1144,11 +1159,11 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                     },
                 });
                 *env = state.base_env;
-                expr_cache_put(state.expr, value);
+                expr_cache_put(state.expr, value, cx);
             }
         }
     }
-    expr_cache_take(root).expect("expression worklist lost its root")
+    expr_cache_take(root, cx).expect("expression worklist lost its root")
 }
 
 #[inline(never)]
@@ -1167,7 +1182,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
         }
     }
-    if let Some(value) = expr_cache_take(e) {
+    if let Some(value) = expr_cache_take(e, cx) {
         return canonicalize_pre_tier_expr(value);
     }
     let cache_owner = ExprCacheOwner {
@@ -2997,6 +3012,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     let mut value = lower_owned_expr(fe, cx, env);
                     // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
                     if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
+                        // A typed fixed-list literal is lowered without an
+                        // expected type at this point. Reapply the field's
+                        // concrete shape before emission, or a `[T#N]` field
+                        // receives a `Vec<T>` and rustc reports an internal
+                        // type error (I2).
+                        value = preserve_typed_list_shape(value, &fty, cx);
                         value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
                     }
                     (n.clone(), value, boxed)

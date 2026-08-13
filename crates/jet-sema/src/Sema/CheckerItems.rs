@@ -249,6 +249,15 @@ impl<'a> Checker<'a> {
         if ty.is_none_or(type_is_copy) || !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
             return false;
         }
+        // A non-Copy field read is an owning-position clone when the selected
+        // field is itself cloneable. Keep that one mechanism available for a
+        // borrowed parameter; non-cloneable subplaces still require `^` or an
+        // explicit copy and take this diagnostic path.
+        if crate::Sema::Diagnostics::field_read_to_clone(expr, self.registry, self.imports)
+            && ty.is_some_and(|value| crate::Sema::Diagnostics::is_cloneable(value, self.registry))
+        {
+            return false;
+        }
         let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) else {
             return false;
         };
@@ -2051,8 +2060,8 @@ impl<'a> Checker<'a> {
     /// is still read later — both would otherwise reach rustc as a raw,
     /// unreported E0507/E0382 (I2). Two cases:
     ///   - a `read`/`mut` param is `&T`/`&mut T`, so using it directly as the
-    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Reject it
-    ///     before codegen and require an explicit copy.
+    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Insert the
+    ///     same implicit copy used for any other owning slot.
     ///   - an OWNED local (no param convention) moves for real in the
     ///     generated Rust; if a later statement in the same/enclosing block
     ///     still reads it, that would be rustc E0382 ("use after move") with
@@ -2065,25 +2074,6 @@ impl<'a> Checker<'a> {
     fn clone_borrowed_struct_field_value(&mut self, expr: &mut Expr, ty: Option<&Type>) {
         if self.reject_borrowed_param_subplace(expr, ty, "fill an owned field") {
             return;
-        }
-        if let Expr::Ident(name, span) = expr {
-            let borrowed = self.lookup(name).is_some_and(|info| {
-                !type_is_copy(&info.ty)
-                    && matches!(
-                        info.param_conv,
-                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
-                    )
-            });
-            if borrowed {
-                self.diags.push(Diagnostic::error(
-                    "E0120",
-                    format!("`{name}` was not moved here, so it cannot fill an owned field"),
-                    "this function has read access only and does not own the value".to_string(),
-                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
-                    Some(*span),
-                ));
-                return;
-            }
         }
         let should_clone = match expr {
             Expr::Ident(name, _) => {

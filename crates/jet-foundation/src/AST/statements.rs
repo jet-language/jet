@@ -586,6 +586,159 @@ impl Stmt {
         visit_stmt(self, &mut f);
     }
 
+    /// Reanchor a compiler-generated statement fragment to the source item
+    /// that requested it. Expression spans are not enough for branch nodes:
+    /// subjectless `if` guards use the statement span to distinguish their
+    /// compiler-private `true` subject from an authored `if true`.
+    pub fn reanchor(&mut self, span: Span) {
+        self.for_each_expr_mut(|expr| expr.reanchor(span));
+
+        fn visit(stmt: &mut Stmt, span: Span) {
+            match stmt {
+                Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } => {}
+                Stmt::Return(_, current)
+                | Stmt::Break(current)
+                | Stmt::BreakValue(_, current)
+                | Stmt::Continue(current)
+                | Stmt::BreakLabel(_, current)
+                | Stmt::ContinueLabel(_, current)
+                | Stmt::Yield(_, current) => *current = span,
+                Stmt::BreakLabelValue(_, _, _, current) => *current = span,
+                Stmt::While {
+                    body, span: current, ..
+                }
+                | Stmt::For {
+                    body, span: current, ..
+                }
+                | Stmt::Loop {
+                    body, span: current, ..
+                }
+                | Stmt::Unsafe {
+                    body, span: current, ..
+                }
+                | Stmt::Impure {
+                    body, span: current, ..
+                }
+                | Stmt::Reactive {
+                    body, span: current, ..
+                }
+                | Stmt::Shield {
+                    body, span: current, ..
+                }
+                | Stmt::Switched {
+                    body, span: current, ..
+                }
+                | Stmt::Region {
+                    body, span: current, ..
+                }
+                | Stmt::Policy {
+                    body, span: current, ..
+                }
+                | Stmt::TaskGroup {
+                    body, span: current, ..
+                }
+                | Stmt::Layout {
+                    body, span: current, ..
+                }
+                | Stmt::Caps {
+                    body, span: current, ..
+                }
+                | Stmt::Grant {
+                    body, span: current, ..
+                }
+                | Stmt::ComptimeBlock {
+                    body, span: current, ..
+                }
+                | Stmt::Live {
+                    body, span: current, ..
+                }
+                | Stmt::AssumeDet {
+                    body, span: current, ..
+                }
+                | Stmt::Transact {
+                    body, span: current, ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ComptimeIf {
+                    then_body,
+                    else_body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for child in then_body {
+                        visit(child, span);
+                    }
+                    if let Some(body) = else_body {
+                        for child in body {
+                            visit(child, span);
+                        }
+                    }
+                }
+                Stmt::Switch {
+                    arms,
+                    else_body,
+                    span: current,
+                    ..
+                }
+                | Stmt::ComptimeSwitch {
+                    arms,
+                    else_body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    for arm in arms {
+                        for child in &mut arm.body {
+                            visit(child, span);
+                        }
+                    }
+                    if let Some(body) = else_body {
+                        for child in body {
+                            visit(child, span);
+                        }
+                    }
+                }
+                Stmt::CountedLoop {
+                    step,
+                    body,
+                    span: current,
+                    ..
+                } => {
+                    *current = span;
+                    if let Some(step) = step {
+                        visit(step, span);
+                    }
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ContextBlock {
+                    body, span: current, ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+                Stmt::ScopeMember {
+                    body, span: current, ..
+                } => {
+                    *current = span;
+                    for child in body {
+                        visit(child, span);
+                    }
+                }
+            }
+        }
+
+        visit(self, span);
+    }
+
     /// The source span this statement occupies, used by the source-level
     /// debugger (D-DBG3) to resolve a Jet line for a breakpoint or `<- here`
     /// caret. For statements that carry no explicit `span` field, this falls

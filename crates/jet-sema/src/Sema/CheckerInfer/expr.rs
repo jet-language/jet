@@ -520,7 +520,9 @@ impl<'a> Checker<'a> {
                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
                             )
                         })
-                    });
+                    })
+                    && !(field_read_to_clone(e, self.registry, self.imports)
+                        && is_cloneable(t, self.registry));
                 if !borrowed_param_place
                     && !type_is_copy(t)
                     && field_read_to_clone(e, self.registry, self.imports)
@@ -532,7 +534,7 @@ impl<'a> Checker<'a> {
                                 Some(AccessConvention::Read) | Some(AccessConvention::Write)
                             )
                         });
-                        if borrowed_param {
+                        if borrowed_param && !is_cloneable(t, self.registry) {
                             let path = field_path(e).unwrap_or_else(|| root.to_string());
                             self.diags.push(Diagnostic::error(
                                 "E0120",

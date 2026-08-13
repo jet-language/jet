@@ -2776,6 +2776,14 @@ fn seed_fragment_structs(
             cx.computed_fields.insert(name.clone(), computed);
         }
     }
+    // Keep fragment lowering on the same recursive-layout fact as AOT/JIT.
+    // A fragment Cx is intentionally assembled without the full item walk, so
+    // it must ask the shared context helper for the boxed edges after all
+    // fragment structs and fields are registered.
+    for definition in structs.values() {
+        cx.boxed_edges
+            .extend(crate::Codegen::find_struct_box_edges(definition, cx));
+    }
     // Preserve sema's qualified and short keys even if a fragment's StructDef
     // table is sparse.
     for ((owner, field), _) in computed_fields {

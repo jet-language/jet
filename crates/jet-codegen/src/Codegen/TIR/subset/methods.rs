@@ -121,6 +121,25 @@ pub(crate) fn method_call_in_subset(
             }
         }
     }
+    // Qualified file-module calls can carry sema's `Unit` receiver sentinel
+    // when their return type is unit. They are still module calls, not user
+    // instance methods; admit the same resolved import shape as the ordinary
+    // `recv_type == None` path below.
+    if let Expr::Ident(alias, _) = receiver {
+        if !locals.contains(alias)
+            && (cx
+                .reexport_calls
+                .contains_key(&(alias.clone(), method.to_string()))
+                || cx.import_mods.contains_key(alias)
+                || cx.code_modules.contains(alias.as_str()))
+        {
+            return args.iter().all(|a| {
+                !a.flags.shared_auto_clone
+                    && arg_conv_in_subset(a)
+                    && expr_in_subset(&a.expr, cx, locals)
+            });
+        }
+    }
     // c109 Phase 23: `.raw()` on a distinct type (D-DIST3). The AST `emit_method_call`
     // special-cases `method == "raw"` BEFORE any user dispatch, unconditionally emitting
     // `({recv}).0`. Sema (CheckerInfer ~L2039) admits `.raw()` ONLY on a distinct-type

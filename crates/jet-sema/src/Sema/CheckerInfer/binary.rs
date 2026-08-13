@@ -605,7 +605,17 @@ impl<'a> Checker<'a> {
 
         // D-OPDEF1=A: user operators are ordinary trait-method calls after sema
         // proves one exact impl and the fixed same-type law.
-        if lt == rt {
+        // A dimensional unit is still represented by a nominal `#Numeric`
+        // type, but `*` and `/` must derive the physical dimension before the
+        // ordinary same-type trait hook can erase it back to that nominal type.
+        // Otherwise `Meter * Meter` stays `Meter` forever and exponent
+        // overflow never reaches the sema dimension check.
+        let dimensional_multiplicative = matches!(op, BinOp::Mul | BinOp::Div)
+            && (self.quantity_dimension(&lt).is_some()
+                || self.quantity_dimension(&rt).is_some());
+        let unit_operator = self.unit_fact_for_type(&lt).is_some()
+            || self.unit_fact_for_type(&rt).is_some();
+        if lt == rt && !dimensional_multiplicative && !unit_operator {
             if let Type::Named(type_name) = &lt {
                 let hook = match op {
                     BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),

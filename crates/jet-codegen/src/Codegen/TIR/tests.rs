@@ -139,7 +139,11 @@
         let tir = lower_func(function, &cx);
         let mut generated = String::new();
         crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
-        assert!(!generated.contains("__jet_binder_ref_"), "unlowered default reference: {generated}");
+        let binder_ref_prefix = crate::Codegen::mangle_generated("binder_ref_");
+        assert!(
+            !generated.contains(&binder_ref_prefix),
+            "unlowered default reference: {generated}"
+        );
     }
 
     #[test]
