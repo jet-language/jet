@@ -59,6 +59,18 @@ fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
         && stderr.contains("undefined symbol")
 }
 
+fn assert_front_end(entry: &GoldenEntry, src: &str) {
+    let diagnostics = jet::check_with_path(entry.path.to_str().expect("example path is utf8"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "example {} failed the front end:\n{}",
+        entry.stem,
+        jet::render_diagnostics(&entry.shown, src, &diagnostics)
+    );
+}
+
 #[test]
 fn statement_attributes_codegen_shape() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -266,15 +278,16 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
-    // The source itself names `c.gtk4`, so the front end cannot inspect this
-    // example without the same capability required by its native build.
-    if entry.stem == "ui/ui_native_linux" && !env.have_gtk {
-        eprintln!("note: skipping examples/features/{}.jet golden (need gtk4)", entry.stem);
-        return;
-    }
-
     let src = fs::read_to_string(&entry.path).unwrap();
     let stem = entry.stem.as_str();
+    let needs_gtk = stem == "ui/ui_native_linux";
+    if needs_gtk && !env.have_gtk {
+        assert_front_end(entry, &src);
+        eprintln!(
+            "note: front end checked; skipping examples/features/{stem}.jet build (need gtk4)"
+        );
+        return;
+    }
     let uses_ffi_bridge = matches!(
         stem,
         "lowlevel/ffi"
@@ -291,7 +304,10 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     );
 
     if uses_ffi_bridge && !env.have_cargo {
-        eprintln!("note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)");
+        assert_front_end(entry, &src);
+        eprintln!(
+            "note: front end checked; skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
+        );
         return;
     }
 
@@ -377,14 +393,17 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         stem
     );
 
-    let needs_gtk = stem == "ui/ui_native_linux";
-    if needs_gtk && (!env.have_gtk || !env.have_rustc) {
-        eprintln!("note: skipping examples/features/{stem}.jet build (need gtk4 + rustc)");
+    if needs_gtk && !env.have_rustc {
+        eprintln!(
+            "note: front end checked; skipping examples/features/{stem}.jet build (need gtk4 + rustc)"
+        );
         return;
     }
     let needs_raylib_display = stem == "game/raylib_window";
     if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
-        eprintln!("note: skipping examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)");
+        eprintln!(
+            "note: front end checked; skipping examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
+        );
         return;
     }
 
@@ -567,9 +586,11 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_fortran" => ("fortran", "matrix", "matrix.f90"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
+    let src = fs::read_to_string(&entry.path).unwrap();
+    assert_front_end(entry, &src);
     if !env.have_rustc || !env.have_cargo {
         eprintln!(
-            "note: skipping examples/features/{} golden (need provisioned compiler toolchain)",
+            "note: front end checked; skipping examples/features/{} golden (need provisioned compiler toolchain)",
             entry.stem
         );
         return;
@@ -593,7 +614,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .unwrap_or(false);
     if !have_tool {
         eprintln!(
-            "note: skipping examples/features/{} golden (need provisioned {})",
+            "note: front end checked; skipping examples/features/{} golden (need provisioned {})",
             entry.stem, tool
         );
         return;
