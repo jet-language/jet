@@ -58,7 +58,9 @@ fn item_has_comptime_evaluation(item: &Item) -> bool {
 
 pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        Stmt::Expr(value) | Stmt::Yield(value, _) => expr_has_comptime_evaluation(value),
+        Stmt::Expr(value)
+        | Stmt::Yield(value, _)
+        | Stmt::DeferClose { close: value, .. } => expr_has_comptime_evaluation(value),
         Stmt::Val(binding) => {
             binding.is_comptime || expr_has_comptime_evaluation(&binding.init)
         }

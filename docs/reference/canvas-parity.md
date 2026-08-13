@@ -42,6 +42,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 ## Statements
 
 - [Stmt::Expr] status=graph expression/action node.
+- [Stmt::DeferClose] status=readonly resource cleanup, source edits.
 - [Stmt::Val] status=graph binding node.
 - [Stmt::Assign] status=graph assignment node.
 - [Stmt::Return] status=graph return node.

@@ -1707,6 +1707,7 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         Stmt::Expr(e) | Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
             find_multi_input_in_expr(e, node_span, out)
         }
+        Stmt::DeferClose { close, .. } => find_multi_input_in_expr(close, node_span, out),
         Stmt::Return(Some(e), _) => find_multi_input_in_expr(e, node_span, out),
         Stmt::Yield(e, _) => find_multi_input_in_expr(e, node_span, out),
         Stmt::Switch {
@@ -1958,6 +1959,7 @@ fn find_multi_input_element_in_stmt(
     match stmt {
         Stmt::Val(b) => find_multi_input_element_in_expr(&b.init, node_span, element_span, found),
         Stmt::Expr(e)
+        | Stmt::DeferClose { close: e, .. }
         | Stmt::Return(Some(e), _)
         | Stmt::Yield(e, _)
         | Stmt::BreakValue(e, _)

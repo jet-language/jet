@@ -88,7 +88,9 @@ fn desugar_stmts(stmts: &mut Vec<Stmt>, active: OS, diags: &mut Vec<Diagnostic>)
 /// Descend into every statement body a non-switch statement carries.
 fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>) {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) => desugar_expr(e, active, diags),
+        Stmt::Expr(e)
+        | Stmt::Yield(e, _)
+        | Stmt::DeferClose { close: e, .. } => desugar_expr(e, active, diags),
         Stmt::Val(b) => desugar_expr(&mut b.init, active, diags),
         Stmt::Assign { value, .. } => desugar_expr(value, active, diags),
         Stmt::Return(Some(e), _) => desugar_expr(e, active, diags),

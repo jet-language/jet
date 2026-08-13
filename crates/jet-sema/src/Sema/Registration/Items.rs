@@ -777,6 +777,7 @@ impl<'a> ComptimeTypeResolver<'a> {
                 }
                 Stmt::ContextBlock { body, .. } => self.resolve_stmts(body),
                 Stmt::Expr(_)
+                | Stmt::DeferClose { .. }
                 | Stmt::Assign { .. }
                 | Stmt::Return(..)
                 | Stmt::Break(..)

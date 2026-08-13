@@ -1823,22 +1823,10 @@ impl<'a> Parser<'a> {
                 }
                 let close_span = close.span();
                 self.finish_stmt()?;
-                Ok(Stmt::Expr(Expr::Call(Call {
-                    name: Syntax::INTERNAL_DEFER_CLOSE.to_string(),
-                    name_span: defer_span,
-                    type_args: Vec::new(),
-                    args: vec![CallArg {
-                        convention: AccessConvention::Read,
-                        expr: close,
-                        span: close_span,
-                        flags: Default::default(),
-                        label: None,
-                        spread: false,
-                    }],
-                    resolved_ret: None,
-                    range_checked: false,
-                    widen_approx: false,
-                })))
+                Ok(Stmt::DeferClose {
+                    close,
+                    span: Span::new(defer_span.start, close_span.end),
+                })
             }
             TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
                 let assert_span = self.bump().span;

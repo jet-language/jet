@@ -13,7 +13,9 @@ pub(crate) fn walk_stmts_for_const_refs(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => walk_expr_for_const_refs(e, const_names, taken),
+            Stmt::Expr(e)
+            | Stmt::Yield(e, _)
+            | Stmt::DeferClose { close: e, .. } => walk_expr_for_const_refs(e, const_names, taken),
             Stmt::Val(b) => walk_expr_for_const_refs(&b.init, const_names, taken),
             Stmt::Assign { value, .. } => walk_expr_for_const_refs(value, const_names, taken),
             Stmt::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
@@ -452,7 +454,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
 
 pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_refs_name(e, name),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => expr_refs_name(e, name),
         Stmt::Val(b) => expr_refs_name(&b.init, name),
         Stmt::Assign { target, value, .. } => {
             lvalue_refs_name(target, name) || expr_refs_name(value, name)
@@ -814,7 +816,9 @@ pub(crate) fn stmt_collect_captures(
     mut_cap: &mut HashSet<String>,
 ) {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_collect_captures(e, bound, read, mut_cap),
+        Stmt::Expr(e)
+        | Stmt::Yield(e, _)
+        | Stmt::DeferClose { close: e, .. } => expr_collect_captures(e, bound, read, mut_cap),
         Stmt::Val(b) => {
             expr_collect_captures(&b.init, bound, read, mut_cap);
             bound.insert(b.name.clone());

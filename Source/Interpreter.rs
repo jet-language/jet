@@ -51,7 +51,7 @@ pub fn detect_dev_mode(bundle: &ProgramBundle) -> DevMode {
 fn stmt_is_resident(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Loop { .. } => true,
-        Stmt::Expr(e) => expr_has_spawn(e),
+        Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } => expr_has_spawn(e),
         Stmt::Val(b) => expr_has_spawn(&b.init),
         Stmt::Assign { value, .. } => expr_has_spawn(value),
         _ => false,

@@ -312,7 +312,9 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
 
 fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) => collect_tuple_shapes_from_expr(e, out),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+            collect_tuple_shapes_from_expr(e, out)
+        }
         Stmt::Val(b) => {
             if let Some(ty) = &b.ty {
                 collect_tuple_shapes_from_type(ty, out);

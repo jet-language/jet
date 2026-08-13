@@ -56,7 +56,10 @@ fn desugar_stmts(stmts: &mut [Stmt]) {
 
 fn desugar_stmt(stmt: &mut Stmt) {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::BreakValue(e, _) => desugar_expr(e),
+        Stmt::Expr(e)
+        | Stmt::Yield(e, _)
+        | Stmt::DeferClose { close: e, .. }
+        | Stmt::BreakValue(e, _) => desugar_expr(e),
         Stmt::BreakLabelValue(_, _, e, _) => desugar_expr(e),
         Stmt::Val(b) => desugar_expr(&mut b.init),
         Stmt::Assign { value, .. } => desugar_expr(value),

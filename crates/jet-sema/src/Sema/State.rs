@@ -377,7 +377,7 @@ impl<'a> StateCtx<'a> {
 
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => {
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
                 self.check_expr(e);
             }
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {

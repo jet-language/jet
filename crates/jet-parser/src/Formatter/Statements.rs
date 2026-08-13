@@ -315,11 +315,9 @@ impl<'a> Fmt<'a> {
             }
         }
         match stmt {
-            Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => {
+            Stmt::DeferClose { close, .. } => {
                 self.write("defer ");
-                if let Some(arg) = call.args.first() {
-                    self.fmt_expr(&arg.expr, Prec::OrFallback);
-                }
+                self.fmt_expr(close, Prec::OrFallback);
             }
             Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_UNSAFE_ASSERT => {
                 self.write(Syntax::KW_ASSERT);
@@ -1264,6 +1262,10 @@ fn single_str_lit(e: &Expr) -> Option<&str> {
 fn resugar_layout_stmt(layout_name: &str, stmt: &Stmt) -> Stmt {
     match stmt {
         Stmt::Expr(e) => Stmt::Expr(resugar_layout_expr(layout_name, e)),
+        Stmt::DeferClose { close, span } => Stmt::DeferClose {
+            close: resugar_layout_expr(layout_name, close),
+            span: *span,
+        },
         Stmt::Val(b) => {
             let mut b2 = b.clone();
             b2.init = resugar_layout_expr(layout_name, &b.init);

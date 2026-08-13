@@ -409,6 +409,14 @@ pub enum Stmt {
         dot_span: Span,
         span: Span,
     },
+    /// D-SHAPE-RESOURCE2=A: `defer close(^resource)` keeps the consuming close
+    /// as a typed statement instead of encoding it in a private call name.
+    /// Kept last so existing statement discriminants remain stable for the
+    /// semantic index's structural keys.
+    DeferClose {
+        close: Expr,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -459,6 +467,7 @@ impl Stmt {
         fn visit_stmt(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
             match stmt {
                 Stmt::Expr(expr) => visit_expr(expr, f),
+                Stmt::DeferClose { close, .. } => visit_expr(close, f),
                 Stmt::Val(binding) => visit_expr(&mut binding.init, f),
                 Stmt::Assign { target, value, .. } => {
                     visit_lvalue(target, f);
@@ -598,6 +607,7 @@ impl Stmt {
         fn visit(stmt: &mut Stmt, span: Span) {
             match stmt {
                 Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } => {}
+                Stmt::DeferClose { span: current, .. } => *current = span,
                 Stmt::Return(_, current)
                 | Stmt::Break(current)
                 | Stmt::BreakValue(_, current)
@@ -748,6 +758,7 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Expr(e) => e.span(),
+            Stmt::DeferClose { span, .. } => *span,
             Stmt::Val(b) => b.name_span,
             Stmt::Assign { target, .. } => target.span(),
             Stmt::Return(_, span)

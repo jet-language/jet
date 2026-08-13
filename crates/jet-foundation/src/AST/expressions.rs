@@ -996,6 +996,7 @@ impl Expr {
         fn walk_stmt(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
             match stmt {
                 Stmt::Expr(expr) => walk(expr, f),
+                Stmt::DeferClose { close, .. } => walk(close, f),
                 Stmt::Val(binding) => walk(&mut binding.init, f),
                 Stmt::Assign { target, value, .. } => {
                     walk_lvalue(target, f);

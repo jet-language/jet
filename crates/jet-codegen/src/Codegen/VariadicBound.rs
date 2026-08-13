@@ -255,7 +255,9 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
 /// whether `name` is referenced anywhere in `s`.
 fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
     match s {
-        Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_references_ident(e, name),
+        Stmt::Expr(e)
+        | Stmt::DeferClose { close: e, .. }
+        | Stmt::Return(Some(e), _) => expr_references_ident(e, name),
         Stmt::Val(b) => expr_references_ident(&b.init, name),
         Stmt::Assign { target, value, .. } => {
             let target_hit = match target {

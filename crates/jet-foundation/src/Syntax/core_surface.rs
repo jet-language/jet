@@ -352,10 +352,6 @@ pub const RESOURCE_CLOSE: &str = "close";
 /// D-SHAPE-RESOURCE2=A: nominal, consuming, infallible cleanup capability.
 pub const TRAIT_CLOSE: &str = "Close";
 
-/// Parser-only collision-proof spelling for the desugared deferred close.
-/// NUL cannot occur in a source identifier, so user code cannot invoke it.
-pub const INTERNAL_DEFER_CLOSE: &str = "\0jet.defer.close";
-
 /// S19 (ratified): loop statement (for SharedHandle lint checks) — same
 /// governing decision as the loop-header keywords in Syntax/math_layout.rs.
 pub const KW_LOOP: &str = "loop";

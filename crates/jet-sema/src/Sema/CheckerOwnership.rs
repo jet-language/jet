@@ -1402,7 +1402,9 @@ impl<'a> Checker<'a> {
     ) {
         for stmt in body {
             match stmt {
-                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+                Stmt::Expr(expr)
+                | Stmt::Yield(expr, _)
+                | Stmt::DeferClose { close: expr, .. } => {
                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
                 }
                 Stmt::Val(binding) => {

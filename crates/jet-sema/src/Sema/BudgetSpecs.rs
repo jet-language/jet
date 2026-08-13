@@ -199,7 +199,9 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
     for stmt in stmts {
         match stmt {
             Stmt::Val(binding) => collect_scene_expr(&binding.init, scenes),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr), _) => collect_scene_expr(expr, scenes),
+            Stmt::Expr(expr)
+            | Stmt::DeferClose { close: expr, .. }
+            | Stmt::Return(Some(expr), _) => collect_scene_expr(expr, scenes),
             Stmt::Assign { value, .. } => collect_scene_expr(value, scenes),
             Stmt::While { cond, body, .. } => {
                 collect_scene_expr(cond, scenes);

@@ -370,7 +370,9 @@ pub(super) fn substitute_stmts(
 
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, &values),
+            Stmt::Expr(value)
+            | Stmt::Yield(value, _)
+            | Stmt::DeferClose { close: value, .. } => substitute_expr(value, types, &values),
             Stmt::Val(binding) => {
                 substitute_binding(binding, types, &values);
                 values.remove(&binding.name);

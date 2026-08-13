@@ -28,6 +28,7 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
         // Bare `return` must stay multiline: `{ return }` is not a recoverable parse.
         Stmt::Return(None, _) => false,
         Stmt::Expr(_)
+        | Stmt::DeferClose { .. }
         | Stmt::Val(_)
         | Stmt::Assign { .. }
         | Stmt::Return(Some(_), _)
@@ -575,6 +576,7 @@ fn item_span_end(item: &Item) -> usize {
 fn stmt_end(stmt: &Stmt) -> usize {
     match stmt {
         Stmt::Expr(e) => e.span().end,
+        Stmt::DeferClose { span, .. } => span.end,
         Stmt::Val(b) => b.init.span().end,
         Stmt::Assign { value, .. } => value.span().end,
         Stmt::Return(e, s) => e.as_ref().map(|x| x.span().end).unwrap_or(s.end),
@@ -831,7 +833,12 @@ impl<'a> Fmt<'a> {
     fn statement_source_end(&self, stmt: &Stmt) -> usize {
         if !matches!(
             stmt,
-            Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } | Stmt::Return(..) | Stmt::Yield(..)
+            Stmt::Expr(_)
+                | Stmt::DeferClose { .. }
+                | Stmt::Val(_)
+                | Stmt::Assign { .. }
+                | Stmt::Return(..)
+                | Stmt::Yield(..)
         ) {
             return stmt_end(stmt);
         }
@@ -1038,6 +1045,7 @@ impl Prec {
 fn stmt_start(stmt: &Stmt) -> usize {
     match stmt {
         Stmt::Expr(e) => e.span().start,
+        Stmt::DeferClose { span, .. } => span.start,
         Stmt::Val(b) => b.name_span.start,
         Stmt::Assign { target, .. } => match target {
             LValue::Local { name_span, .. } => name_span.start,

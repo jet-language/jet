@@ -719,6 +719,7 @@ fn collect_call_preconditions(
 fn statement_is_flow_boundary(statement: &jet::AST::Stmt) -> bool {
     match statement {
         jet::AST::Stmt::Expr(expr)
+        | jet::AST::Stmt::DeferClose { close: expr, .. }
         | jet::AST::Stmt::Val(jet::AST::Binding { init: expr, .. })
         | jet::AST::Stmt::Return(Some(expr), _) => !matches!(expr, Expr::Call(_)),
         jet::AST::Stmt::Assign { .. }
@@ -801,7 +802,9 @@ fn bind_call_arguments(
 fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST::Call)) {
     use jet::AST::Stmt;
     match statement {
-        Stmt::Expr(expr) | Stmt::Yield(expr, _) => visit_expr_calls(expr, calls),
+        Stmt::Expr(expr)
+        | Stmt::Yield(expr, _)
+        | Stmt::DeferClose { close: expr, .. } => visit_expr_calls(expr, calls),
         Stmt::Val(binding) => visit_expr_calls(&binding.init, calls),
         Stmt::Assign { target, value, .. } => {
             visit_lvalue_calls(target, calls);
@@ -1110,7 +1113,9 @@ fn call_args_contain_machine_arithmetic(call: &jet::AST::Call) -> bool {
 fn function_body_contains_machine_arithmetic(func: &jet::AST::Func) -> bool {
     func.body.iter().any(|statement| match statement {
         jet::AST::Stmt::Val(binding) => contains_machine_arithmetic(&binding.init),
-        jet::AST::Stmt::Return(Some(value), _) | jet::AST::Stmt::Expr(value) => {
+        jet::AST::Stmt::Return(Some(value), _)
+        | jet::AST::Stmt::Expr(value)
+        | jet::AST::Stmt::DeferClose { close: value, .. } => {
             contains_machine_arithmetic(value)
         }
         _ => true,

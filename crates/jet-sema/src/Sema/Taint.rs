@@ -612,7 +612,7 @@ impl<'a> TaintCtx<'a> {
 
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => self.check_expr(e),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => self.check_expr(e),
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.check_expr(e),
             Stmt::Val(b) => {
                 self.check_expr(&b.init);

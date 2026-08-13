@@ -69,7 +69,7 @@ fn defer_close_has_explicit_tir_codegen_and_stable_formatting() {
     let out = compile(SIMPLE);
     assert!(out.rust.contains("JetDeferredClose"), "{}", out.rust);
     assert!(
-        out.rust.contains("__jet_Close::close(__jet_resource_resource_")
+        out.rust.contains("__jet_Close::close(__jet___resource_resource_")
             && out.rust.contains(".take())"),
         "{}",
         out.rust
@@ -174,7 +174,7 @@ fn run() {
     assert!(
         compiled
             .rust
-            .contains("return __jet_resource_param_resource.take();"),
+            .contains("return __jet___resource_param_resource.take();"),
         "{}",
         compiled.rust
     );
@@ -372,7 +372,7 @@ fn run() {
 }
 
 #[test]
-fn default_dev_deopts_or_interpreter_gaps_on_deferred_close() {
+fn default_dev_runs_deferred_close_with_native_parity() {
     use jet::Interpreter::RunOutcome;
     use jet::JitBackend::JitBackend;
 
@@ -388,11 +388,8 @@ fn default_dev_deopts_or_interpreter_gaps_on_deferred_close() {
     assert!(errors.is_empty(), "{errors:?}");
 
     if jet_jit::cranelift_host_supported() {
-        let gap = jet_jit::try_compile_bundle(&bundle).expect_err("JIT must name its cleanup gap");
-        assert!(
-            gap.contains("automatic resource cleanup") || gap.contains("jit "),
-            "{gap}"
-        );
+        let result = jet_jit::try_compile_bundle(&bundle);
+        assert!(result.is_ok(), "JIT must compile typed deferred cleanup: {result:?}");
     }
 
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
@@ -404,16 +401,13 @@ fn default_dev_deopts_or_interpreter_gaps_on_deferred_close() {
     match dev.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => {
             assert!(
-                jet_jit::deopt_invoked_for_test(),
-                "tiered JIT must deopt on cleanup gap"
+                !jet_jit::deopt_invoked_for_test(),
+                "typed deferred cleanup must stay on the JIT tier"
             );
             assert_eq!(stdout, "body\nclose dev\n");
         }
         RunOutcome::Problems(diags) => {
-            assert!(
-                !jet_jit::is_e2211(&diags),
-                "E2211 retired: {diags:?}"
-            );
+            panic!("typed deferred cleanup failed on the JIT tier: {diags:?}");
         }
     }
 }

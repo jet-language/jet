@@ -695,7 +695,9 @@ fn collect_mmio_stmts(
                     ptrs.insert(b.name.clone(), fact);
                 }
             }
-            crate::AST::Stmt::Expr(e) | crate::AST::Stmt::Return(Some(e), _) => {
+            crate::AST::Stmt::Expr(e)
+            | crate::AST::Stmt::DeferClose { close: e, .. }
+            | crate::AST::Stmt::Return(Some(e), _) => {
                 collect_mmio_expr(e, core_aliases, ptrs, unsafe_reason, out);
             }
             crate::AST::Stmt::Assign { value, .. } => {

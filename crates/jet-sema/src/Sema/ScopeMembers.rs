@@ -93,7 +93,7 @@ fn statements_have_assertion(statements: &[Stmt]) -> bool {
 
 fn statement_has_assertion(statement: &Stmt) -> bool {
     let direct = match statement {
-        Stmt::Expr(expr) | Stmt::Yield(expr, _) => expr_has_assertion(expr),
+        Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => expr_has_assertion(expr),
         Stmt::Val(binding) => expr_has_assertion(&binding.init),
         Stmt::Assign { value, .. } => expr_has_assertion(value),
         Stmt::Return(Some(expr), _)

@@ -938,7 +938,9 @@ fn collect_capture_statements(
 ) {
     for statement in statements {
         match statement {
-            Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+            Stmt::Expr(expr)
+            | Stmt::Yield(expr, _)
+            | Stmt::DeferClose { close: expr, .. } => {
                 collect_capture_expr(expr, aliases, local_functions, sites)
             }
             Stmt::Val(binding) => {

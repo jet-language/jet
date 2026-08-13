@@ -671,7 +671,7 @@ fn layout_anchor_method(field: &str) -> Option<&'static str> {
 /// this only changes which AST shape sema sees, it decides nothing).
 pub(super) fn desugar_layout_anchors(layout_name: &str, stmt: &mut Stmt) {
     match stmt {
-        Stmt::Expr(e) => desugar_layout_expr(layout_name, e),
+        Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } => desugar_layout_expr(layout_name, e),
         Stmt::Val(b) => desugar_layout_expr(layout_name, &mut b.init),
         _ => {}
     }

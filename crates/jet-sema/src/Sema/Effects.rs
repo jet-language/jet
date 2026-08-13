@@ -1319,7 +1319,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
     use crate::AST::{ForKind, Stmt};
     let block = |b: &[Stmt]| b.iter().find_map(|s| stmt_handle_escape(s, handle));
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_handle_escape(e, handle),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => expr_handle_escape(e, handle),
         Stmt::Val(b) => expr_handle_escape(&b.init, handle),
         Stmt::Assign { value, .. } => expr_handle_escape(value, handle),
         Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),

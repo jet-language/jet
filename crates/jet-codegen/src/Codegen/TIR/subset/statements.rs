@@ -151,10 +151,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Yield(e, _) => expr_in_subset(e, cx, locals),
         // D-IGNORERET2=A: `.drop("reason")` lowers to an ExprStmt of the receiver;
         // the method call itself is erased. Covered iff the receiver is in-subset.
-        Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => call
-            .args
-            .first()
-            .is_some_and(|arg| expr_in_subset(&arg.expr, cx, locals)),
+        Stmt::DeferClose { close, .. } => expr_in_subset(close, cx, locals),
         Stmt::Expr(Expr::MethodCall {
             receiver, method, ..
         }) if method == Syntax::METHOD_DROP => expr_in_subset(receiver, cx, locals),

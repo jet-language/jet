@@ -583,7 +583,9 @@ fn scan_stmt_for_variadic_uses(
                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
             }
         }
-        Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_uses(e, name, other),
+        Stmt::Expr(e)
+        | Stmt::DeferClose { close: e, .. }
+        | Stmt::Return(Some(e), _) => expr_uses(e, name, other),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => {}
         Stmt::Val(b) => expr_uses(&b.init, name, other),

@@ -134,7 +134,9 @@ fn scan_stmt_for_mut_arg(
     interpreted_functions: &HashSet<&str>,
 ) -> Option<Boundary> {
     match stmt {
-        Stmt::Expr(expr) => expr_mut_arg(expr, interpreted_functions),
+        Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
+            expr_mut_arg(expr, interpreted_functions)
+        }
         Stmt::Val(binding) => expr_mut_arg(&binding.init, interpreted_functions),
         Stmt::Assign { value, .. } => expr_mut_arg(value, interpreted_functions),
         Stmt::Return(Some(expr), _) => expr_mut_arg(expr, interpreted_functions),

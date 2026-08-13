@@ -593,6 +593,21 @@ fn project_stmt(
         Stmt::Expr(e) => {
             let _ = project_expr_node(g, index, src, e, ordinal, x, y, true);
         }
+        Stmt::DeferClose { close, span } => {
+            let node_id = format!("{}:stmt:{ordinal}:defer_close", g.graph_id);
+            add_node(
+                g,
+                &node_id,
+                "defer_close",
+                "defer close",
+                (*span).into(),
+                x,
+                y,
+                vec!["cleanup"],
+                vec!["source_jump"],
+            );
+            add_inline(g, &node_id, ordinal, "close", src, close.span());
+        }
         Stmt::Return(expr, span) => {
             let node_id = format!("{}:stmt:{ordinal}:return", g.graph_id);
             add_node(

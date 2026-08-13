@@ -2035,6 +2035,11 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Expr(e) | AST::Stmt::Yield(e, _) => {
             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
         }
+        AST::Stmt::DeferClose { close, .. } => {
+            structural_slot(ctx, "close", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(close, mp, ctx)
+            });
+        }
         AST::Stmt::Assign { target, value, .. } => {
             collect_lvalue(target, mp, ctx);
             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
@@ -2616,7 +2621,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
 }
 
 fn collect_expr_stmt(stmt: &AST::Stmt, mp: &str, ctx: &mut WalkCtx<'_>) {
-    if let AST::Stmt::Expr(e) = stmt {
+    if let AST::Stmt::Expr(e) | AST::Stmt::DeferClose { close: e, .. } = stmt {
         collect_expr(e, mp, ctx);
     }
 }

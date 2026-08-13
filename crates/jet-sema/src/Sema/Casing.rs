@@ -207,7 +207,7 @@ fn binding_name(b: &crate::AST::Binding, out: &mut Vec<Diagnostic>) {
 fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => expr_names(e, out),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => expr_names(e, out),
             Stmt::Val(b) => { binding_name(b, out); expr_names(&b.init, out); }
             Stmt::Assign { target, value, .. } => {
                 match target {

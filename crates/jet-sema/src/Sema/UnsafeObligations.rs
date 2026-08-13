@@ -289,7 +289,9 @@ fn assertion(statement: &Stmt) -> Option<(Vec<String>, Span)> {
 
 fn collect_shallow_operations(statement: &Stmt, out: &mut Vec<(&'static str, Span, Vec<&'static str>)>) {
     match statement {
-        Stmt::Expr(expression) | Stmt::Return(Some(expression), _) => collect_expr_operations(expression, out),
+        Stmt::Expr(expression)
+        | Stmt::DeferClose { close: expression, .. }
+        | Stmt::Return(Some(expression), _) => collect_expr_operations(expression, out),
         Stmt::Val(binding) => collect_expr_operations(&binding.init, out),
         Stmt::Assign { target, value, .. } => { collect_lvalue_operations(target, out); collect_expr_operations(value, out); }
         Stmt::While { cond, .. } => collect_expr_operations(cond, out),

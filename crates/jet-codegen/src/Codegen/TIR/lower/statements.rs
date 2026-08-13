@@ -362,7 +362,10 @@ fn collect_interrupt_callback_scan(
             InterruptScanTask::Stmts(stmts) => {
                 for stmt in stmts.iter().rev() {
                     match stmt {
-                        Stmt::Expr(expr) => work.push(InterruptScanTask::Expr(expr)),
+                        Stmt::Expr(expr)
+                        | Stmt::DeferClose { close: expr, .. } => {
+                            work.push(InterruptScanTask::Expr(expr))
+                        }
                         Stmt::Val(binding) => {
                             work.push(InterruptScanTask::Expr(&binding.init));
                         }
@@ -618,7 +621,9 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                         work.push(body);
                     }
                 }
-                Stmt::Expr(expr) => collect_interrupt_aliases_expr(expr, aliases),
+                Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
+                    collect_interrupt_aliases_expr(expr, aliases)
+                }
                 Stmt::Assign { target, value, .. } => {
                     if let LValue::Local { name, .. } = target {
                         if let Some(source) = interrupt_callback_ident(value) {
@@ -711,7 +716,9 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
                 }
                 collect_interrupt_lambda_captures_expr(&binding.init, captures);
             }
-            Stmt::Expr(expr) => collect_interrupt_lambda_captures_expr(expr, captures),
+            Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
+                collect_interrupt_lambda_captures_expr(expr, captures)
+            }
             Stmt::Assign { target, value, .. } => {
                 if let LValue::Local { name, .. } = target {
                     if let Some(lam) = interrupt_lambda(value) {
@@ -2590,23 +2597,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 })),
             })
         }
-        // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).
-        // The method call itself is erased; the "reason" string is audit-only.
-        Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => {
-            let close = call
-                .args
-                .first()
-                .expect("parser creates one deferred close argument");
-            let Expr::Call(close_call) = &close.expr else {
+        // D-SHAPE-RESOURCE2=A: lower the sema-checked consuming close into the
+        // existing TIR cleanup node; the engines keep the same LIFO behavior.
+        Stmt::DeferClose { close, span } => {
+            let Expr::Call(close_call) = close else {
                 unreachable!("parser creates a close call for deferred cleanup")
             };
             let Expr::Ident(resource, _) = &close_call.args[0].expr else {
                 unreachable!("parser restricts deferred close to one resource binding")
             };
             TStmt::DeferClose {
-                close: lower_expr(&close.expr, cx, env),
+                close: lower_expr(close, cx, env),
                 resource: env.rust_name_of(resource),
-                id: call.name_span.start,
+                id: span.start,
             }
         }
         Stmt::Expr(Expr::MethodCall {

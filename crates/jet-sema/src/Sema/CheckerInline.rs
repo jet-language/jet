@@ -138,7 +138,7 @@ impl<'a> InlineAlwaysScan<'a> {
     fn scan_stmt(&mut self, s: &Stmt) {
         self.stmt_count += 1;
         match s {
-            Stmt::Expr(e) => self.scan_expr(e),
+            Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } => self.scan_expr(e),
             Stmt::Val(b) => self.scan_binding(b),
             Stmt::Assign { target, value, .. } => {
                 self.scan_lvalue(target);

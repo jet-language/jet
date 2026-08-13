@@ -944,7 +944,7 @@ fn collect_moved_in_stmt(
         Stmt::Assign { value, .. } => {
             collect_moved_in_expr(value, session_bindings, scope, moved);
         }
-        Stmt::Expr(e) => {
+        Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } => {
             collect_moved_in_expr(e, session_bindings, scope, moved);
         }
         Stmt::Return(Some(e), _) => {

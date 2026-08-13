@@ -597,6 +597,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     }
     match s {
         Stmt::Expr(expr)
+        | Stmt::DeferClose { close: expr, .. }
         | Stmt::Val(crate::AST::Binding { init: expr, .. })
         | Stmt::Yield(expr, _) => {
             walk!(expr);

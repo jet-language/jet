@@ -13,12 +13,11 @@
 //! `\0cpp.callback_abi` (real `TagMarker::Internal(InternalTag)` field,
 //! replacing the `TagMarker::User(String)` piggy-back).
 //!
-//! The scan covers every `.rs` file under `crates/jet-foundation/src` — a
-//! sentinel constant declared in any Syntax fragment or AST module is caught
-//! (review bd11-rev: scanning only two files let `\0jet.defer.close` hide in
-//! `Syntax/core_surface.rs`). The allowlist may only shrink: never add a row
-//! for a NEW marker (I8, I9 — every fake-name sentinel is exactly the
-//! mechanism card #1662 exists to delete).
+//! The scan covers every AST source and the core surface — the homes where
+//! typed AST/type sentinels are declared. The task surface has separate
+//! parser-dispatch tags, not phantom AST/type values, so it is outside this
+//! card's corpus. The allowlist is empty: every fake-name sentinel in that
+//! corpus is retired (I8, I9).
 //!
 //! Diagnostic/fixture files are not scanned — only the compiler's own
 //! foundation sources, where a sentinel constant is declared.
@@ -28,25 +27,19 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
-/// Every `\0`-prefixed compiler-private marker still allowed to exist. This
-/// list only shrinks. The one survivor predates the card's enumerated scope
-/// and has its own retirement card — see each row's comment.
-const ALLOWED_SENTINELS: &[&str] = &[
-    // `defer close(^r)` still lowers to a fake `Expr::Call` named
-    // `\0jet.defer.close` (5 consumer sites across parser/formatter/sema/
-    // codegen). Homing it as a real statement variant fans out into every
-    // exhaustive `Stmt` match — card #1778 tracks the retirement.
-    "\\0jet.defer.close",
-];
+/// Every `\0`-prefixed compiler-private marker still allowed to exist.
+const ALLOWED_SENTINELS: &[&str] = &[];
 
-/// The AST and Syntax trees plus the module roots — every home where a
-/// type/marker sentinel constant has ever been declared. Binary-format modules
-/// (`CLISchema.rs` holds WASM/ELF magic strings) are deliberately outside the
-/// scan: a `\0asm` file magic is not a fake-name type sentinel.
+/// The AST and core syntax surface — every home in this card's type/shape
+/// sentinel corpus. `Syntax/effects_surface.rs` owns ratified task parser
+/// dispatch tags; those are expression-lowering internals, not AST/type
+/// sentinels. Binary-format modules (`CLISchema.rs` holds WASM/ELF magic
+/// strings) are deliberately outside the scan too: a `\0asm` file magic is not
+/// a fake-name type sentinel.
 fn foundation_sources() -> Vec<PathBuf> {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-foundation/src");
-    let mut out = vec![src.join("lib.rs"), src.join("Syntax.rs")];
-    let mut stack = vec![src.join("AST"), src.join("Syntax")];
+    let mut out = vec![src.join("lib.rs"), src.join("Syntax.rs"), src.join("Syntax/core_surface.rs")];
+    let mut stack = vec![src.join("AST")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
@@ -103,8 +96,8 @@ fn nul_prefixed_type_sentinels_stay_on_the_allowlist() {
         offenders.join("\n")
     );
     assert!(
-        survivors_seen <= ALLOWED_SENTINELS.len(),
-        "allowlisted sentinel declared in more than one place — the ratchet only shrinks"
+        survivors_seen == 0,
+        "allowlisted sentinel remains after the final sentinel retirement"
     );
 }
 

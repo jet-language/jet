@@ -1218,14 +1218,6 @@ impl<'a> Checker<'a> {
                     let Stmt::Expr(expr) = stmt else {
                         return;
                     };
-                    if let Expr::Call(call) = expr {
-                        if call.name == Syntax::INTERNAL_DEFER_CLOSE {
-                            if let Some(arg) = call.args.first_mut() {
-                                self.infer_fallible_stmt(&mut arg.expr);
-                            }
-                            return;
-                        }
-                    }
                     // D-IGNORERET2=A: `.drop("reason")` is the blessed explicit-discard
                     // terminal. When recognized, infer the *receiver* (for side effects),
                     // validate the reason is a non-empty string literal, and suppress E0402.
@@ -1322,6 +1314,9 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
+                }
+                Stmt::DeferClose { close, .. } => {
+                    self.infer_fallible_stmt(close);
                 }
                 Stmt::Return(expr, span) => {
                     // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
@@ -2952,7 +2947,9 @@ fn stmts_index_root_with(body: &[Stmt], root: &str, index_var: &str) -> bool {
 
 fn stmt_indexes_root_with(stmt: &Stmt, root: &str, index_var: &str) -> bool {
     match stmt {
-        Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_indexes_root_with(e, root, index_var),
+        Stmt::Expr(e)
+        | Stmt::DeferClose { close: e, .. }
+        | Stmt::Return(Some(e), _) => expr_indexes_root_with(e, root, index_var),
         Stmt::Val(b) => expr_indexes_root_with(&b.init, root, index_var),
         Stmt::Assign { target, value, .. } => {
             lvalue_indexes_root_with(target, root, index_var)

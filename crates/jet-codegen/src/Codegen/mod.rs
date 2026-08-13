@@ -1784,6 +1784,7 @@ fn collect_allocator_constructors(
                 }
             }
             Stmt::Expr(_)
+            | Stmt::DeferClose { .. }
             | Stmt::Assign { .. }
             | Stmt::Return(..)
             | Stmt::Break(_)

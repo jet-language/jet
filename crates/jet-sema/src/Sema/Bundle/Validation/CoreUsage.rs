@@ -300,7 +300,9 @@ pub(crate) fn collect_core_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => collect_core_expr(e, imports, used, spans, ffi_cb),
+            Stmt::Expr(e)
+            | Stmt::Yield(e, _)
+            | Stmt::DeferClose { close: e, .. } => collect_core_expr(e, imports, used, spans, ffi_cb),
             Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans, ffi_cb),
             Stmt::Assign { target, value, .. } => {
                 collect_core_lvalue(target, imports, used, spans, ffi_cb);
