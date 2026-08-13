@@ -40,6 +40,46 @@ fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
 }
 
 #[test]
+fn unannotated_run_is_fallible_by_default_and_reports_at_the_edge() {
+    let source = r#"
+fn step() => Int ? {
+    return Err("boom")
+}
+
+fn run() {
+    value :: step()?
+    print(value)
+}
+"#;
+    let out = jet::compile(source).expect("an unannotated run may use ?");
+    assert!(
+        out.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
+        "unannotated run should default to a fallible unit boundary:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())"),
+        "the default entry must report an unhandled error:\n{}",
+        out.rust
+    );
+
+    let dir = common::unique_tmp("jet_unannotated_entry_error");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.jet"), source).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("boom"), "entry report should contain the source error: {stderr}");
+    assert!(stderr.contains("Error"), "entry report should contain its error frame: {stderr}");
+}
+
+#[test]
 fn script_entry_uses_the_same_front_end_for_check_and_build() {
     let dir = common::unique_tmp("jet_script_check_build");
     std::fs::create_dir_all(&dir).unwrap();
@@ -198,7 +238,7 @@ fn run() ? {
     );
     assert!(
         out.rust
-            .contains("if let Err(__jet_err) = jet_runtime_boundary(|| __jet_run())"),
+            .contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())"),
         "fallible run wrapper must handle returned errors:\n{}",
         out.rust
     );
@@ -210,7 +250,7 @@ fn run() ? {
 }
 
 #[test]
-fn crypto_fallible_unit_run_uses_the_e3001_runtime_boundary() {
+fn declared_crypto_error_uses_the_generic_runtime_boundary() {
     let src = r#"
 use core.crypto as crypto
 
@@ -230,16 +270,18 @@ fn run() ? CryptoError {
         "CryptoError run should retain its error type:\n{}",
         out.rust
     );
+    let main = out.rust.rfind("\nfn main()").expect("generated main");
+    let entry = &out.rust[main..];
     assert!(
-        out.rust.contains("Error [E3001]: unhandled cryptographic error")
-            && out.rust.contains("std::process::exit(if __jet_internal { 101 } else { 70 });"),
-        "CryptoError run must use the E3001 boundary:\n{}",
-        out.rust
+        entry.contains("if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run())")
+            && !entry.contains("jet_render_e3001_crypto")
+            && !entry.contains("jet_abort_diagnostic"),
+        "CryptoError run must use the generic reported-error boundary:\n{entry}"
     );
 }
 
 #[test]
-fn unhandled_crypto_error_exits_70_with_a_redacted_e3001_frame() {
+fn unhandled_crypto_error_exits_1_with_the_generic_entry_report() {
     let src = r#"
 use core.crypto as crypto
 
@@ -267,38 +309,28 @@ fn run() ? CryptoError {
     let code = output.status.code().unwrap_or(0);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(code, 70, "stderr:\n{stderr}");
+    assert_eq!(code, 1, "stderr:\n{stderr}");
     assert!(stdout.is_empty(), "stdout must stay empty: {stdout:?}");
-    assert!(
-        stderr.ends_with(concat!(
-            "Error [E3001]: unhandled cryptographic error\n",
-            " Why: hkdf_sha256: output length must be 0..8160; got 8161\n",
-            " Fix: handle the CryptoError in fn run\n",
-        )),
-        "stderr:\n{stderr}"
-    );
+    assert!(stderr.contains("hkdf_sha256"), "stderr should carry the error report: {stderr}");
+    assert!(!stderr.contains("unhandled cryptographic error"), "stderr:\n{stderr}");
 }
 
 #[test]
-fn user_crypto_error_is_not_the_core_entry_error() {
+fn user_crypto_error_is_a_normal_declared_entry_error() {
     let src = r#"
 enum CryptoError {
     Internal
 }
 
 fn run() ? CryptoError {
-    return Err(.Internal)
+    return Err(CryptoError.Internal)
 }
 "#;
-    let diagnostics = jet::compile(src).expect_err("user CryptoError must not gain core behavior");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0122"),
-        "expected entrypoint E0122, got {diagnostics:?}"
-    );
+    jet::compile(src).expect("declared error families are valid at the entry");
 }
 
 #[test]
-fn internal_crypto_error_exits_101_in_the_generated_wrapper() {
+fn internal_crypto_error_uses_the_reported_entry_exit() {
     let src = r#"
 use core.crypto as crypto
 
@@ -308,7 +340,7 @@ fn run() ? CryptoError {
 "#;
     let out = jet::compile(src).expect("CryptoError entrypoint should compile");
     let ffi = out.ffi.as_ref().expect("core.crypto must emit its bridge");
-    let marker = "if let Err(__jet_err) = jet_runtime_boundary(|| __jet_run()) {";
+    let marker = "if let Err(__jet___err) = jet_runtime_boundary(|| __jet_run()) {";
     let start = out.rust.find(marker).expect("generated crypto error boundary");
     let rest = &out.rust[start..];
     let end = rest.find("\n    }\n").expect("generated boundary close") + "\n    }".len();
@@ -347,14 +379,10 @@ fn main() {{
     assert!(built.status.success(), "rustc stderr: {}", String::from_utf8_lossy(&built.stderr));
     let output = std::process::Command::new(&binary).output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(output.status.code(), Some(101));
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        concat!(
-            "Error [E3001]: unhandled cryptographic error\n",
-            " Why: internal test-17\n",
-            " Fix: handle the CryptoError in fn run\n",
-        )
+        "internal test-17\n"
     );
 }
 

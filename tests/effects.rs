@@ -834,9 +834,10 @@ fn run() {
 fn transact_irreversible_net_is_e0746() {
     let src = r#"
 use core.http as http
+use core.http.server as server
 fn run() {
     #Transact(tx) {
-        r :: http.get("http://x") ?? "";
+        r :: http.get("http://x") ?? server.response(200, "");
         print(r);
     }
 }

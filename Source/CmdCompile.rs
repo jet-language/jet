@@ -918,7 +918,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
     exit(child_exit_code(status));
 }
 
-/// D-WEBAPP-SERVE1=D: `jet dev` serves a conventional `fn app() => WebApp`
+/// D-WEBAPP-SERVE1=D: `jet dev` serves a WebApp returned by `fn run`
 /// through the same native app entry as `jet run`, adding only the reload
 /// response flag. A user-authored `fn dev()` is selected before this helper.
 pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<u16>) {

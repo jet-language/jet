@@ -29,10 +29,7 @@ pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_s
 pub(crate) use GenericModules::expand_generic_module_aliases;
 pub use GenericModules::specialize_function_types;
 use GenericModules::{clone_enum, clone_struct};
-use Outputs::{
-    cli_entry_param_shape, is_fallible_void_entry_return, no_run_error, resolve_outputs,
-    CLIEntryShape,
-};
+use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};
 use Pipeline::{
     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
     check_bundle_opts_for_output_with_context as pipeline_check_bundle_opts_for_output_with_context,

@@ -2004,7 +2004,7 @@ fn main() {
                 run_dev_entry(file, mode);
                 return;
             }
-            if has_web_app_entry_fn(file) {
+            if entry_returns_web_app(file) {
                 if use_interpreter {
                     std::env::set_var("JET_WEBAPP_DEV", "1");
                     let dev_file = std::fs::canonicalize(file)
@@ -2015,7 +2015,6 @@ fn main() {
                         std::env::set_var("JET_WEBAPP_PORT", port.to_string());
                     }
                     run_dev(file, try_anyway, policy, mode, true);
-                    return;
                 }
                 run_web_app_dev_entry(file, mode, dev_port);
                 return;
@@ -2582,12 +2581,12 @@ fn has_dev_entry_fn(file: &str) -> bool {
         .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
 }
 
-fn has_web_app_entry_fn(file: &str) -> bool {
-    let src = match fs::read_to_string(file) {
+fn entry_returns_web_app(file: &str) -> bool {
+    let source = match fs::read_to_string(file) {
         Ok(source) => source,
         Err(_) => return false,
     };
-    let (tokens, diagnostics) = jet::Lexer::lex(&src);
+    let (tokens, diagnostics) = jet::Lexer::lex(&source);
     if !diagnostics.is_empty() {
         return false;
     }
@@ -2596,15 +2595,19 @@ fn has_web_app_entry_fn(file: &str) -> bool {
         Err(_) => return false,
     };
     program.items.iter().any(|item| {
-        matches!(
-            item,
-            jet::AST::Item::Func(function)
-                if function.name == "app"
-                    && matches!(
-                        function.return_type.as_ref(),
-                        Some(jet::AST::Type::Named(name)) if name == "WebApp"
-                    )
-        )
+        let jet::AST::Item::Func(function) = item else {
+            return false;
+        };
+        if function.name != "run" {
+            return false;
+        }
+        match function.return_type.as_ref() {
+            Some(jet::AST::Type::Named(name)) => name == "WebApp",
+            Some(jet::AST::Type::Result { ok, .. }) => {
+                matches!(ok.as_ref(), jet::AST::Type::Named(name) if name == "WebApp")
+            }
+            _ => false,
+        }
     })
 }
 

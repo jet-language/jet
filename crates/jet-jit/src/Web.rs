@@ -61,19 +61,26 @@ extern "C" fn jet_jit_web_page(title: i64, body: i64) -> i64 {
     })
 }
 
+/// Entry-boundary adapter for a WebApp returned by `fn run`. The operation is
+/// still the Prelude WebApp `serve` method; this function only supplies the
+/// opaque JIT handle and releases the runtime borrow before the server blocks.
+pub(crate) fn serve_web_app(app: i64) {
+    let app_handle = with_rt(|rt| {
+        rt.web
+            .apps
+            .get(app.saturating_sub(1) as usize)
+            .cloned()
+    })
+    .expect("jit web app: bad handle");
+    app_handle.serve();
+}
+
 extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
     let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
     if method_name == "serve" {
-        let app_handle = with_rt(|rt| {
-            rt.web
-                .apps
-                .get(app.saturating_sub(1) as usize)
-                .cloned()
-        })
-        .expect("jit web app: bad handle");
         // Serving blocks. Keep the resident runtime published, but release its
         // access lock so HTTP worker callbacks can enter Jet one at a time.
-        app_handle.serve();
+        serve_web_app(app);
         return app;
     }
     with_rt(|rt| {
@@ -265,7 +272,6 @@ host_fns! {
     devserver_port: "jet_jit_devserver_port" => jet_jit_devserver_port: binary;
     devserver_serve: "jet_jit_devserver_serve" => jet_jit_devserver_serve: unary_void;
 }
-
 
 
 

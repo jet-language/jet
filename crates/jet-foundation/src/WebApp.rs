@@ -1,6 +1,6 @@
 //! D-WEBAPP1=D / D-WEBAUTHOR1=D: one statically known full-stack application graph.
 //!
-//! Sema evaluates the `fn app()` builder chain into this typed graph. Runtime
+//! Sema evaluates the WebApp-returning `fn run` builder chain into this typed graph. Runtime
 //! registration outside a declared `.mount` is a compile diagnostic. Optional
 //! `.routes(from:)` conventions expand only when the builder opts in.
 

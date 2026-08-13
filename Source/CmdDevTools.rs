@@ -2532,7 +2532,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 
     // Full sema type-check with CompileMode::Eval — runs all type/ownership
-    // checks but relaxes E0122 (run return type) so `pure fn run() => T`
+    // checks and accepts value-returning `pure fn run() => T`
     // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
     // their precise diagnostics rather than falling through to E0956.
     {

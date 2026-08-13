@@ -21,6 +21,19 @@ fn main_returns_default_err(program: &JitProgram) -> bool {
     })
 }
 
+fn main_returns_web_app(program: &JitProgram) -> bool {
+    program.funcs.iter().any(|func| {
+        func.name == program.entry
+            && match &func.ret {
+                Some(Type::Named(name)) => name == "WebApp",
+                Some(Type::Result { ok, .. }) => {
+                    matches!(ok.as_ref(), Type::Named(name) if name == "WebApp")
+                }
+                _ => false,
+            }
+    })
+}
+
 pub(crate) fn fresh_runtime() -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
@@ -211,6 +224,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_returns_web_app = main_returns_web_app(program);
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
         let (mut module, host) = new_jit_module()?;
@@ -226,6 +240,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
                 host,
                 main_id,
                 main_returns_result,
+                main_returns_web_app,
                 main_returns_default_err,
             });
         });
@@ -247,6 +262,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
             )?;
             runtime.snapshot_compile_strings();
             resident.main_returns_result = main_returns_result;
+            resident.main_returns_web_app = main_returns_web_app;
             resident.main_returns_default_err = main_returns_default_err;
             Ok(())
         })
@@ -254,7 +270,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result, main_returns_default_err) = RESIDENT_MODULE
+    let (code, main_returns_result, main_returns_web_app, main_returns_default_err) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -262,6 +278,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                     (
                         r.module.get_finalized_function(r.main_id),
                         r.main_returns_result,
+                        r.main_returns_web_app,
                         r.main_returns_default_err,
                     )
                 })
@@ -278,7 +295,10 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.errors.clear();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
-        let entry_result = if main_returns_result {
+        let entry_app = if main_returns_result {
+            let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
+            Some(entry())
+        } else if main_returns_web_app {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
             Some(entry())
         } else {
@@ -343,29 +363,38 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 exit_code: code,
             });
         }
-        if let Some(handle) = entry_result {
+        if let Some(handle) = entry_app {
             let result = jit_result(runtime, handle)
-                .ok_or_else(|| "jit fallible entry returned invalid Result handle".to_string())?;
-            if !result.ok {
-                let message = if main_returns_default_err {
-                    let error = runtime
-                        .errors
-                        .get((result.bits as i64).saturating_sub(1) as usize)
-                        .ok_or_else(|| "jit fallible entry returned invalid Err handle".to_string())?;
-                    jet_foundation::Outcome::jet_render_err(error)
-                } else {
-                    runtime
-                        .heap
-                        .clone_string(result.bits as i64)
-                        .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
-                };
-                runtime.stderr.push_str(&message);
-                runtime.stderr.push('\n');
-                return Ok(RunOutcome::Ran {
-                    stdout: runtime.stdout.clone(),
-                    stderr: runtime.stderr.clone(),
-                    exit_code: 1,
-                });
+                .filter(|_| main_returns_result);
+            if main_returns_result {
+                let result = result
+                    .ok_or_else(|| "jit fallible entry returned invalid Result handle".to_string())?;
+                if !result.ok {
+                    let message = if main_returns_default_err {
+                        let error = runtime
+                            .errors
+                            .get((result.bits as i64).saturating_sub(1) as usize)
+                            .ok_or_else(|| "jit fallible entry returned invalid Err handle".to_string())?;
+                        jet_foundation::Outcome::jet_render_err(error)
+                    } else {
+                        runtime
+                            .heap
+                            .clone_string(result.bits as i64)
+                            .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
+                    };
+                    runtime.stderr.push_str(&message);
+                    runtime.stderr.push('\n');
+                    return Ok(RunOutcome::Ran {
+                        stdout: runtime.stdout.clone(),
+                        stderr: runtime.stderr.clone(),
+                        exit_code: 1,
+                    });
+                }
+                if main_returns_web_app {
+                    crate::Web::serve_web_app(result.bits as i64);
+                }
+            } else if main_returns_web_app {
+                crate::Web::serve_web_app(handle);
             }
         }
         Ok(RunOutcome::Ran {
@@ -418,6 +447,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_returns_web_app = main_returns_web_app(program);
     let (mut module, host) = new_jit_module()?;
     let mut runtime = RESIDENT_RUNTIME
         .with(|slot| slot.borrow_mut().take())
@@ -455,6 +485,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
             host,
             main_id,
             main_returns_result,
+            main_returns_web_app,
             main_returns_default_err,
         });
     });
@@ -476,6 +507,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });
     let main_returns_default_err = main_returns_default_err(program);
+    let main_returns_web_app = main_returns_web_app(program);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
     RESIDENT_MODULE.with(|slot| {
         *slot.borrow_mut() = Some(ResidentModule {
@@ -483,6 +515,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
             host,
             main_id,
             main_returns_result,
+            main_returns_web_app,
             main_returns_default_err,
         });
     });

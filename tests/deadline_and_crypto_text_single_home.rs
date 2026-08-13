@@ -1,8 +1,7 @@
 //! Card #1660 (D-ONCE-*): the E3003 deadline-exceeded text was hand-typed in
 //! four places (`Prelude/TaskGroup.rs`, `Prelude/CoreLib/Top/MathRandomTime.rs`,
 //! `SchedulerHost.rs` test, `jet-jit/Concurrency.rs`) with two incompatible
-//! `Why:`/`Fix:` spacings, and the E3001 unhandled-crypto text (emitted by
-//! `Codegen/Items.rs`) used a third. All three tiers now materialize the
+//! `Why:`/`Fix:` spacings. All three tiers now materialize the
 //! E3003 row from the one renderer, `TaskGroup::JetTaskDeadline::render`
 //! (`jet_task_deadline(wait_kind).render()`), and both codes share the same
 //! ` Why: … / Fix: …` spacing.
@@ -11,8 +10,7 @@
 //!   - `e3003_why_text_lives_only_in_the_one_renderer`: fails if the E3003
 //!     `why` sentence reappears hand-typed anywhere under `crates/` outside
 //!     `Prelude/TaskGroup.rs`.
-//!   - `e3003_and_e3001_spell_why_and_fix_identically`: both codes' rendered
-//!     `Why:`/`Fix:` lines use the same one-space-then-label convention.
+//!   - the entry codegen has no retired CryptoError-specific arm.
 
 mod common;
 
@@ -62,7 +60,7 @@ fn e3003_why_text_lives_only_in_the_one_renderer() {
 }
 
 #[test]
-fn e3003_and_e3001_spell_why_and_fix_identically() {
+fn e3003_spacing_survives_and_entry_crypto_arm_is_gone() {
     let root = root();
 
     let task_group = fs::read_to_string(root.join(E3003_HOME)).unwrap();
@@ -73,7 +71,8 @@ fn e3003_and_e3001_spell_why_and_fix_identically() {
 
     let items_rs = fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/Items.rs")).unwrap();
     assert!(
-        items_rs.contains("\\\" Why: {{}}\\\"") && items_rs.contains("\\\" Fix: handle the CryptoError"),
-        "E3001 unhandled-crypto emission must keep the same ' Why: … / Fix: …' spacing as E3003"
+        !items_rs.contains("handle the CryptoError")
+            && !items_rs.contains("unhandled cryptographic error"),
+        "entry codegen must not retain the retired CryptoError-specific arm"
     );
 }

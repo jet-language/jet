@@ -31,7 +31,7 @@ fn example_app_hello_graph_records_policy_and_modes() {
         env!("CARGO_MANIFEST_DIR")
     );
     let facts = check_facts(&path);
-    let graph = facts.web_app.expect("fn app() graph");
+    let graph = facts.web_app.expect("fn run() WebApp graph");
     assert!(graph.shared_tir);
     assert_eq!(graph.hydration, "dev-overlay");
     assert_eq!(graph.routes.len(), 1);
@@ -54,8 +54,7 @@ fn routes_from_expands_convention_files() {
         root.join("app.jet"),
         r#"use core.web as web
 fn about_page() => WebPage { return web.page("About", "us") }
-fn app() => WebApp { return web.app().routes(from: "routes").ssr() }
-fn run() {}
+fn run() => WebApp { return web.app().routes(from: "routes").ssr() }
 "#,
     )
     .unwrap();
@@ -89,8 +88,7 @@ fn collision_and_stray_and_dynamic_diagnose() {
         root.join("collision.jet"),
         r#"use core.web as web
 fn home() => WebPage { return web.page("h", "b") }
-fn app() => WebApp { return web.app().route("/", home).routes(from: "routes").csr() }
-fn run() {}
+fn run() => WebApp { return web.app().route("/", home).routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -100,8 +98,7 @@ fn run() {}
     fs::write(
         root.join("stray.jet"),
         r#"use core.web as web
-fn app() => WebApp { return web.app().routes(from: "routes").csr() }
-fn run() {}
+fn run() => WebApp { return web.app().routes(from: "routes").csr() }
 "#,
     )
     .unwrap();
@@ -112,10 +109,9 @@ fn run() {}
         root.join("dynamic.jet"),
         r#"use core.web as web
 fn pick() => Int { return 1 }
-fn app() => WebApp {
+fn run() => WebApp {
     return web.app().route("/", pick()).csr()
 }
-fn run() {}
 "#,
     )
     .unwrap();
@@ -133,7 +129,7 @@ fn render_modes_mount_island_and_shared_tir() {
 fn home() => WebPage { return web.page("H", "b") }
 fn dash() => WebPage { return web.page("D", "b") }
 fn plugins(prefix: String) {}
-fn app() => WebApp {
+fn run() => WebApp {
     return web.app()
         .route("/", home)
         .ssg()
@@ -146,7 +142,6 @@ fn app() => WebApp {
         .split("dash")
         .hydration_release()
 }
-fn run() {}
 "#,
     )
     .unwrap();

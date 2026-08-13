@@ -389,40 +389,7 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
-        let source = std::fs::read_to_string(file).ok();
-        let web_entry = source.as_ref().and_then(|source| {
-            let (tokens, diagnostics) = crate::Lexer::lex(source);
-            if !diagnostics.is_empty() {
-                return None;
-            }
-            let program = crate::Parser::parse(&tokens).ok()?;
-            let has_app = program.items.iter().any(|item| {
-                matches!(
-                    item,
-                    crate::AST::Item::Func(function)
-                        if function.name == "app"
-                            && matches!(
-                                function.return_type.as_ref(),
-                                Some(crate::AST::Type::Named(name)) if name == "WebApp"
-                            )
-                )
-            });
-            let has_run = !program.script_body.is_empty()
-                || program.items.iter().any(
-                    |item| matches!(item, crate::AST::Item::Func(function) if function.name == "run"),
-                );
-            (has_app && !has_run)
-                .then(|| format!("{source}\nfn run() {{ app().serve() }}\n"))
-        });
-        let overlay_path = std::fs::canonicalize(file).unwrap_or_else(|_| {
-            std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .join(file)
-        });
-        let overlay = web_entry
-            .as_deref()
-            .map(|source| (overlay_path.as_path(), source));
-        match crate::Loader::load_entry_with_overlay(file, overlay, false) {
+        match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);

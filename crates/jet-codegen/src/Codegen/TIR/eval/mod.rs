@@ -3049,6 +3049,25 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
+fn returns_web_app(ty: Option<&Type>) -> bool {
+    match ty {
+        Some(Type::Named(name)) => name == "WebApp",
+        Some(Type::Result { ok, .. }) => {
+            matches!(ok.as_ref(), Type::Named(name) if name == "WebApp")
+        }
+        _ => false,
+    }
+}
+
+fn serve_entry_value(ctx: &mut EvalCtx<'_>, value: CtValue) -> Result<CtValue, Diagnostic> {
+    match value {
+        CtValue::Failed(report) => Ok(CtValue::Failed(report)),
+        CtValue::Present(app) => ctx.eval_web_app_method(&app, "serve", Vec::new()),
+        app @ CtValue::Struct { .. } => ctx.eval_web_app_method(&app, "serve", Vec::new()),
+        _ => Err(unsupported("WebApp entry value", ctx.span())),
+    }
+}
+
 fn struct_metadata_keys(
     bundle: &ProgramBundle,
     owner_idx: usize,
@@ -3365,7 +3384,14 @@ fn run_program_with_structs_on_stack(
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
-    let result = ctx.with_task_dispatcher(|ctx| ctx.run_func(entry, Vec::new(), &mut scope));
+    let result = ctx.with_task_dispatcher(|ctx| {
+        let result = ctx.run_func(entry, Vec::new(), &mut scope);
+        if returns_web_app(entry.ret.as_ref()) {
+            result.and_then(|value| serve_entry_value(ctx, value))
+        } else {
+            result
+        }
+    });
     *sink = std::mem::take(
         &mut *shared_sink.lock().expect("evaluator sink poisoned"),
     );

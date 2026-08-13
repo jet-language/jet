@@ -1,4 +1,4 @@
-//! D-WEBAPP1=D / D-WEBAUTHOR1=D: extract the `fn app()` builder into one typed
+//! D-WEBAPP1=D / D-WEBAUTHOR1=D: extract the `fn run` WebApp builder into one typed
 //! application graph and diagnose undeclared dynamic edges, stray convention
 //! files, and builder/file collisions.
 
@@ -11,12 +11,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// Walk the entry module for `fn app()` and record the static builder graph.
+/// Walk the entry module for the WebApp-returning `fn run` and record the static
+/// builder graph.
 pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Vec<Diagnostic>) {
     let Some(module) = bundle.modules.get(bundle.entry) else {
         return (None, Vec::new());
     };
-    let Some(app_fn) = find_app_fn(&module.items) else {
+    let Some(run_fn) = find_web_app_run_fn(&module.items) else {
         return (None, Vec::new());
     };
 
@@ -34,7 +35,7 @@ pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Ve
     let mut current_render = WebRenderMode::Csr;
     let mut seen_paths: HashMap<String, (String, Span)> = HashMap::new();
 
-    for stmt in &app_fn.body {
+    for stmt in &run_fn.body {
         if let Some(expr) = stmt_expr(stmt) {
             walk_builder(
                 expr,
@@ -64,13 +65,15 @@ pub fn extract_web_app_graph(bundle: &ProgramBundle) -> (Option<WebAppGraph>, Ve
     (Some(graph), diags)
 }
 
-fn find_app_fn(items: &[Item]) -> Option<&crate::AST::Func> {
+fn find_web_app_run_fn(items: &[Item]) -> Option<&crate::AST::Func> {
     for item in items {
         match item {
-            Item::Func(f) if f.name == "app" => return Some(f),
+            Item::Func(f) if f.name == "run" && returns_web_app(f.return_type.as_ref()) => {
+                return Some(f)
+            }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
-                    if let Some(f) = find_app_fn(body) {
+                    if let Some(f) = find_web_app_run_fn(body) {
                         return Some(f);
                     }
                 }
@@ -79,6 +82,16 @@ fn find_app_fn(items: &[Item]) -> Option<&crate::AST::Func> {
         }
     }
     None
+}
+
+fn returns_web_app(ty: Option<&crate::AST::Type>) -> bool {
+    match ty {
+        Some(crate::AST::Type::Named(name)) => name == "WebApp",
+        Some(crate::AST::Type::Result { ok, .. }) => {
+            matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "WebApp")
+        }
+        _ => false,
+    }
 }
 
 fn collect_fn_names(items: &[Item]) -> Vec<String> {

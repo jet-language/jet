@@ -5210,11 +5210,19 @@ relabeling stored bytes.
 #### Full-stack web, compute, and services
 
 **D-WEBAPP1=D — one sema-known application graph**: sema evaluates the
-statically evaluable `fn app()` builder chain into one typed graph. Runtime
+statically evaluable WebApp-returning `fn run` builder chain into one typed graph. Runtime
 registration outside a declared typed `.mount` is a compile diagnostic. Mounts
 keep prefix, effects, and security policy static. Browser/server partition,
 hydration mismatch, executable TIR, and generated-source re-entry laws apply;
 `jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
+
+**D-ENTRY-VALUE1=B — the entry returns the program** *(card #1446)*: `fn run`
+is the one entry. Its return type says what the program is. No return means a
+script that executes and exits. Returning the App-family value, today spelled
+`WebApp`, serves that value at the runtime edge; `jet dev` serves the same value
+with watch, reload, and hot swap. An explicit `fn dev()` remains the expert
+override. The hidden app-name convention, synthesized `run` overlay, and
+run/app/dev precedence table are deleted.
 
 **D-WEBAUTHOR1=D — explicit builder with opt-in conventions**: the builder is
 always canonical and one file remains complete. File routing activates only
