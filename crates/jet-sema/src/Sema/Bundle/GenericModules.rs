@@ -507,6 +507,7 @@ struct TemplateInfo {
     source_items: Vec<Item>,
     source_values: HashMap<String, crate::AST::CtValue>,
     source_rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+    build_facts: jet_foundation::Facts::BuildFactSnapshot,
 }
 
 fn collect_generic_module_spans(
@@ -617,6 +618,7 @@ fn expand_nested_generics_in_code_module(
     application_module: &str,
     enclosing_full_key: &[u8],
     inherited_values: &HashMap<String, crate::AST::CtValue>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     source_rule_facts: &[crate::AST::AppliedRuleApplication],
     generated_rule_facts: &mut Vec<crate::AST::AppliedRuleApplication>,
     diags: &mut Vec<Diagnostic>,
@@ -640,6 +642,7 @@ fn expand_nested_generics_in_code_module(
             application_module,
             &scope_full_key,
             inherited_values,
+            build_facts,
             source_rule_facts,
             generated_rule_facts,
             diags,
@@ -690,7 +693,15 @@ fn expand_nested_generics_in_code_module(
     for item in items.iter() {
         let Item::Const(def) = item else { continue };
         if let Some(value) = def.ct.clone().or_else(|| {
-            crate::Comptime::evaluate(&def.value, &funcs, &HashSet::new(), Path::new("."), &values).ok()
+            crate::Comptime::evaluate_closed_value(
+                &def.value,
+                &funcs,
+                &HashSet::new(),
+                Path::new("."),
+                &values,
+                build_facts,
+            )
+            .ok()
         }) {
             values.insert(def.name.clone(), value);
         }
@@ -707,6 +718,7 @@ fn expand_nested_generics_in_code_module(
             source_items: Vec::new(),
             source_values: values.clone(),
             source_rule_facts: source_rule_facts.to_vec(),
+            build_facts: build_facts.clone(),
         })
     }).collect();
     let aliases: HashMap<String, &ModuleAliasDef> = alias_defs.iter()
@@ -740,7 +752,7 @@ fn expand_nested_generics_in_code_module(
             invalid_aliases.insert(nested_alias.name.clone());
             continue;
         };
-        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, &enums, diags) else {
+        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, build_facts, &enums, diags) else {
             invalid_aliases.insert(nested_alias.name.clone());
             continue;
         };
@@ -757,6 +769,7 @@ fn expand_nested_generics_in_code_module(
         let canonical = if let Some(canonical) = instances.get(&key) {
             canonical.clone()
         } else {
+            let identity_args = args.clone();
             let Some(mut expansion) = expand_alias(
                 &resolved,
                 consumer_module,
@@ -767,13 +780,14 @@ fn expand_nested_generics_in_code_module(
                 &traits,
                 &funcs,
                 &values,
+                build_facts,
                 &enums,
                 instances,
                 fingerprints,
                 applications,
                 Some(args),
             ) else { continue };
-            let identity = instance_identity(&key, info, &resolved, application_module);
+            let identity = instance_identity(&key, info, &resolved, application_module, &identity_args);
             register_instance_fingerprint(fingerprints, &identity, resolved.span);
             expansion.module.instance_identity = Some(identity);
             instances.insert(key, resolved.name.clone());
@@ -1069,6 +1083,7 @@ fn instance_identity(
     template: &TemplateInfo,
     alias: &ModuleAliasDef,
     source_module: &str,
+    args: &[ResolvedModuleArg],
 ) -> crate::AST::ModuleInstanceIdentity {
     let full_key = key.bytes();
     let fingerprint = crate::SHA256::sha256_hex(&full_key);
@@ -1077,6 +1092,12 @@ fn instance_identity(
         full_key,
         definition_id: template.definition_id.clone(),
         argument_keys: key.args.clone(),
+        argument_values: args.iter().map(resolved_argument_value).collect(),
+        argument_provenance: alias
+            .args
+            .iter()
+            .map(|arg| argument_provenance(arg, template))
+            .collect(),
         template_span: template.def.span,
         applications: vec![crate::AST::ModuleInstanceApplication {
             name: alias.name.clone(),
@@ -1084,6 +1105,42 @@ fn instance_identity(
             semantic_identity: format!("instance:{fingerprint}"),
             span: alias.name_span,
         }],
+    }
+}
+
+fn resolved_argument_value(arg: &ResolvedModuleArg) -> String {
+    match arg {
+        ResolvedModuleArg::Type(ty) => format!("type:{}", type_name(ty)),
+        ResolvedModuleArg::Value(value, _) => format!("value:{}", value.jet_show()),
+    }
+}
+
+fn argument_provenance(arg: &ModuleArg, template: &TemplateInfo) -> Vec<String> {
+    let ModuleArg::Value(expr, _) = arg else {
+        return vec!["type argument".to_string()];
+    };
+    let Some(path) = module_expr_path(expr) else {
+        return vec!["closed value expression".to_string()];
+    };
+    if let Some(name) = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
+        let mut sources = template
+            .build_facts
+            .setting_provenance
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        sources.push(format!("argument:{path}"));
+        return sources;
+    }
+    vec![format!("argument:{path}")]
+}
+
+fn module_expr_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
+        Expr::Field(base, member, _) => Some(format!("{}.{}", module_expr_path(base)?, member)),
+        Expr::Paren(inner, _) => module_expr_path(inner),
+        _ => None,
     }
 }
 
@@ -1206,6 +1263,7 @@ fn resolve_args(
     traits: &TraitRegistry,
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::AST::CtValue>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     enums: &HashMap<String, bool>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Vec<ResolvedModuleArg>> {
@@ -1254,12 +1312,13 @@ fn resolve_args(
                     ));
                     return None;
                 };
-                let value = match crate::Comptime::evaluate(
+                let value = match crate::Comptime::evaluate_closed_value(
                     &expr,
                     funcs,
                     &HashSet::new(),
                     Path::new("."),
                     globals,
+                    build_facts,
                 ) {
                     Ok(value) => value,
                     Err(_) => {
@@ -1268,7 +1327,7 @@ fn resolve_args(
                             format!("value argument for `{name}` is not known at compile time"),
                             "generic module instances need one closed, deterministic Tier-0 value"
                                 .to_string(),
-                            format!("pass a literal or comptime `{}` value", type_name(ty)),
+                            format!("pass a literal, a `@build.*` fact, or a comptime `{}` value", type_name(ty)),
                             Some(arg.span()),
                         ));
                         return None;
@@ -1314,6 +1373,7 @@ fn expand_alias(
     traits:&TraitRegistry,
     funcs:&HashMap<String,&Func>,
     globals:&HashMap<String,crate::AST::CtValue>,
+    build_facts:&jet_foundation::Facts::BuildFactSnapshot,
     enums:&HashMap<String,bool>,
     instances: &mut HashMap<ModuleInstanceKey, String>,
     fingerprints: &mut HashMap<String, Vec<u8>>,
@@ -1369,7 +1429,7 @@ fn expand_alias(
     }
     let resolved_args = match resolved_args {
         Some(args) => args,
-        None => resolve_args(alias, info, traits, funcs, globals, enums, diags)?,
+        None => resolve_args(alias, info, traits, funcs, globals, build_facts, enums, diags)?,
     };
     let mut type_args = HashMap::new();
     let mut value_args = HashMap::new();
@@ -1476,12 +1536,13 @@ fn expand_alias(
         // before ordinary item registration, so dropping this result leaves
         // the later comptime context unable to resolve an earlier `@` binding.
         let evaluated = source.ct.clone().or_else(|| {
-            crate::Comptime::evaluate(
+            crate::Comptime::evaluate_closed_value(
                 &value,
                 funcs,
                 &HashSet::new(),
                 Path::new("."),
                 &definition_values,
+                build_facts,
             )
             .ok()
         });
@@ -1586,6 +1647,7 @@ fn expand_alias(
                 application_module,
                 instance_full_key,
                 &definition_values,
+                &info.build_facts,
                 &info.source_rule_facts,
                 &mut rule_facts,
                 diags,
@@ -1661,7 +1723,8 @@ fn expand_alias(
             (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
                                 params: resolve_params(def, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone(),
-                source_rule_facts: info.source_rule_facts.clone() })
+                source_rule_facts: info.source_rule_facts.clone(),
+                build_facts: info.build_facts.clone() })
         }).collect();
         let nested_alias_defs: Vec<ModuleAliasDef> = template.body.iter().filter_map(|item| {
             let Item::ModuleAlias(def) = item else { return None };
@@ -1682,6 +1745,7 @@ fn expand_alias(
                 &nested_traits,
                 &nested_funcs,
                 &definition_values,
+                &info.build_facts,
                 &nested_enums,
                 diags,
             ) else { continue };
@@ -1704,14 +1768,16 @@ fn expand_alias(
                 );
                 continue;
             }
+            let identity_args = args.clone();
             if let Some(mut expansion) = expand_alias(&resolved_alias, consumer_module, application_module, &key.bytes(), &nested_templates,
-                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums,
+                diags, &nested_traits, &nested_funcs, &definition_values, &info.build_facts, &nested_enums,
                 instances, fingerprints, applications, Some(args)) {
                 let identity = instance_identity(
                     &key,
                     nested_info,
                     &resolved_alias,
                     application_module,
+                    &identity_args,
                 );
                 register_instance_fingerprint(
                     fingerprints,
@@ -1930,6 +1996,7 @@ pub(crate) fn expand_generic_module_aliases(
     bundle: &mut ProgramBundle,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let build_facts = bundle.build_facts.clone();
     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
         .modules
         .iter()
@@ -1964,12 +2031,13 @@ pub(crate) fn expand_generic_module_aliases(
             {
                 for item in &module.items {
                     if let Item::Const(def) = item {
-                        if let Ok(value) = crate::Comptime::evaluate(
+                        if let Ok(value) = crate::Comptime::evaluate_closed_value(
                             &def.value,
                             &funcs,
                             &HashSet::new(),
                             Path::new("."),
                             &source_values,
+                            &build_facts,
                         ) {
                             source_values.insert(def.name.clone(), value);
                         }
@@ -1997,6 +2065,7 @@ pub(crate) fn expand_generic_module_aliases(
                                 source_items: clone_definition_items(&source_items),
                                 source_values: source_values.clone(),
                                 source_rule_facts: module.rule_facts.clone(),
+                                build_facts: build_facts.clone(),
                             },
                         ))
                     }
@@ -2060,7 +2129,14 @@ pub(crate) fn expand_generic_module_aliases(
         if module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))) {
             for item in &module.items {
                 if let Item::Const(c)=item {
-                    if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals) {
+                    if let Ok(value)=crate::Comptime::evaluate_closed_value(
+                        &c.value,
+                        &funcs,
+                        &HashSet::new(),
+                        Path::new("."),
+                        &globals,
+                        &build_facts,
+                    ) {
                         globals.insert(c.name.clone(),value);
                     }
                 }
@@ -2185,7 +2261,7 @@ pub(crate) fn expand_generic_module_aliases(
                     invalid_aliases.insert(alias.name.clone());
                     continue;
                 };
-                let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &globals, &enums, diags) else {
+                let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &globals, &build_facts, &enums, diags) else {
                     invalid_aliases.insert(alias.name.clone());
                     continue;
                 };
@@ -2205,6 +2281,7 @@ pub(crate) fn expand_generic_module_aliases(
                     }
                     continue;
                 }
+                let identity_args = args.clone();
                 if let Some(mut cm) = expand_alias(
                     &resolved,
                     module_idx,
@@ -2215,13 +2292,14 @@ pub(crate) fn expand_generic_module_aliases(
                     &traits,
                     &funcs,
                     &globals,
+                    &build_facts,
                     &enums,
                     &mut bundle_instances,
                     &mut fingerprint_keys,
                     &mut instance_applications,
                     Some(args),
                 ) {
-                    let identity = instance_identity(&key, info, &resolved, &module.display);
+                    let identity = instance_identity(&key, info, &resolved, &module.display, &identity_args);
                     register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);
                     bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {
@@ -2433,7 +2511,7 @@ mod instance_collision_tests {
     #[should_panic(expected = "internal compiler error: E0859 generic module instance fingerprint collision")]
     fn different_full_keys_with_same_digest_fail_closed_before_codegen() {
         let mut registry = HashMap::new();
-        let make = |full_key| crate::AST::ModuleInstanceIdentity { full_key, fingerprint: "forced-digest".into(), definition_id: "def".into(), argument_keys: Vec::new(), template_span: Span::new(0, 0), applications: Vec::new() };
+        let make = |full_key| crate::AST::ModuleInstanceIdentity { full_key, fingerprint: "forced-digest".into(), definition_id: "def".into(), argument_keys: Vec::new(), argument_values: Vec::new(), argument_provenance: Vec::new(), template_span: Span::new(0, 0), applications: Vec::new() };
         let first = make(vec![1]);
         let second = make(vec![2]);
         register_instance_fingerprint(&mut registry, &first, Span::new(1, 2));

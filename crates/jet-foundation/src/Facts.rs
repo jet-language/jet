@@ -39,6 +39,12 @@ pub struct BuildFactSnapshot {
     /// Resolved contribution chains used by `jet explain`; fact readers still
     /// consume the folded fields above.
     pub contributions: BTreeMap<String, crate::Policy::EffectiveFact>,
+    /// D-CONF-MODULE1=A: effective declared settings for the selected build
+    /// profile. The map is a folded input, not an engine-visible lookup.
+    pub settings: BTreeMap<String, BuildFactValue>,
+    /// The contribution chain for each effective setting, kept beside the
+    /// value so semantic tools can explain a specialized argument.
+    pub setting_provenance: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for BuildFactSnapshot {
@@ -50,6 +56,8 @@ impl Default for BuildFactSnapshot {
             profile: "dev".to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
+            settings: BTreeMap::new(),
+            setting_provenance: BTreeMap::new(),
         }
     }
 }
@@ -71,11 +79,18 @@ impl BuildFactSnapshot {
             profile: profile.to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
+            settings: BTreeMap::new(),
+            setting_provenance: BTreeMap::new(),
         }
     }
 
     pub fn contribution(&self, name: &str) -> Option<&crate::Policy::EffectiveFact> {
         self.contributions.get(name)
+    }
+
+    /// Resolve one declared setting from the already-seeded build snapshot.
+    pub fn setting_value(&self, name: &str) -> Option<BuildFactValue> {
+        self.settings.get(name).cloned()
     }
 
     /// Resolve a registered build leaf into a value shape. The registry owns
@@ -116,6 +131,9 @@ pub enum BuildFactValue {
     Text(String),
     OptionalText(Option<String>),
     Bool(bool),
+    Int(i64),
+    Char(char),
+    Enum { type_name: String, variant: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

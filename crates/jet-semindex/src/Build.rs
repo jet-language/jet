@@ -207,6 +207,8 @@ impl SymbolDB {
                 template_definition_id: identity.definition_id.clone(),
                 template_span: identity.template_span.into(),
                 arguments: identity.argument_keys.iter().map(|key| key.iter().map(|byte| format!("{byte:02x}")).collect()).collect(),
+                argument_values: identity.argument_values.clone(),
+                argument_provenance: identity.argument_provenance.clone(),
                 applications: identity.applications.iter().map(|application| InstanceApplicationFact {
                     name: application.name.clone(),
                     module_path: application.source_module.clone(),

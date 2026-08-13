@@ -62,6 +62,32 @@ impl<'a> Checker<'a> {
                 };
                 return Some(Some(ty));
             }
+            if let Some(name) = path.strip_prefix(Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
+                let snapshot = self
+                    .modules
+                    .and_then(|modules| modules.get(self.module_idx))
+                    .map(|state| &state.build_facts);
+                let Some(snapshot) = snapshot else {
+                    return Some(None);
+                };
+                let Some(value) = crate::Comptime::build_setting_value(snapshot, name) else {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!("`{path}` has no declared value"),
+                        "settings are typed build facts from the selected profile".to_string(),
+                        "declare the setting and provide a default or profile contribution".to_string(),
+                        Some(*span),
+                    ));
+                    return Some(None);
+                };
+                let ty = value.jet_type();
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span: *span,
+                    value: Some(value),
+                };
+                return Some(Some(ty));
+            }
         }
         let is_build_subject =
             matches!(&**inner, Expr::ComptimeName { name, .. } if name == "@build");

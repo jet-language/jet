@@ -400,19 +400,20 @@ fn checked_bundle(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    checked_bundle_with_entry(file, gates, None)
+    checked_bundle_with_entry(file, gates, None, "dev")
 }
 
 fn checked_bundle_with_entry(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
     entry_fn: Option<&str>,
+    profile: &str,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
-                if let Err(diags) = crate::Driver::seed_build_facts(&mut bundle, "dev", false) {
+                if let Err(diags) = crate::Driver::seed_build_facts(&mut bundle, profile, false) {
                     return Err(diags);
                 }
                 if let Some(entry_fn) = entry_fn {
@@ -550,7 +551,7 @@ pub fn run_jit_once_with_args_opts_and_gates(
             return outcome;
         }
     }
-    match checked_bundle_with_entry(file, gates, requested) {
+    match checked_bundle_with_entry(file, gates, requested, "dev") {
         Ok(bundle) => {
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
@@ -595,6 +596,15 @@ pub fn run_interpreter_once_with_args_and_gates(
     program_args: &[&str],
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
+    run_interpreter_once_with_args_and_gates_profile(file, program_args, gates, "dev")
+}
+
+pub fn run_interpreter_once_with_args_and_gates_profile(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+) -> RunOutcome {
     crate::RunCache::reset_phases();
     if let Some(outcome) = job_help_if_requested(file, program_args, gates) {
         return outcome;
@@ -603,7 +613,7 @@ pub fn run_interpreter_once_with_args_and_gates(
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
         let requested = requested_job(program_args);
-        let outcome = match checked_bundle_with_entry(file, gates, requested) {
+        let outcome = match checked_bundle_with_entry(file, gates, requested, profile) {
             Ok(bundle) => {
                 let selected = selected_job(&bundle, requested);
                 let runtime_args = if selected.is_some() {
@@ -642,10 +652,20 @@ pub fn dev_iteration_with_gates(
     use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
+    dev_iteration_with_gates_profile(file, try_anyway, use_interpreter, gates, "dev")
+}
+
+pub fn dev_iteration_with_gates_profile(
+    file: &str,
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+) -> RunOutcome {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle(file, gates) {
+        let outcome = match checked_bundle_with_entry(file, gates, None, profile) {
             Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
             Err(diags) => RunOutcome::Problems(diags),
         };

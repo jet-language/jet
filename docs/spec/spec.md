@@ -1976,7 +1976,9 @@ module int_cache :: cache<Int>(64)
 
 Value parameters are immutable Tier-0 comptime `Bool`, `Int`, `Char`, `String`,
 or fieldless-enum values (D-GENMOD-VALUE1=A). The compiler evaluates and
-normalizes each value before specialization. `Int` parameters may appear in the
+normalizes each closed expression before specialization. Registered build facts
+such as `@build.settings.cache_slots` are legal leaves in that expression and
+use the same fuel-limited evaluator as other Tier-0 values. `Int` parameters may appear in the
 generic-module-only fixed-list layout form `[T#capacity]`. Value argument types
 must match exactly; E0853 reports a mismatch.
 
@@ -1995,12 +1997,11 @@ a different instance.
 **Implementation status:** parser, sema, and codegen specialize full module
 bodies across same-file and imported templates. Type/value substitution,
 definition-site capture, bounds, cycles, applicative identity, stable instance
-fingerprints, semindex/LSP identity, and fail-closed E0859 collision handling
-are implemented. E0850–E0853 and E0855–E0857 reject invalid targets, arity,
+fingerprints, build-fact settings/provenance, semindex/LSP identity, and
+fail-closed E0859 collision handling are implemented. E0850–E0853 and E0855–E0857 reject invalid targets, arity,
 bounds, value kinds/types, scope, and cycles in sema before codegen. Remaining
-card work is the final executable acceptance matrix and documentation/example
-closure; package-cache and cross-toolchain proof is tracked separately by the
-card's later criteria.
+acceptance is covered by `examples/features/modules/fact_value_arguments.jet`
+and its profile settings manifest.
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
 

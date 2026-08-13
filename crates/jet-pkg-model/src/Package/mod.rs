@@ -196,9 +196,9 @@ pub struct PackageFacts {
     pub grants: Vec<(String, Vec<String>)>,
     /// D-POLICY-WORD1=A: the one governance namespace (`policy: .{ … }`).
     pub policy: PackagePolicy,
-    /// D-CONF-NAME1: typed settings declared in `settings: .{ … }`. Stored
-    /// structurally; runtime `@build.settings.*` reads are a separate,
-    /// unratified ballot (D-CONF-KEY1) and are not wired here.
+    /// D-CONF-MODULE1=A: typed settings declared in `settings: .{ … }`.
+    /// The driver resolves their effective profile values into the shared
+    /// build-fact snapshot.
     pub settings: BTreeMap<String, SettingDecl>,
     pub configs: Vec<String>,
     /// Resolved file-backed Config paths. These are relative to the Package
@@ -235,9 +235,8 @@ pub struct PackagePolicy {
     pub lints_deny: Option<Vec<String>>,
 }
 
-/// D-CONF-NAME1: one declared `settings:` entry — a name, a Tier-0 type, and
-/// an optional default. Structural only in this card; typed reads and
-/// `--set`/profile contribution are D-CONF-KEY1/D-CONF-READ1 (unratified).
+/// D-CONF-MODULE1=A: one declared `settings:` entry — a name, a Tier-0 type,
+/// and an optional default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingDecl {
     pub ty: String,
@@ -371,7 +370,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};configs={:?};members={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};configs={:?};settings={:?};build_profiles={:?};members={:?};",
             self.name,
             self.version,
             self.jet,
@@ -382,6 +381,8 @@ impl PackageFacts {
             self.environments,
             self.defaults,
             self.configs,
+            self.settings,
+            self.build_profiles,
             self.members,
         )
         .expect("writing to a String cannot fail");

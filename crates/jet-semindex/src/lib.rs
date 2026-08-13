@@ -196,6 +196,26 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     Err(SemIndexError::Load(diags))
 }
 
+/// Load, check, and build the semantic index with one selected build profile.
+/// This keeps profile-sensitive specialization in the same Driver → sema path
+/// used by compilation while giving explain tooling the matching snapshot.
+pub fn open_with_profile(entry: &Path, profile: &str) -> Result<SemIndex, SemIndexError> {
+    let entry_str = entry.to_string_lossy();
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_effect_facts_profile(&entry_str, None, false, profile);
+    if !diags
+        .iter()
+        .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
+    {
+        if let Some(bundle) = bundle {
+            let mut index = build_index(&bundle, &facts);
+            attach_package_facts(&mut index, entry)?;
+            return Ok(index);
+        }
+    }
+    Err(SemIndexError::Load(diags))
+}
+
 /// Load, check, and build consumer-neutral symbol facts for docs/completion/help.
 pub fn open_symbols(entry: &Path) -> Result<SemanticSymbolIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
@@ -304,7 +324,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 13);
+        assert_eq!(SCHEMA_VERSION, 14);
     }
 
     #[test]

@@ -544,6 +544,7 @@ pub const BUILD_FIELD_SMALL: &str = "small"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_PANIC: &str = "panic"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_FEATURES: &str = "features"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_ENV: &str = "env"; // D-BUILDPROFILE1
+pub const BUILD_FIELD_SETTINGS: &str = "settings"; // D-CONF-MODULE1
 /// D-BUILDSCOPE1=A: standing programmable-build authority grant.
 pub const BUILD_FIELD_ALLOW: &str = "allow";
 

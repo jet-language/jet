@@ -238,7 +238,7 @@ fn expand_json_is_canonical_and_lens_scoped() {
     assert_eq!(first.stdout, second.stdout, "expand JSON must be byte-stable");
     let stdout = String::from_utf8_lossy(&first.stdout);
     assert!(stdout.starts_with('{'), "JSON mode must not print human headers: {stdout}");
-    assert!(stdout.contains("\"schema_version\":13"), "must reuse semindex schema: {stdout}");
+    assert!(stdout.contains("\"schema_version\":14"), "must reuse semindex schema: {stdout}");
     assert!(stdout.contains("\"expand\":{\"selection\":\"inline\""), "missing expand projection: {stdout}");
     assert!(stdout.contains("\"contract\":\"#Inline"), "inline facts missing: {stdout}");
     assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");

@@ -169,6 +169,12 @@ pub struct ModuleInstanceIdentity {
     pub fingerprint: String,
     pub definition_id: String,
     pub argument_keys: Vec<Vec<u8>>,
+    /// Human-readable normalized values for tooling. Identity still uses the
+    /// framed bytes above; these fields never participate in dispatch.
+    pub argument_values: Vec<String>,
+    /// D-CONF-MODULE1=A: source chain for each argument, including the
+    /// selected profile and declared setting when a build fact supplied it.
+    pub argument_provenance: Vec<Vec<String>>,
     pub template_span: Span,
     pub applications: Vec<ModuleInstanceApplication>,
 }

@@ -65,7 +65,7 @@ pub use EventLite::{
     core_event_policy_sync, core_event_scope, core_event_with_policy,
     eval_method as eval_event_method, reset as reset_event_lite,
 };
-pub use Reflect::{build_fact_value, fact_read_value};
+pub use Reflect::{build_fact_value, build_setting_value, fact_read_value};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -703,6 +703,105 @@ pub fn evaluate(
         globals,
         &HashMap::new(),
     )
+}
+
+/// D-CONF-MODULE1=A: the one closed-value evaluator for settings and generic
+/// module value arguments. Build facts are folded into ordinary literals
+/// before the existing fuel-limited Tier-0 evaluator runs, so arithmetic,
+/// bindings, calls, purity, and fuel keep one semantic path.
+pub fn evaluate_closed_value(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+) -> Result<CtValue, Diagnostic> {
+    evaluate_closed_value_with_imports_opts_collecting_structs(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        &HashMap::new(),
+        jet_foundation::Policy::GateSet::default(),
+        0,
+        &HashMap::new(),
+        None,
+        build_facts,
+    )
+    .map(|(value, _)| value)
+}
+
+/// D-CONF-MODULE1=A: the settings evaluator is also the definition-side
+/// comptime evaluator. Its optional collection arguments preserve the normal
+/// build-time I/O evidence path while the fact leaves are folded first.
+pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &'a Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    gates: jet_foundation::Policy::GateSet,
+    initial_impure_depth: usize,
+    structs: &HashMap<String, &'a StructDef>,
+    mutated: Option<&mut HashMap<String, CtValue>>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+    let closed = fold_build_facts(init, build_facts);
+    evaluate_with_imports_opts_collecting_structs(
+        &closed,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        gates,
+        initial_impure_depth,
+        structs,
+        mutated,
+    )
+}
+
+fn fold_build_facts(
+    init: &crate::AST::Expr,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+) -> crate::AST::Expr {
+    let mut closed = init.clone();
+    closed.for_each_expr_mut(|expr| {
+        let Some(value) = fact_read_value(expr, &[], build_facts) else {
+            return;
+        };
+        let span = expr.span();
+        if let Some(literal) = build_fact_expr(value, span) {
+            *expr = literal;
+        }
+    });
+    closed
+}
+
+fn build_fact_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
+    Some(match value {
+        CtValue::Bool(value) => crate::AST::Expr::Bool(value, span),
+        CtValue::Int(value) => crate::AST::Expr::Int(value, span, None, None),
+        CtValue::Char(value) => crate::AST::Expr::Char(value, span),
+        CtValue::Str(value) => {
+            crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value)], span)
+        }
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if args.is_empty() => crate::AST::Expr::EnumLit {
+            type_name,
+            variant,
+            args: Vec::new(),
+            leading_dot: false,
+            span,
+        },
+        _ => return None,
+    })
 }
 
 /// Like `evaluate` but with module aliases for effect-approved Core calls.

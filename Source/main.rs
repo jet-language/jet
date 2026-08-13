@@ -12,6 +12,7 @@ use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+use std::collections::BTreeMap;
 
 use jet::Diagnostics::{ColorChoice, Diagnostic};
 use jet::ExitCodes;
@@ -53,7 +54,7 @@ use CmdDevTools::{
     run_eval, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
     BenchRunOpts,
 };
-use CmdDossier::run_dossier;
+use CmdDossier::{run_dossier, run_module_explain};
 use CmdExpand::run_expand;
 use CmdImpact::run_impact;
 use CmdPkg::{
@@ -247,6 +248,7 @@ pub(crate) struct ProfileConfig {
     pub panic_abort: bool,
     pub features: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub settings: BTreeMap<String, String>,
 }
 
 impl ProfileConfig {
@@ -258,6 +260,7 @@ impl ProfileConfig {
             panic_abort: false,
             features: Vec::new(),
             env: Vec::new(),
+            settings: BTreeMap::new(),
         }
     }
 
@@ -269,6 +272,7 @@ impl ProfileConfig {
             panic_abort: false,
             features: Vec::new(),
             env: Vec::new(),
+            settings: BTreeMap::new(),
         }
     }
 
@@ -280,6 +284,7 @@ impl ProfileConfig {
             panic_abort: false,
             features: Vec::new(),
             env: Vec::new(),
+            settings: BTreeMap::new(),
         }
     }
 
@@ -292,6 +297,7 @@ impl ProfileConfig {
             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
             features: def.features.clone(),
             env: def.env.clone(),
+            settings: def.settings.clone(),
         }
     }
 
@@ -318,6 +324,16 @@ impl ProfileConfig {
                 "env:{}",
                 env.iter()
                     .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                .join(",")
+            ));
+        }
+        if !self.settings.is_empty() {
+            parts.push(format!(
+                "settings:{}",
+                self.settings
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
                     .collect::<Vec<_>>()
                     .join(",")
             ));
@@ -429,6 +445,7 @@ impl BuildProfile {
                 panic_abort: false,
                 features: Vec::new(),
                 env: Vec::new(),
+                settings: BTreeMap::new(),
             },
             BuildProfile::Release => ProfileConfig::release(),
             BuildProfile::Debug => ProfileConfig::debug(),
@@ -441,6 +458,7 @@ impl BuildProfile {
                 panic_abort: true,
                 features: Vec::new(),
                 env: Vec::new(),
+                settings: BTreeMap::new(),
             },
             BuildProfile::Freestanding => ProfileConfig {
                 optimize: OptimizeLevel::Basic,
@@ -449,6 +467,7 @@ impl BuildProfile {
                 panic_abort: true,
                 features: Vec::new(),
                 env: Vec::new(),
+                settings: BTreeMap::new(),
             },
         }
     }
@@ -1697,6 +1716,16 @@ fn main() {
                 run_explain_web_graph(&jet_argv[1..], mode);
                 return;
             }
+            if let (Some(subject), Some(file)) = (args.get(1), args.get(2)) {
+                if subject.contains('.') && file.ends_with(jet::Syntax::FILE_EXT) {
+                    if let Some(profile) = named_profile.as_deref() {
+                        let _ = resolve_named_profile(profile, file, mode);
+                    }
+                    let profile = named_profile.as_deref().unwrap_or("dev");
+                    run_module_explain(subject, file, profile, mode.json);
+                    return;
+                }
+            }
             if args.get(1).map(|s| s.as_str()) == Some("marker") {
                 run_explain_marker(
                     args.get(2).map(|s| s.as_str()),
@@ -2151,6 +2180,9 @@ fn main() {
                     exit(ExitCodes::USAGE);
                 }
             };
+            if let Some(profile) = named_profile.as_deref() {
+                let _ = resolve_named_profile(profile, file, mode);
+            }
             // c-devserver (owner-directed 2026-07-01): a `.jet` file can define
             // its own `jet dev` behavior as ordinary Jet code — a top-level
             // `fn dev()` becomes the program's real (native) entry point,
@@ -2179,7 +2211,15 @@ fn main() {
                     if let Some(port) = dev_port {
                         std::env::set_var("JET_APP_PORT", port.to_string());
                     }
-                    run_dev(file, try_anyway, policy, gates, mode, true);
+                    run_dev(
+                        file,
+                        try_anyway,
+                        policy,
+                        gates,
+                        mode,
+                        true,
+                        named_profile.as_deref().unwrap_or("dev"),
+                    );
                 }
                 run_web_app_dev_entry(file, mode, dev_port);
                 return;
@@ -2197,7 +2237,15 @@ fn main() {
                 run_dev_web(file, mode, verbose, dev_port);
                 return;
             }
-            run_dev(file, try_anyway, policy, gates, mode, use_interpreter);
+            run_dev(
+                file,
+                try_anyway,
+                policy,
+                gates,
+                mode,
+                use_interpreter,
+                named_profile.as_deref().unwrap_or("dev"),
+            );
             return;
         }
         // D-CLI-DEVSERVE1=A: `jet serve` is deleted — `jet dev` is the only dev
@@ -2436,6 +2484,7 @@ fn main() {
                                         gates,
                                         mode,
                                         use_interpreter,
+                                        named_profile.as_deref().unwrap_or("dev"),
                                     );
                                     return;
                                 }
@@ -2683,6 +2732,7 @@ fn main() {
                         gates,
                         mode,
                         use_interpreter,
+                        named_profile.as_deref().unwrap_or("dev"),
                     );
                     return;
                 }

@@ -484,7 +484,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "explain",
-        summary: "Explain a diagnostic code or build fact",
+        summary: "Explain a diagnostic code, build fact, or generic-module value",
         headline: false,
         actions: &[],
         exhaustive: false,

@@ -280,7 +280,7 @@ pub(crate) fn eval_comptime_items(
             }
             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
             // through the shared effect facts.
-            match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
+            match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs(
                 &value,
                 &funcs,
                 &externs,
@@ -291,6 +291,7 @@ pub(crate) fn eval_comptime_items(
                 0,
                 &structs,
                 None,
+                build_facts,
             ) {
                 Ok((v, inputs)) => {
                     // `v.jet_type()` reads the element type off the value's

@@ -7,6 +7,80 @@ use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
 use jet_semindex::{open, SemIndexError};
 
+/// D-CONF-MODULE1=A: explain a generic-module member's specialization input
+/// from the semantic index, including the profile/declaration chain for a
+/// build-fact value.
+pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json: bool) {
+    let abs = absolutize(file);
+    let module_name = subject.split('.').next().unwrap_or(subject);
+    let index = match jet_semindex::open_with_profile(&abs, profile) {
+        Ok(index) => index,
+        Err(SemIndexError::Load(diags)) => {
+            for diagnostic in &diags {
+                eprintln!(
+                    "{}",
+                    jet::render_diagnostics(
+                        &abs.display().to_string(),
+                        "",
+                        std::slice::from_ref(diagnostic),
+                    )
+                );
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let Some(instance) = index.instances().iter().find(|instance| {
+        instance.name == module_name
+            || instance
+                .applications
+                .iter()
+                .any(|application| application.name == module_name)
+    }) else {
+        crate::cli_error!(@fix "E2104", format!("generic module `{module_name}` is not present in `{file}`"), "pass the instantiated member as `module.member` and the source entry file");
+        exit(ExitCodes::USER_ERROR);
+    };
+    if json {
+        let arguments = instance
+            .argument_values
+            .iter()
+            .zip(&instance.argument_provenance)
+            .map(|(value, sources)| {
+                format!(
+                    "{{\"value\":{},\"provenance\":[{}]}}",
+                    json_string(value),
+                    sources
+                        .iter()
+                        .map(|source| json_string(source))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema_version\":1,\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}]}}",
+            json_string(subject),
+            json_string(&instance.name),
+            json_string(&instance.fingerprint),
+            arguments
+        );
+        return;
+    }
+    println!("generic module `{subject}`");
+    println!("  instance: {}", instance.name);
+    println!("  fingerprint: {}", instance.fingerprint);
+    for (value, sources) in instance
+        .argument_values
+        .iter()
+        .zip(&instance.argument_provenance)
+    {
+        println!("  argument: {value}");
+        for source in sources {
+            println!("    from: {source}");
+        }
+    }
+}
+
 pub(crate) fn run_dossier(args: &[String], json: bool) {
     let mut positional: Vec<&str> = Vec::new();
     for a in args {

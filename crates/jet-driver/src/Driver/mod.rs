@@ -1046,6 +1046,10 @@ pub fn seed_build_facts(
         .as_ref()
         .and_then(|facts| facts.version.clone())
         .unwrap_or_else(|| "0.0.0".to_string());
+    let (settings, setting_provenance) = manifest
+        .as_ref()
+        .map(|facts| effective_build_settings(facts, profile))
+        .unwrap_or_default();
     let stamp = crate::Lock::build_stamp(&bundle.project_root, locked).map_err(|error| {
         vec![Diagnostic::error(
             "E3512",
@@ -1097,8 +1101,92 @@ pub fn seed_build_facts(
         profile: profile.to_string(),
         stamp,
         contributions,
+        settings,
+        setting_provenance,
     };
     Ok(())
+}
+
+/// D-CONF-MODULE1=A: resolve declaration defaults plus the selected profile's
+/// same-layer contributions into the one typed fact snapshot. Invalid values
+/// remain absent and are diagnosed when a source expression asks for them,
+/// keeping this seed step free of a second settings diagnostic family.
+fn effective_build_settings(
+    facts: &jet_pkg_model::Package::PackageFacts,
+    profile: &str,
+) -> (
+    BTreeMap<String, jet_foundation::Facts::BuildFactValue>,
+    BTreeMap<String, Vec<String>>,
+) {
+    let mut values = BTreeMap::new();
+    let mut provenance = BTreeMap::new();
+    for (name, declaration) in &facts.settings {
+        if let Some(raw) = &declaration.default {
+            if let Some(value) = parse_build_setting(declaration, raw) {
+                values.insert(name.clone(), value);
+                provenance.insert(
+                    name.clone(),
+                    vec![format!("{}:settings.{name} (default)", facts.origin)],
+                );
+            }
+        }
+    }
+    let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) else {
+        return (values, provenance);
+    };
+    for (name, raw) in &profile_def.settings {
+        let Some(declaration) = facts.settings.get(name) else {
+            continue;
+        };
+        let Some(value) = parse_build_setting(declaration, raw) else {
+            continue;
+        };
+        values.insert(name.clone(), value);
+        provenance
+            .entry(name.clone())
+            .or_default()
+            .push(format!("{}:build.{profile}.settings.{name}", facts.origin));
+    }
+    (values, provenance)
+}
+
+fn parse_build_setting(
+    declaration: &jet_pkg_model::Package::SettingDecl,
+    raw: &str,
+) -> Option<jet_foundation::Facts::BuildFactValue> {
+    let raw = raw.trim();
+    match declaration.ty.trim().trim_start_matches('.') {
+        "Bool" => match raw {
+            "true" => Some(jet_foundation::Facts::BuildFactValue::Bool(true)),
+            "false" => Some(jet_foundation::Facts::BuildFactValue::Bool(false)),
+            _ => None,
+        },
+        "Int" => raw
+            .parse()
+            .ok()
+            .map(jet_foundation::Facts::BuildFactValue::Int),
+        "Char" => parse_char_setting(raw).map(jet_foundation::Facts::BuildFactValue::Char),
+        "String" => Some(jet_foundation::Facts::BuildFactValue::Text(raw.to_string())),
+        type_name => {
+            let variant = raw
+                .strip_prefix(type_name)
+                .and_then(|value| value.strip_prefix('.'))
+                .unwrap_or(raw)
+                .trim_start_matches('.')
+                .trim();
+            (!variant.is_empty()).then(|| jet_foundation::Facts::BuildFactValue::Enum {
+                type_name: type_name.to_string(),
+                variant: variant.to_string(),
+            })
+        }
+    }
+}
+
+fn parse_char_setting(raw: &str) -> Option<char> {
+    let raw = raw.strip_prefix('\'').and_then(|value| value.strip_suffix('\''))?;
+    let mut chars = raw.chars();
+    let value = chars.next()?;
+    chars.next().is_none().then_some(value)
 }
 
 #[derive(Debug, Clone)]
@@ -3999,7 +4087,25 @@ pub fn check_file_with_effect_facts(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None);
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, "dev");
+    (diagnostics, bundle, facts)
+}
+
+/// Like `check_file_with_effect_facts`, with an explicitly selected build
+/// profile for tooling that must explain profile-dependent specialization.
+pub fn check_file_with_effect_facts_profile(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    profile: &str,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = overlay.into_iter().collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, profile);
     (diagnostics, bundle, facts)
 }
 
@@ -4015,7 +4121,7 @@ pub fn check_file_with_effect_facts_incremental(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache));
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache), "dev");
     (diagnostics, bundle, facts)
 }
 
@@ -4030,7 +4136,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
-    check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache))
+    check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache), "dev")
 }
 
 fn check_file_with_effect_facts_impl(
@@ -4038,6 +4144,7 @@ fn check_file_with_effect_facts_impl(
     overlays: &[(&Path, &str)],
     is_lsp: bool,
     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
+    profile: &str,
 ) -> (
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
@@ -4049,6 +4156,15 @@ fn check_file_with_effect_facts_impl(
     match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
+            if let Err(seed_diags) = seed_build_facts(&mut bundle, profile, false) {
+                diags.extend(seed_diags);
+                return (
+                    diags,
+                    None,
+                    crate::Sema::SemIndexEffectFacts::default(),
+                    dependencies,
+                );
+            }
             let (check_diags, facts) = match incremental {
                 Some(cache) => crate::Sema::check_bundle_with_effect_facts_incremental(
                     &mut bundle,
@@ -4102,7 +4218,7 @@ pub fn check_file_with_overlays(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, overlays, is_lsp, None);
+        check_file_with_effect_facts_impl(file, overlays, is_lsp, None, "dev");
     (diagnostics, bundle, facts)
 }
 

@@ -522,6 +522,8 @@ pub struct BuildProfileDef {
     pub panic: Option<BuildPanic>,
     pub features: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// D-CONF-MODULE1=A: profile contributions to declared typed settings.
+    pub settings: BTreeMap<String, String>,
 }
 
 pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackageParseError> {
@@ -552,6 +554,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let mut panic = None;
         let mut features = Vec::new();
         let mut env = Vec::new();
+        let mut settings = BTreeMap::new();
         let mut seen_fields = HashSet::new();
         for (key, val) in key_value_entries(inner)? {
             if !seen_fields.insert(key.clone()) {
@@ -586,9 +589,23 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     }
                     env.push((k, unquote(&v)));
                 }
+            } else if key == Syntax::BUILD_FIELD_SETTINGS {
+                let inner = val
+                    .as_str()
+                    .strip_prefix('.')
+                    .unwrap_or(val.as_str())
+                    .strip_prefix('{')
+                    .and_then(|s| s.strip_suffix('}'))
+                    .map(|s| s.trim())
+                    .ok_or_else(|| err(format!("build profile `{name}` needs `settings: {{ key: value, … }}`")))?;
+                for (key, value) in key_value_entries(inner)? {
+                    if settings.insert(key.clone(), unquote(&value)).is_some() {
+                        return Err(err(format!("build profile `{name}.settings.{key}` is declared more than once")));
+                    }
+                }
             } else {
                 return Err(err(format!(
-                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, features, env)"
+                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, features, env, settings)"
                 )));
             }
         }
@@ -602,7 +619,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                 )))
             }
         };
-        profiles.push(BuildProfileDef { name, optimize, debug_info, small, panic, features, env });
+        profiles.push(BuildProfileDef { name, optimize, debug_info, small, panic, features, env, settings });
     }
     Ok(profiles)
 }

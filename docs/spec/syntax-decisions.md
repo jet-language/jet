@@ -6963,3 +6963,10 @@ items. A checked text block uses the closed `#Name { … }` boundary and resolve
 the name through the declaration registry; `#SQL<Row>` and `#HTML { … }` now
 use their declared `.Block` rows. The old marker-only DSL whitelist is retired
 by the syntax-chore lane.
+
+**2026-08-13 — D-CONF-MODULE1=A implementation log** *(card #1524)*.
+Declared profile settings now seed the shared typed build-fact snapshot. A
+closed `@build.settings.<name>` expression is folded by the same Tier-0
+evaluator used for generic-module value arguments, and its normalized value is
+part of the existing instance fingerprint. Semantic instance facts retain the
+profile and declaration provenance; no execution tier reads settings.

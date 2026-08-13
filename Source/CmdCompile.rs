@@ -366,8 +366,7 @@ pub(crate) fn run_compile_cmd(
             || freestanding
             || !build_grants.is_empty()
             || capabilities_json
-            || sbom
-            || named_profile.is_some();
+            || sbom;
         if incompatible {
             let diagnostic = jet::Diagnostics::Diagnostic::error(
                 "E2102",
@@ -470,6 +469,7 @@ pub(crate) fn run_compile_cmd(
     {
         native_cache_key(
             file,
+            profile.budget_name(),
             &format!("{profile_tag};{}", setting_overrides_tag(setting_overrides)),
             mode_tag,
         )
@@ -1722,6 +1722,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         // profile and `--coverage` instrumentation are distinct binaries again.
         native_cache_key(
             shown.as_ref(),
+            profile.budget_name(),
             &profile_tag,
             if coverage { "testcov" } else { "test" },
         ),
@@ -2810,12 +2811,19 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 /// `mode_tag` keeps binaries built from the same AST under different pipelines in
 /// separate key spaces (a `jet test` harness binary can never be served for a
 /// `jet run`). The toolchain version and `package.jet` fingerprint ride the salt.
-fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
-    native_cache_key_with_toolchain(file, profile_tag, mode_tag, native_toolchain_identity())
+fn native_cache_key(file: &str, profile: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
+    native_cache_key_with_toolchain(
+        file,
+        profile,
+        profile_tag,
+        mode_tag,
+        native_toolchain_identity(),
+    )
 }
 
 fn native_cache_key_with_toolchain(
     file: &str,
+    profile: &str,
     profile_tag: &str,
     mode_tag: &str,
     toolchain_identity: &str,
@@ -2837,6 +2845,9 @@ fn native_cache_key_with_toolchain(
     // #91: instance identity is a sema product. Run the front end before a
     // cache lookup so a hit is keyed by resolved template identity rather than
     // consumer spelling. A hit still skips codegen/rustc, never validation.
+    if jet::Driver::seed_build_facts(&mut bundle, profile, false).is_err() {
+        return None;
+    }
     if jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
         .iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
     {
@@ -4134,16 +4145,16 @@ mod missing_c_lib_tests {
         project.write("defs.jet", dependency);
         project.write("package.jet", manifest_v1);
 
-        let base = native_cache_key(&project.main(), "default", "run").expect("base cache key");
-        let toolchain_a = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a").expect("toolchain A cache key");
-        let toolchain_b = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-b/rustc-a/linker-a/backend-a").expect("toolchain B cache key");
+        let base = native_cache_key(&project.main(), "dev", "default", "run").expect("base cache key");
+        let toolchain_a = native_cache_key_with_toolchain(&project.main(), "dev", "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a").expect("toolchain A cache key");
+        let toolchain_b = native_cache_key_with_toolchain(&project.main(), "dev", "default", "run", "compiler-build-b/rustc-a/linker-a/backend-a").expect("toolchain B cache key");
         assert_ne!(toolchain_a, toolchain_b, "production native-cache key seam must include compiler/toolchain identity");
 
         project.write(
             "main.jet",
             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value() + 1) }\n",
         );
-        let program_body = native_cache_key(&project.main(), "default", "run").expect("program body cache key");
+        let program_body = native_cache_key(&project.main(), "dev", "default", "run").expect("program body cache key");
         assert_ne!(base, program_body, "entry-body edit must invalidate native cache");
 
         project.write("main.jet", main);
@@ -4151,7 +4162,7 @@ mod missing_c_lib_tests {
             "defs.jet",
             "pub module box<T>(n: Int) { pub fn value() => Int { return n + 1 } }\n",
         );
-        let dependency_body = native_cache_key(&project.main(), "default", "run").expect("dependency cache key");
+        let dependency_body = native_cache_key(&project.main(), "dev", "default", "run").expect("dependency cache key");
         assert_ne!(base, dependency_body, "imported template-body edit must invalidate native cache");
 
         project.write("defs.jet", dependency);
@@ -4159,7 +4170,7 @@ mod missing_c_lib_tests {
             "main.jet",
             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(4)\nfn run() { print(selected.value()) }\n",
         );
-        let argument = native_cache_key(&project.main(), "default", "run").expect("argument cache key");
+        let argument = native_cache_key(&project.main(), "dev", "default", "run").expect("argument cache key");
         assert_ne!(base, argument, "normalized instance-argument edit must invalidate native cache");
 
         project.write("main.jet", main);
@@ -4167,11 +4178,11 @@ mod missing_c_lib_tests {
             "package.jet",
             "name: \"cache-proof\"\nversion: \"2.0.0\"\n",
         );
-        let package = native_cache_key(&project.main(), "default", "run").expect("package cache key");
+        let package = native_cache_key(&project.main(), "dev", "default", "run").expect("package cache key");
         assert_ne!(base, package, "package manifest edit must invalidate native cache");
 
         project.write("package.jet", manifest_v1);
-        let profile = native_cache_key(&project.main(), "small", "run").expect("profile cache key");
+        let profile = native_cache_key(&project.main(), "small", "small", "run").expect("profile cache key");
         assert_ne!(base, profile, "build-profile edit must invalidate native cache");
     }
 

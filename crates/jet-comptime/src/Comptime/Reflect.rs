@@ -1056,6 +1056,9 @@ pub fn fact_read_value(
         if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
             return build_fact_value(build_facts, read);
         }
+        if let Some(name) = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
+            return build_setting_value(build_facts, name);
+        }
     }
     let is_build_subject = matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
     let read = if member == crate::Syntax::BUILD_INFO_PROFILE {
@@ -1157,6 +1160,42 @@ pub fn build_fact_value(
             Some(CtValue::absent(crate::AST::Type::String))
         }
         jet_foundation::Facts::BuildFactValue::Bool(value) => Some(CtValue::Bool(value)),
+        jet_foundation::Facts::BuildFactValue::Int(value) => Some(CtValue::Int(value)),
+        jet_foundation::Facts::BuildFactValue::Char(value) => Some(CtValue::Char(value)),
+        jet_foundation::Facts::BuildFactValue::Enum { type_name, variant } => Some(CtValue::Enum {
+            type_name,
+            variant,
+            args: Vec::new(),
+        }),
+    }
+}
+
+/// D-CONF-MODULE1=A: settings use the same CtValue conversion as registered
+/// build facts. The evaluator, not an execution tier, owns the result.
+pub fn build_setting_value(
+    snapshot: &jet_foundation::Facts::BuildFactSnapshot,
+    name: &str,
+) -> Option<CtValue> {
+    build_fact_value_from_value(snapshot.setting_value(name)?)
+}
+
+fn build_fact_value_from_value(value: jet_foundation::Facts::BuildFactValue) -> Option<CtValue> {
+    match value {
+        jet_foundation::Facts::BuildFactValue::Text(value) => Some(CtValue::Str(value)),
+        jet_foundation::Facts::BuildFactValue::OptionalText(Some(value)) => {
+            Some(CtValue::Present(Box::new(CtValue::Str(value))))
+        }
+        jet_foundation::Facts::BuildFactValue::OptionalText(None) => {
+            Some(CtValue::absent(crate::AST::Type::String))
+        }
+        jet_foundation::Facts::BuildFactValue::Bool(value) => Some(CtValue::Bool(value)),
+        jet_foundation::Facts::BuildFactValue::Int(value) => Some(CtValue::Int(value)),
+        jet_foundation::Facts::BuildFactValue::Char(value) => Some(CtValue::Char(value)),
+        jet_foundation::Facts::BuildFactValue::Enum { type_name, variant } => Some(CtValue::Enum {
+            type_name,
+            variant,
+            args: Vec::new(),
+        }),
     }
 }
 

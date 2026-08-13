@@ -6,7 +6,7 @@ use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 14;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -146,6 +146,8 @@ pub struct InstanceFact {
     pub template_definition_id: String,
     pub template_span: SourceSpan,
     pub arguments: Vec<String>,
+    pub argument_values: Vec<String>,
+    pub argument_provenance: Vec<Vec<String>>,
     pub applications: Vec<InstanceApplicationFact>,
     pub exported_members: Vec<String>,
 }

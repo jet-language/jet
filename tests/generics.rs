@@ -5,6 +5,164 @@ mod common;
 use std::process::Command;
 
 #[test]
+fn generic_module_profile_fact_values_are_closed_and_fingerprinted() {
+    let root = std::env::temp_dir().join(format!("jet_generic_module_profile_fact_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create profile fact fixture");
+    std::fs::write(
+        root.join("package.jet"),
+        r#"name: "profile_fact"
+version: "0.1.0"
+settings: .{ cache_slots: Int = 3 }
+build: {
+    compact: Build.{ optimize: full, settings: { cache_slots: 2 } },
+    spacious: Build.{ optimize: full, settings: { cache_slots: 5 } },
+}
+"#,
+    )
+    .expect("write profile fact manifest");
+    let source = r#"
+module cache<K>(capacity: Int) {
+    pub struct Buffer { items: [K#capacity] }
+    pub fn slots() => Int = capacity
+}
+module tuned :: cache<Int>(@build.settings.cache_slots)
+fn run() { print(tuned.slots()) }
+"#;
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, source).expect("write profile fact source");
+
+    let mut fingerprints = Vec::new();
+    for profile in ["compact", "spacious"] {
+        let mut bundle = jet::Loader::load_entry_with_overlay(
+            entry.to_str().expect("profile fact path"),
+            None,
+            false,
+        )
+        .expect("load profile fact source");
+        jet::Driver::seed_build_facts(&mut bundle, profile, false)
+            .expect("seed profile settings");
+        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+            "profile fact module should check: {diagnostics:#?}"
+        );
+        let identity = bundle
+            .modules
+            .iter()
+            .flat_map(|module| module.items.iter())
+            .find_map(|item| match item {
+                jet::AST::Item::CodeModule(module) if module.name == "tuned" => module.instance_identity.as_ref(),
+                _ => None,
+            })
+            .expect("fact-fed module instance identity");
+        assert_eq!(identity.argument_values[1], format!("value:{}", if profile == "compact" { 2 } else { 5 }));
+        assert!(identity.argument_provenance[1].iter().any(|source| source.contains("settings.cache_slots")));
+        assert!(identity.argument_provenance[1].iter().any(|source| source.contains(&format!("build.{profile}"))));
+        fingerprints.push(identity.fingerprint.clone());
+    }
+    assert_ne!(fingerprints[0], fingerprints[1], "profile values must not collide");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn generic_module_fact_value_example_has_profile_and_tier_parity() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entry = root.join("examples/features/modules/fact_value_arguments.jet");
+    let expected = std::fs::read(root.join("examples/features/expected/modules/fact_value_arguments.out"))
+        .expect("fact-value module golden");
+    for (profile, output) in [("compact", b"2\n".as_slice()), ("spacious", b"5\n".as_slice())] {
+        let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("run")
+            .arg(format!("--profile={profile}"))
+            .arg(&entry)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run fact-value module under named profile");
+        assert!(
+            run.status.success(),
+            "named profile `{profile}` failed:\n{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(run.stdout, output, "named profile `{profile}` size drifted");
+
+        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("run")
+            .arg(format!("--profile={profile}"))
+            .arg("--interpret")
+            .arg(&entry)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("interpret fact-value module under named profile");
+        assert!(
+            interpreted.status.success(),
+            "interpreted profile `{profile}` failed: {}",
+            String::from_utf8_lossy(&interpreted.stderr)
+        );
+        assert_eq!(interpreted.stdout, output, "interpreted profile `{profile}` drifted");
+
+        let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["dev", entry.to_str().expect("fact-value module path")])
+            .arg(format!("--profile={profile}"))
+            .args(["--interpret", "--watch=off"])
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("dev-interpret fact-value module under named profile");
+        assert!(
+            dev.status.success(),
+            "dev profile `{profile}` failed: {}",
+            String::from_utf8_lossy(&dev.stderr)
+        );
+        assert_eq!(dev.stdout, output, "dev profile `{profile}` drifted");
+    }
+
+    let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["explain", "tuned.slots"])
+        .arg(&entry)
+        .arg("--profile=compact")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("explain fact-fed module value");
+    assert!(
+        explain.status.success(),
+        "module explain failed: {}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    let explanation = String::from_utf8_lossy(&explain.stdout);
+    assert!(
+        explanation.contains("value:2"),
+        "explain must show the folded value: {explanation}"
+    );
+    assert!(
+        explanation.contains("build.compact.settings.cache_slots"),
+        "explain must show profile provenance: {explanation}"
+    );
+
+    for args in [
+        vec!["run", entry.to_str().expect("fact-value module path")],
+        vec!["run", "--interpret", entry.to_str().expect("fact-value module path")],
+        vec![
+            "dev",
+            entry.to_str().expect("fact-value module path"),
+            "--interpret",
+            "--watch=off",
+        ],
+    ] {
+        let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(args)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run fact-value module through execution tier");
+        assert!(
+            run.status.success(),
+            "execution tier failed: {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(run.stdout, expected, "execution tier output drifted");
+    }
+}
+
+#[test]
 fn generic_modules_canonical_spelling_keeps_comptime_bindings() {
     let source = r#"
 @base :: 40

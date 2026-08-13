@@ -119,7 +119,7 @@ fn usage_for(cmd: &str) -> String {
         "fetch" => "jet store fetch".to_string(),
         "update" => "jet update [dep]".to_string(),
         "clean" => "jet clean".to_string(),
-        "explain" => "jet explain <CODE|FACT> [file]".to_string(),
+        "explain" => "jet explain <CODE|FACT|module.member> [file.jet]".to_string(),
         "doctor" => "jet self doctor".to_string(),
         "repl" => "jet repl".to_string(),
         "notebook" => "jet notebook [file.jetnb] [--protocol]".to_string(),

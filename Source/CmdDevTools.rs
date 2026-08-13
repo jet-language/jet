@@ -27,6 +27,7 @@ pub(crate) fn run_dev(
     gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
+    profile: &str,
 ) {
     let path = Path::new(file);
     if !path.exists() {
@@ -36,7 +37,13 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
+        let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+            file,
+            try_anyway,
+            use_interpreter,
+            gates,
+            profile,
+        );
         render_dev_outcome(&outcome, file, mode);
         exit_dev_outcome(outcome);
     }
@@ -47,7 +54,14 @@ pub(crate) fn run_dev(
 
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
-    let mut prev_bundle = render_dev_iteration(file, try_anyway, gates, mode, use_interpreter);
+    let mut prev_bundle = render_dev_iteration(
+        file,
+        try_anyway,
+        gates,
+        mode,
+        use_interpreter,
+        profile,
+    );
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
     let mut watch = match jet_devserver::WatchSession::open(path) {
         Ok(watch) => watch,
@@ -87,6 +101,7 @@ pub(crate) fn run_dev(
                 gates,
                 mode,
                 use_interpreter,
+                profile,
             );
             // Transactional hot replacement: commit only when the new bundle
             // loaded; otherwise keep the prior session valid.
@@ -266,10 +281,17 @@ fn render_dev_change(
     gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
+    profile: &str,
 ) -> Option<jet::AST::ProgramBundle> {
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
+            if let Err(seed_diags) = jet::Driver::seed_build_facts(&mut b, profile, false) {
+                let src = fs::read_to_string(file).unwrap_or_default();
+                println!("\n— {} changed —", file);
+                report_problems(mode, file, &src, &seed_diags);
+                return None;
+            }
             let diags = jet::Sema::check_bundle_gates(&mut b, jet::Sema::CompileMode::Run, gates);
             let errs: Vec<_> = diags
                 .iter()
@@ -362,7 +384,13 @@ fn render_dev_change(
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
+        let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+            file,
+            try_anyway,
+            use_interpreter,
+            gates,
+            profile,
+        );
         render_dev_outcome(&outcome, file, mode);
     }
 
@@ -446,16 +474,24 @@ fn render_dev_iteration(
     gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
+    profile: &str,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let outcome = jet::Interpreter::dev_iteration_with_gates(file, try_anyway, use_interpreter, gates);
+    let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+        file,
+        try_anyway,
+        use_interpreter,
+        gates,
+        profile,
+    );
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
     let bundle = if ran_ok {
-        jet::Loader::load_entry(file).ok().map(|mut bundle| {
+        jet::Loader::load_entry(file).ok().and_then(|mut bundle| {
+            jet::Driver::seed_build_facts(&mut bundle, profile, false).ok()?;
             let diagnostics = jet::Sema::check_bundle_gates(&mut bundle, jet::Sema::CompileMode::Run, gates);
             render_dev_lints(file, mode, &diagnostics);
-            bundle
+            Some(bundle)
         })
     } else {
         None
