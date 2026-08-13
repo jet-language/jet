@@ -535,6 +535,7 @@ pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
         "PasswordHash" => Some("PasswordHash"),
         "Digest256" => Some("Digest256"),
         "Digest512" => Some("Digest512"),
+        "Hasher" => Some("Hasher"),
         "CryptoError" => Some("CryptoError"),
         "FileCryptoError" => Some("FileCryptoError"),
         "KeyWrapError" => Some("KeyWrapError"),
@@ -1670,6 +1671,9 @@ impl Cx {
             Type::Named(name) if name == "RowPolicy" && !self.type_names.contains(name) => {
                 format!("{}JetRowPolicy", self.root_prefix)
             }
+            Type::Named(name) if name == "Hasher" && !self.type_names.contains(name) => {
+                format!("{}JetCryptoHasher", self.root_prefix)
+            }
             Type::Named(name)
                 if !self.type_names.contains(name)
                     && core_crypto_rust_type_name(name).is_some() =>
@@ -2030,6 +2034,9 @@ impl Cx {
                         _ => resolved,
                     };
                     return format!("{}{rust}", self.root_prefix);
+                }
+                if resolved == "Hasher" {
+                    return format!("{}JetCryptoHasher", self.root_prefix);
                 }
                 if let Some(rust) = core_crypto_rust_type_name(resolved) {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");

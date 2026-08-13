@@ -11,128 +11,350 @@ pub const JET_CORE_ARCHIVE_ABI_VERSION: &str = "core.archive.abi.v2";
 
 const TAR_BLOCK: usize = 512;
 const MAX_OUTPUT: usize = 64 * 1024 * 1024;
+const ZIP_READER_STATE: &[u8] = b"JZR1";
+const ZIP_WRITER_STATE: &[u8] = b"JZW1";
 
 pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
-    if data.len() > MAX_OUTPUT {
+    zip_write_all(&[(name.to_string(), data.to_vec())])
+}
+
+pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
+    zip_read_all(data)
+        .and_then(|entries| entries.into_iter().next().map(|(_, data)| data))
+        .unwrap_or_default()
+}
+
+pub fn jet_archive_crc32(data: &[u8]) -> i64 {
+    i64::from(crc32(data))
+}
+
+pub fn jet_archive_adler32(data: &[u8]) -> i64 {
+    let mut a = 1u32;
+    let mut b = 0u32;
+    for chunk in data.chunks(5_552) {
+        for byte in chunk {
+            a = (a + u32::from(*byte)) % 65_521;
+            b = (b + a) % 65_521;
+        }
+    }
+    i64::from((b << 16) | a)
+}
+
+pub fn jet_archive_deflate(data: &[u8]) -> Vec<u8> {
+    deflate_fixed(data)
+}
+
+pub fn jet_archive_inflate(data: &[u8]) -> Vec<u8> {
+    inflate_any(data).unwrap_or_default()
+}
+
+pub fn jet_archive_zip_names_json(data: &[u8]) -> String {
+    names_json(
+        zip_read_all(data)
+            .unwrap_or_default()
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect(),
+    )
+}
+
+pub fn jet_archive_zip_open(data: &[u8]) -> Vec<u8> {
+    if data.is_empty() {
+        let mut state = ZIP_WRITER_STATE.to_vec();
+        state.extend_from_slice(&zip_write_all(&[]));
+        return state;
+    }
+    if zip_read_all(data).is_some() {
+        let mut state = ZIP_READER_STATE.to_vec();
+        state.extend_from_slice(data);
+        state
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn jet_archive_zip_next(reader: &[u8], index: i64) -> String {
+    let Ok(index) = usize::try_from(index) else {
+        return String::new();
+    };
+    zip_reader_entries(reader)
+        .and_then(|entries| entries.get(index).map(|(name, _)| name.clone()))
+        .unwrap_or_default()
+}
+
+pub fn jet_archive_zip_read(reader: &[u8], name: &str) -> Vec<u8> {
+    zip_reader_entries(reader)
+        .and_then(|entries| entries.into_iter().find(|(entry, _)| entry == name).map(|(_, data)| data))
+        .unwrap_or_default()
+}
+
+pub fn jet_archive_zip_write(writer: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
+    if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
         return Vec::new();
     }
-    let name = name.as_bytes();
-    let Ok(name_len) = u16::try_from(name.len()) else {
+    let mut entries = zip_writer_entries(writer).unwrap_or_default();
+    if let Some(index) = entries.iter().position(|(entry, _)| entry == name) {
+        entries[index] = (name.to_string(), data.to_vec());
+    } else {
+        entries.push((name.to_string(), data.to_vec()));
+    }
+    let mut state = ZIP_WRITER_STATE.to_vec();
+    state.extend_from_slice(&zip_write_all(&entries));
+    state
+}
+
+pub fn jet_archive_zip_close(writer: &[u8]) -> Vec<u8> {
+    zip_writer_entries(writer).map(|entries| zip_write_all(&entries)).unwrap_or_default()
+}
+
+pub fn jet_archive_zip_extract(data: &[u8], name: &str) -> Vec<u8> {
+    jet_archive_zip_read(&jet_archive_zip_open(data), name)
+}
+
+pub fn jet_archive_unzip(data: &[u8], name: &str) -> Vec<u8> {
+    jet_archive_zip_extract(data, name)
+}
+
+fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
+    let eocd = find_eocd(data)?;
+    let count = usize::from(read_u16(data, eocd + 10)?);
+    let central_size = usize::try_from(read_u32(data, eocd + 12)?).ok()?;
+    let central = usize::try_from(read_u32(data, eocd + 16)?).ok()?;
+    let central_end = central.checked_add(central_size)?;
+    if central_end > eocd || read_u16(data, eocd + 4)? != 0 || read_u16(data, eocd + 6)? != 0 {
+        return None;
+    }
+    let mut entries = Vec::with_capacity(count);
+    let mut offset = central;
+    let mut total = 0usize;
+    for _ in 0..count {
+        if read_u32(data, offset)? != 0x0201_4b50 {
+            return None;
+        }
+        if read_u16(data, offset + 6)? != 20 || read_u16(data, offset + 8)? != 0 {
+            return None;
+        }
+        let method = read_u16(data, offset + 10)?;
+        if method != 0 && method != 8 {
+            return None;
+        }
+        let crc = read_u32(data, offset + 16)?;
+        let compressed_len = usize::try_from(read_u32(data, offset + 20)?).ok()?;
+        let expected_len = usize::try_from(read_u32(data, offset + 24)?).ok()?;
+        if expected_len > MAX_OUTPUT || total.saturating_add(expected_len) > MAX_OUTPUT {
+            return None;
+        }
+        let name_len = usize::from(read_u16(data, offset + 28)?);
+        let extra_len = usize::from(read_u16(data, offset + 30)?);
+        let comment_len = usize::from(read_u16(data, offset + 32)?);
+        let name_start = offset.checked_add(46)?;
+        let name_end = name_start.checked_add(name_len)?;
+        let extra_end = name_end.checked_add(extra_len)?;
+        let record_end = extra_end.checked_add(comment_len)?;
+        if record_end > central_end {
+            return None;
+        }
+        let name = String::from_utf8(data.get(name_start..name_end)?.to_vec()).ok()?;
+        if !zip_name_valid(&name) {
+            return None;
+        }
+        let local = usize::try_from(read_u32(data, offset + 42)?).ok()?;
+        if read_u32(data, local)? != 0x0403_4b50
+            || read_u16(data, local + 6)? != 0
+            || read_u16(data, local + 8)? != method
+        {
+            return None;
+        }
+        let local_name_len = usize::from(read_u16(data, local + 26)?);
+        let local_extra_len = usize::from(read_u16(data, local + 28)?);
+        let payload_start = local
+            .checked_add(30)?
+            .checked_add(local_name_len)?
+            .checked_add(local_extra_len)?;
+        let payload_end = payload_start.checked_add(compressed_len)?;
+        let payload = data.get(payload_start..payload_end)?;
+        let bytes = match method {
+            0 => (compressed_len == expected_len).then(|| payload.to_vec())?,
+            8 => inflate(payload, expected_len)?,
+            _ => return None,
+        };
+        if bytes.len() != expected_len || crc32(&bytes) != crc {
+            return None;
+        }
+        total = total.checked_add(bytes.len())?;
+        entries.push((name, bytes));
+        offset = record_end;
+    }
+    (offset == central_end).then_some(entries)
+}
+
+fn zip_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in entries {
+        if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
+            return Vec::new();
+        }
+        let Ok(name_len) = u16::try_from(name.len()) else {
+            return Vec::new();
+        };
+        let compressed = deflate_fixed(data);
+        let Ok(compressed_len) = u32::try_from(compressed.len()) else {
+            return Vec::new();
+        };
+        let Ok(size) = u32::try_from(data.len()) else {
+            return Vec::new();
+        };
+        let Ok(local_offset) = u32::try_from(out.len()) else {
+            return Vec::new();
+        };
+        put_u32(&mut out, 0x0403_4b50);
+        put_u16(&mut out, 20);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 8);
+        put_u16(&mut out, 0);
+        put_u16(&mut out, 0);
+        put_u32(&mut out, crc32(data));
+        put_u32(&mut out, compressed_len);
+        put_u32(&mut out, size);
+        put_u16(&mut out, name_len);
+        put_u16(&mut out, 0);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&compressed);
+
+        put_u32(&mut central, 0x0201_4b50);
+        put_u16(&mut central, 20);
+        put_u16(&mut central, 20);
+        put_u16(&mut central, 0);
+        put_u16(&mut central, 8);
+        put_u16(&mut central, 0);
+        put_u16(&mut central, 0);
+        put_u32(&mut central, crc32(data));
+        put_u32(&mut central, compressed_len);
+        put_u32(&mut central, size);
+        put_u16(&mut central, name_len);
+        put_u16(&mut central, 0);
+        put_u16(&mut central, 0);
+        put_u16(&mut central, 0);
+        put_u16(&mut central, 0);
+        put_u32(&mut central, 0);
+        put_u32(&mut central, local_offset);
+        central.extend_from_slice(name.as_bytes());
+    }
+    let Ok(central_offset) = u32::try_from(out.len()) else {
         return Vec::new();
     };
-    let Ok(size) = u32::try_from(data.len()) else {
+    let Ok(central_size) = u32::try_from(central.len()) else {
         return Vec::new();
     };
-    let crc = crc32(data);
-    let mut out = Vec::with_capacity(30 + name.len() + data.len() + 46 + name.len() + 22);
-
-    put_u32(&mut out, 0x0403_4b50);
-    put_u16(&mut out, 10);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0x21);
-    put_u32(&mut out, crc);
-    put_u32(&mut out, size);
-    put_u32(&mut out, size);
-    put_u16(&mut out, name_len);
-    put_u16(&mut out, 0);
-    out.extend_from_slice(name);
-    out.extend_from_slice(data);
-
-    let central_offset = u32::try_from(out.len()).unwrap_or(0);
-    put_u32(&mut out, 0x0201_4b50);
-    put_u16(&mut out, 0x031e);
-    put_u16(&mut out, 10);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0x21);
-    put_u32(&mut out, crc);
-    put_u32(&mut out, size);
-    put_u32(&mut out, size);
-    put_u16(&mut out, name_len);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u16(&mut out, 0);
-    put_u32(&mut out, 0);
-    put_u32(&mut out, 0);
-    out.extend_from_slice(name);
-
-    let central_size = u32::try_from(out.len().saturating_sub(central_offset as usize)).unwrap_or(0);
+    let Ok(count) = u16::try_from(entries.len()) else {
+        return Vec::new();
+    };
+    out.extend_from_slice(&central);
     put_u32(&mut out, 0x0605_4b50);
     put_u16(&mut out, 0);
     put_u16(&mut out, 0);
-    put_u16(&mut out, 1);
-    put_u16(&mut out, 1);
+    put_u16(&mut out, count);
+    put_u16(&mut out, count);
     put_u32(&mut out, central_size);
     put_u32(&mut out, central_offset);
     put_u16(&mut out, 0);
     out
 }
 
-pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
-    let Some(eocd) = find_eocd(data) else {
-        return Vec::new();
-    };
-    if read_u16(data, eocd + 8) != Some(1) || read_u16(data, eocd + 10) != Some(1) {
-        return Vec::new();
+fn zip_reader_entries(state: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
+    state
+        .strip_prefix(ZIP_READER_STATE)
+        .and_then(zip_read_all)
+}
+
+fn zip_writer_entries(state: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
+    state
+        .strip_prefix(ZIP_WRITER_STATE)
+        .and_then(zip_read_all)
+}
+
+fn zip_name_valid(name: &str) -> bool {
+    !name.is_empty()
+        && !name.as_bytes().contains(&0)
+        && !name.contains('\\')
+        && !Path::new(name).components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            )
+        })
+}
+
+fn names_json(names: Vec<&str>) -> String {
+    let mut out = String::from("[");
+    for (index, name) in names.into_iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for ch in name.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                ch => out.push(ch),
+            }
+        }
+        out.push('"');
     }
-    let Some(central) = read_u32(data, eocd + 16).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    if read_u32(data, central) != Some(0x0201_4b50) {
-        return Vec::new();
+    out.push(']');
+    out
+}
+
+struct DeflateBits {
+    out: Vec<u8>,
+    bit: u8,
+}
+
+impl DeflateBits {
+    fn write(&mut self, mut value: u32, count: u8) {
+        for _ in 0..count {
+            if self.bit == 0 {
+                self.out.push(0);
+            }
+            if value & 1 != 0 {
+                let last = self.out.len() - 1;
+                self.out[last] |= 1 << self.bit;
+            }
+            value >>= 1;
+            self.bit = (self.bit + 1) % 8;
+        }
     }
-    let flags = read_u16(data, central + 8).unwrap_or(u16::MAX);
-    if flags & 1 != 0 {
-        return Vec::new();
+
+    fn finish(self) -> Vec<u8> {
+        self.out
     }
-    let method = read_u16(data, central + 10).unwrap_or(u16::MAX);
-    let Some(compressed_len) = read_u32(data, central + 20).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(expected_len) = read_u32(data, central + 24).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    if expected_len > MAX_OUTPUT {
-        return Vec::new();
+}
+
+fn deflate_fixed(data: &[u8]) -> Vec<u8> {
+    let mut bits = DeflateBits { out: Vec::new(), bit: 0 };
+    bits.write(1, 1);
+    bits.write(1, 2);
+    for byte in data {
+        let (code, count) = fixed_code(usize::from(*byte));
+        bits.write(code, count);
     }
-    let Some(expected_crc) = read_u32(data, central + 16) else {
-        return Vec::new();
+    let (code, count) = fixed_code(256);
+    bits.write(code, count);
+    bits.finish()
+}
+
+fn fixed_code(symbol: usize) -> (u32, u8) {
+    let (code, count) = match symbol {
+        0..=143 => (symbol as u32 + 0x30, 8),
+        144..=255 => (symbol as u32 - 144 + 0x190, 9),
+        256..=279 => (symbol as u32 - 256, 7),
+        _ => (symbol as u32 - 280 + 0xc0, 8),
     };
-    let Some(local) = read_u32(data, central + 42).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    if read_u32(data, local) != Some(0x0403_4b50) {
-        return Vec::new();
-    }
-    let Some(name_len) = read_u16(data, local + 26).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(extra_len) = read_u16(data, local + 28).map(|n| n as usize) else {
-        return Vec::new();
-    };
-    let Some(start) = local.checked_add(30 + name_len + extra_len) else {
-        return Vec::new();
-    };
-    let Some(end) = start.checked_add(compressed_len) else {
-        return Vec::new();
-    };
-    let Some(payload) = data.get(start..end) else {
-        return Vec::new();
-    };
-    let out = match method {
-        0 => payload.to_vec(),
-        8 => inflate(payload, expected_len).unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    if out.len() == expected_len && crc32(&out) == expected_crc {
-        out
-    } else {
-        Vec::new()
-    }
+    (reverse_bits(code, count), count as u8)
 }
 
 pub fn jet_archive_tar_add(archive: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
@@ -522,6 +744,14 @@ fn reverse_bits(mut code: u32, count: usize) -> u32 {
 }
 
 fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
+    (expected_len <= MAX_OUTPUT).then(|| inflate_with_limit(data, Some(expected_len)))?
+}
+
+fn inflate_any(data: &[u8]) -> Option<Vec<u8>> {
+    inflate_with_limit(data, None)
+}
+
+fn inflate_with_limit(data: &[u8], expected_len: Option<usize>) -> Option<Vec<u8>> {
     let mut bits = Bits { data, bit: 0 };
     let mut out = Vec::new();
     loop {
@@ -534,7 +764,9 @@ fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
                     return None;
                 }
                 for _ in 0..len {
-                    if out.len() == expected_len {
+                    if expected_len.is_some_and(|limit| out.len() == limit)
+                        || out.len() == MAX_OUTPUT
+                    {
                         return None;
                     }
                     out.push(bits.read(8)? as u8);
@@ -551,7 +783,11 @@ fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
             _ => return None,
         }
         if final_block {
-            return (out.len() == expected_len).then_some(out);
+            return match expected_len {
+                None => Some(out),
+                Some(limit) if out.len() == limit => Some(out),
+                Some(_) => None,
+            };
         }
     }
 }
@@ -601,7 +837,7 @@ fn inflate_codes(
     literal: &Huffman,
     distance: &Huffman,
     out: &mut Vec<u8>,
-    expected_len: usize,
+    expected_len: Option<usize>,
 ) -> Option<()> {
     const LENGTH_BASE: [usize; 29] = [
         3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
@@ -622,7 +858,9 @@ fn inflate_codes(
     loop {
         match literal.symbol(bits)? {
             byte @ 0..=255 => {
-                if out.len() == expected_len {
+                if expected_len.is_some_and(|limit| out.len() == limit)
+                    || out.len() == MAX_OUTPUT
+                {
                     return None;
                 }
                 out.push(byte as u8);
@@ -635,7 +873,11 @@ fn inflate_codes(
                 let base = *DIST_BASE.get(distance_symbol)?;
                 let extra = *DIST_EXTRA.get(distance_symbol)?;
                 let distance = base + bits.read(extra)? as usize;
-                if distance == 0 || distance > out.len() || out.len().checked_add(length)? > expected_len {
+                if distance == 0
+                    || distance > out.len()
+                    || out.len().checked_add(length)? > MAX_OUTPUT
+                    || expected_len.is_some_and(|limit| out.len().checked_add(length).is_none_or(|end| end > limit))
+                {
                     return None;
                 }
                 for _ in 0..length {

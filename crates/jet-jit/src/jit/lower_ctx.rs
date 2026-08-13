@@ -11145,6 +11145,14 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "sign", 2) => (self.host.crypto.sign, false),
             ("core.crypto", "verify", 3) => (self.host.crypto.verify, false),
             ("core.crypto", "sha256", 1) => (self.host.crypto.sha256, false),
+            ("core.crypto", "sha1", 1) => (self.host.crypto.sha1, false),
+            ("core.crypto", "sha224", 1) => (self.host.crypto.sha224, false),
+            ("core.crypto", "sha384", 1) => (self.host.crypto.sha384, false),
+            ("core.crypto", "sha3_224", 1) => (self.host.crypto.sha3_224, false),
+            ("core.crypto", "sha3_256", 1) => (self.host.crypto.sha3_256, false),
+            ("core.crypto", "sha3_384", 1) => (self.host.crypto.sha3_384, false),
+            ("core.crypto", "sha3_512", 1) => (self.host.crypto.sha3_512, false),
+            ("core.crypto", "pbkdf2_hmac", 4) => (self.host.crypto.pbkdf2_hmac, false),
             ("core.crypto", "sha512_bytes", 1) => (self.host.crypto.sha512_bytes, false),
             ("core.crypto", "blake3_bytes", 1) => (self.host.crypto.blake3_bytes, false),
             ("core.crypto", "seal", 3) => (self.host.crypto.seal, false),
@@ -11156,6 +11164,9 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "__password_text", 1) => {
                 (self.host.crypto.password_text, false)
             }
+            ("core.crypto", "__hasher_new", 0) => (self.host.crypto.hasher_new, false),
+            ("core.crypto", "__hasher_update", 2) => (self.host.crypto.hasher_update, false),
+            ("core.crypto", "__hasher_digest", 1) => (self.host.crypto.hasher_digest, false),
             ("core.crypto", "file_open", 3) => (self.host.crypto.file_open, false),
             ("core.crypto", "__secret_from_bytes", 1) => {
                 (self.host.crypto.secret_from_bytes, false)
@@ -13389,6 +13400,51 @@ impl LowerCtx<'_, '_> {
                         "zip_decompress" if args.len() == 1 => {
                             (self.host.archive.zip_decompress, vec![self.lower_expr(&args[0])?])
                         }
+                        "crc32" if args.len() == 1 => {
+                            (self.host.archive.crc32, vec![self.lower_expr(&args[0])?])
+                        }
+                        "adler32" if args.len() == 1 => {
+                            (self.host.archive.adler32, vec![self.lower_expr(&args[0])?])
+                        }
+                        "deflate" if args.len() == 1 => {
+                            (self.host.archive.deflate, vec![self.lower_expr(&args[0])?])
+                        }
+                        "inflate" if args.len() == 1 => {
+                            (self.host.archive.inflate, vec![self.lower_expr(&args[0])?])
+                        }
+                        "zip_names_json" if args.len() == 1 => {
+                            (self.host.archive.zip_names_json, vec![self.lower_expr(&args[0])?])
+                        }
+                        "zip_open" if args.len() == 1 => {
+                            (self.host.archive.zip_open, vec![self.lower_expr(&args[0])?])
+                        }
+                        "zip_next" if args.len() == 2 => (
+                            self.host.archive.zip_next,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "zip_read" if args.len() == 2 => (
+                            self.host.archive.zip_read,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "zip_write" if args.len() == 3 => (
+                            self.host.archive.zip_write,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "zip_close" if args.len() == 1 => {
+                            (self.host.archive.zip_close, vec![self.lower_expr(&args[0])?])
+                        }
+                        "zip_extract" if args.len() == 2 => (
+                            self.host.archive.zip_extract,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "unzip" if args.len() == 2 => (
+                            self.host.archive.unzip,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         "tar_add" if args.len() == 3 => (
                             self.host.archive.tar_add,
                             vec![

@@ -409,9 +409,10 @@ fn crypto_helper_return_ty(helper: &str) -> Type {
         bits: 8,
     }));
     match helper {
-        "__digest256_hex" | "__digest512_hex" | "__x25519_public_text" | "__password_text" => {
+        "__digest256_hex" | "__digest512_hex" | "__x25519_public_text" | "__password_text" | "__hasher_digest" => {
             Type::String
         }
+        "__hasher_new" => Type::Named("Hasher".into()),
         "__signing_public" => Type::Named("VerifyKey".into()),
         "__x25519_public" => Type::Named("X25519PublicKey".into()),
         "__signing_generate" => Type::Result {
@@ -485,6 +486,8 @@ fn crypto_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
         ("Digest256", "hex") => Some("__digest256_hex"),
         ("Digest512", "hex") => Some("__digest512_hex"),
         ("PasswordHash", "text") => Some("__password_text"),
+        ("Hasher", "update") => Some("__hasher_update"),
+        ("Hasher", "digest") => Some("__hasher_digest"),
         _ => None,
     }
 }
@@ -547,6 +550,7 @@ fn lower_crypto_instance_fast(
     receiver: &Expr,
     method: &str,
     method_span: Span,
+    call_args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     resolved_ret: Option<&Type>,
     lowered_receiver: &mut Option<TExpr>,
@@ -568,7 +572,10 @@ fn lower_crypto_instance_fast(
     let recv = lowered_receiver
         .take()
         .unwrap_or_else(|| lower_expr(receiver, cx, env));
-    let args = vec![recv];
+    let mut args = vec![recv];
+    if kind == "Hasher" && method == "update" {
+        args.extend(call_args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+    }
     let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
     let ty = resolved_ret
         .cloned()
@@ -848,6 +855,7 @@ pub(crate) fn lower_method_call_with_sig(
         receiver,
         method,
         method_span,
+        args,
         recv_type,
         resolved_ret,
         &mut lowered_receiver,
@@ -1444,6 +1452,7 @@ fn lower_method_call_impl(
             ("KeyUnlock", "Recipient") => "__vault_unlock_recipient",
             ("KeyUnlock", "Passphrase") => "__vault_unlock_passphrase",
             ("PasswordHash", "parse") => "__password_parse",
+            ("Hasher", "new") => "__hasher_new",
             _ => return None,
         };
         Some(helper)
@@ -1464,11 +1473,14 @@ fn lower_method_call_impl(
         let helper = crypto_instance_helper(kind, method);
         if let Some(helper) = helper {
             let recv = lower_expr(receiver, cx, env);
-            let args = vec![recv];
-            let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
+            let mut targs = vec![recv];
+            if kind == "Hasher" && method == "update" {
+                targs.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+            }
+            let widen_to_vec = core_widen_to_vec("core.crypto", helper, &targs);
             let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
             return TExpr { ty, kind: TExprKind::CoreCall {
-                module: "core.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
+                module: "core.crypto".to_string(), method: helper.to_string(), args: targs, source_span: method_span, widen_to_vec,
             }};
         }
     }

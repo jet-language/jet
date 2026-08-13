@@ -408,6 +408,8 @@ pub fn builtin_method_return(
         Type::Named(n) if n == "X25519SecretKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("X25519PublicKey".into()))),
         Type::Named(n) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512") && method == "bytes" && arg_count == 0 => Some(Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))),
         Type::Named(n) if matches!(n.as_str(), "Digest256" | "Digest512") && method == "hex" && arg_count == 0 => Some(Some(Type::String)),
+        Type::Named(n) if n == "Hasher" && method == "update" && arg_count == 1 => Some(None),
+        Type::Named(n) if n == "Hasher" && method == "digest" && arg_count == 0 => Some(Some(Type::String)),
         Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
         Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
@@ -751,6 +753,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         }
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_CONDITION => {
             Some(Some(Type::Named(crate::Syntax::TYPE_CONDITION.to_string())))
+        }
+        (Type::Named(n), "new", 0) if n == "Hasher" => {
+            Some(Some(Type::Named("Hasher".to_string())))
         }
         (Type::Named(n), "new", 1) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
@@ -2051,6 +2056,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "shuffle"
             )
         }
+        Type::Named(n) if n == "Hasher" => method == "update",
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
@@ -2077,6 +2083,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => Some(vec![Type::Named("X25519SecretKey".into())]),
         Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => Some(vec![Type::Named("Secret".into())]),
         Type::Named(n) if n == "PasswordHash" && method == "parse" => Some(vec![Type::String]),
+        Type::Named(n) if n == "Hasher" && method == "update" => {
+            Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))])
+        }
+        Type::Named(n) if n == "Hasher" && method == "digest" => Some(vec![]),
         Type::Named(n)
             if n == crate::Syntax::DURATION_TYPE
                 && method == crate::Syntax::METHOD_DURATION_IN =>

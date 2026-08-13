@@ -32,6 +32,7 @@ const CRYPTO_LEAVES: &[(&str, CoreLeafKind)] = &[
     ("PasswordHash", CoreLeafKind::Plain),
     ("Digest256", CoreLeafKind::Plain),
     ("Digest512", CoreLeafKind::Plain),
+    ("Hasher", CoreLeafKind::Plain),
     ("CryptoError", CoreLeafKind::Plain),
     ("FileCryptoError", CoreLeafKind::Plain),
     ("KeyWrapError", CoreLeafKind::Plain),

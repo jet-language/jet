@@ -706,6 +706,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true]), // E2-M12 D-OBS3: trace context for structured log records.
     CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true]), // D-LOGFMT1=A: explicit log format override.
     CoreCallRecord::new("core.crypto", "sha256_bytes", "jet_ring_crypto_sha256_bytes", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha1", "jet_crypto_sha1_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha224", "jet_crypto_sha224_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha384", "jet_crypto_sha384_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha3_224", "jet_crypto_sha3_224_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha3_256", "jet_crypto_sha3_256_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha3_384", "jet_crypto_sha3_384_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "sha3_512", "jet_crypto_sha3_512_hex", true, &[true]),
+    CoreCallRecord::new("core.crypto", "pbkdf2_hmac", "jet_crypto_pbkdf2_hmac", true, &[true, true, false, false]),
     CoreCallRecord::new("core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false]),
     CoreCallRecord::new("core.auth", "session_show", "jet_auth_session_show", true, &[true]),
     CoreCallRecord::new("core.auth", "session_user", "jet_auth_session_user", true, &[true]),

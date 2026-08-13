@@ -3705,6 +3705,22 @@ impl<'a> EvalCtx<'a> {
         for a in args {
             argv.push(self.eval_expr_child(a, scope)?);
         }
+        // Hasher.update is lowered as a CoreCall so AOT and JIT share the
+        // same Prelude symbol. The interpreter carrier is a structural value;
+        // write its updated state back through the mutable receiver place.
+        if module == "core.crypto" && method == "__hasher_update" && args.len() == 2 {
+            if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+                module,
+                method,
+                argv.clone(),
+                source_span,
+                Some(expr.ty.clone()),
+            ) {
+                let updated = result?;
+                self.write_back_place(&args[0], updated, scope)?;
+                return Ok(CtValue::Unit);
+            }
+        }
         // A typed JSON encoder must pass through the same Codable protocol as
         // the AOT helper.  The generic CtValue renderer only knows a record's
         // storage shape, so using it here would bypass a hand-written nested

@@ -16,6 +16,7 @@ pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs");
     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
     pub(crate) use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_for_host;
     include!("../../jet-pkg-model/src/Prelude/Crypto.rs");
@@ -98,6 +99,7 @@ pub(crate) enum CryptoValue {
     Signature(runtime::JetSignature),
     Digest256(runtime::JetDigest256),
     Digest512(runtime::JetDigest512),
+    Hasher(runtime::JetCryptoHasher),
     Sealed(runtime::JetSealed),
     Secret(runtime::Secret),
     PasswordHash(runtime::JetPasswordHash),
@@ -288,6 +290,13 @@ fn with_crypto<R>(handle: i64, f: impl FnOnce(&CryptoValue) -> Option<R>) -> Opt
     })
 }
 
+fn with_crypto_mut<R>(handle: i64, f: impl FnOnce(&mut CryptoValue) -> Option<R>) -> Option<R> {
+    Concurrency::with_runtime_mut(|rt| {
+        let index = handle.saturating_sub(1) as usize;
+        rt.crypto_values.get_mut(index).and_then(|slot| slot.as_mut()).and_then(f)
+    })
+}
+
 /// Snapshot closed-family secret material for `ExpiringSecret` zeroize-on-expiry.
 /// Keeps the crypto handle live so `with` can loan it until expiry drops it.
 pub(crate) fn claim_expiring_secret(handle: i64) -> Option<crate::Memory::SecretState> {
@@ -419,6 +428,86 @@ extern "C" fn jet_jit_crypto_verify(
 extern "C" fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
     let digest = runtime::jet_crypto_sha256_typed_impl(&clone_bytes(data_handle));
     push(CryptoValue::Digest256(digest))
+}
+
+extern "C" fn jet_jit_crypto_sha1(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha1_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha224(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha224_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha384(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha384_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha3_224(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha3_224_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha3_256(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha3_256_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha3_384(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha3_384_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_sha3_512(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha3_512_hex(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i64, key_len: i64) -> i64 {
+    let out = runtime::jet_crypto_pbkdf2_hmac(
+        &clone_bytes(password),
+        &clone_bytes(salt),
+        iterations,
+        key_len,
+    );
+    alloc_bytes(&out)
+}
+
+extern "C" fn jet_jit_crypto_hasher_new() -> i64 {
+    push(CryptoValue::Hasher(runtime::jet_crypto_hasher_new()))
+}
+
+extern "C" fn jet_jit_crypto_hasher_update(handle: i64, data: i64) -> i64 {
+    let bytes = clone_bytes(data);
+    if with_crypto_mut(handle, |value| match value {
+        CryptoValue::Hasher(hasher) => {
+            runtime::jet_crypto_hasher_update(hasher, &bytes);
+            Some(())
+        }
+        _ => None,
+    })
+    .is_some()
+    {
+        0
+    } else {
+        Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid Hasher handle"));
+        0
+    }
+}
+
+extern "C" fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::Hasher(hasher) => Some(runtime::jet_crypto_hasher_digest(hasher)),
+        _ => None,
+    }) {
+        Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid Hasher handle"));
+            0
+        }
+    }
 }
 
 extern "C" fn jet_jit_crypto_sha512_bytes(data_handle: i64) -> i64 {
@@ -1689,6 +1778,17 @@ host_fns! {
     sign: "jet_jit_crypto_sign" => jet_jit_crypto_sign: binary;
     verify: "jet_jit_crypto_verify" => jet_jit_crypto_verify: ternary;
     sha256: "jet_jit_crypto_sha256" => jet_jit_crypto_sha256: unary;
+    sha1: "jet_jit_crypto_sha1" => jet_jit_crypto_sha1: unary;
+    sha224: "jet_jit_crypto_sha224" => jet_jit_crypto_sha224: unary;
+    sha384: "jet_jit_crypto_sha384" => jet_jit_crypto_sha384: unary;
+    sha3_224: "jet_jit_crypto_sha3_224" => jet_jit_crypto_sha3_224: unary;
+    sha3_256: "jet_jit_crypto_sha3_256" => jet_jit_crypto_sha3_256: unary;
+    sha3_384: "jet_jit_crypto_sha3_384" => jet_jit_crypto_sha3_384: unary;
+    sha3_512: "jet_jit_crypto_sha3_512" => jet_jit_crypto_sha3_512: unary;
+    pbkdf2_hmac: "jet_jit_crypto_pbkdf2_hmac" => jet_jit_crypto_pbkdf2_hmac: quaternary;
+    hasher_new: "jet_jit_crypto_hasher_new" => jet_jit_crypto_hasher_new: nullary;
+    hasher_update: "jet_jit_crypto_hasher_update" => jet_jit_crypto_hasher_update: binary;
+    hasher_digest: "jet_jit_crypto_hasher_digest" => jet_jit_crypto_hasher_digest: unary;
     sha512_bytes: "jet_jit_crypto_sha512_bytes" => jet_jit_crypto_sha512_bytes: unary;
     blake3_bytes: "jet_jit_crypto_blake3_bytes" => jet_jit_crypto_blake3_bytes: unary;
     digest256_hex: "jet_jit_crypto_digest256_hex" => jet_jit_crypto_digest256_hex: unary;

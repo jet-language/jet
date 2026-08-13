@@ -1147,6 +1147,13 @@ pub(crate) fn method_call_in_subset(
     ) {
         return expr_in_subset(receiver, cx, locals);
     }
+    if matches!(
+        (recv_type_leaf, method, args.len()),
+        (Some("Hasher"), "update", 1) | (Some("Hasher"), "digest", 0)
+    ) {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
     // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn __jet_Shape>`). Sema sets
     // `recv_type == Some(<trait>)` with the trait in `cx.trait_names`; the AST
@@ -1429,6 +1436,7 @@ pub(crate) fn static_method_call_in_subset(
             | ("KeyUnlock", "Recipient" | "Passphrase", 1)
             | ("X25519PublicKey", "from_text", 1)
             | ("PasswordHash", "parse", 1)
+            | ("Hasher", "new", 0)
     ) {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

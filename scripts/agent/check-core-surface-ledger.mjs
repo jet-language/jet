@@ -280,7 +280,7 @@ const CROSS_DOMAIN_DISTINCT = new Set([
   "trimstart", "trylock", "type", "typeassert", "typeof", "union", "unlock", "unquote",
   "unwrap", "unzip", "update", "urandom", "use", "userinfo", "utime", "valid",
   "validate", "value", "valueof", "values", "var", "verifyhostname", "verifymode", "version",
-  "wait", "with", "wrap", "write", "writebyte", "writelines", "writer", "writeto",
+  "wait", "waitall", "with", "wrap", "write", "writebyte", "writelines", "writer", "writeto",
   "xor", "zero", "zip",
 ]);
 
@@ -532,11 +532,13 @@ const TYPE_CONTAINER = {
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {
-  task_list_method_return: "TaskList",
   list_method_return: "List",
   iter_method_return: "Iter",
   view_method_return: "View",
   option_method_return: "Option",
+  // Result is a language carrier, not a scored Core container. Its methods
+  // are still discovered so the ledger cannot silently miss the dispatch.
+  result_method_return: null,
   map_method_return: "Map",
   string_method_return: "String",
   stopwatch_method_return: "Stopwatch",
@@ -1289,6 +1291,7 @@ function collectionInventory() {
     const container = COLLECTION_METHOD_FUNCTIONS[name];
     const body = tableBody(name, sources);
     const sourceLine = lineAt(source, source.indexOf("fn " + name + "("));
+    if (name === "result_method_return") continue;
     if (container !== null) {
       const methods = Array.from(methodNames(body, constants)).sort();
       // A table that yields nothing is a reader that cannot read it. This is

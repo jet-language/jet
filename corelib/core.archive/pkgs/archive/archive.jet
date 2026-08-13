@@ -1,6 +1,6 @@
 // core.archive — zip/tar containers (D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A).
 //
-// This is the source-owned public package. The four small wrappers below are
+// This is the source-owned public package. These small wrappers are
 // checked by the normal Jet frontend and are emitted as ordinary Jet
 // functions. Their calls to `abi` are the one audited ABI boundary for byte
 // format work; no compiler template or engine-specific implementation is used.
@@ -15,6 +15,54 @@ pub fn zip_compress(name: String, data: [U8]) => [U8] {
 
 pub fn zip_decompress(data: [U8]) => [U8] {
     return abi.zip_decompress(data)
+}
+
+pub fn crc32(data: [U8]) => Int {
+    return abi.crc32(data)
+}
+
+pub fn adler32(data: [U8]) => Int {
+    return abi.adler32(data)
+}
+
+pub fn deflate(data: [U8]) => [U8] {
+    return abi.deflate(data)
+}
+
+pub fn inflate(data: [U8]) => [U8] {
+    return abi.inflate(data)
+}
+
+pub fn zip_names_json(archive: [U8]) => String {
+    return abi.zip_names_json(archive)
+}
+
+pub fn zip_open(archive: [U8]) => [U8] {
+    return abi.zip_open(archive)
+}
+
+pub fn zip_next(reader: [U8], index: Int) => String {
+    return abi.zip_next(reader, index)
+}
+
+pub fn zip_read(reader: [U8], name: String) => [U8] {
+    return abi.zip_read(reader, name)
+}
+
+pub fn zip_write(writer: [U8], name: String, data: [U8]) => [U8] {
+    return abi.zip_write(writer, name, data)
+}
+
+pub fn zip_close(writer: [U8]) => [U8] {
+    return abi.zip_close(writer)
+}
+
+pub fn zip_extract(archive: [U8], name: String) => [U8] {
+    return abi.zip_extract(archive, name)
+}
+
+pub fn unzip(archive: [U8], name: String) => [U8] {
+    return abi.unzip(archive, name)
 }
 
 pub fn tar_add(archive: [U8], name: String, data: [U8]) => [U8] {

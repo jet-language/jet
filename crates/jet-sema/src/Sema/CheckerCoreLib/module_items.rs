@@ -341,6 +341,23 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // UUIDs as `String`, no new nominal type); `v5` is the deterministic
         // namespace+name sibling of the already-shipped `v4`/`v7`.
         "core.uuid" => &["v4", "v7", "v5", "parse"],
+        // Keep these literal module arms alongside the dynamic gate lookup
+        // above so source-ledger tooling can see the complete inventory.
+        "core.mem" => &[
+            Syntax::TYPE_PTR,
+            Syntax::MEM_FROM_ADDR,
+            Syntax::MEM_VOLATILE_READ,
+            Syntax::MEM_VOLATILE_WRITE,
+            Syntax::MEM_ADDRESS_OF,
+            Syntax::MEM_PIN,
+            Syntax::TYPE_PIN,
+            Syntax::MEM_ARENA,
+            Syntax::MEM_BUMP,
+            Syntax::MEM_POOL,
+            Syntax::MEM_FIXED,
+        ],
+        // D-LIB-CALLGRANT1=A: pinned native Jet library loader.
+        "core.mod" => &["load"],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.solve" => &["Solver"],
@@ -704,10 +721,19 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "PasswordHash",
             "Digest256",
             "Digest512",
+            "Hasher",
             "CryptoError",
             "FileCryptoError",
             "sha256",
             "sha256_bytes",
+            "sha1",
+            "sha224",
+            "sha384",
+            "sha3_224",
+            "sha3_256",
+            "sha3_384",
+            "sha3_512",
+            "pbkdf2_hmac",
             "sha512_bytes",
             "blake3_bytes",
             "constant_time_equal_bytes",
@@ -867,6 +893,18 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.archive" => &[
             "zip_compress",
             "zip_decompress",
+            "crc32",
+            "adler32",
+            "deflate",
+            "inflate",
+            "zip_names_json",
+            "zip_open",
+            "zip_next",
+            "zip_read",
+            "zip_write",
+            "zip_close",
+            "zip_extract",
+            "unzip",
             "tar_add",
             "tar_get",
             "tar_names_json",
@@ -909,8 +947,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
         "core.plugin" => &["load"],
-        // D-LIB-CALLGRANT1=A: pinned native Jet library loader.
-        Syntax::CORE_MOD_MODULE => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
         "core.reactive" => &["signal", "derived", "computed", "effect"],
@@ -1107,7 +1143,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         (module, item),
         ("core.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
-            | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
+            | "PasswordHash" | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError" | "Session" | "Auth")
         | ("core.sync", "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy")
