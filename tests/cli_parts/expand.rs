@@ -164,6 +164,64 @@ fn expand_inline_golden() {
 }
 
 #[test]
+fn expand_callable_signature_uses_one_checked_fact_document() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/callable/callable_policies.jet");
+    let human = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "callable-signature"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
+    assert!(human_text.contains("load_user [fn:"), "{human_text}");
+    assert!(human_text.contains("label: label = \"user\": String"), "{human_text}");
+    assert!(human_text.contains("policies=[trace(\"users.load\")]") , "{human_text}");
+
+    let json = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "callable-signature", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
+    assert!(parse_json(&json_text).is_ok(), "{json_text}");
+    assert!(json_text.contains("\"selection\":\"callable-signature\""));
+    assert!(json_text.contains("\"policies\":[\"trace(\\\"users.load\\\")\"]"));
+    assert!(json_text.contains("\"default\":\"\\\"user\\\"\""));
+}
+
+#[test]
+fn expand_derive_lens_projects_derived_capabilities() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/types/auto_derive_policy/main.jet");
+    let human = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "derive"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
+    assert!(human_text.contains("derive —"), "{human_text}");
+    assert!(human_text.contains("Visible: Printable"), "{human_text}");
+
+    let json = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "derive", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
+    assert!(parse_json(&json_text).is_ok(), "{json_text}");
+    assert!(json_text.contains("\"selection\":\"derive\""));
+    assert!(json_text.contains("\"derives\":[\"Printable\"]"));
+}
+
+#[test]
 fn expand_json_is_canonical_and_lens_scoped() {
     let p = expand_fixture();
     let run = || {
@@ -310,6 +368,8 @@ fn expand_json_bare_projects_every_lens() {
     assert!(stdout.contains("\"name\":\"web\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"effects\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"layout\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"derive\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"callable-signature\""), "{stdout}");
     assert!(!stdout.contains("inline —"), "human output leaked into JSON: {stdout}");
 }
 

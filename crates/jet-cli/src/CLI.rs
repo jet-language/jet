@@ -223,7 +223,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
     NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
-    NestedCommandSpec { name: "expand", usage: "expand [--facts <lens>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
     NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
     NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
@@ -827,7 +827,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.
-    FlagSpec { long: "--facts", help: "with expand: project a specific evidence lens --facts=<lens>" },
+    FlagSpec { long: "--facts", help: "with expand: project inline, memory, web, effects, layout, derive, or callable-signature facts --facts=<lens>" },
     FlagSpec { long: "--annotations", help: "with budget: CI annotations auto, none, or github" },
     FlagSpec { long: "--baseline", help: "with budget update: selected baseline name" },
     FlagSpec { long: "--bootstrap", help: "with budget update: create absent or stale baseline history" },

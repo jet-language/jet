@@ -301,7 +301,7 @@ pub(crate) fn compute_completions(
     if let Some((receiver_name, prefix)) = context_is_compiler_fact_access(src, offset) {
         let is_type = db.defs.iter().any(|def| {
             def.name == receiver_name
-                && matches!(&def.kind, SymKind::Struct { .. } | SymKind::Type)
+                && matches!(&def.kind, SymKind::Struct { .. } | SymKind::Type { .. })
         }) || receiver_name
             .chars()
             .next()
@@ -331,7 +331,7 @@ pub(crate) fn compute_completions(
         } else {
             db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
                 match &def.kind {
-                    SymKind::Struct { .. } | SymKind::Type => Some(def.name.clone()),
+                    SymKind::Struct { .. } | SymKind::Type { .. } => Some(def.name.clone()),
                     SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
                     _ => None,
                 }
@@ -369,7 +369,7 @@ pub(crate) fn compute_completions(
     if let Some(enum_type) = detect_switch_enum_type(src, offset, db) {
         for def in &db.defs {
             if def.name == enum_type {
-                if let SymKind::Enum { variants } = &def.kind {
+                if let SymKind::Enum { variants, .. } = &def.kind {
                     for v in variants {
                         let label = format!("{}.{}", enum_type, v);
                         if seen.insert(label.clone()) {

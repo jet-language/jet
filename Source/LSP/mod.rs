@@ -183,6 +183,21 @@ mod tests {
     }
 
     #[test]
+    fn hover_shows_callable_access_defaults_and_policies() {
+        let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String = \"user\") => Int { return 1 }\nfn run() {}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error));
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (toks, _) = crate::Lexer::lex(src);
+        let offset = src.find("fn load").expect("load declaration") + 3;
+        let hover = compute_hover(&db, &toks, src, project.entry(), offset).expect("load hover");
+        assert!(hover.contains("&value: Int"), "{hover}");
+        assert!(hover.contains("label: String = \"user\""), "{hover}");
+        assert!(hover.contains("policies=[trace(\"users.load\")]"), "{hover}");
+    }
+
+    #[test]
     fn unique_type_uses_leaf_in_hover_and_json() {
         let src = "struct Point { x: Int }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);

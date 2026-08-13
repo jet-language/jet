@@ -3502,6 +3502,12 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
 - `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. Physical
   byte facts remain optional; when absent, the lens names the registered
   diagnostic and the reason.
+- `derive` (D-ONCE-DERIVE1) — capabilities already attached to structs,
+  enums, and distinct types, with their checked identity and source span.
+- `callable-signature` (D-CALLPOLICY1=E) — the complete checked callable
+  contract: public labels and local names, defaults, access modes, zones,
+  types, variadics, effects, errors, returned-view provenance, source identity,
+  and the declared policy chain.
 
 A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
 stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright

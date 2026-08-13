@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use jet_foundation::AST::ParamZone;
+use jet_foundation::AST::{AccessConvention, ParamZone, Type};
 use jet_foundation::AST::ProgramBundle;
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
@@ -16,7 +16,7 @@ use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, ExpandProjection, ExpandValue,
     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
-    SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
+    CallableParameterFact, CallableSignatureFact, SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
 
@@ -388,6 +388,50 @@ fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
     )
 }
 
+fn json_callable_signature(signature: &crate::Types::CallableSignatureFact) -> String {
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(|parameter| {
+            format!(
+                "{{\"name\":{},\"label\":{},\"default\":{},\"access\":{},\"zone\":{},\"type\":{},\"variadic\":{}}}",
+                json_str(&parameter.name),
+                json_str(&parameter.label),
+                parameter
+                    .default
+                    .as_ref()
+                    .map_or_else(|| "null".to_string(), |value| json_str(value)),
+                json_str(&parameter.access),
+                json_str(&parameter.zone),
+                json_str(&parameter.ty),
+                parameter.variadic,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let list = |values: &[String]| {
+        values
+            .iter()
+            .map(|value| json_str(value))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let views = signature
+        .returned_views
+        .iter()
+        .map(json_view_provenance)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"parameters\":[{}],\"effects\":[{}],\"errors\":[{}],\"returned_views\":[{}],\"policies\":[{}]}}",
+        parameters,
+        list(&signature.effects),
+        list(&signature.errors),
+        views,
+        list(&signature.policies),
+    )
+}
+
 fn json_kind(kind: &SymbolKind) -> String {
     match kind {
         SymbolKind::Module => "{\"kind\":\"module\"}".to_string(),
@@ -469,8 +513,19 @@ fn json_def(d: &SymbolDef) -> String {
             .collect::<Vec<_>>()
             .join(",")
     );
+    let callable_json = d
+        .callable_signature
+        .as_ref()
+        .map(json_callable_signature)
+        .unwrap_or_else(|| "null".to_string());
+    let derives = d
+        .derives
+        .iter()
+        .map(|derive| json_str(derive))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{}}}",
+        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{},\"callable_signature\":{},\"derives\":[{}]}}",
         json_str(&d.identity),
         json_str(&d.qualified_name),
         json_str(&d.name),
@@ -478,6 +533,8 @@ fn json_def(d: &SymbolDef) -> String {
         json_span(d.def_span),
         json_kind(&d.kind),
         view_json,
+        callable_json,
+        derives,
     )
 }
 
@@ -814,6 +871,14 @@ pub(crate) fn convert_defs(
 ) -> Vec<SymbolDef> {
     defs.iter()
         .map(|d| {
+            let view_provenance = view_provenance
+                .get(&d.identity)
+                .map(|map| {
+                    map.iter()
+                        .map(|(path, provenance)| convert_view_provenance(path, provenance))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let owner = match &d.kind {
                 SymKind::EnumVariant { parent } | SymKind::Field { parent, .. } => {
                     Some(parent.as_str())
@@ -837,17 +902,89 @@ pub(crate) fn convert_defs(
                 module_path: d.module_path.clone(),
                 def_span: d.def_span.into(),
                 kind: convert_kind(&d.kind),
-                view_provenance: view_provenance
-                    .get(&d.identity)
-                    .map(|map| {
-                        map.iter()
-                            .map(|(path, provenance)| convert_view_provenance(path, provenance))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                callable_signature: callable_signature(&d.kind, &view_provenance),
+                derives: match &d.kind {
+                    SymKind::Struct { derives, .. }
+                    | SymKind::Enum { derives, .. }
+                    | SymKind::Type { derives } => derives.clone(),
+                    _ => Vec::new(),
+                },
+                view_provenance,
             }
         })
         .collect()
+}
+
+fn callable_signature(
+    kind: &SymKind,
+    returned_views: &[crate::Types::ViewProvenanceFact],
+) -> Option<CallableSignatureFact> {
+    let SymKind::Function {
+        params,
+        param_contract,
+        param_variadic,
+        ret,
+        effects,
+        effect_via,
+        param_access,
+        param_defaults,
+        policies,
+    } = kind
+    else {
+        return None;
+    };
+    let parameters = params
+        .iter()
+        .enumerate()
+        .map(|(index, (name, ty))| {
+            let (label, zone) = param_contract
+                .get(index)
+                .map(|(_, label, zone)| (
+                    label.clone(),
+                    match zone {
+                        ParamZone::PositionalOnly => "positional_only",
+                        ParamZone::Either => "either",
+                        ParamZone::LabelOnly => "label_only",
+                    }
+                    .to_string(),
+                ))
+                .unwrap_or_else(|| (String::new(), "either".to_string()));
+            let access = match param_access
+                .get(index)
+                .copied()
+                .unwrap_or(AccessConvention::Read)
+            {
+                AccessConvention::Read => "read",
+                AccessConvention::Write => "write",
+                AccessConvention::Move => "move",
+            };
+            CallableParameterFact {
+                name: name.clone(),
+                label,
+                default: param_defaults.get(index).cloned().flatten(),
+                access: access.to_string(),
+                zone,
+                ty: ty.name(),
+                variadic: param_variadic.get(index).copied().unwrap_or(false),
+            }
+        })
+        .collect();
+    let effects = effect_via
+        .as_ref()
+        .map(|(name, _)| vec![format!("via {name}")])
+        .or_else(|| effects.as_ref().map(|row| row.iter().map(|(name, _)| name.clone()).collect()))
+        .unwrap_or_default();
+    let errors = match ret {
+        Some(Type::Result { err, .. }) => vec![err.name()],
+        _ => Vec::new(),
+    };
+    Some(CallableSignatureFact {
+        parameters,
+        effects,
+        errors,
+        returned_views: returned_views.to_vec(),
+        policies: policies.clone(),
+    })
 }
 
 pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
@@ -891,15 +1028,15 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
                 .collect(),
             ret: ret.as_ref().map(|t| t.name()),
         },
-        SymKind::Struct { fields } => SymbolKind::Struct {
+        SymKind::Struct { fields, .. } => SymbolKind::Struct {
             fields: fields.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
         },
-        SymKind::Enum { variants } => SymbolKind::Enum {
+        SymKind::Enum { variants, .. } => SymbolKind::Enum {
             variants: variants.clone(),
         },
         SymKind::Trait => SymbolKind::Trait,
         SymKind::Tag => SymbolKind::Tag,
-        SymKind::Type => SymbolKind::Type,
+        SymKind::Type { .. } => SymbolKind::Type,
         SymKind::Const => SymbolKind::Const,
         SymKind::EnumVariant { parent } => SymbolKind::EnumVariant {
             parent: parent.clone(),

@@ -892,6 +892,7 @@ fn semantic_shape(
             ret,
             effects,
             effect_via,
+            ..
         } => {
             let params = function_parameter_parts(
                 params,
@@ -911,7 +912,7 @@ fn semantic_shape(
             let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
             (SemanticSymbolKind::Function, format!("{prefix}({params}){arrow}{result}"))
         }
-        SymKind::Struct { fields } => (
+        SymKind::Struct { fields, .. } => (
             SemanticSymbolKind::Type,
             format!(
                 "struct {name} {{ {} }}",
@@ -922,13 +923,13 @@ fn semantic_shape(
                     .join(", ")
             ),
         ),
-        SymKind::Enum { variants } => (
+        SymKind::Enum { variants, .. } => (
             SemanticSymbolKind::Type,
             format!("enum {name} {{ {} }}", variants.join(", ")),
         ),
         SymKind::Trait => (SemanticSymbolKind::Type, format!("trait {name}")),
         SymKind::Tag => (SemanticSymbolKind::Type, format!("tag {name}")),
-        SymKind::Type => (SemanticSymbolKind::Type, format!("type {name}")),
+        SymKind::Type { .. } => (SemanticSymbolKind::Type, format!("type {name}")),
         SymKind::Const => (SemanticSymbolKind::Constant, format!("const {name}")),
         SymKind::EnumVariant { parent } => (
             SemanticSymbolKind::Member,
