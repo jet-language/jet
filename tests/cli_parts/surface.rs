@@ -444,6 +444,23 @@ fn check_json_golden() {
 }
 
 #[test]
+fn clean_check_json_golden() {
+    let dir = isolated_cwd("check_json_clean");
+    fs::write(dir.join("clean.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .args(["check", "clean.jet", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stderr.is_empty(), "clean JSON check wrote stderr: {:?}", out.stderr);
+    check_snapshot(
+        "check_json_clean.txt",
+        &scrub(&String::from_utf8_lossy(&out.stdout), &dir.join("clean.jet")),
+    );
+}
+
+#[test]
 fn build_json_golden() {
     let p = bad_file(&line!().to_string());
     let out = Command::new(jet())
