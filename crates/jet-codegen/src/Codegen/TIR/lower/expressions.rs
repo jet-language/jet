@@ -3130,6 +3130,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             import_ns,
             as_trait,
             fields,
+            span,
             ..
         } => {
             // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
@@ -3462,7 +3463,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
             // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
             // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
-            let tfields = fields
+            let mut tfields = fields
                 .iter()
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
@@ -3479,7 +3480,32 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     (n.clone(), value, boxed)
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            if cx.published_schemas.contains(&resolved_name) {
+                let holder_ty = Type::Named(Syntax::TYPE_DATA.to_string());
+                let holder = if env.fn_name == "decode" {
+                    TExpr {
+                        ty: holder_ty,
+                        kind: TExprKind::Local(TLocal::user("tree")),
+                    }
+                } else {
+                    TExpr {
+                        ty: holder_ty,
+                        kind: TExprKind::CoreCall {
+                            module: "core.encoding".to_string(),
+                            method: "__published_schema_empty".to_string(),
+                            args: Vec::new(),
+                            source_span: *span,
+                            widen_to_vec: Vec::new(),
+                        },
+                    }
+                };
+                tfields.push((
+                    Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(),
+                    holder,
+                    false,
+                ));
+            }
             // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
             // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
             let ty = match as_trait {

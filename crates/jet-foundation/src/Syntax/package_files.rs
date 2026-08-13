@@ -163,6 +163,10 @@ pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
 pub const MARKER_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
+/// D-BOUND-EVOLVE1=A: compiler-owned storage for the original ordered wire
+/// object. This is an emitted field, not a user-facing source spelling.
+pub const PUBLISHED_UNKNOWN_FIELDS: &str = "__jet_unknown_fields";
+
 /// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
 /// a type whose values must be consumed exactly once on every reachable path
 /// (moved to a `^` parameter or returned). Using one zero times is E0140

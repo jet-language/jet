@@ -200,6 +200,9 @@ fn datatree_kind(tree: &CtValue) -> &'static str {
 }
 fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(tree, "Object") {
+        Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
+            Some(fields.clone())
+        }
         Some(CtValue::Map(m)) => Some(
             m.iter()
                 .map(|(k, v)| {
@@ -218,6 +221,9 @@ fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
 }
 fn object_get<'a>(tree: &'a CtValue, key: &str) -> Option<&'a CtValue> {
     match json_payload(tree, "Object") {
+        Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
+            fields.iter().find(|(field, _)| field == key).map(|(_, value)| value)
+        }
         Some(CtValue::Map(m)) => m.get(&CtKey::Str(key.to_string())),
         _ => None,
     }
@@ -225,7 +231,10 @@ fn object_get<'a>(tree: &'a CtValue, key: &str) -> Option<&'a CtValue> {
 fn rebuild_object(pairs: Vec<(String, CtValue)>) -> CtValue {
     json_variant(
         "Object",
-        Some(CtValue::Map(pairs.into_iter().map(|(k, v)| (CtKey::Str(k), v)).collect())),
+        Some(CtValue::Struct {
+            type_name: "JSONObject".to_string(),
+            fields: pairs,
+        }),
     )
 }
 fn object_key_set(tree: &CtValue) -> BTreeSet<String> {
@@ -874,7 +883,7 @@ impl<'a> Interp<'a> {
             return self.eval_typed_csv_decode(method, text, ty, span);
         }
         let parsed: Result<CtValue, CtValue> = match module {
-            "core.encoding.json" => super::JSONInterp::parse_json(text)
+            "core.encoding.json" => super::JSONInterp::parse_json_ordered(text)
                 .map_err(|e| json_parse_err_to_decode("JSON", super::JSONInterp::json_error_value(e))),
             "core.encoding.toml" => super::EncodingLite::toml_parse(text).map_err(|e| json_parse_err_to_decode("TOML", e)),
             "core.encoding.yaml" => super::EncodingLite::yaml_parse(text).map_err(|e| json_parse_err_to_decode("YAML", e)),

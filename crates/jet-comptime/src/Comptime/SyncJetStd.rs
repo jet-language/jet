@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
 
 fn quote_json(s: &str) -> String {

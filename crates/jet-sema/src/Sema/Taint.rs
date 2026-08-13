@@ -13,6 +13,22 @@ pub type FieldTags = HashMap<(String, String), TagSet>;
 pub type FieldTypes = HashMap<(String, String), String>;
 pub type ReturnTypes = HashMap<String, String>;
 
+/// Compiler-owned origin facts. They are ordinary entries in the existing
+/// taint plane; the $origin. prefix keeps them out of the user tag namespace.
+const ORIGIN_NET: &str = "$origin.net";
+const ORIGIN_FS: &str = "$origin.fs";
+const ORIGIN_ENV: &str = "$origin.env";
+const ORIGIN_PROCESS: &str = "$origin.process";
+const ORIGIN_FFI: &str = "$origin.ffi";
+
+fn is_origin_fact(tag: &str) -> bool {
+    tag.starts_with("$origin.")
+}
+
+fn clear_origin_facts(tags: &mut TagSet) {
+    tags.retain(|tag| !is_origin_fact(tag));
+}
+
 /// Per-function taint analyzer. Carries the program-level facts (which functions
 /// are exact-tag scrubbers, how Core aliases resolve to modules) and the running set of
 /// tainted locals while it walks one function body.
@@ -150,6 +166,34 @@ impl<'a> TaintCtx<'a> {
         destinations
     }
 
+    fn core_module_for_receiver(&self, receiver: &Expr) -> Option<String> {
+        match receiver {
+            Expr::Ident(alias, _) => self.core_imports.get(alias).cloned(),
+            Expr::Field(base, field, _) => self
+                .core_module_for_receiver(base)
+                .map(|module| format!("{module}.{field}")),
+            _ => None,
+        }
+    }
+
+    fn is_typed_decode(&self, receiver: &Expr, method: &str) -> bool {
+        if !matches!(method, "decode" | "decode_traced") {
+            return false;
+        }
+        matches!(
+            self.core_module_for_receiver(receiver).as_deref(),
+            Some(
+                "core.encoding.json"
+                    | "core.encoding.jsonl"
+                    | "core.encoding.csv"
+                    | "core.encoding.toml"
+                    | "core.encoding.yaml"
+                    | "core.encoding.cbor"
+                    | "core.encoding.xml"
+            )
+        )
+    }
+
     fn type_name(ty: &Type) -> Option<String> {
         match ty {
             Type::Named(name) => Some(name.clone()),
@@ -196,6 +240,7 @@ impl<'a> TaintCtx<'a> {
                 tags.extend(self.returns.get(&call.name).cloned().unwrap_or_default());
                 if let Some(tag) = self.scrubbers.get(&call.name) {
                     tags.remove(tag);
+                    clear_origin_facts(&mut tags);
                 }
                 tags
             }
@@ -210,6 +255,10 @@ impl<'a> TaintCtx<'a> {
                 }
                 if let Some(tag) = key.as_ref().and_then(|key| self.scrubbers.get(key)) {
                     tags.remove(tag);
+                    clear_origin_facts(&mut tags);
+                }
+                if self.is_typed_decode(receiver, method) {
+                    clear_origin_facts(&mut tags);
                 }
                 // A verified token yields typed public claims, not the original
                 // credential text. Core owns this declassification boundary.
@@ -296,11 +345,17 @@ impl<'a> TaintCtx<'a> {
             ),
             Expr::TupleLit(fields, _, _) => self.union(fields.iter().map(|(_, value)| value)),
             Expr::StructLit { fields, .. } => {
-                self.union(fields.iter().map(|(_, _, value)| value))
+                let mut tags = self.union(fields.iter().map(|(_, _, value)| value));
+                // A sema-accepted typed construction has passed the declared
+                // field shape. The successful construction is the same
+                // validation boundary as typed decode.
+                clear_origin_facts(&mut tags);
+                tags
             }
             Expr::TypedLit { body, .. } => {
                 let mut tags = TagSet::new();
                 body.for_each_expr(|value| tags.extend(self.tags_of(value)));
+                clear_origin_facts(&mut tags);
                 tags
             }
             Expr::EnumLit { args, .. } => self.union(args.iter().map(|argument| match argument {
@@ -869,11 +924,14 @@ pub fn collect_return_tag_facts(
         returns: &mut HashMap<String, TagSet>,
         return_types: &mut ReturnTypes,
     ) {
-        let tags = function
+        let mut tags = function
             .return_type
             .as_ref()
             .map(type_tags)
             .unwrap_or_default();
+        if function.inline_foreign.is_some() {
+            tags.insert(ORIGIN_FFI.to_string());
+        }
         if !tags.is_empty() {
             returns.insert(key.clone(), tags);
         }
@@ -925,6 +983,30 @@ pub fn collect_return_tag_facts(
                         returns,
                         return_types,
                     );
+                }
+            }
+            Item::ExternRust(block) => {
+                for function in &block.functions {
+                    let mut tags = TagSet::new();
+                    tags.insert(ORIGIN_FFI.to_string());
+                    returns.insert(function.name.clone(), tags);
+                    if let Some(type_name) =
+                        function.return_type.as_ref().and_then(TaintCtx::type_name)
+                    {
+                        return_types.insert(function.name.clone(), type_name);
+                    }
+                }
+            }
+            Item::CModule(module) => {
+                for function in &module.functions {
+                    let mut tags = TagSet::new();
+                    tags.insert(ORIGIN_FFI.to_string());
+                    returns.insert(function.name.clone(), tags);
+                    if let Some(type_name) =
+                        function.return_type.as_ref().and_then(TaintCtx::type_name)
+                    {
+                        return_types.insert(function.name.clone(), type_name);
+                    }
                 }
             }
             _ => {}
@@ -992,6 +1074,22 @@ pub fn register_builtin_tag_facts(facts: &mut jet_foundation::Facts::FactRegistr
         credential,
         std::iter::empty(),
     );
+
+    for (origin, source) in [
+        (ORIGIN_NET, "Net"),
+        (ORIGIN_FS, "FS"),
+        (ORIGIN_ENV, "Env"),
+        (ORIGIN_PROCESS, "Exec"),
+        (ORIGIN_FFI, "FFI"),
+    ] {
+        facts.declare_with_rules(
+            jet_foundation::Facts::FactKind::Tag,
+            origin,
+            std::iter::empty(),
+            ["SQL.raw".to_string(), "HTML.raw".to_string(), "Sh.raw".to_string()],
+            [source.to_string()],
+        );
+    }
 }
 
 pub fn collect_field_facts(
@@ -1219,15 +1317,20 @@ pub fn e0722(api: &str, span: Span) -> Diagnostic {
 
 pub fn e0721(tag: &str, api: &str, destinations: &[String], span: Span) -> Diagnostic {
     let destination = destinations.last().map(String::as_str).unwrap_or("sink");
+    let fix = if is_origin_fact(tag) {
+        "remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function".to_string()
+    } else {
+        format!(
+            "remove the destination use, or pass the value through a matching `#Scrub({tag})` function"
+        )
+    };
     Diagnostic::error(
         "E0721",
         format!("a `{tag}` value is denied at `{api}`"),
         format!(
             "the declaration for `{tag}` denies `{destination}`, which covers this destination"
         ),
-        format!(
-            "remove the destination use, or pass the value through a matching `#Scrub({tag})` function"
-        ),
+        fix,
         Some(span),
     )
 }

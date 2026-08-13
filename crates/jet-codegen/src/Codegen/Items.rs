@@ -167,6 +167,13 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         let field_ty = cx.struct_field_rust_with_view_lifetime(s, &f.name, &f.ty);
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
+    if cx.published_schemas.contains(&s.name) {
+        out.push_str(&format!(
+            "    pub {}: {},\n",
+            crate::Syntax::PUBLISHED_UNKNOWN_FIELDS,
+            cx.rust_type(&Type::Named(crate::Syntax::TYPE_DATA.to_string()))
+        ));
+    }
     out.push_str("}\n\n");
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);

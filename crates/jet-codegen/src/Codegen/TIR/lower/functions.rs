@@ -853,6 +853,41 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             .map(|ty| resolve_self_ty(&cx.expand_type_aliases(ty), type_name)),
         cx,
     );
+    let mut body = body;
+    if serde == Some(SerdeCodec::Encode) && cx.published_schemas.contains(type_name) {
+        for stmt in &mut body {
+            if let TStmt::Return(Some(value)) = stmt {
+                let known = std::mem::replace(
+                    value,
+                    TExpr {
+                        ty: Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                        kind: TExprKind::Unit,
+                    },
+                );
+                let holder = TExpr {
+                    ty: Type::Named(Syntax::TYPE_DATA.to_string()),
+                    kind: TExprKind::Field {
+                        recv: Box::new(TExpr {
+                            ty: owner_ty.clone(),
+                            kind: TExprKind::Local(TLocal::generated(Syntax::KW_SELF)),
+                        }),
+                        field: Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(),
+                        boxed: false,
+                    },
+                };
+                *value = TExpr {
+                    ty: known.ty.clone(),
+                    kind: TExprKind::CoreCall {
+                        module: "core.encoding".to_string(),
+                        method: "__published_schema_merge".to_string(),
+                        args: vec![known, holder],
+                        source_span: f.span,
+                        widen_to_vec: Vec::new(),
+                    },
+                };
+            }
+        }
+    }
     let mut clone_types = env.cloned_types.borrow().clone();
     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
     for param in &f.params {

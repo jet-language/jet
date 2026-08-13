@@ -738,6 +738,102 @@ fn run() {
 }
 
 #[test]
+fn published_schema_preserves_unknown_wire_order_across_tiers() {
+    on_encoding_stack(published_schema_preserves_unknown_wire_order_across_tiers_inner);
+}
+
+fn published_schema_preserves_unknown_wire_order_across_tiers_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping published-schema parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.json as json
+use core.text as text
+
+#[PublishedSchema, Codable]
+struct Published {
+    known: Int
+}
+
+#Codable
+struct Plain {
+    known: Int
+}
+
+#[Codable, DenyUnknownFields]
+struct Strict {
+    known: Int
+}
+
+fn published() => String {
+    value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
+    return json.to_string(value)
+}
+
+fn plain() => String {
+    value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
+    return json.to_string(value)
+}
+
+fn strict() => String {
+    result :: json.decode<Strict>("{{\"known\":7,\"extra\":1}}")
+    if result == {
+        .Err(errors) -> return errors[0].reason
+        else -> return "strict accepted"
+    }
+}
+
+fn malformed() => String {
+    result :: json.decode<Published>("{{\"known\":7")
+    if result == {
+        .Err(_) -> return "malformed rejected"
+        else -> return "malformed accepted"
+    }
+}
+
+fn forced_deopt() => String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    return published()
+}
+
+fn run() {
+    print(published())
+    print(plain())
+    print(strict())
+    print(malformed())
+    print(forced_deopt())
+}
+"#;
+    let scratch = Scratch::new("published_schema_unknowns");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "published-schema probe needs mixed tiers: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
+        "published-schema probe must exercise named interpreter deopt: {plan:?}"
+    );
+    let expected = concat!(
+        "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n",
+        "{\"known\":7}\n",
+        "E2412: unknown field `extra`\n",
+        "malformed rejected\n",
+        "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n",
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "published-schema AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "forced interpreter diverged");
+    assert!(jit_executed_for_test(), "resident control must execute JIT");
+    assert!(deopt_invoked_for_test(), "forced control must execute TIR evaluator");
+    assert!(!fallback_invoked_for_test(), "published-schema probe must not fall back");
+}
+
+#[test]
 fn u64_codable_is_rejected_before_backend_selection() {
     let cases = [
         (

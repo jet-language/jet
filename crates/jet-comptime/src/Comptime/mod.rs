@@ -517,11 +517,20 @@ pub fn cbor_encode_for_tir(
 }
 
 pub fn render_datatree_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_json_pretty(value, false, 0)
+    JSONInterp::render_ordered_datatree(value, false, 0)
 }
 
 pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_json_pretty(value, true, 0)
+    JSONInterp::render_ordered_datatree(value, true, 0)
+}
+
+/// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps
+/// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
+pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
+    match JSONInterp::parse_json_ordered(text) {
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(JSONInterp::json_error_value(error))),
+    }
 }
 
 /// TIR/JIT bridge for the canonical whole-value CBOR parser.

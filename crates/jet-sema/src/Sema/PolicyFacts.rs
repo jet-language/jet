@@ -182,7 +182,9 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
         graph.record(
             PolicyDomain::Taint,
             func.name.clone(),
-            format!("#Scrub({tag}) removes exactly one fact tag (D-TAG-SURFACE1)"),
+            format!(
+                "#Scrub({tag}) clears the declared tag and compiler-owned origin facts (D-TAG-SURFACE1, D-BOUND-TAINT1)"
+            ),
         );
     }
     if func.is_replayable {

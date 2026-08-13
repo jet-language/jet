@@ -116,6 +116,16 @@
         }
     }
 
+    /// D-BOUND-EVOLVE1=A: replace known values in the original wire order and
+    /// append newly-created known fields in schema order. Unknown entries stay
+    /// byte-for-byte in their original position relative to the known fields.
+    pub fn jet_datatree_merge_wire_order(known: &DataTree, original: &DataTree) -> DataTree {
+        let (DataTree::Object(known), DataTree::Object(original)) = (known, original) else {
+            return known.clone();
+        };
+        DataTree::Object(jet_wire_order_merge(known, original))
+    }
+
     // D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on DataTree. Each
     // read returns `Result<T, [FieldError]>` so a `?` chain composes cleanly
     // inside a hand `decode`. `.field`/`.at` auto-fill the path with the

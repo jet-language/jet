@@ -404,13 +404,13 @@ fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), true, 0)
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let j = jet_std::parse_json(text).map_err(|e| {
+    let tree = jet_std::parse_json_datatree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the same migration chain, silently — the
     // status is dropped. Types without migrations hit the trait default, which
     // is exactly `jet_decode` (zero cost).
-    Ok(T::jet_decode_traced(&jet_std::datatree_from_json(&j))?.0)
+    Ok(T::jet_decode_traced(&tree)?.0)
 }
 
 // D-MIGRATE3=A: `decode_traced<T>` — same decode, wrapped in `DecodeResult` so the
@@ -418,10 +418,10 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
 fn jet_enc_json_decode_traced<T: __jet_Decode>(
     text: &String,
 ) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
-    let j = jet_std::parse_json(text).map_err(|e| {
+    let tree = jet_std::parse_json_datatree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
-    let (value, migration) = T::jet_decode_traced(&jet_std::datatree_from_json(&j))?;
+    let (value, migration) = T::jet_decode_traced(&tree)?;
     Ok(jet_std::DecodeResult { value, migration })
 }
 

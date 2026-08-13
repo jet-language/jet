@@ -48,7 +48,7 @@ fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = crate::Encoding::json_rt::parse_datatree(text).map_err(|error| {
+    let tree = crate::Encoding::json_rt::parse_datatree_ordered(text).map_err(|error| {
         jet_std::FieldError::one(format!(
             "invalid JSON (line {}): {}",
             error.line, error.message
