@@ -122,6 +122,7 @@ fn usage_for(cmd: &str) -> String {
         "explain" => "jet explain <CODE|FACT> [file]".to_string(),
         "doctor" => "jet self doctor".to_string(),
         "repl" => "jet repl".to_string(),
+        "notebook" => "jet notebook [file.jetnb] [--protocol]".to_string(),
         "help" => "jet help".to_string(),
         "os" => "jet os <plan|import|build|vm> <host> …".to_string(),
         _ => format!("jet {} [args]", cmd),
@@ -135,6 +136,7 @@ fn example_for(cmd: &str) -> Option<String> {
             Some(format!("jet {} examples/features/basics/hello.jet", cmd))
         }
         "dev" => Some("jet dev run.jet".to_string()),
+        "notebook" => Some("jet notebook analysis.jetnb".to_string()),
         "explain" => Some("jet explain E0102".to_string()),
         "new" => Some("jet new web-api".to_string()),
         _ => None,

@@ -116,6 +116,22 @@ pub trait ReplAuthorizer {
     fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()>;
     fn fs_remove(&mut self, path: &str) -> std::io::Result<()>;
     fn verified_root(&mut self) -> std::io::Result<std::fs::File>;
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        use std::io::{self, Write};
+        if !prompt.is_empty() {
+            print!("{prompt}");
+            io::stdout().flush()?;
+        }
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(line)
+    }
     fn reset_session(&mut self) {}
 }
 

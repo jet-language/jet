@@ -81,7 +81,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
 
 #[test]
 fn shared_session_identical_stale_rules_across_clients() {
-    let mut kernel = Kernel::open(None, "env-test");
+    let mut kernel = Kernel::open(None, "env-test").unwrap();
     let a = kernel
         .notebook
         .add_cell(CellKind::Jet, "x :: 1")
@@ -148,6 +148,7 @@ fn jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss() {
             requested_messages: vec![],
         },
         1,
+        None,
     )
     .unwrap();
     assert!(nb.visible_output(&c1).is_some());
@@ -193,6 +194,7 @@ fn jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss() {
             requested_messages: vec![],
         },
         2,
+        None,
     )
     .unwrap();
     save_jetnb(&nb, &path).unwrap();
@@ -318,7 +320,7 @@ fn rich_output_trust_quarantines_imports_and_binds_grants() {
 
 #[test]
 fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
-    let mut kernel = Kernel::open(None, "proto-env");
+    let mut kernel = Kernel::open(None, "proto-env").unwrap();
     let out = run_headless_script(
         &mut kernel,
         &[

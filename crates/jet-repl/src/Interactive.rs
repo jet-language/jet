@@ -148,6 +148,41 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
             }
         }
     }
+
+    fn read_input(&mut self, prompt: &str) -> io::Result<String> {
+        print!("{prompt}");
+        io::stdout().flush()?;
+        let mut line = String::new();
+        loop {
+            match self.reader.read_key() {
+                Key::Char(ch) => {
+                    line.push(ch);
+                    print!("{ch}");
+                    io::stdout().flush()?;
+                }
+                Key::Backspace => {
+                    if line.pop().is_some() {
+                        print!("\x08 \x08");
+                        io::stdout().flush()?;
+                    }
+                }
+                Key::Enter => {
+                    println!();
+                    return Ok(line);
+                }
+                Key::CtrlC => {
+                    println!();
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "input interrupted"));
+                }
+                Key::Eof => {
+                    println!();
+                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
+                }
+                Key::Idle => {}
+                _ => {}
+            }
+        }
+    }
 }
 
 // ── pin rail / bindings pane ────────────────────────────────────────────────

@@ -47,6 +47,9 @@ impl Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
     fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
         self.inner.verified_root()
     }
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        self.inner.read_input(prompt)
+    }
     fn reset_session(&mut self) {
         self.inner.reset_session()
     }
@@ -58,6 +61,7 @@ pub struct EvalResult {
     pub status: ReplTurnStatus,
     pub had_effect: bool,
     pub quit: bool,
+    pub value: Option<CtValue>,
 }
 
 /// Run one Jet input against `session` (shared by every notebook client).
@@ -87,6 +91,7 @@ pub(crate) fn evaluate_step_with_items(
             status: ReplTurnStatus::Ok,
             had_effect: false,
             quit: false,
+            value: None,
         };
     }
 
@@ -112,6 +117,7 @@ pub(crate) fn evaluate_step_with_items(
                 status: ReplTurnStatus::Error,
                 had_effect: false,
                 quit: false,
+                value: None,
             };
         }
     };
@@ -122,6 +128,7 @@ pub(crate) fn evaluate_step_with_items(
             status: ReplTurnStatus::Ok,
             had_effect: false,
             quit: false,
+            value: None,
         },
 
         InputKind::Meta(cmd, _) => {
@@ -132,6 +139,7 @@ pub(crate) fn evaluate_step_with_items(
                     status: ReplTurnStatus::Ok,
                     had_effect: false,
                     quit: true,
+                    value: None,
                 };
             }
             out.push_str(&format!(
@@ -143,6 +151,7 @@ pub(crate) fn evaluate_step_with_items(
                 status: ReplTurnStatus::Error,
                 had_effect: false,
                 quit: false,
+                value: None,
             }
         }
 
@@ -155,6 +164,7 @@ pub(crate) fn evaluate_step_with_items(
                 status: ReplTurnStatus::Error,
                 had_effect: false,
                 quit: false,
+                value: None,
             }
         }
 
@@ -182,6 +192,7 @@ pub(crate) fn evaluate_step_with_items(
                         status: ReplTurnStatus::Error,
                         had_effect: false,
                         quit: false,
+                        value: None,
                     };
                 }
             };
@@ -198,6 +209,7 @@ pub(crate) fn evaluate_step_with_items(
                 status: ReplTurnStatus::Ok,
                 had_effect: false,
                 quit: false,
+                value: None,
             }
         }
 
@@ -224,6 +236,7 @@ pub(crate) fn evaluate_step_with_items(
                         status: ReplTurnStatus::Error,
                         had_effect: false,
                         quit: false,
+                        value: None,
                     };
                 }
             };
@@ -237,6 +250,7 @@ pub(crate) fn evaluate_step_with_items(
                 status: ReplTurnStatus::Ok,
                 had_effect: false,
                 quit: false,
+                value: None,
             }
         }
 
@@ -261,6 +275,7 @@ pub(crate) fn evaluate_step_with_items(
                         status: ReplTurnStatus::Error,
                         had_effect: false,
                         quit: false,
+                        value: None,
                     };
                 }
             };
@@ -279,19 +294,36 @@ pub(crate) fn evaluate_step_with_items(
                 inner: authorizer,
                 observed: false,
             };
-            let result = Comptime::run_repl_step(
-                &stmts,
-                &funcs,
-                base_dir,
-                &mut sink,
-                &mut trial_scope,
-                REPL_FUEL_BUDGET,
-                suppress,
-                &session.core_imports,
-                &structs,
-                &session.binding_types,
-                &mut tracking,
-            );
+            let result = if Comptime::repl_interruptible_turn_active() {
+                Comptime::run_repl_step_interruptible(
+                    &stmts,
+                    &funcs,
+                    base_dir,
+                    &mut sink,
+                    &mut trial_scope,
+                    REPL_FUEL_BUDGET,
+                    suppress,
+                    &session.core_imports,
+                    &structs,
+                    &session.binding_types,
+                    &mut tracking,
+                )
+            } else {
+                Comptime::run_repl_step(
+                    &stmts,
+                    &funcs,
+                    base_dir,
+                    &mut sink,
+                    &mut trial_scope,
+                    REPL_FUEL_BUDGET,
+                    suppress,
+                    &session.core_imports,
+                    &structs,
+                    &session.binding_types,
+                    &mut tracking,
+                )
+                .map_err(Comptime::ReplStepError::Diagnostic)
+            };
 
             match result {
                 Ok(echo_val) => {
@@ -321,6 +353,7 @@ pub(crate) fn evaluate_step_with_items(
                         out.push_str(&sink.stderr);
                         summary.push_str(&sink.stderr);
                     }
+                    let result_value = echo_val.clone();
                     if let Some(v) = echo_val {
                         if !matches!(v, CtValue::Unit) {
                             let shown = crate::display_value(&v);
@@ -348,9 +381,29 @@ pub(crate) fn evaluate_step_with_items(
                         status: ReplTurnStatus::Ok,
                         had_effect,
                         quit: false,
+                        value: result_value,
                     }
                 }
-                Err(d) => {
+                Err(Comptime::ReplStepError::Interrupted) => {
+                    let had_effect =
+                        tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty();
+                    out.push_str("Interrupted. External effects already performed were not rolled back.\n");
+                    session.record_turn_ex(
+                        trimmed,
+                        ReplTurnStatus::Interrupted,
+                        "Interrupted".to_string(),
+                        had_effect,
+                        None,
+                    );
+                    EvalResult {
+                        text: out,
+                        status: ReplTurnStatus::Interrupted,
+                        had_effect,
+                        quit: false,
+                        value: None,
+                    }
+                }
+                Err(Comptime::ReplStepError::Diagnostic(d)) => {
                     out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                     session.record_turn(
                         trimmed,
@@ -362,6 +415,7 @@ pub(crate) fn evaluate_step_with_items(
                         status: ReplTurnStatus::Error,
                         had_effect: false,
                         quit: false,
+                        value: None,
                     }
                 }
             }

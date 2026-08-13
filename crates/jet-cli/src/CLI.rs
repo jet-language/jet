@@ -787,6 +787,11 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
+    // E3 interactive scripting flags.
+    FlagSpec { long: "--protocol", help: "with notebook: use the bounded headless JSONL/script session" },
+    FlagSpec { long: "--headless", help: "with notebook: use the bounded headless session" },
+    FlagSpec { long: "--bind", help: "with notebook: bind the local HTTP client to this address" },
+    FlagSpec { long: "--token", help: "with notebook: require this bearer token for clients" },
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "with eval: reject code with side effects" },
     FlagSpec { long: "--freestanding", help: "with build/run: target a system without an operating system" },

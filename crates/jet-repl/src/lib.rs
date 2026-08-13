@@ -44,7 +44,7 @@ pub mod SemanticSymbols;
 pub mod Term;
 
 use jet_foundation::Terminal::{ColorChoice, Theme};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
@@ -91,6 +91,21 @@ pub(crate) enum PromptChoice { Once, Session, Deny, Continue, Revoke }
 
 pub(crate) trait EffectPrompt {
     fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice;
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        if !prompt.is_empty() {
+            print!("{prompt}");
+            io::stdout().flush()?;
+        }
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(line)
+    }
 }
 
 pub(crate) struct ReplPolicy {
@@ -99,6 +114,8 @@ pub(crate) struct ReplPolicy {
     root_dir: std::io::Result<std::fs::File>,
     handles_available: bool,
     session: HashSet<crate::Comptime::ReplEffectRequest>,
+    input: VecDeque<String>,
+    notebook: bool,
 }
 
 impl ReplPolicy {
@@ -109,7 +126,23 @@ impl ReplPolicy {
             root_dir: std::fs::File::open(root),
             handles_available: cfg!(target_os = "linux"),
             session: HashSet::new(),
+            input: VecDeque::new(),
+            notebook: false,
         }
+    }
+
+    pub(crate) fn for_notebook(flags: ReplFlags, root: &Path) -> Self {
+        let mut policy = Self::new(flags, root);
+        policy.notebook = true;
+        policy
+    }
+
+    pub(crate) fn push_input(&mut self, line: String) {
+        self.input.push_back(line);
+    }
+
+    pub(crate) fn pending_input(&self) -> usize {
+        self.input.len()
     }
 
     pub(crate) fn authorizer<'a>(
@@ -207,6 +240,35 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
 
     fn reset_session(&mut self) {
         self.policy.session.clear();
+    }
+
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        if let Some(line) = self.policy.input.pop_front() {
+            return Ok(line);
+        }
+        if let Some(prompt_reader) = self.prompt.as_deref_mut() {
+            return prompt_reader.read_input(prompt);
+        }
+        if self.policy.notebook {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "notebook input is empty; queue a line before running this cell",
+            ));
+        }
+        let mut line = String::new();
+        if !prompt.is_empty() {
+            print!("{prompt}");
+            let mut stdout = std::io::stdout();
+            std::io::Write::flush(&mut stdout)?;
+        }
+        std::io::stdin().read_line(&mut line)?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(line)
     }
 
     fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> {
@@ -469,6 +531,7 @@ impl crate::Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
     fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_create_dir(path) }
     fn fs_remove(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_remove(path) }
     fn verified_root(&mut self) -> std::io::Result<std::fs::File> { self.inner.verified_root() }
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> { self.inner.read_input(prompt) }
     fn reset_session(&mut self) { self.inner.reset_session() }
 }
 

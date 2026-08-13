@@ -1,10 +1,10 @@
 //! Headless notebook protocol — proves Jupyter adapter + first-party parity.
 
 use super::document::{
-    export_ipynb, export_jet, import_ipynb, merge_by_id, save_jetnb, CellKind, JetNotebook,
+    export_ipynb, export_jet, import_ipynb, CellKind, JetNotebook,
 };
 use super::kernel::{ClientKind, Kernel, RerunDecision};
-use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub enum ProtocolMessage {
@@ -22,10 +22,17 @@ pub enum ProtocolMessage {
     Inspect { cell_id: String },
     Complete { prefix: String },
     ImportIpynb { text: String },
+    Open { path: PathBuf },
+    Reopen,
+    Edit { cell_id: String, source: String },
+    MergePath { path: PathBuf },
+    Profile { client: ClientKind, cell_id: String },
+    Debug { cell_id: String },
+    State,
     ExportIpynb,
     ExportJet,
     Merge { theirs_json: String },
-    Save { path: String },
+    Save { path: PathBuf },
     AddCell { kind: CellKind, source: String },
     Grant { cell_id: String, renderer: String },
     VisibleOutput { client: ClientKind, cell_id: String },
@@ -135,6 +142,40 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
             kernel.attach_perf();
             ProtocolReply::ok("perf_attached")
         }
+        ProtocolMessage::Open { path } => match kernel.open_document(&path) {
+            Ok(()) => ProtocolReply::ok(format!("opened={}", path.display())),
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::Reopen => match kernel.reopen_document() {
+            Ok(()) => ProtocolReply::ok("reopened"),
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::Edit { cell_id, source } => match kernel.edit_cell(&cell_id, source) {
+            Ok(()) => ProtocolReply::ok(format!("edited={cell_id}")),
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::Profile { client, cell_id } => {
+            kernel.attach_perf();
+            match kernel.execute_cell(client, &cell_id) {
+                Ok(result) => ProtocolReply::ok(format!(
+                    "profiled={cell_id}; elapsed_ms={}; count={}",
+                    result.elapsed_ms, result.execution_count
+                )),
+                Err(error) => ProtocolReply::err(error),
+            }
+        }
+        ProtocolMessage::Debug { cell_id } => {
+            kernel.attach_debug();
+            let Some(cell) = kernel.notebook.cells.iter().find(|c| c.id == cell_id) else {
+                return ProtocolReply::err(format!("unknown cell `{cell_id}`"));
+            };
+            ProtocolReply::ok(format!(
+                "debug cell={cell_id}; source={}; bindings={}",
+                cell.source.replace('\n', "\\n"),
+                kernel.session.scope.keys().cloned().collect::<Vec<_>>().join(",")
+            ))
+        }
+        ProtocolMessage::State => ProtocolReply::ok(kernel.state_json()),
         ProtocolMessage::Inspect { cell_id } => {
             let Some(cell) = kernel.notebook.cells.iter().find(|c| c.id == cell_id) else {
                 return ProtocolReply::err(format!("unknown cell `{cell_id}`"));
@@ -165,7 +206,7 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
         }
         ProtocolMessage::ImportIpynb { text } => match import_ipynb(&text) {
             Ok((nb, loss)) => {
-                kernel.notebook = nb;
+                kernel.replace_notebook(nb);
                 ProtocolReply::ok(format!(
                     "cells={}; {}",
                     kernel.notebook.cells.len(),
@@ -193,14 +234,21 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
         ProtocolMessage::Merge { theirs_json } => {
             match JetNotebook::from_canonical_bytes(theirs_json.as_bytes()) {
                 Ok(theirs) => {
-                    kernel.notebook = merge_by_id(&kernel.notebook, &theirs);
+                    kernel.merge_notebook(theirs);
                     ProtocolReply::ok(format!("cells={}", kernel.notebook.cells.len()))
                 }
                 Err(e) => ProtocolReply::err(e),
             }
         }
-        ProtocolMessage::Save { path } => match save_jetnb(&kernel.notebook, Path::new(&path)) {
-            Ok(()) => ProtocolReply::ok(format!("saved={path}")),
+        ProtocolMessage::MergePath { path } => match super::document::load_jetnb(&path) {
+            Ok(theirs) => {
+                kernel.merge_notebook(theirs);
+                ProtocolReply::ok(format!("cells={}", kernel.notebook.cells.len()))
+            }
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::Save { path } => match kernel.save_document(Some(&path)) {
+            Ok(saved) => ProtocolReply::ok(format!("saved={}", saved.display())),
             Err(e) => ProtocolReply::err(e),
         },
         ProtocolMessage::Grant { cell_id, renderer } => {
@@ -268,6 +316,37 @@ fn parse_script_line(kernel: &Kernel, line: &str) -> Result<ProtocolMessage, Str
         }),
         "debug" => Ok(ProtocolMessage::DebugAttach),
         "perf" => Ok(ProtocolMessage::PerfAttach),
+        "open" => Ok(ProtocolMessage::Open {
+            path: PathBuf::from(rest),
+        }),
+        "reopen" => Ok(ProtocolMessage::Reopen),
+        "edit" => {
+            let mut bits = rest.splitn(2, ' ');
+            Ok(ProtocolMessage::Edit {
+                cell_id: bits.next().ok_or("edit needs cell id")?.to_string(),
+                source: bits.next().unwrap_or("").to_string(),
+            })
+        }
+        "save" => Ok(ProtocolMessage::Save {
+            path: PathBuf::from(rest),
+        }),
+        "merge" => Ok(ProtocolMessage::MergePath {
+            path: PathBuf::from(rest),
+        }),
+        "import-ipynb" => Ok(ProtocolMessage::ImportIpynb {
+            text: rest.to_string(),
+        }),
+        "state" => Ok(ProtocolMessage::State),
+        "profile" => {
+            let mut bits = rest.split_whitespace();
+            let client = parse_client(bits.next().unwrap_or("first"))?;
+            let cell_id = bits
+                .next()
+                .map(str::to_string)
+                .or_else(|| kernel.notebook.cells.last().map(|c| c.id.clone()))
+                .ok_or("profile needs cell id")?;
+            Ok(ProtocolMessage::Profile { client, cell_id })
+        }
         "inspect" => {
             let cell_id = if rest.is_empty() {
                 kernel

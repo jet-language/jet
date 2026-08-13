@@ -200,6 +200,20 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     }
     authorizer.authorize(&request, span)?;
+    if module == "core.io" && matches!(method, "input" | "read_all_input") {
+        let prompt = match args.first() {
+            Some(CtValue::Str(value)) => value.as_str(),
+            _ => "",
+        };
+        return Ok(match authorizer.read_input(prompt) {
+            Ok(line) => CtValue::Present(Box::new(CtValue::Str(line))),
+            Err(error) => CtValue::failed(Box::new(io_error_value(
+                IoErrorOperation::Read,
+                "stdin",
+                error,
+            ))),
+        });
+    }
     if module == "core.files" {
         return apply_repl_fs_call(method, &args, span, authorizer);
     }

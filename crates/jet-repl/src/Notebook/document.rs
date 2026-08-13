@@ -1,6 +1,7 @@
 //! D-NOTEBOOK-DOC1=D — mergeable `.jetnb` source truth, cache, ipynb, `.jet` export.
 
 use super::trust::{quarantine_outputs, MimeBundle, POLICY_VERSION};
+use jet_foundation::JSON::{parse_json, JSONValue};
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +21,7 @@ pub struct CellOutput {
     pub bundle: MimeBundle,
     pub execution_count: Option<u32>,
     pub cache_key: Option<String>,
+    pub turn_id: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -116,6 +118,18 @@ impl JetNotebook {
         self.cells.iter().position(|c| c.id == id)
     }
 
+    pub fn edit_cell(&mut self, cell_id: &str, source: impl Into<String>) -> Result<(), String> {
+        let idx = self
+            .cell_index(cell_id)
+            .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
+        let source = source.into();
+        if self.cells[idx].source != source {
+            self.cells[idx].source = source;
+            self.invalidate_from(cell_id);
+        }
+        Ok(())
+    }
+
     pub fn invalidate_from(&mut self, cell_id: &str) {
         let Some(start) = self.cell_index(cell_id) else {
             return;
@@ -189,6 +203,7 @@ impl JetNotebook {
         cell_id: &str,
         bundle: MimeBundle,
         execution_count: u32,
+        turn_id: Option<usize>,
     ) -> Result<(), String> {
         let key = self
             .closure_cache_key(cell_id)
@@ -208,6 +223,7 @@ impl JetNotebook {
             bundle,
             execution_count: Some(execution_count),
             cache_key: Some(key),
+            turn_id,
         });
         Ok(())
     }
@@ -346,6 +362,12 @@ fn cell_output_to_json(out: &CellOutput) -> Result<CanonicalJson, String> {
     if let Some(key) = &out.cache_key {
         fields.push(("cache_key".into(), CanonicalJson::String(key.clone())));
     }
+    if let Some(turn_id) = out.turn_id {
+        fields.push((
+            "turn_id".into(),
+            CanonicalJson::integer(turn_id.to_string())?,
+        ));
+    }
     CanonicalJson::object(fields)
 }
 
@@ -476,10 +498,15 @@ fn output_from_json(json: &CanonicalJson) -> Result<CellOutput, String> {
         Some(CanonicalJson::String(s)) => Some(s.clone()),
         _ => None,
     };
+    let turn_id = match obj.get("turn_id") {
+        Some(CanonicalJson::Integer(value)) => value.parse().ok(),
+        _ => None,
+    };
     Ok(CellOutput {
         bundle,
         execution_count,
         cache_key,
+        turn_id,
     })
 }
 
@@ -554,14 +581,10 @@ pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
 }
 
 pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
-    let mut owned = text.to_string();
-    if !owned.ends_with('\n') {
-        owned.push('\n');
-    }
-    let json = CanonicalJson::parse_canonical(owned.as_bytes()).or_else(|_| {
-        // Non-canonical ipynb: best-effort via a tiny hand parser for cells.
-        Err("ipynb is not A-canonical JSON; use CanonicalJson-compatible export".to_string())
-    })?;
+    let json = CanonicalJson::parse_canonical(text.as_bytes())
+        .or_else(|_| parse_json(text).map(json_value_to_canonical).map_err(|_| {
+            "ipynb is not valid JSON; export a complete Jupyter notebook".to_string()
+        }))?;
     let CanonicalJson::Object(root) = json else {
         return Err("ipynb root must be an object".into());
     };
@@ -622,6 +645,7 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
                     bundle,
                     execution_count: None,
                     cache_key: None,
+                    turn_id: None,
                 });
             }
         }
@@ -637,6 +661,25 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
         });
     }
     Ok((nb, loss))
+}
+
+fn json_value_to_canonical(value: JSONValue) -> CanonicalJson {
+    match value {
+        JSONValue::Null => CanonicalJson::Null,
+        JSONValue::Bool(value) => CanonicalJson::Bool(value),
+        JSONValue::Number(value) => CanonicalJson::Integer(value.to_string()),
+        JSONValue::Flt(value) => CanonicalJson::String(value.to_string()),
+        JSONValue::String(value) => CanonicalJson::String(value),
+        JSONValue::Array(values) => {
+            CanonicalJson::Array(values.into_iter().map(json_value_to_canonical).collect())
+        }
+        JSONValue::Object(values) => CanonicalJson::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, json_value_to_canonical(value)))
+                .collect(),
+        ),
+    }
 }
 
 fn flatten_ipynb_outputs(outputs: &[CanonicalJson]) -> String {
