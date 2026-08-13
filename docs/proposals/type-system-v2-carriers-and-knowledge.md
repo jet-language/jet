@@ -484,8 +484,9 @@ Effort is expendable; the sequence is what matters.
   one interval prover; one measure substrate; one fact registry covering dimensions; transitive
   equality. Every existing test keeps passing.
 - **Phase B — land the owed ratifications on the new substrate.** Bigint `Int` (#1436), `Complex`,
-  `Fraction`, `<=>`/`Ordering` (#1435), ns `Duration` (#1466) — built once, as grid and plane
-  instances, full I9 parity.
+  `Fraction`, `<=>`/`Ordering` (#1435) — this card is the implementing card after Phase A's type2
+  carrier+knowledge foundation lands — and ns `Duration` (#1466) are built once, as grid and plane
+  instances, full I9 parity. Card #1435 is sequenced here; it is not superseded or absorbed.
 - **Phase C — implement the settled surface law.** Refinement spelling, Duration→Time, `BigInt`
   retirement, uncertainty opt-in, and reflection completion. Each is a coherent in-repo migration
   with the replaced form deleted, per greenfield law.

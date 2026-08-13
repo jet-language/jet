@@ -755,6 +755,7 @@ impl<'a> Parser<'a> {
                                 | TokKind::NotEq
                                 | TokKind::Le
                                 | TokKind::Ge
+                                | TokKind::Compare
                         ) =>
                     {
                         let expr = self.module_arg_expr()?;

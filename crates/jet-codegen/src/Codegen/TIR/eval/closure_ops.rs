@@ -4,12 +4,32 @@ use std::collections::HashMap;
 use crate::Codegen::TIR::{TClosureOp, TExpr, TExprKind, TLambda, TLambdaBody};
 use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::{CtReport, CtValue};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, Span};
 
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
     progress_iter_value, progress_no_color, progress_now, unsupported, EvalCtx, Flow,
 };
+
+fn ordering_cmp(value: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return Err(unsupported("sort_by comparator must return Ordering", span));
+    };
+    if type_name != crate::Syntax::TYPE_ORDERING || !args.is_empty() {
+        return Err(unsupported("sort_by comparator must return Ordering", span));
+    }
+    match variant.as_str() {
+        "Less" => Ok(std::cmp::Ordering::Less),
+        "Equal" => Ok(std::cmp::Ordering::Equal),
+        "Greater" => Ok(std::cmp::Ordering::Greater),
+        _ => Err(unsupported("sort_by comparator must return Ordering", span)),
+    }
+}
 
 fn progress_parts(
     value: &CtValue,
@@ -545,6 +565,29 @@ impl<'a> EvalCtx<'a> {
                 }
                 let sorted = CtValue::List(keyed.into_iter().map(|(_, v)| v).collect());
                 self.write_back_place(recv, sorted, scope)?;
+                Ok(CtValue::Unit)
+            }
+            TClosureOp::SortByCompare => {
+                let CtValue::List(mut items) = recv_v else {
+                    return Err(unsupported("sort_by receiver", self.span()));
+                };
+                let span = self.span();
+                let mut sort_err = None;
+                items.sort_by(|left, right| {
+                    match calln(self, vec![left.clone(), right.clone()])
+                        .and_then(|value| ordering_cmp(&value, span))
+                    {
+                        Ok(order) => order,
+                        Err(error) => {
+                            sort_err.get_or_insert(error);
+                            std::cmp::Ordering::Equal
+                        }
+                    }
+                });
+                if let Some(error) = sort_err {
+                    return Err(error);
+                }
+                self.write_back_place(recv, CtValue::List(items), scope)?;
                 Ok(CtValue::Unit)
             }
             TClosureOp::TakeWhile => {

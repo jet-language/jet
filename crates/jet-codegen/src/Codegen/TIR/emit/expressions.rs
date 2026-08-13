@@ -1330,6 +1330,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
                 TBuiltinOp::Sort => format!("({}).sort()", recv),
+                TBuiltinOp::OrderingThen => format!(
+                    "{}jet_ordering_then(&({}), &({}))",
+                    cx.root_prefix,
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::OrderingReverse => {
+                    format!("{}jet_ordering_reverse(&({}))", cx.root_prefix, recv)
+                }
                 // View/ViewMut are slices (`&[T]` / `&mut [T]`) — never `.clone()` the
                 // receiver (ViewMut is not Clone). Iter consumes; List/View borrow via `.iter()`.
                 TBuiltinOp::JoinSep => {
@@ -2100,6 +2109,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
+            if *op == BinOp::Compare {
+                return jet_name_format!(
+                    "{name_prefix}Comparable::compare(&({}), &({}))",
+                    ls,
+                    rs,
+                );
+            }
             // Unit-family arithmetic is a synthetic trait operation. Keep the
             // operands borrowed exactly as the generated `__jet_*` trait
             // requires; emitting Rust's value operator here moves a repeated
@@ -3164,6 +3180,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::BagAny => format!("({}).keys().any({})", recv, a(0)),
                 TClosureOp::All => format!("jet_list_all({vec_src}, {})", a(0)),
                 TClosureOp::SortBy => format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
+                TClosureOp::SortByCompare => {
+                    format!("{{ jet_list_sort_by_compare(&mut {}, {}); }}", recv, a(0))
+                }
                 TClosureOp::Reduce => {
                     format!("jet_list_reduce({vec_src}, {}, {})", a(0), a(1))
                 }

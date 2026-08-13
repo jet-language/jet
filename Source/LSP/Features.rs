@@ -1319,6 +1319,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::Gt
         | TokKind::Le
         | TokKind::Ge
+        | TokKind::Compare
         | TokKind::Arrow
         | TokKind::LambdaArrow
         | TokKind::Question

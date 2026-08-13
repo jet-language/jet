@@ -751,6 +751,20 @@ impl<'a> Checker<'a> {
                 None
             };
             if let Some(mut expected) = build_expected.or_else(|| Collections::builtin_method_arg_types(recv_ty, method)) {
+                // D-CMP3WAY1=B / #1435: `sort_by` also accepts one binary
+                // comparator whose result is the core `Ordering` type.
+                if method == "sort_by"
+                    && matches!(
+                        args.first().map(|arg| &arg.expr),
+                        Some(Expr::Lambda(lambda)) if lambda.params.len() == 2
+                    )
+                {
+                    if let Type::List(inner) | Type::FixedList { elem: inner, .. } = recv_ty {
+                        if let Some(callback) = expected.first_mut() {
+                            *callback = Collections::sort_by_callback_type(inner, true);
+                        }
+                    }
+                }
                 // D-LISTREMOVE1/F: `.Slot` changes the first argument from the
                 // list element type to an Int position. The selector is a
                 // closed enum, so a literal is enough to resolve this

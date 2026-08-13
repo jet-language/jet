@@ -204,6 +204,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::IndexOf => apply_method(recv, "index_of", args, span),
         TBuiltinOp::Reverse => apply_mutating(recv, "reverse", args, span),
         TBuiltinOp::Sort => apply_mutating(recv, "sort", args, span),
+        TBuiltinOp::OrderingThen => apply_method(recv, "then", args, span),
+        TBuiltinOp::OrderingReverse => apply_method(recv, "reverse", args, span),
         TBuiltinOp::JoinSep => apply_method(recv, "join", args, span),
         TBuiltinOp::Sum { .. } => apply_method(recv, "sum", args, span),
         TBuiltinOp::Product { .. } => apply_method(recv, "product", args, span),

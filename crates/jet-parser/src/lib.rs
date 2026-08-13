@@ -66,3 +66,15 @@ mod generic_module_tests {
         assert!(!formatted.contains("fn run"), "formatter must keep script syntax: {formatted}");
     }
 }
+
+#[cfg(test)]
+mod compare_tests {
+    use super::{Lexer, Parser};
+
+    #[test]
+    fn separated_le_and_gt_still_reject_as_an_invalid_expression() {
+        let (tokens, lex_diagnostics) = Lexer::lex("fn run() { return a <= > b }");
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        assert!(Parser::parse(&tokens).is_err());
+    }
+}

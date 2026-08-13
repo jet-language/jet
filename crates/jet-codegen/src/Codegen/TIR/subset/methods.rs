@@ -163,6 +163,16 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("__Carrier__") {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // D-CMP3WAY1=B: Ordering combinators are core Prelude operations, not user
+    // methods in the registry. Their arguments and receiver stay on the TIR path.
+    if matches!(method, "then" | "reverse")
+        && (recv_type.as_deref() == Some(Syntax::TYPE_ORDERING)
+            || (recv_type.is_none() && !matches!(receiver, Expr::Ident(..))))
+    {
+        return ((method == "then" && args.len() == 1) || (method == "reverse" && args.is_empty()))
+            && expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }

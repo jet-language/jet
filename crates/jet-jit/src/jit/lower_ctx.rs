@@ -17677,6 +17677,23 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
+            TBuiltinOp::OrderingThen => {
+                let other = self.lower_expr(&args[0])?;
+                let equal_tag = self.b.ins().iconst(types::I64, 1);
+                let equal = self.bool_from_icmp(IntCC::Equal, recv_val, equal_tag);
+                Ok(self.b.ins().select(equal, other, recv_val))
+            }
+            TBuiltinOp::OrderingReverse => {
+                let less_tag = self.b.ins().iconst(types::I64, 0);
+                let greater_tag = self.b.ins().iconst(types::I64, 2);
+                let less = self.bool_from_icmp(IntCC::Equal, recv_val, less_tag);
+                let greater = self.bool_from_icmp(IntCC::Equal, recv_val, greater_tag);
+                let equal = self.b.ins().iconst(types::I64, 1);
+                let swapped_less = self.b.ins().iconst(types::I64, 2);
+                let swapped_greater = self.b.ins().iconst(types::I64, 0);
+                let non_greater = self.b.ins().select(less, swapped_less, equal);
+                Ok(self.b.ins().select(greater, swapped_greater, non_greater))
+            }
             TBuiltinOp::LenList => {
                 // CoreCall String receivers often lower `.len()` as LenList because
                 // `tir_recv_jet_ty` can't see through CoreCall — treat as char len.
@@ -17996,7 +18013,9 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::RemoveList { .. }
             | TBuiltinOp::CountList
             | TBuiltinOp::ExtendList
-            | TBuiltinOp::ConcatList => Err("jit builtin method unsupported".to_string()),
+            | TBuiltinOp::ConcatList
+            | TBuiltinOp::OrderingThen
+            | TBuiltinOp::OrderingReverse => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::GetMap => {
                 if matches!(
                     &recv_ty,
@@ -22866,6 +22885,43 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().isub(one, equal)
             });
         }
+        if op == BinOp::Compare {
+            if matches!(&lhs_ty, Type::String) || matches!(&rhs_ty, Type::String) {
+                // StringMethod.compare is the JIT adapter for the Prelude's
+                // lexicographic text comparison. It returns -1/0/1; map that
+                // stable scalar onto Ordering's Less/Equal/Greater tags.
+                let method = self.b.ins().iconst(types::I64, 7);
+                let raw = self
+                    .call_host(self.host.text.string_method, &[l, method, r]);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let less = self.bool_from_icmp(IntCC::SignedLessThan, raw, zero);
+                let greater = self.bool_from_icmp(IntCC::SignedGreaterThan, raw, zero);
+                return Ok(self.ordering_from_flags(less, greater));
+            }
+            match lhs_ty {
+                Type::Int => {
+                    let less = self.bool_from_icmp(IntCC::SignedLessThan, l, r);
+                    let greater = self.bool_from_icmp(IntCC::SignedGreaterThan, l, r);
+                    return Ok(self.ordering_from_flags(less, greater));
+                }
+                Type::Float | Type::Float32 => {
+                    let less = self.bool_from_fcmp(FloatCC::LessThan, l, r);
+                    let greater = self.bool_from_fcmp(FloatCC::GreaterThan, l, r);
+                    return Ok(self.ordering_from_flags(less, greater));
+                }
+                Type::IntN { signed, .. } => {
+                    let (less_cc, greater_cc) = if signed {
+                        (IntCC::SignedLessThan, IntCC::SignedGreaterThan)
+                    } else {
+                        (IntCC::UnsignedLessThan, IntCC::UnsignedGreaterThan)
+                    };
+                    let less = self.bool_from_icmp(less_cc, l, r);
+                    let greater = self.bool_from_icmp(greater_cc, l, r);
+                    return Ok(self.ordering_from_flags(less, greater));
+                }
+                _ => return Err("jit spaceship comparison unsupported".to_string()),
+            }
+        }
         if Self::is_math_value_ty(&lhs_ty)
             || Self::is_math_value_ty(&rhs.ty)
             || Self::is_math_value_ty(&lhs.ty)
@@ -23120,6 +23176,14 @@ impl LowerCtx<'_, '_> {
         let one = self.b.ins().iconst(types::I8, 1);
         let zero = self.b.ins().iconst(types::I8, 0);
         self.b.ins().select(cmp, one, zero)
+    }
+
+    fn ordering_from_flags(&mut self, less: Value, greater: Value) -> Value {
+        let less_tag = self.b.ins().iconst(types::I64, 0);
+        let equal_tag = self.b.ins().iconst(types::I64, 1);
+        let greater_tag = self.b.ins().iconst(types::I64, 2);
+        let equal_or_greater = self.b.ins().select(greater, greater_tag, equal_tag);
+        self.b.ins().select(less, less_tag, equal_or_greater)
     }
 
     fn bool_from_fcmp(&mut self, cc: FloatCC, l: Value, r: Value) -> Value {
@@ -23581,6 +23645,7 @@ impl LowerCtx<'_, '_> {
             }
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
             TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),
+            TClosureOp::SortByCompare => self.lower_iter_sort_by_compare(recv, args),
             TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
             TClosureOp::SkipWhile => self.lower_iter_take_skip_while(recv, args, true),
             TClosureOp::Fold | TClosureOp::Reduce | TClosureOp::ViewFold => {
@@ -25741,6 +25806,126 @@ impl LowerCtx<'_, '_> {
             .module
             .declare_func_in_func(self.host.coll.list_sort_by_i64_keys, self.b.func);
         self.b.ins().call(sort_ref, &[coll, keys]);
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+
+    fn lower_iter_sort_by_compare(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        let elem_ty = jit_closure_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (left_place, right_place, body_expr) = self.closure_binary_lambda(args)?;
+        if !matches!(
+            &body_expr.ty,
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_ORDERING
+        ) {
+            return Err("jit sort_by comparator must return Ordering".to_string());
+        }
+
+        let recv_val = self.lower_expr(recv)?;
+        let recv_val = self.collect_progress(recv_val);
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        // Selection sort keeps the comparator inline and only needs the
+        // existing list get/set host seams. It is deliberately small: this is
+        // the JIT adapter for the Prelude comparator, not a second ordering
+        // policy.
+        let outer_header = self.b.create_block();
+        let outer_body = self.b.create_block();
+        let outer_step = self.b.create_block();
+        let inner_header = self.b.create_block();
+        let inner_body = self.b.create_block();
+        let inner_step = self.b.create_block();
+        let exit = self.b.create_block();
+        let outer_var = self.fresh_var(types::I64);
+        let inner_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(outer_var, zero);
+        self.b.ins().jump(outer_header, &[]);
+
+        self.b.switch_to_block(outer_header);
+        let outer = self.b.use_var(outer_var);
+        let coll = self.b.use_var(coll_var);
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, outer, len);
+        self.b.ins().brif(done, exit, &[], outer_body, &[]);
+
+        self.b.switch_to_block(outer_body);
+        self.b.seal_block(outer_body);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let first_inner = self.b.ins().iadd(outer, one);
+        self.b.def_var(inner_var, first_inner);
+        self.b.ins().jump(inner_header, &[]);
+
+        self.b.switch_to_block(inner_header);
+        let inner = self.b.use_var(inner_var);
+        let coll = self.b.use_var(coll_var);
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, inner, len);
+        self.b.ins().brif(done, outer_step, &[], inner_body, &[]);
+
+        self.b.switch_to_block(inner_body);
+        self.b.seal_block(inner_body);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let left_call = self.b.ins().call(get_ref, &[coll, outer, line]);
+        let left = self.b.inst_results(left_call)[0];
+        self.emit_trap_check()?;
+        let right_call = self.b.ins().call(get_ref, &[coll, inner, line]);
+        let right = self.b.inst_results(right_call)[0];
+        self.emit_trap_check()?;
+        let ordering = self.with_bound_local(&left_place, elem_ty.clone(), left, |this| {
+            this.with_bound_local(&right_place, elem_ty.clone(), right, |inner_ctx| {
+                inner_ctx.lower_expr(body_expr)
+            })
+        })?;
+        let less_tag = self.b.ins().iconst(types::I64, 0);
+        let less = self.b.ins().icmp(IntCC::Equal, ordering, less_tag);
+        let swap = self.b.create_block();
+        self.b.ins().brif(less, swap, &[], inner_step, &[]);
+
+        self.b.switch_to_block(swap);
+        self.b.seal_block(swap);
+        let set_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_set, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        self.b.ins().call(set_ref, &[coll, outer, right, line]);
+        self.b.ins().call(set_ref, &[coll, inner, left, line]);
+        self.b.ins().jump(inner_step, &[]);
+
+        self.b.switch_to_block(inner_step);
+        self.b.seal_block(inner_step);
+        let inner = self.b.use_var(inner_var);
+        let next = self.b.ins().iadd(inner, one);
+        self.b.def_var(inner_var, next);
+        self.b.ins().jump(inner_header, &[]);
+
+        self.b.switch_to_block(outer_step);
+        self.b.seal_block(outer_step);
+        let outer = self.b.use_var(outer_var);
+        let next = self.b.ins().iadd(outer, one);
+        self.b.def_var(outer_var, next);
+        self.b.ins().jump(outer_header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(outer_header);
+        self.b.seal_block(inner_header);
+        self.b.seal_block(exit);
         Ok(self.b.ins().iconst(types::I8, 0))
     }
 

@@ -143,6 +143,8 @@ pub enum TokKind {
     Gt,
     Le,
     Ge,
+    /// D-CMP3WAY1=B: longest-match three-way comparison operator.
+    Compare,
     // Compound assignment (S17).
     PlusEq,
     /// D-INCR1: prefix/postfix increment `++`.
@@ -292,6 +294,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Gt => "`>`".to_string(),
         TokKind::Le => "`<=`".to_string(),
         TokKind::Ge => "`>=`".to_string(),
+        TokKind::Compare => "`<=>`".to_string(),
         TokKind::PlusEq => "`+=`".to_string(),
         TokKind::PlusPlus => "`++`".to_string(),
         TokKind::MinusEq => "`-=`".to_string(),

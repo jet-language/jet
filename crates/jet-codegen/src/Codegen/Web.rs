@@ -3461,6 +3461,21 @@ fn wasm_emit_expr(
             wasm_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
                 .expect("the match arm admits only Prelude-carried operators")
         }
+        TIR::TExprKind::Binary {
+            op: crate::AST::BinOp::Compare,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
+            let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
+            let less = wasm_enum_head(Syntax::TYPE_ORDERING, "Less");
+            let equal = wasm_enum_head(Syntax::TYPE_ORDERING, "Equal");
+            let greater = wasm_enum_head(Syntax::TYPE_ORDERING, "Greater");
+            format!(
+                "{{ let __jet_compare_left = {l}; let __jet_compare_right = {r}; if (__jet_compare_left) < (__jet_compare_right) {{ {less} }} else if (__jet_compare_left) > (__jet_compare_right) {{ {greater} }} else {{ {equal} }} }}"
+            )
+        }
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
             wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
@@ -5089,6 +5104,18 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 tir_js_expr(rhs, funcs, file_prefix)?
             )
         }
+        E::Binary {
+            op: crate::AST::BinOp::Compare,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let l = tir_js_expr(lhs, funcs, file_prefix)?;
+            let r = tir_js_expr(rhs, funcs, file_prefix)?;
+            format!(
+                "((left, right) => (left < right ? {{ tag: \"Less\", values: [] }} : left > right ? {{ tag: \"Greater\", values: [] }} : {{ tag: \"Equal\", values: [] }}))({l}, {r})"
+            )
+        }
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op).ok_or(())?, tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => js_unary_call(
             op,
@@ -5726,6 +5753,7 @@ fn binop(op: &crate::AST::BinOp) -> Option<&'static str> {
         Ge => ">=",
         And => "&&",
         Or => "||",
+        Compare => return None,
     })
 }
 

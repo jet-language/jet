@@ -2358,6 +2358,17 @@ fn resident_safe_closure_method(
                         if matches!(&lam.executable, TIR::TLambdaBody::Expr(body) if matches!(body.ty, Type::Int))
                 )
         }
+        TIR::TClosureOp::SortByCompare => {
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::Int | Type::String | Type::Named(_)))
+                && resident_safe_binary_lambda(args, callees)
+                && matches!(
+                    args.first().map(|arg| &arg.kind),
+                    Some(TExprKind::Lambda(lam))
+                        if matches!(&lam.executable, TIR::TLambdaBody::Expr(body)
+                            if matches!(&body.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ORDERING))
+                )
+        }
         TIR::TClosureOp::TakeWhile
         | TIR::TClosureOp::SkipWhile
         | TIR::TClosureOp::Position => {

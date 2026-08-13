@@ -101,6 +101,8 @@ pub enum BinOp {
     Gt,
     Le,
     Ge,
+    /// D-CMP3WAY1=B: three-way comparison, desugared to `compare` for hooks.
+    Compare,
     And,
     Or,
 }
@@ -135,6 +137,7 @@ impl BinOp {
             BinOp::Gt => ">",
             BinOp::Le => "<=",
             BinOp::Ge => ">=",
+            BinOp::Compare => "<=>",
             BinOp::And => "&&",
             BinOp::Or => "||",
         }
@@ -153,7 +156,7 @@ impl BinOp {
         Some(match self {
             BinOp::BitXor => "^",
             BinOp::Rem => "%",
-            BinOp::Pow | BinOp::FloorDiv | BinOp::Mod => return None,
+            BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Compare => return None,
             other => other.spell(),
         })
     }
