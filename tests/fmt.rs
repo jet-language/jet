@@ -1386,9 +1386,15 @@ fn fmt_single_line_nested_forces_expand() {
 
 #[test]
 fn fmt_preserves_single_line_loops_and_fn() {
-    // The rule applies uniformly to `while`/`for`/`fn` bodies.
+    // D-LOOP-STMT-ARROW1=C: the rule applies uniformly to every loop header.
     let while_src = "fn run() {\n    n :: 0\n    loop n < 3 -> n += 1\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
+
+    let infinite_src = "fn run() {\n    loop -> break\n}\n";
+    assert_fmt_stable(infinite_src, "single-line infinite loop");
+
+    let state_src = "fn run() {\n    loop i := 0, i < 3 -> i += 1\n}\n";
+    assert_fmt_stable(state_src, "single-line state loop");
 
     let for_src = "fn run() {\n    loop i, 0..3 -> print(\"{i}\")\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
