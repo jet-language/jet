@@ -2791,10 +2791,23 @@ impl<'a> Checker<'a> {
                 && matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
                     if self.lookup(name).is_some_and(|info| is_allocator_type(&info.ty)))
             {
-                return self
-                    .place_from_expr(receiver)
-                    .map(|place| vec![(Vec::new(), place, ViewKind::Arena, ViewAccess::Write)])
-                    .unwrap_or_default();
+                let Expr::Ident(name, _) = receiver.as_ref().without_parens() else {
+                    return Vec::new();
+                };
+                // Keep the result view rooted at allocator handle, like plain
+                // `alloc`. `place_from_expr(receiver)` follows Fixed's backing
+                // fact, which makes result carrier overlap its owner borrow.
+                return vec![
+                    (
+                        Vec::new(),
+                        ViewPlace {
+                            owner: self.owner_id(name),
+                            projections: Vec::new(),
+                        },
+                        ViewKind::Arena,
+                        ViewAccess::Write,
+                    ),
+                ];
             }
         }
         if let Expr::MethodCall {
