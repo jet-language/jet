@@ -1,5 +1,7 @@
 //! D-REPORT-TEST1/A — testing file helpers keep one meaning on every tier.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
