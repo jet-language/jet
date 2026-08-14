@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
-    let mut kernel = Kernel::open(None, "entry-order-test");
+    let mut kernel = Kernel::open(None, "entry-order-test")
+        .expect("open entry-order notebook kernel");
     let caller = kernel
         .notebook
         .add_cell(
@@ -85,7 +86,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
 
 #[test]
 fn shared_session_identical_stale_rules_across_clients() {
-    let mut kernel = Kernel::open(None, "env-test").unwrap();
+    let mut kernel = Kernel::open(None, "env-test").expect("open shared-session notebook kernel");
     let a = kernel
         .notebook
         .add_cell(CellKind::Jet, "x :: 1")
@@ -324,7 +325,7 @@ fn rich_output_trust_quarantines_imports_and_binds_grants() {
 
 #[test]
 fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
-    let mut kernel = Kernel::open(None, "proto-env").unwrap();
+    let mut kernel = Kernel::open(None, "proto-env").expect("open headless-protocol notebook kernel");
     let out = run_headless_script(
         &mut kernel,
         &[
@@ -365,7 +366,8 @@ fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
     print(read_file(Path.from("notes.txt")) ?? panic("read failed"))
 }"#;
     let environment = Kernel::environment_hash(&scratch.path);
-    let mut kernel = Kernel::open(Some(&document), environment.clone()).unwrap();
+    let mut kernel = Kernel::open(Some(&document), environment.clone())
+        .expect("open first-hour notebook document");
     let cell_id = kernel.notebook.add_cell(CellKind::Jet, source).id.clone();
     kernel.push_stdin("Ada");
 
@@ -378,7 +380,8 @@ fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
     assert_eq!(std::fs::read_to_string(scratch.join("notes.txt")).unwrap(), "Ada");
 
     kernel.save_document(Some(&document)).unwrap();
-    let reopened = Kernel::open(Some(&document), environment).unwrap();
+    let reopened = Kernel::open(Some(&document), environment)
+        .expect("reopen first-hour notebook document");
     assert_eq!(reopened.document_path.as_deref(), Some(document.as_path()));
     assert_eq!(reopened.notebook.cells[0].source, source);
 }
