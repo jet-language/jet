@@ -385,20 +385,19 @@ fn snapshot_codes() -> BTreeSet<String> {
                 for code in extract_snapshot_codes(&text) {
                     out.insert(code);
                 }
-                // `jet explain` names its code on the first line instead of
-                // using the rendered `[E####]` diagnostic form.
-                if p.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("explain_"))
-                {
-                    if let Some(code) = text
-                        .lines()
-                        .next()
-                        .map(str::trim)
-                        .filter(|code| jet::Explain::is_code(code))
-                    {
-                        out.insert(code.to_string());
-                    }
+            }
+        }
+    }
+
+    // Runtime journey reports intentionally omit a bracketed diagnostic code.
+    // Count only the exact runtime fixture convention, with a paired snapshot
+    // and the live interpreter marker; explain pages are not UI snapshots.
+    if let Ok(entries) = fs::read_dir(&ui) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) == Some("jet") {
+                if let Some(code) = runtime_ui_code(&path) {
+                    out.insert(code);
                 }
             }
         }
@@ -548,6 +547,26 @@ fn extract_snapshot_codes(text: &str) -> Vec<String> {
     extract_delimited_codes(text, b'[', b']')
 }
 
+fn runtime_ui_code(path: &PathBuf) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    let digits = name.strip_prefix("runtime_e")?.strip_suffix(".jet")?;
+    if digits.len() != 4 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if !path.with_extension("stderr").is_file() {
+        return None;
+    }
+    let source = fs::read_to_string(path).ok()?;
+    if !source
+        .lines()
+        .any(|line| line.trim() == "// @dev_interpreter")
+    {
+        return None;
+    }
+    let code = format!("E{digits}");
+    jet::Explain::is_code(&code).then_some(code)
+}
+
 #[test]
 fn word_shaped_codes_are_registered_and_explainable() {
     let expected = [
@@ -642,17 +661,11 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // E0153: protocol expansion parse failure — internal compiler error path only
     // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
     "E0153",
-    // E3001/E3005: `jet prove --json` (Source/CmdProve.rs render_report) now embeds these
-    // as literal quoted `"E3001"`/`"E3005"` JSON-field values in generated evidence records,
-    // which the literal-scan `emitted_codes()` picks up. But the real user-facing rendering
-    // of these codes (D-OBS1/D-OBS2 runtime panic voice in jet_panic_rich/jet_contract_fail,
-    // crates/jet-codegen/src/Prelude/Core.rs) is deliberately bracket-free — `panic: {msg}` /
-    // `@{Pre|Post} contract failed: {msg}`, never `[E3001]`/`[E3005]` — so no snapshot fixture
-    // can contain the bracket form this scanner's `extract_snapshot_codes` looks for without
-    // fabricating text the compiler never prints. Real coverage exists as CLI-process
-    // assertions in tests/prove.rs (`prove_captures_contract_results_and_runtime_panics_structurally`
-    // asserts `"code":"E3001"` / `"code":"E3005"` in real `jet prove --json` output). Card #521.
-    "E3001",
+    // E3005: `jet prove --json` (Source/CmdProve.rs render_report) embeds this
+    // as a literal quoted `"E3005"` JSON-field value in generated evidence records,
+    // which the literal-scan `emitted_codes()` picks up. Its real user-facing
+    // contract-failure rendering is deliberately bracket-free, so coverage stays
+    // in the structural CLI assertion until a live runtime fixture exists.
     "E3005",
 ];
 
