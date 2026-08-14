@@ -53,6 +53,9 @@ The report gates window measurements on the complete `#820-#825` backend chain:
 default is headless/no-op. This pass had no windowed run, backend/input receipt,
 or frame receipt.
 
+**Gate evidence:** `#820`–`#824` are blocked in sequence; `#825` is ready but
+cannot complete the chain alone. The gate is therefore closed for this run.
+
 | persona | time-to-first-window | first-pixel | state |
 | --- | --- | --- | --- |
 | Mara | not-applicable — CLI project has no window target | not-applicable — no window is created | usable-with-friction |
