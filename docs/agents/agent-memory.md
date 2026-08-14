@@ -1153,7 +1153,7 @@ contribution law (type-v2 model one level up).
 Card #1506 (e3) carries 11 full ballots (v2 after owner feedback), all
 open. History: owner ratified READ1/MERGE1/STAMP1/WORD1 (A) on
 pre-review-fix text; reopened per owner instruction. v2 changes: fact
-reads respelled $build.* riding metaprogramming one-splice law
+reads respelled @build.* riding metaprogramming one-splice law
 ([[metaprogramming-one-program-2026-08-06]]) — no reserved word, fallback
 option B; new D-CONF-NAME1 (manifest vocabulary menu, bare name:/version:
 rec), D-CONF-SPLIT1 (facts in text / actions in fn build, computed
@@ -2323,7 +2323,7 @@ Card #1620 (e3, decide). Proposal docs/proposals/compiler-facts-one-law.md (auth
 
 One law over four rethinks: fact moves toward safety silently; every away-move = one written recorded word. Registry half already ratified (D-META-REG1 one table; D-CONC-UNIT1 work facts on type machinery).
 
-Seven ballots pending owner: D-FACT-LAW1 (law, rec B guarded registry), WORD1 (tighten/loosen, rec A), GATE1 (full ledger `jet inspect gates`, rec A), READ1 ($ reads every plane, rec A), HOME1 (home user-facing orphans + phantom rejection, rec A), OWN1 (borrow checker = prover wall, rec A), FLOW1 (one flow-fact store, rec A).
+Seven ballots pending owner: D-FACT-LAW1 (law, rec B guarded registry), WORD1 (tighten/loosen, rec A), GATE1 (full ledger `jet inspect gates`, rec A), READ1 (@ reads every plane, rec A), HOME1 (home user-facing orphans + phantom rejection, rec A), OWN1 (borrow checker = prover wall, rec A), FLOW1 (one flow-fact store, rec A).
 
 Key facts: stale-memory corrections — SPAWN1=D, FAIL1=A, AUTHORITY-MEM2=A all RATIFIED (not pending). Dead joins State.rs:712 + Sema/mod.rs:44 = soundness debt. Memory sigils &/^/~ are NOT gates (OWN1 wall). On ratification: record in syntax-decisions.md, route #1517-#1579 onto one substrate (criterion 4 open).
 

@@ -166,6 +166,9 @@ fn typed_settings_dir() -> PathBuf {
 }
 
 fn typed_settings_output(tls: &str) -> String {
+    if tls == "on" {
+        return include_str!("../examples/features/expected/packages/typed_settings.out").to_string();
+    }
     format!("tls-{tls}\nhttps://api.example.com\n")
 }
 

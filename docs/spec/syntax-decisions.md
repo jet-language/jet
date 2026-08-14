@@ -6586,7 +6586,8 @@ fieldless enum, as ratified by D-GENMOD-VALUE1.
 snapshot, CLI/profile contribution path, `@build.settings.*` folding, and
 execution-tier callers now use the typed settings plane. Retired `features:`
 and `env:` profile fields teach the declaration-plus-`--set` form and do not
-reach rustc configuration or process environment.
+reach rustc configuration or process environment. Profile validation checks
+every declared profile, including inactive profiles, before build selection.
 
 **D-CONF-MERGE1=A — nearest source, most explicit layer, `.Force` pins**
 *(ratified 2026-08-06, card #1520)*: one contribution law has two halves. In
