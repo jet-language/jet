@@ -310,7 +310,7 @@ pub(crate) fn clif_ty_with_distinct(
     {
         return Some(types::I64);
     }
-    if matches!(&ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String)) {
+    if matches!(&ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String | Type::Int)) {
         return Some(types::I64);
     }
     // Option of Map / list / named handle — packed Option ABI (0 / bits+1).
@@ -319,7 +319,7 @@ pub(crate) fn clif_ty_with_distinct(
         Type::Option(inner)
             if matches!(
                 inner.as_ref(),
-                Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
+                Type::Map { key, .. } if matches!(key.as_ref(), Type::String | Type::Int)
             ) || matches!(
                 inner.as_ref(),
                 Type::List(_) | Type::FixedList { .. } | Type::Named(_)

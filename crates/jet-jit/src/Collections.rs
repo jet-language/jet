@@ -142,6 +142,10 @@ mod collection_semantics {
         jet_zip_rows(lengths, mode, read, fill)
     }
 
+    pub(super) fn zip_length_mismatch_message() -> &'static str {
+        jet_zip_length_mismatch_message()
+    }
+
     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
         jet_list_try_new()
     }
@@ -380,6 +384,24 @@ mod collection_semantics {
 
     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
         jet_list_pop_kernel(values).ok()
+    }
+
+    pub(super) fn list_remove_value<T: Clone + PartialEq>(
+        values: &mut Vec<T>,
+        value: T,
+    ) -> Option<T> {
+        jet_list_remove_value_kernel(values, value)
+    }
+
+    pub(super) fn list_remove_slot<T: Clone>(
+        values: &mut Vec<T>,
+        index: i64,
+    ) -> Result<T, String> {
+        jet_list_remove_slot_kernel(values, index)
+    }
+
+    pub(super) fn list_count<T: PartialEq>(values: &[T], value: &T) -> i64 {
+        jet_list_count_kernel(values, value)
     }
 
     pub(super) fn set_pop_i64(
@@ -911,6 +933,29 @@ extern "C" fn jet_jit_list_clone(list: i64) -> i64 {
 extern "C" fn jet_jit_list_copy(list: i64) -> i64 {
     let values = clone_list_ints(list);
     alloc_from_ints(&collection_semantics::list_copy_i64(&values))
+}
+
+extern "C" fn jet_jit_list_count(list: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(values) = rt.heap.clone_int_list(list) else {
+            jet_foundation::ice!(None, "jit list count: bad handle");
+        };
+        collection_semantics::list_count(&values, &value)
+    })
+}
+
+extern "C" fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values: &mut Vec<jet_rt::JetVal> =
+            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
+        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+            jet_foundation::ice!(None, "jit list remove value: bad handle");
+        };
+        match collection_semantics::list_remove_value(xs, jet_rt::JetVal::Int(value)) {
+            Some(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+            Some(_) | None => 0,
+        }
+    })
 }
 
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
@@ -1776,7 +1821,11 @@ extern "C" fn jet_jit_iter_zip_family(
                 )
             },
         ) else {
-            rt.set_runtime_stop("E3001", 0, "zip length mismatch");
+            rt.set_runtime_stop(
+                "E3001",
+                0,
+                collection_semantics::zip_length_mismatch_message(),
+            );
             return out;
         };
         for values in rows {
@@ -2380,31 +2429,23 @@ extern "C" fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
     });
 }
 
-/// `list.remove(i)` — AOT `jet_list_remove` panic text on OOB; in-bounds mutates
-/// the `JetArena` list in place (same `Vec::remove` as AOT).
-///
-/// # ponytail: single-field `JetArena` layout = `Vec<JetVal>`; no public remove API yet.
-extern "C" fn jet_jit_list_remove(list: i64, idx: i64) -> i64 {
+/// `list.remove(i, RemoveBy.Slot)` — shared Prelude bounds semantics, with the
+/// JIT only marshalling the list handle and runtime-stop boundary.
+extern "C" fn jet_jit_list_remove_slot(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         // SAFETY: JetArena is `{ values: Vec<JetVal> }` — one field, identical address.
         let values: &mut Vec<jet_rt::JetVal> =
             unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
         let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
-            jet_foundation::ice!(None, "jit list remove: bad handle");
+            jet_foundation::ice!(None, "jit list remove slot: bad handle");
         };
-        let len = xs.len() as i64;
-        if idx < 0 || idx >= len {
-            rt.set_runtime_stop(
-                "E3010",
-                0,
-                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
-            );
-            return 0;
-        }
-        match xs.remove(idx as usize) {
-            jet_rt::JetVal::Int(v) => v,
-            jet_rt::JetVal::Float(v) => v.to_bits() as i64,
-            _ => 0,
+        match collection_semantics::list_remove_slot(xs, idx) {
+            Ok(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+            Ok(_) => 0,
+            Err(message) => {
+                rt.set_runtime_stop("E3010", line, &message);
+                0
+            }
         }
     })
 }
@@ -4102,6 +4143,8 @@ host_fns! {
             .push(AbiParam::new(types::I8));
         let mut sig_get_opt = sig_len.clone();
         sig_get_opt.params.push(AbiParam::new(types::I64));
+        let mut sig_list_remove_slot = sig_get_opt.clone();
+        sig_list_remove_slot.params.push(AbiParam::new(types::I32));
         let mut sig_debug_optional = Signature::new(cc);
         sig_debug_optional
             .params
@@ -4239,6 +4282,9 @@ host_fns! {
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
     list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
+    list_count: "jet_jit_list_count" => jet_jit_list_count: sig_get_opt;
+    list_remove_value: "jet_jit_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;
+    list_remove_slot: "jet_jit_list_remove_slot" => jet_jit_list_remove_slot: sig_list_remove_slot;
     list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
     list_starts_with: "jet_jit_list_starts_with" => jet_jit_list_starts_with: sig_list_eq;
     list_ends_with: "jet_jit_list_ends_with" => jet_jit_list_ends_with: sig_list_eq;
@@ -4320,7 +4366,6 @@ host_fns! {
     str_push_debug_optional: "jet_jit_str_push_debug_optional" => jet_jit_str_push_debug_optional: sig_debug_optional;
     str_push_debug_record: "jet_jit_str_push_debug_record" => jet_jit_str_push_debug_record: sig_debug_record;
     str_push_debug_variant: "jet_jit_str_push_debug_variant" => jet_jit_str_push_debug_variant: sig_debug_variant;
-    list_remove: "jet_jit_list_remove" => jet_jit_list_remove: sig_get_opt;
     list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;
     set_from_list: "jet_jit_set_from_list" => jet_jit_set_from_list: sig_set_from;

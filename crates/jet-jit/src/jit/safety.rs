@@ -3147,14 +3147,22 @@ fn resident_safe_builtin_op(
                 && jit_list_int_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
         }
-        // D-COLLBREADTH1=A: Set / Queue / list.remove — Int elems only.
-        // D-LISTREMOVE1/F: these operations use the canonical Prelude through
-        // deopt; the resident list-handle ABI cannot carry Option<T> or a
-        // value-vs-slot selector without inventing a second semantic path.
-        TBuiltinOp::RemoveList { .. }
-        | TBuiltinOp::CountList
-        | TBuiltinOp::ExtendList
-        | TBuiltinOp::ConcatList => false,
+        // D-COLLBREADTH1=A: list.remove/count use the shared Prelude kernels;
+        // the JIT only carries the resident Int-list handle and Option carrier.
+        TBuiltinOp::RemoveList { mode, .. } => {
+            matches!(mode, TIR::ListRemoveMode::Value | TIR::ListRemoveMode::Slot)
+                && jit_list_int_type(recv_ty)
+                && matches!(args.len(), 1 | 2)
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::CountList => {
+            jit_list_int_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ExtendList | TBuiltinOp::ConcatList => false,
         TBuiltinOp::SetFrom => {
             (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
         }

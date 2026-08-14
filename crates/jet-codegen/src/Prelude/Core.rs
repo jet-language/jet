@@ -1504,19 +1504,14 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
     _file: &str,
     _line: u32,
 ) -> JetOutcome<T, JetAbsent> {
-    jet_outcome_of(
-        xs.iter()
-            .position(|item| *item == value)
-            .map(|index| xs.remove(index)),
-    )
+    jet_outcome_of(jet_list_remove_value_kernel(xs, value))
 }
 
 fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_arithmetic_stop(file, line, &jet_list_bounds_message(len, i));
+    match jet_list_remove_slot_kernel(xs, i) {
+        Ok(value) => Ok(value),
+        Err(message) => jet_arithmetic_stop(file, line, &message),
     }
-    Ok(xs.remove(i as usize))
 }
 
 // D-LISTREMOVE1/F (criterion c6 on #1481): PriorityQueue.remove reuses List's
@@ -1545,7 +1540,7 @@ fn jet_priority_queue_remove_slot<T: Ord>(
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
-    xs.iter().filter(|item| *item == value).count() as i64
+    jet_list_count_kernel(xs, value)
 }
 
 fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {

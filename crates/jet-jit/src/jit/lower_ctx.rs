@@ -18405,9 +18405,33 @@ impl LowerCtx<'_, '_> {
                     Err("jit PriorityQueue.remove dynamic selector unsupported".to_string())
                 }
             },
-            TBuiltinOp::RemoveList { .. }
-            | TBuiltinOp::CountList
-            | TBuiltinOp::ExtendList
+            TBuiltinOp::RemoveList { mode, line } => match mode {
+                TIR::ListRemoveMode::Value => {
+                    let value = self.lower_expr(&args[0])?;
+                    Ok(self.call_host(
+                        self.host.coll.list_remove_value,
+                        &[recv_val, value],
+                    ))
+                }
+                TIR::ListRemoveMode::Slot => {
+                    let index = self.lower_expr(&args[0])?;
+                    let line = self.b.ins().iconst(types::I32, *line as i64);
+                    let value = self.call_host(
+                        self.host.coll.list_remove_slot,
+                        &[recv_val, index, line],
+                    );
+                    self.emit_trap_check()?;
+                    Ok(value)
+                }
+                TIR::ListRemoveMode::Dynamic => {
+                    Err("jit list.remove dynamic selector unsupported".to_string())
+                }
+            },
+            TBuiltinOp::CountList => {
+                let value = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.coll.list_count, &[recv_val, value]))
+            }
+            TBuiltinOp::ExtendList
             | TBuiltinOp::ConcatList
             | TBuiltinOp::OrderingThen
             | TBuiltinOp::OrderingReverse => Err("jit builtin method unsupported".to_string()),

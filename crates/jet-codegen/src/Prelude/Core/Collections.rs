@@ -383,6 +383,24 @@ fn jet_list_pop_kernel<T>(xs: &mut Vec<T>) -> JetOutcome<T, JetAbsent> {
     jet_outcome_of(xs.pop())
 }
 
+fn jet_list_remove_value_kernel<T: Clone + PartialEq>(xs: &mut Vec<T>, value: T) -> Option<T> {
+    xs.iter()
+        .position(|item| *item == value)
+        .map(|index| xs.remove(index))
+}
+
+fn jet_list_remove_slot_kernel<T: Clone>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
+    let len = xs.len() as i64;
+    if index < 0 || index >= len {
+        return Err(jet_list_bounds_message(len, index));
+    }
+    Ok(xs.remove(index as usize))
+}
+
+fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+    xs.iter().filter(|item| *item == value).count() as i64
+}
+
 trait JetSetPopKernel {
     type Item;
 
@@ -839,9 +857,13 @@ where
         match jet_zip_strict_step(a.0.next(), b.0.next()) {
             Ok(Some((x, y))) => Some(f(x, y)),
             Ok(None) => None,
-            Err(()) => jet_panic("<core.collections>", 0, "zip length mismatch"),
+            Err(()) => jet_panic("<core.collections>", 0, jet_zip_length_mismatch_message()),
         }
     })))
+}
+
+fn jet_zip_length_mismatch_message() -> &'static str {
+    "zip length mismatch"
 }
 fn jet_iter_zip_pad<A: 'static + Clone, B: 'static + Clone, O: 'static, F: 'static>(
     mut a: JetIter<A>,
