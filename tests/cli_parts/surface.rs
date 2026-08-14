@@ -747,6 +747,10 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     fs::create_dir_all(outside.parent().unwrap()).unwrap();
     fs::write(&outside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
     assert_eq!(report_file(&report(&outside)), outside.display().to_string());
+    assert_eq!(
+        report_file(&report(Path::new("../outside/bad.jet"))),
+        outside.display().to_string()
+    );
 
     let inside = dir.join("repo/src/bad.jet");
     fs::create_dir_all(inside.parent().unwrap()).unwrap();
@@ -768,7 +772,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     let fix = dir.join("fix/bad.jet");
     fs::create_dir_all(fix.parent().unwrap()).unwrap();
     fs::write(&fix, "fn run() {\n    println(\"hi\")\n}\n").unwrap();
-    let fix_report = report(&fix);
+    let fix_report = report(Path::new("../fix/bad.jet"));
     let fix_file = report_file(&fix_report);
     let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
         jet_foundation::JSON::JSONValue::Array(edits) => edits,
@@ -813,7 +817,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     fs::write(&left, "fn run( {\n").unwrap();
     fs::write(&right, "fn run( {\n").unwrap();
     let output = Command::new(jet())
-        .args(["fmt", left.to_str().unwrap(), right.to_str().unwrap(), "--json"])
+        .args(["fmt", "../left/bad.jet", "../right/bad.jet", "--json"])
         .current_dir(&runner)
         .env("NO_COLOR", "1")
         .output()

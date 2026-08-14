@@ -19,7 +19,7 @@ pub(crate) fn run_guarantees(
         exit(jet::ExitCodes::USAGE);
     };
     let bundle = jet::Loader::load_entry_with_diagnostics(&file).unwrap_or_else(|diagnostics| {
-        render_loader_diagnostics(&diagnostics, json, color);
+        render_loader_diagnostics(&diagnostics, &file, json, color);
     });
     let package = match jet::Package::PackageFacts::load(&bundle.project_root) {
         None => None,
@@ -102,15 +102,17 @@ fn entry_file(args: &[String]) -> Option<String> {
 
 fn render_loader_diagnostics(
     diagnostics: &[jet::Loader::LoaderDiagnostic],
+    entry_file: &str,
     json: bool,
     color: bool,
 ) -> ! {
     if json {
         for entry in diagnostics {
+            let machine_file = crate::machine_report_path_for_entry(entry_file, &entry.file);
             print!(
                 "{}",
                 jet::render_all_json(
-                    &entry.file,
+                    &machine_file,
                     &entry.source,
                     std::slice::from_ref(&entry.diagnostic),
                 )
@@ -144,10 +146,11 @@ fn render_ledger_diagnostics(
     if json {
         for entry in ledger.diagnostics() {
             let source = module_source(bundle, &entry.source);
+            let machine_file = crate::machine_report_path_for_bundle(bundle, &entry.source);
             print!(
                 "{}",
                 jet::render_all_json(
-                    &entry.source,
+                    &machine_file,
                     &source,
                     std::slice::from_ref(&entry.diagnostic),
                 )

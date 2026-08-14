@@ -1983,11 +1983,13 @@ Every diagnostic report has these fields:
 | `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
 | `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
-The renderer keeps the `file` path exactly as the caller gives it. An absolute
-path stays absolute. A relative path resolves from the reporting process's
-working directory. The renderer does not search for `.git`, strip a repository
-prefix, or fall back to a base name. Every `fix_edits[].file` uses the same path
-as `file`, so an agent can apply the edit to the reported source.
+CLI source construction gives every disk-backed report one physical path. A
+workspace-relative module display is resolved against the loaded bundle's
+project root; a direct relative input is resolved from the reporting process's
+working directory. Synthetic labels do not become host-specific paths. The
+renderer keeps that supplied path exactly. It does not search for `.git`, strip
+a repository prefix, or fall back to a base name. Every `fix_edits[].file` uses
+the same path as `file`, so an agent can apply the edit to the reported source.
 
 The clean-check success object has these additional fields:
 

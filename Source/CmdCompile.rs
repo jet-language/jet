@@ -322,7 +322,8 @@ pub(crate) fn run_compile_cmd(
             report_problems(mode, file, &src, &lints);
         }
         if mode.json && lints.is_empty() {
-            print!("{}", jet::Diagnostics::render_success_json(file));
+            let machine_file = crate::machine_report_path_for_process(file);
+            print!("{}", jet::Diagnostics::render_success_json(&machine_file));
         } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
@@ -631,7 +632,8 @@ pub(crate) fn run_compile_cmd(
                     .unwrap_or_else(|| lints.clone());
                 if !warning_lints.is_empty() {
                     if mode.json {
-                        eprint!("{}", jet::render_all_json(file, &src, &warning_lints));
+                        let machine_file = crate::machine_report_path_for_process(file);
+                        eprint!("{}", jet::render_all_json(&machine_file, &src, &warning_lints));
                     } else {
                         eprint!(
                             "{}",
@@ -2373,7 +2375,8 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
         }
         Err(diags) => {
             if mode.json {
-                eprint!("{}", jet::render_all_json(label, &src, &diags));
+                let machine_file = crate::machine_report_path_for_process(label);
+                eprint!("{}", jet::render_all_json(&machine_file, &src, &diags));
             } else {
                 eprint!("{}", jet::render_diagnostics(label, &src, &diags));
             }
@@ -2557,9 +2560,10 @@ pub(crate) fn run_fmt(
             if !r.parse_diags.is_empty() {
                 let path_s = r.path.to_str().unwrap_or("?");
                 if mode.json {
+                    let machine_file = crate::machine_report_path_for_process(path_s);
                     eprint!(
                         "{}",
-                        jet::render_all_json(path_s, &r.original, &r.parse_diags)
+                        jet::render_all_json(&machine_file, &r.original, &r.parse_diags)
                     );
                 } else {
                     eprint!(

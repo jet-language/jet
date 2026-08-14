@@ -3147,7 +3147,8 @@ pub(crate) fn report_problems(
     diags: &[jet::Diagnostics::Diagnostic],
 ) {
     if mode.json {
-        eprint!("{}", jet::render_all_json(file, src, diags));
+        let machine_file = machine_report_path_for_process(file);
+        eprint!("{}", jet::render_all_json(&machine_file, src, diags));
         return;
     }
     eprint!(
@@ -3167,6 +3168,65 @@ pub(crate) fn report_problems(
             "{}",
             jet::Explain::pointer_line(&first.code, mode.color_stderr())
         );
+    }
+}
+
+/// Return the one physical path representation used by CLI machine reports.
+///
+/// Disk-backed source labels are absolute, so an agent can open them without
+/// guessing the package root. Synthetic labels stay labels: they do not name
+/// files and must not become host-specific paths in stable output.
+pub(crate) fn machine_report_path_for_process(file: &str) -> String {
+    if file.is_empty() || file.starts_with('<') {
+        return file.to_string();
+    }
+    machine_report_path_from_path(Path::new(file))
+}
+
+/// Resolve a loader display label against the entry's package/workspace root.
+/// Loader displays are intentionally human-friendly and root-relative; JSON
+/// reports need the corresponding physical path instead.
+pub(crate) fn machine_report_path_for_entry(entry_file: &str, display: &str) -> String {
+    if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
+        return display.to_string();
+    }
+    let entry = machine_report_path_from_path(Path::new(entry_file));
+    let entry = Path::new(&entry);
+    let base = entry.parent().unwrap_or_else(|| Path::new("."));
+    let root = jet::Loader::find_manifest_root(base).unwrap_or_else(|| base.to_path_buf());
+    machine_report_path_from_path(&root.join(display))
+}
+
+/// Map a loaded module's display label back to its physical source path.
+/// Human renderers keep the display label; only JSON report construction uses
+/// this mapping.
+pub(crate) fn machine_report_path_for_bundle(
+    bundle: &jet::AST::ProgramBundle,
+    display: &str,
+) -> String {
+    if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
+        return display.to_string();
+    }
+    let path = bundle
+        .modules
+        .iter()
+        .find(|module| module.display == display)
+        .map(|module| module.path.clone())
+        .unwrap_or_else(|| bundle.project_root.join(display));
+    machine_report_path_from_path(&path)
+}
+
+fn machine_report_path_from_path(path: &Path) -> String {
+    let display = path.to_string_lossy();
+    if display.starts_with('<') {
+        return display.into_owned();
+    }
+    if path.is_absolute() {
+        display.into_owned()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
+            .unwrap_or_else(|_| display.into_owned())
     }
 }
 

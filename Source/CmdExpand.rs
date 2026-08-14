@@ -226,7 +226,8 @@ fn print_json_cli_error(code: &str, what: &str, why: &str, fix: &str) -> ! {
 }
 
 fn print_json_frontend_diagnostics(file: &str, source: &str, diags: &[jet::Diagnostics::Diagnostic]) -> ! {
-    print!("{}", jet::render_all_json(file, source, diags));
+    let machine_file = crate::machine_report_path_for_process(file);
+    print!("{}", jet::render_all_json(&machine_file, source, diags));
     exit(ExitCodes::USER_ERROR);
 }
 

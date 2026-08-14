@@ -2862,14 +2862,16 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
         .collect();
     if a11y_lints.is_empty() {
         if mode.json {
-            print!("{}", jet::render_all_json(file, &src, &[]));
+            let machine_file = crate::machine_report_path_for_process(file);
+            print!("{}", jet::render_all_json(&machine_file, &src, &[]));
         } else {
             println!("ok: `{}` has no accessibility problems", file);
         }
         return;
     }
     if mode.json {
-        eprint!("{}", jet::render_all_json(file, &src, &a11y_lints));
+        let machine_file = crate::machine_report_path_for_process(file);
+        eprint!("{}", jet::render_all_json(&machine_file, &src, &a11y_lints));
     } else {
         eprint!(
             "{}",

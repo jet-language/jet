@@ -32,10 +32,11 @@ pub(crate) fn run(
     let bundle = jet::Loader::load_entry_with_diagnostics(file).unwrap_or_else(|diagnostics| {
         if json {
             for entry in &diagnostics {
+                let machine_file = crate::machine_report_path_for_entry(file, &entry.file);
                 print!(
                     "{}",
                     jet::render_all_json(
-                        &entry.file,
+                        &machine_file,
                         &entry.source,
                         std::slice::from_ref(&entry.diagnostic),
                     )
@@ -84,10 +85,11 @@ fn render_report_diagnostics(
     if json {
         for entry in ledger.diagnostics() {
             let source = module_source(bundle, &entry.source);
+            let machine_file = crate::machine_report_path_for_bundle(bundle, &entry.source);
             print!(
                 "{}",
                 jet::render_all_json(
-                    &entry.source,
+                    &machine_file,
                     &source,
                     std::slice::from_ref(&entry.diagnostic),
                 )
