@@ -5436,7 +5436,7 @@ fn lower_method_call_impl(
                 },
                 _ => Type::Int,
             };
-            let ty = resolved_ret.clone().unwrap_or_else(|| Type::Result {
+            let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                 ok: Box::new(Type::List(Box::new(elem_ty.clone()))),
                 err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
             });
