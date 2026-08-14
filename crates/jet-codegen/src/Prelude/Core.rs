@@ -740,7 +740,7 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
 fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
     jet_test_record_stop("E3001");
     if jet_runtime_should_unwind() {
-        panic!("{}", report);
+        std::panic::resume_unwind(Box::new(report));
     }
     eprint!("{}", report);
     jet_runtime_exit();
@@ -787,7 +787,7 @@ fn jet_sentry_runtime_stop(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        panic!("{}", report.rendered);
+        std::panic::resume_unwind(Box::new(report.rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
@@ -834,7 +834,7 @@ fn jet_runtime_stop_with_context(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        panic!("{}", report.rendered);
+        std::panic::resume_unwind(Box::new(report.rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
@@ -863,7 +863,7 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
     }
     if jet_interrupt_handler_should_unwind() {
-        panic!("{}", rendered);
+        std::panic::resume_unwind(Box::new(rendered));
     }
     eprintln!("{}", rendered);
     jet_runtime_exit();
@@ -1009,7 +1009,7 @@ fn jet_panic_rich(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        panic!("{}", report.rendered);
+        std::panic::resume_unwind(Box::new(report.rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
