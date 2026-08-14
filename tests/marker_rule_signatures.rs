@@ -102,6 +102,10 @@ fn signed_auto_derive_markers_parse_on_types() {
     for source in [
         "#!Printable\nstruct Quiet { value: Int }\nfn run() {}",
         "#[!Debug, !Equatable, Printable]\nstruct Mixed { value: Int }\nfn run() {}",
+        "#!Codable\nstruct QuietCodec { value: Int }\nfn run() {}",
+        "#!Encode\nstruct QuietEncoder { value: Int }\nfn run() {}",
+        "#!Decode\nstruct QuietDecoder { value: Int }\nfn run() {}",
+        "#!Comparable\nstruct QuietOrder { value: Int }\nfn run() {}",
     ] {
         let diagnostics = parse_codes(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}\n{source}");
@@ -113,7 +117,6 @@ fn negative_sign_is_reserved_for_auto_derive_traits() {
     for source in [
         "#!Pure\nfn run() {}",
         "#[!Inline]\nfn run() {}",
-        "#!Comparable\nstruct Bad { value: Int }\nfn run() {}",
     ] {
         let diagnostics = parse_codes(source);
         assert_eq!(diagnostics, vec!["E0931"], "{diagnostics:?}\n{source}");

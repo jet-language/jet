@@ -1528,11 +1528,11 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     )
 }
 
-/// D-META-CODE1=A / D-META-BODY1=A: expand a user-authored derive body in a
-/// comptime scope where `type_param` is bound to `type_info`. The returned
-/// items are the same AST nodes the parser produced for hand-written items;
-/// compile-time control flow only decides how many cloned templates enter the
-/// ordinary sema path.
+/// D-META-CODE1=A / D-META-BODY1=A / D-META-USER1=A: expand a typed derive or
+/// marker body in a comptime scope where `type_param` is bound to `type_info`.
+/// The returned items are the same AST nodes the parser produced for
+/// hand-written items; compile-time control flow only decides how many cloned
+/// templates enter the ordinary sema path.
 pub fn expand_derive_body(
     body: &[crate::AST::DeriveBodyItem],
     type_param: &str,
@@ -1543,24 +1543,6 @@ pub fn expand_derive_body(
     let mut scope = HashMap::new();
     scope.insert(type_param.to_string(), type_info);
     expand_template_body(body, &scope, funcs, base_dir)
-}
-
-/// D-META-USER1=A: adapt a statement-only declared rule body to the same
-/// typed template engine as derive bodies. The AST stays statement-only for
-/// marker declarations; no source text is serialized or parsed again.
-pub fn expand_statement_body(
-    body: &[crate::AST::Stmt],
-    type_param: &str,
-    type_info: CtValue,
-    funcs: &HashMap<String, &Func>,
-    base_dir: &Path,
-) -> Result<Vec<crate::AST::Item>, Diagnostic> {
-    let typed_body = body
-        .iter()
-        .cloned()
-        .map(crate::AST::DeriveBodyItem::Stmt)
-        .collect::<Vec<_>>();
-    expand_derive_body(&typed_body, type_param, type_info, funcs, base_dir)
 }
 
 /// D-META-BODY1=A: expand the same typed item-template block for a build

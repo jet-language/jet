@@ -67,7 +67,7 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.@states\n    emit(\"fn derived_fact_read() => String {{ return \\\"ok\\\" }}\")\n}\n\nstate Report { Draft, Published }\n\n#Debug\nstruct Report {\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() => String :: \"ok\"\n}\n\nstate Report { Draft, Published }\n\n#Debug\nstruct Report {\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));

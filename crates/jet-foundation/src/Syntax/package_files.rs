@@ -349,10 +349,11 @@ pub const MARKER_DECODE: &str = "Decode"; // D-SERDE4
                                         // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
                                         // other built-in derive markers that join Codable/Encode/Decode — all on
                                         // `#`, the sole rule prefix.
-                                        // D-AUTODERIVE-SYNTAX1=D restores Debug as a signed type-site auto-derive
-                                        // control beside Printable and Equatable. User derives (`derive T.Wire {
-                                        // … }`, applied as `#[Wire]`) also stay `#` — built-in and user derives
-                                        // share the same prefix; only the derive name tells them apart.
+                                        // D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: all six structural
+                                        // auto-derive controls accept the same leading `!` refusal, including
+                                        // `#!Codable`. User derives (`derive T.Wire { … }`, applied as
+                                        // `#[Wire]`) also stay `#` — built-in and user derives share the
+                                        // same prefix; only the derive name tells them apart.
 pub const MARKER_COMPARABLE: &str = "Comparable"; // D-VERDICT-732-1 (formerly D-MARKERMOVE3)
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const MARKER_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]

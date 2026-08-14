@@ -5,6 +5,26 @@ pub fn is_applied_rule(name: &str) -> bool {
         .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
 }
 
+/// D-META-AUTO1=A: the one structural auto-derive engine vocabulary. `Codable`
+/// is the marker-family spelling for the two codec traits, so it is included
+/// by `is_signed_auto_derive` below rather than duplicated in this trait list.
+pub const STRUCTURAL_AUTO_DERIVE_TRAITS: &[&str] = &[
+    crate::Generics::PRINTABLE,
+    crate::Generics::EQUATABLE,
+    crate::Generics::DEBUG,
+    crate::Generics::COMPARABLE,
+    crate::Generics::ENCODE,
+    crate::Generics::DECODE,
+];
+
+/// D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: `!` refuses any built-in
+/// capability that the structural auto-derive engine can provide. Keep this
+/// vocabulary in the owner-controlled Syntax surface so the parser, type
+/// marker classifier, and engine cannot drift apart.
+pub fn is_signed_auto_derive(name: &str) -> bool {
+    STRUCTURAL_AUTO_DERIVE_TRAITS.contains(&name) || name == crate::Syntax::MARKER_CODABLE
+}
+
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
 // keyword — the lexer resolves a literal's identifier suffix against
 // #UnitFamily members in scope (MARKER_UNIT_FAMILY, D-QUAL3). One fixed rule:

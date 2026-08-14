@@ -350,7 +350,7 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
             }
             Item::MarkerDecl(marker) => {
                 if let Some(body) = &marker.body {
-                    visit_statements(source, body, ledger);
+                    visit_template_body(source, body, ledger);
                 }
                 // D-BOUND-SINK1=A: checked text contracts are source code too.
                 // Walk both comptime expressions so an audited `.raw()` in a
@@ -362,6 +362,31 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// D-META-CODE1=A / D-META-USER1=A: marker and derive bodies retain typed
+/// item templates until expansion. Walk both branches here so gate inspection
+/// sees expressions in generated items and compile-time control flow without
+/// inventing a source-string parser path.
+fn visit_template_body(
+    source: &str,
+    body: &[crate::AST::DeriveBodyItem],
+    ledger: &mut GateLedger,
+) {
+    for body_item in body {
+        match body_item {
+            crate::AST::DeriveBodyItem::Stmt(statement) => {
+                visit_statements(source, std::slice::from_ref(statement), ledger);
+            }
+            crate::AST::DeriveBodyItem::Item(item) => {
+                visit_items(source, std::slice::from_ref(item.as_ref()), ledger);
+            }
+            crate::AST::DeriveBodyItem::Loop { source: expression, body, .. } => {
+                visit_expression(source, expression, ledger);
+                visit_template_body(source, body, ledger);
+            }
         }
     }
 }

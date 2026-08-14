@@ -614,7 +614,11 @@ impl<'a> Parser<'a> {
             let mut end = self.toks[self.pos - 1].span.end;
             let body = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
-                let body = self.block_stmts();
+                // D-META-USER1=A / D-META-CODE1=A: a marker body that adds
+                // code uses the same typed item-template grammar as a derive.
+                // Rejection-only statements remain ordinary body statements;
+                // no source string or second parser path exists.
+                let body = self.derive_body_items()?;
                 end = self.toks[self.pos - 1].span.end;
                 Some(body)
             } else if let Some(diagnostic) = self.reject_marker_decl_trailer() {

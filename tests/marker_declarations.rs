@@ -208,7 +208,7 @@ fn every_fact_row_carries_its_law_columns() {
 
 /// D-META-USER1=A: source rows join the same checked vocabulary that drives
 /// marker legality, and a body can return an additive member through the
-/// existing generated-fragment path.
+/// shared typed-item expansion path.
 #[test]
 fn source_rules_record_facts_and_add_checked_members() {
     let source = r#"
@@ -216,13 +216,9 @@ marker Recorded(@sites: [.Type])
 
 marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
-    emit("""
-impl $tname {{
-    fn greeting(self) => String {{
-        return "hello"
-    }}
-}}
-""")
+    impl @tname {
+        fn greeting(self) => String :: "hello"
+    }
 }
 
 #[Recorded, AddGreeting]
@@ -395,13 +391,9 @@ fn source_rule_collision_names_generated_and_written_spans() {
         r#"
 marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
-    emit("""
-impl $tname {{
-    fn greeting(self) => String {{
-        return "generated"
-    }}
-}}
-""")
+    impl @tname {
+        fn greeting(self) => String :: "generated"
+    }
 }
 
 #AddGreeting

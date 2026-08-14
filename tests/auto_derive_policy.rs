@@ -142,6 +142,24 @@ fn run() {
 }
 
 #[test]
+fn signed_codable_refuses_both_codec_directions() {
+    let bundle = checked_project(
+        "signed_codable",
+        "",
+        r#"
+#!Codable
+struct NoCodec { value: Int }
+
+fn run() {}
+"#,
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    assert!(!facts.auto_encode.contains("NoCodec"));
+    assert!(!facts.auto_decode.contains("NoCodec"));
+}
+
+#[test]
 fn generic_deny_list_refuses_auto_derive() {
     let bundle = checked_project(
         "package_off",

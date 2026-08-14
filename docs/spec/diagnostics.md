@@ -654,7 +654,7 @@ renumbered, and no new `W` code may be allocated.
 | E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
 | E0939 | sema | `#Memo` argument is not hashable (D-MEMO1=A) |
 | E0940 | sema | `#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A) |
-| E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
+| E0931 | parse | `!` is used on a marker other than a structurally auto-derived capability (D-META-AUTO1=A, D-AUTODERIVE-SYNTAX1=D) |
 | E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
@@ -2258,7 +2258,7 @@ pointer to `docs/spec/syntax-decisions.md`.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for Printable, Equatable, or Debug. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
+| `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for structurally auto-derived capabilities. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
 
 ### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)
 

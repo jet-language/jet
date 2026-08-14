@@ -120,16 +120,11 @@ impl<'a> Parser<'a> {
         /// reader.
         fn marker_from_head(&mut self, head: MarkerHead) -> Result<Marker, Diagnostic> {
             if let Some(negated_span) = head.negated_span {
-                if !matches!(
-                    head.name.as_str(),
-                    crate::Generics::PRINTABLE
-                        | crate::Generics::EQUATABLE
-                        | crate::Generics::DEBUG
-                ) {
+                if !Syntax::is_signed_auto_derive(&head.name) {
                     return Err(Diagnostic::error(
                         "E0931",
                         format!("`!{}` is not a signed auto-derive trait", head.name),
-                        "`!` rejects compiler generation only for Printable, Equatable, or Debug"
+                        "`!` rejects compiler generation only for structurally auto-derived traits"
                             .to_string(),
                         format!("remove `!` from `#{}`, or use it with an auto-derived trait", head.name),
                         Some(Span::new(negated_span.start, head.name_span.end)),
@@ -1494,18 +1489,7 @@ impl<'a> Parser<'a> {
         fn split_type_markers(markers: Vec<Marker>, derives: &mut Vec<(String, Span)>) -> Vec<Marker> {
             let mut serde = Vec::new();
             for m in markers {
-                if m.negated
-                    && matches!(
-                        m.name.as_str(),
-                        crate::Generics::PRINTABLE
-                            | crate::Generics::EQUATABLE
-                            | crate::Generics::DEBUG
-                            | crate::Generics::COMPARABLE
-                            | Syntax::MARKER_CODABLE
-                            | Syntax::MARKER_ENCODE
-                            | Syntax::MARKER_DECODE
-                    )
-                {
+                if m.negated && Syntax::is_signed_auto_derive(&m.name) {
                     continue;
                 }
                 match m.name.as_str() {

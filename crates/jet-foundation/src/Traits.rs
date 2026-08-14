@@ -970,7 +970,7 @@ impl TraitRegistry {
         foreign_supports: impl Fn(&str, &str) -> Option<bool>,
     ) -> bool {
         let mut any_changed = false;
-        for trait_name in [PRINTABLE, EQUATABLE, DEBUG, COMPARABLE, ENCODE, DECODE] {
+        for &trait_name in Syntax::STRUCTURAL_AUTO_DERIVE_TRAITS {
             loop {
                 let mut changed = false;
                 for item in items {

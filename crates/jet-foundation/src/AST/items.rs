@@ -108,9 +108,10 @@ pub struct MarkerDecl {
     pub name: String,
     pub name_span: Span,
     pub params: Vec<MarkerDeclParam>,
-    /// D-META-USER1=A: absent means this rule only records its declaration
-    /// facts; present means the body may reject or emit checked Jet items.
-    pub body: Option<Vec<Stmt>>,
+    /// D-META-USER1=A / D-META-CODE1=A: absent means this rule only records
+    /// its declaration facts; present means the body may reject or emit
+    /// checked Jet items through the same typed template model as derives.
+    pub body: Option<Vec<DeriveBodyItem>>,
     /// D-BOUND-SINK1=A: a library-owned checked text head. The declaration
     /// uses `marker Name on [.Text] { check … hole … }` so the type and its
     /// construction contract share the marker vocabulary.
@@ -773,10 +774,10 @@ pub struct StateDecl {
     pub span: Span,
 }
 
-/// D-META-CODE1=A / D-META-BODY1=A: one item or compile-time operation in a
-/// user-authored derive body. Items stay as AST nodes from the definition
-/// parse; expansion fills their typed compile-time holes before ordinary sema
-/// checks them.
+/// D-META-CODE1=A / D-META-BODY1=A / D-META-USER1=A: one item or compile-time
+/// operation in a user-authored derive or marker body. Items stay as AST nodes
+/// from the definition parse; expansion fills their typed compile-time holes
+/// before ordinary sema checks them.
 #[derive(Debug, Clone)]
 pub enum DeriveBodyItem {
     Item(Box<Item>),

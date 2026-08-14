@@ -163,13 +163,14 @@
 // not part of the language surface.
 // D-OPDEF1=A adds no punctuation: `impl Type.Add`/`.Sub`/`.Mul`/`.Div`,
 // `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
-// D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D (ratified 2026-07-29,
-// card #1267) amend S55 and D-MARK-DEBUG1. Printable, Equatable, and Debug
-// auto-derive when fields qualify. The package default is refused through the
-// named `policy.lints.deny` entry `auto_derive`. At a type site, the ordinary
-// marker names opt in and a leading Bang opts out (`#!Printable`,
-// `#[!Debug, Equatable]`). Missing traits follow the package default; a
-// hand-written impl always wins.
+// D-META-AUTO1=A / D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D (ratified
+// 2026-07-29, cards #1267/#1545) amend S55 and D-MARK-DEBUG1. Every
+// structurally derivable built-in capability — Printable, Equatable, Debug,
+// Comparable, Encode, and Decode — auto-derives when fields qualify. The
+// package default is refused through the named `policy.lints.deny` entry
+// `auto_derive`. At a type site, ordinary marker names opt in and a leading
+// Bang opts out (`#!Printable`, `#!Codable`, `#[!Debug, Equatable]`). Missing
+// traits follow the package default; a hand-written impl always wins.
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
