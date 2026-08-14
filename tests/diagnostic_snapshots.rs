@@ -235,6 +235,12 @@ fn ui_snapshots() {
         // `jet build --target=sandbox`'s front end so sandbox-only diagnostics
         // (E1257-E1260) can exercise the gate.
         let plugin_target = src.lines().any(|l| l.trim() == "// @plugin_target");
+        // D-PLUGIN1=B / D-DEP-WASM1=A: these fixtures run the real CLI build
+        // so post-compile sandbox diagnostics cover the complete command path.
+        let sandbox_effect = src.lines().any(|l| l.trim() == "// @sandbox_effect");
+        let sandbox_missing_wasm_tools = src
+            .lines()
+            .any(|l| l.trim() == "// @sandbox_missing_wasm_tools");
         // D-WEBTIR1=A: files marked `// @web_target` compile through the web
         // preflight so web-only executable-body diagnostics get UI snapshots.
         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
@@ -461,6 +467,10 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
+        } else if sandbox_effect {
+            run_sandbox_cli_snapshot(&file_arg, false)
+        } else if sandbox_missing_wasm_tools {
+            run_sandbox_cli_snapshot(&file_arg, true)
         } else if plugin_target {
             match jet::compile_plugin(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
@@ -572,6 +582,56 @@ fn run_cli_e1219_snapshot(file: &str) -> String {
     assert!(!output.status.success(), "E1219 command must fail");
     let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
+    rendered
+}
+
+fn run_sandbox_cli_snapshot(file: &str, missing_wasm_tools: bool) -> String {
+    let scratch = unique_tmp(if missing_wasm_tools {
+        "jet_ui_e1259"
+    } else {
+        "jet_ui_e1258"
+    });
+    fs::create_dir_all(&scratch).unwrap();
+    fs::copy(file, scratch.join("main.jet")).expect("copy sandbox diagnostic fixture");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command
+        .args(["build", "main.jet", "--target=sandbox", "--color=never"])
+        .current_dir(&scratch)
+        .env("NO_COLOR", "1");
+
+    if missing_wasm_tools {
+        let which = |tool: &str| -> Option<String> {
+            Command::new("which")
+                .arg(tool)
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        };
+        let rustc_path = which("rustc").expect("E1259 snapshot needs rustc on PATH");
+        let lld_path = which("lld").expect("E1259 snapshot needs lld on PATH");
+        let bin_dir = scratch.join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&rustc_path, bin_dir.join("rustc")).expect("link rustc for E1259 snapshot");
+            symlink(&lld_path, bin_dir.join("lld")).expect("link lld for E1259 snapshot");
+        }
+        #[cfg(not(unix))]
+        panic!("E1259 snapshot needs Unix symlink support");
+        command.env("PATH", &bin_dir);
+    }
+
+    let output = command.output().expect("run sandbox diagnostic fixture");
+    let _ = fs::remove_dir_all(&scratch);
+    assert!(
+        !output.status.success(),
+        "sandbox diagnostic fixture must fail"
+    );
+    let mut rendered = String::from_utf8(output.stdout).expect("sandbox stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("sandbox stderr is UTF-8"));
     rendered
 }
 
