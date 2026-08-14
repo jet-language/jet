@@ -62,7 +62,9 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             cli_bindings: Vec::new(),
             trait_impls: Vec::new(),
             derives: Vec::new(),
-            auto_derive_default: s.auto_derive_default,
+            // D-PATCH1: `T.Patch` serde is deferred; do not inherit the
+            // source struct's package auto-derive default.
+            auto_derive_default: false,
             is_published_schema: false,
             published_schema_span: None,
             is_single_use: false,
