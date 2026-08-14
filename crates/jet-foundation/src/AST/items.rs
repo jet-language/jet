@@ -1366,8 +1366,9 @@ pub struct EveryMarker {
 /// consumer reads the same value instead of re-parsing source text.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EverySchedule {
-    /// Re-run every `nanos` nanoseconds since the job last ran.
-    Interval { nanos: u128 },
+    /// Re-run every `nanos` nanoseconds since the job last ran. The interval
+    /// is the canonical Time delta carrier: a checked i64 nanosecond count.
+    Interval { nanos: i64 },
     /// Re-run once daily at this local 24h wall-clock time.
     DailyAt { hour: u8, minute: u8 },
 }
@@ -1381,6 +1382,8 @@ pub enum EveryScheduleError {
     UnknownDurationUnit,
     /// The duration is zero or negative — a schedule must advance time.
     NonPositiveDuration,
+    /// The duration cannot be represented by the fixed i64 nanosecond carrier.
+    DurationOutOfRange,
     /// The wall-clock string isn't exactly `HH:MM` (two digits, `:`, two
     /// digits).
     BadWallClockFormat,

@@ -650,7 +650,7 @@ renumbered, and no new `W` code may be allocated.
 | E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
 | E0929 | parse | body-level `derive X;` is retired; request the capability with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
 | E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
-| E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad canonical Time unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
+| E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
@@ -1348,7 +1348,7 @@ Inside an applied-rule block a statement-position `.name { … }` / `.name(args)
 | E0614 | `.{name}` isn't a member of `#{marker}`. | Inside a marker block a `.name { … }` statement must name one of that marker's declared members. `#{marker}` understands: {list}. | Use one of the listed members, or remove the block. |
 | E0615 | `.{name}` only works inside a marker block that declares it. | A leading-dot member statement resolves against the enclosing applied rule's vocabulary; out here there is no such block. | Move it inside a `#Test("…") { … }` block, or write an ordinary statement. |
 | E0616 | `.setup` must be the first statement in the test. | `.setup` marks the test's initialization; anything before it would run first. | Move `.setup { … }` to the top of the block. |
-| E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }` or `.skip("reason") { … }`. |
+| E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration value, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }`, `.timeout(wait) { … }`, or `.skip("reason") { … }`. |
 | E0618 | scope members can't be nested. | Each member is a top-level region of the marker block; nesting one inside another member or a control block has no meaning. | Move the member out to the top level of the block. |
 
 ## Script entry diagnostics (D-ENTRY-SCRIPT1)
@@ -2206,6 +2206,7 @@ recognizable shape whose *value* isn't a real schedule.
 |------|-----|-----|
 | this duration's unit isn't a recognized schedule cadence. | a schedule interval uses the canonical Time family — `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member. | Use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`). |
 | a schedule interval must be a positive duration. | `#Every(0ms)` or a negative duration never becomes due. | Write a duration greater than zero, e.g. `#Every(5min)`. |
+| this schedule duration is outside the supported range. | Schedule intervals use the same fixed i64 nanosecond carrier as `Duration`. | Write a smaller positive duration, e.g. `#Every(5min)`. |
 | this daily schedule isn't a plain `"HH:MM"` time. | a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone. | Write a fixed daily time like `#Every("03:00")`. |
 | this daily schedule's hour/minute is out of range. | 24h hours run `00`..=`23`, minutes run `00`..=`59`. | Write an hour between `00` and `23` and a minute between `00` and `59`. |
 

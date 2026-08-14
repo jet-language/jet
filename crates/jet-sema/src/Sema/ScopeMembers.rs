@@ -11,7 +11,7 @@
 //!   marker that declares none (e.g. `#Bench`).
 //! - E0615 — a member statement outside any member-declaring marker block.
 //! - E0616 — `.setup` is not the first statement.
-//! - E0617 — wrong argument shape (`.timeout` needs one duration; `.setup` /
+//! - E0617 — wrong argument shape (`.timeout` needs one duration value; `.setup` /
 //!   `.expect_fail` takes an optional stop code; `.skip` takes an optional reason
 //!   string).
 //! - E0618 — a member nested inside another member or a control block (they must
@@ -778,9 +778,9 @@ fn validate_args(
                 diags.push(Diagnostic::error(
                     "E0617",
                     "`.timeout` needs exactly one duration".to_string(),
-                    "the region must complete within a time budget, written as a duration literal"
+                    "the region must complete within a time budget, written as a duration value"
                         .to_string(),
-                    "write `.timeout(500ms) { … }` (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`)".to_string(),
+                    "write `.timeout(500ms) { … }` or bind that value first (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`)".to_string(),
                     Some(at),
                 ));
             }
@@ -801,20 +801,22 @@ fn validate_args(
     }
 }
 
-/// A `.timeout` argument must name a member of the injected canonical Time
-/// family. The family declaration is the source fact; this pass does not
-/// maintain a second suffix table.
+/// A `.timeout` argument is either a member of the injected canonical Time
+/// family or a binding to one. The family declaration is the source fact; this
+/// pass does not maintain a second suffix table. The ordinary checker validates
+/// the binding's Duration type after `.setup` bindings have entered scope.
 fn is_duration(e: &Expr, items: &[Item]) -> bool {
-    let Expr::UnitLit { suffix, .. } = e else {
-        return false;
-    };
-    items.iter().any(|item| match item {
-        Item::UnitFamily(family) if family.is_canonical_time() => family
-            .members
-            .iter()
-            .any(|member| member.name == *suffix),
+    match e {
+        Expr::Ident(..) => true,
+        Expr::UnitLit { suffix, .. } => items.iter().any(|item| match item {
+            Item::UnitFamily(family) if family.is_canonical_time() => family
+                .members
+                .iter()
+                .any(|member| member.name == *suffix),
+            _ => false,
+        }),
         _ => false,
-    })
+    }
 }
 
 fn vocab_list(vocab: &[&str]) -> String {

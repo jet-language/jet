@@ -24,9 +24,12 @@ fn run() {
     require_eq(double(2), 4)
 }
 
-// `.timeout` bounds a region's running time (post-hoc in v1).
+// `.timeout` accepts the same canonical Time value in a literal or binding.
 #Test("timeout bounds a region") {
-    .timeout(500ms) {
+    .setup {
+        wait :: 500ms
+    }
+    .timeout(wait) {
         require_eq(double(5), 10)
     }
 }

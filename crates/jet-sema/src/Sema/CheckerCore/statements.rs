@@ -2786,9 +2786,10 @@ impl<'a> Checker<'a> {
                 // D-DOTSCOPE1: a scope-member statement (`.setup`/`.expect_fail`/
                 // `.timeout`/`.skip` inside a `#Test` block). Member legality, args,
                 // position, and nesting are validated by the `ScopeMembers` pass; here
-                // the checker only type-checks the region body's ordinary statements.
-                // The member args (`.timeout(500ms)`, `.skip("why")`) are intentionally
-                // NOT inferred — a bare duration literal has no `#UnitFamily` in scope.
+                // the checker type-checks the region body's ordinary statements.
+                // `.timeout` is the one member with a value argument: its canonical
+                // Time literal or binding is inferred here, after `.setup` bindings
+                // have entered scope, and must be a Duration.
                 // `.setup` is init sugar: its bindings leak into the test scope (no new
                 // scope), so the rest of the body can use them. Every other member is
                 // its own region (a closure / block / dead branch in codegen), so its
@@ -2800,6 +2801,27 @@ impl<'a> Checker<'a> {
                     body,
                     ..
                 } => {
+                    if name == crate::Syntax::SCOPE_TEST_TIMEOUT {
+                        if let [arg] = args.as_mut_slice() {
+                            let expected = Type::Named(crate::Syntax::DURATION_TYPE.to_string());
+                            if let Some(got) = self.infer_with_expected(arg, &expected) {
+                                let reported = self.check_type_assignable(&expected, &got, arg.span());
+                                if !reported && got != expected {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`.timeout` wants {}, but this is {}",
+                                            expected.show(),
+                                            got.show()
+                                        ),
+                                        "a timeout budget is a Duration value".to_string(),
+                                        type_fix_hint(&expected, &got),
+                                        Some(arg.span()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     // D-DSLBLOCK1: the optional SQL row header is a type
                     // position, not a runtime expression. Validate it through
                     // the ordinary declared-type rules so local, imported,

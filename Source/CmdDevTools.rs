@@ -259,7 +259,7 @@ impl TaskClock {
                 jet::AST::EverySchedule::Interval { nanos } => {
                     let due = match self.last_interval_run.get(name) {
                         None => true,
-                        Some(last) => now.duration_since(*last).as_nanos() >= nanos,
+                        Some(last) => now.duration_since(*last).as_nanos() >= nanos as u128,
                     };
                     if due {
                         self.last_interval_run.insert(name.clone(), now);

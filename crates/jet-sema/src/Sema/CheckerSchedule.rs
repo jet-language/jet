@@ -29,18 +29,60 @@ fn resolve_every_arg(
             let Some(unit) = registry.unit_literal("Time", suffix) else {
                 return Err(EveryScheduleError::UnknownDurationUnit);
             };
-            let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
-            if !value.is_finite() || value <= 0.0 {
+            if int.iter().any(|value| *value <= 0)
+                || float
+                    .iter()
+                    .any(|value| !value.is_finite() || *value <= 0.0)
+            {
                 return Err(EveryScheduleError::NonPositiveDuration);
             }
-            let scale = unit
-                .scale
-                .num
-                .to_string()
-                .parse::<f64>()
-                .map_err(|_| EveryScheduleError::UnknownDurationUnit)?;
-            let nanos = (value * scale) as u128;
+            let nanos = if let Some(value) = int {
+                let value = *value;
+                let scale = unit
+                    .scale
+                    .num
+                    .to_string()
+                    .parse::<i64>()
+                    .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
+                let numerator = value
+                    .checked_mul(scale)
+                    .ok_or(EveryScheduleError::DurationOutOfRange)?;
+                let denominator = unit
+                    .scale
+                    .den
+                    .to_string()
+                    .parse::<i64>()
+                    .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
+                numerator
+                    .checked_div(denominator)
+                    .ok_or(EveryScheduleError::DurationOutOfRange)?
+            } else {
+                let value = float.as_ref().copied().unwrap_or(0.0);
+                let scale_num = unit
+                    .scale
+                    .num
+                    .to_string()
+                    .parse::<f64>()
+                    .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
+                let scale_den = unit
+                    .scale
+                    .den
+                    .to_string()
+                    .parse::<f64>()
+                    .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
+                let nanoseconds = value * scale_num / scale_den;
+                if !nanoseconds.is_finite()
+                    || nanoseconds < i64::MIN as f64
+                    || nanoseconds >= 9_223_372_036_854_775_808.0
+                {
+                    return Err(EveryScheduleError::DurationOutOfRange);
+                }
+                nanoseconds.trunc() as i64
+            };
             if nanos == 0 {
+                return Err(EveryScheduleError::NonPositiveDuration);
+            }
+            if nanos < 0 {
                 return Err(EveryScheduleError::NonPositiveDuration);
             }
             Ok(EverySchedule::Interval { nanos })
@@ -74,7 +116,7 @@ fn resolve_every_arg(
 }
 
 /// E0926: `#Every(…)`'s value isn't a real schedule — a bad duration unit,
-/// a non-positive duration, or a malformed/out-of-range `"HH:MM"`.
+/// a non-positive/out-of-range duration, or a malformed/out-of-range `"HH:MM"`.
 fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnostic {
     let (what, why, fix) = match reason {
         EveryScheduleError::UnknownDurationUnit => (
@@ -87,6 +129,11 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
             "a schedule interval must be a positive duration",
             "`#Every(0ms)` or a negative duration never becomes due — it isn't a real cadence.",
             "write a duration greater than zero, e.g. `#Every(5min)`.",
+        ),
+        EveryScheduleError::DurationOutOfRange => (
+            "this schedule duration is outside the supported range",
+            "schedule intervals use the same fixed i64 nanosecond carrier as Duration.",
+            "write a smaller positive duration, e.g. `#Every(5min)`.",
         ),
         EveryScheduleError::BadWallClockFormat => (
             "this daily schedule isn't a plain `\"HH:MM\"` time",
