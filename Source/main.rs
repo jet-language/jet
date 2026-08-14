@@ -13,7 +13,6 @@ use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
-use std::collections::BTreeMap;
 
 use jet::Diagnostics::{ColorChoice, Diagnostic};
 use jet::ExitCodes;
@@ -47,8 +46,8 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_jobs, run_test_opts,
+    resolve_named_profile, run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web,
+    run_fix, run_fmt, run_fuzz, run_new, run_jobs, run_test_opts,
     run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
@@ -963,8 +962,8 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
                     emit_cli_report(
                         "E2104",
                         "`--set` needs a key=value assignment".to_string(),
-                        "a typed package setting override names one declared key and its value",
-                        "use `--set key=value`",
+                        "a typed package setting override names one declared key and its value".to_string(),
+                        "use `--set key=value`".to_string(),
                         json,
                     );
                     exit(ExitCodes::USAGE);
@@ -978,8 +977,8 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
             emit_cli_report(
                 "E2104",
                 "`--set` needs a key=value assignment".to_string(),
-                "a typed package setting override names one declared key and its value",
-                "use `--set key=value`",
+                "a typed package setting override names one declared key and its value".to_string(),
+                "use `--set key=value`".to_string(),
                 json,
             );
             exit(ExitCodes::USAGE);
@@ -989,8 +988,8 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
             emit_cli_report(
                 "E2104",
                 "`--set` needs a non-empty key".to_string(),
-                "the compiler must be able to resolve one declared setting before it parses the value",
-                "use `--set key=value` with a declared key",
+                "the compiler must be able to resolve one declared setting before it parses the value".to_string(),
+                "use `--set key=value` with a declared key".to_string(),
                 json,
             );
             exit(ExitCodes::USAGE);
@@ -999,8 +998,8 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
             emit_cli_report(
                 "E2104",
                 format!("setting `{key}` is assigned more than once"),
-                "one invocation must contribute one unambiguous value for each declared setting",
-                "remove the duplicate `--set` assignment",
+                "one invocation must contribute one unambiguous value for each declared setting".to_string(),
+                "remove the duplicate `--set` assignment".to_string(),
                 json,
             );
             exit(ExitCodes::USAGE);

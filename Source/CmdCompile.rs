@@ -204,7 +204,7 @@ fn resolve_profile_name(named_profile: Option<&str>) -> Option<String> {
 /// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
 /// to a `BuildProfile`. Manifest entries override blessed defaults for
 /// `release`/`debug`/`ci`; unknown names emit E1219 and exit.
-fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> BuildProfile {
+pub(crate) fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> BuildProfile {
     if let Some(profiles) = load_pkg_profiles(source_file) {
         if let Some(def) = profiles.iter().find(|p| p.name == name) {
             return BuildProfile::Named {
@@ -383,10 +383,11 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates_and_settings(
+        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings(
             file,
             &args,
             gates,
+            profile.budget_name(),
             setting_overrides,
         );
         match outcome {
@@ -1737,6 +1738,18 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     // `build/test_<stem>` lets one process replace an executable while another
     // is launching it (ETXTBSY on Linux, sharing violations on Windows).
     let bin = test_bin_path(path);
+    let cache_key = native_cache_key(
+        shown.as_ref(),
+        profile.budget_name(),
+        &profile_tag,
+        if override_entry {
+            if coverage { "testcov-override" } else { "test-override" }
+        } else if coverage {
+            "testcov"
+        } else {
+            "test"
+        },
+    );
     build(
         &shown,
         &rust_code,
@@ -1752,18 +1765,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         // `jet test` caches on the same canonical-AST key, but in its own mode
         // space (the test-harness binary must never be served for a `jet run`);
         // profile and `--coverage` instrumentation are distinct binaries again.
-        native_cache_key(
-            shown.as_ref(),
-            profile.budget_name(),
-            &profile_tag,
-            if override_entry {
-                if coverage { "testcov-override" } else { "test-override" }
-            } else if coverage {
-                "testcov"
-            } else {
-                "test"
-            },
-        ),
+        cache_key,
     );
     // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes
     // function and branch records there for the coverage report.

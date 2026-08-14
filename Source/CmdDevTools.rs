@@ -2707,6 +2707,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         undo: None,
                         is_unsafe: f.is_unsafe,
                         is_pure: f.is_pure,
+                        memo_bound: None,
                         is_foreign_thread_safe: false,
                         is_sanitizer: f.is_sanitizer,
                         is_must_use: f.is_must_use,
