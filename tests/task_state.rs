@@ -38,7 +38,7 @@ fn task_lifecycle_joins_through_the_shared_flow_fact_walker() {
 fn run() {
     handle :: task 42
     if {
-        true -> handle.join()
+        true -> handle.join() ?? 0
         else -> handle.detach()
     }
 }
