@@ -4,15 +4,26 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claim-manifest.json");
 const REGISTRY_PATH = join(ROOT, "docs/reference/feature-claims.md");
 const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/feature-claim-report.json");
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/feature-claims/hostile-cases.json");
-const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
-const DEFAULT_HISTORY_PATH = join(ROOT, ".tower/history.json");
+// Worktrees carry stale board snapshots. Resolve live ownership from the main
+// checkout, then fall back to this tree for standalone checkouts.
+const DEFAULT_TOWER_PATH = (function () {
+  try {
+    const commonDir = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: ROOT, encoding: "utf8" }).trim();
+    const candidate = join(dirname(commonDir), "plugins/tower/.tower/tower.json");
+    if (existsSync(candidate)) return candidate;
+  } catch (error) {
+    // Not a git checkout, or git is unavailable; use the in-tree copy.
+  }
+  return join(ROOT, "plugins/tower/.tower/tower.json");
+})();
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
 const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "crates/jet-cli/src/CLI.rs"];
 

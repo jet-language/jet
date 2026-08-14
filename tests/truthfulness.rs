@@ -1048,14 +1048,14 @@ fn dependency_scanner_accepts_commented_headers_and_rejects_junk() {
 // ---------------------------------------------------------------------------
 // Check 9: E3 feature claims stay bound to executable proof
 // ---------------------------------------------------------------------------
+// The checker resolves live Tower ownership from the main checkout. Do not
+// pass this worktree's stale board snapshot.
 #[test]
 fn epoch3_feature_manifest_is_current_and_owned() {
     let root = root();
     let output = Command::new("node")
         .arg("scripts/agent/check-feature-ledger.mjs")
         .arg("--check")
-        .arg("--tower")
-        .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
         .expect("node must run the feature-ledger checker");
@@ -1074,8 +1074,6 @@ fn epoch3_feature_manifest_rejects_hostile_real_card_fixtures() {
     let output = Command::new("node")
         .arg("scripts/agent/check-feature-ledger.mjs")
         .arg("--hostile-fixtures")
-        .arg("--tower")
-        .arg(root.join("plugins/tower/.tower/tower.json"))
         .current_dir(&root)
         .output()
         .expect("node must run the feature-claim hostile fixtures");
