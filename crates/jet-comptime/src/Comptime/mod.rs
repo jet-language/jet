@@ -1941,7 +1941,9 @@ fn expand_template_type(
                 expand_template_type(member, interp, scope)?;
             }
         }
-        Type::Quantity { base, .. } => expand_template_type(base, interp, scope)?,
+        Type::Quantity { base, .. } | Type::InlineRange { base, .. } => {
+            expand_template_type(base, interp, scope)?
+        }
         Type::Int
         | Type::Float
         | Type::Bool
