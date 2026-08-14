@@ -145,7 +145,7 @@ fn copies_policy_is_package_and_source_explicit_only() {
 #[test]
 fn package_copies_policy_restores_string_view_refusal() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/policy_copies_explicit/main.jet");
+        .join("tests/fixtures/policy_copies_explicit/run.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
     assert!(
