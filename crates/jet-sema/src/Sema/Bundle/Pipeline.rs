@@ -204,7 +204,7 @@ fn register_text_head_contracts(
 ) {
     let (funcs, _externs, globals) =
         super::super::Registration::comptime_context_from_items(&module.items);
-    let sigs = funcs
+    let sigs: HashMap<String, crate::AST::FuncSig> = funcs
         .iter()
         .map(|(name, function)| (name.clone(), super::super::func_to_sig(function)))
         .collect();

@@ -195,7 +195,7 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = arg_ty {
                     self.check_type_assignable(&Type::String, &ty, call.args[0].expr.span());
                 }
-                let result = crate::Sema::checked_text_type(type_name);
+                let result = crate::Sema::checked_text_type(&type_name);
                 call.resolved_ret = Some(result.clone());
                 return Some(Some(result));
             }
