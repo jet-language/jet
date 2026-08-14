@@ -21,6 +21,42 @@
 // payload. A verdict nobody reads costs no allocation and no branch.
 pub type JetOutcome<T, E> = Result<T, E>;
 
+/// D-ALLOCFAIL1=A (ratified 2026-08-12): the one report returned by every
+/// fallible allocation surface. The requested byte count and allocator name
+/// are source facts; execution tiers only marshal this value.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AllocError {
+    pub requested_bytes: i64,
+    pub allocator: String,
+}
+
+pub fn jet_alloc_error(requested_bytes: usize, allocator: &str) -> AllocError {
+    AllocError {
+        requested_bytes: requested_bytes.min(i64::MAX as usize) as i64,
+        allocator: allocator.to_string(),
+    }
+}
+
+/// The shared fallible-allocation value seam. `used`, `capacity`, and the
+/// metadata overhead are allocator facts supplied by the execution adapter;
+/// fit testing, charge accounting, and error construction stay in the
+/// embedded Prelude rather than in an execution engine.
+pub fn jet_try_alloc_value<T>(
+    value: T,
+    used: usize,
+    capacity: usize,
+    requested_bytes: usize,
+    allocator: &str,
+    overhead_bytes: usize,
+) -> JetOutcome<(T, usize), AllocError> {
+    let requested = requested_bytes.max(1);
+    let charge = requested.saturating_add(overhead_bytes);
+    if charge > capacity.saturating_sub(used) {
+        return Err(jet_alloc_error(requested, allocator));
+    }
+    Ok((value, used.saturating_add(charge)))
+}
+
 // D-FAIL-ERROR1=A (ratified 2026-08-06) — one default error value on every tier.
 // Engines marshal the three source fields. Construction, projection, and report
 // rendering stay here so no engine owns error meaning.

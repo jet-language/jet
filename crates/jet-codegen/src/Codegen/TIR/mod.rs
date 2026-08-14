@@ -4302,6 +4302,13 @@ pub enum TBuiltinOp {
     IsEmpty,
     /// `push(x)` → `(recv).push(a0)`.
     Push,
+    /// D-ALLOCFAIL1=A: fallible list/string mutation and reservation.
+    ListTryNew,
+    ListTryWithCapacity,
+    TryPush,
+    TryReserve,
+    TryInsertMap,
+    TryStringPush,
     /// `pop()` → `(recv).pop()`.
     Pop,
     /// `PriorityQueue.pop()` → the shared Prelude heap kernel.
@@ -4849,6 +4856,8 @@ pub enum THandleOp {
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
     /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
     AllocAlloc,
+    /// D-ALLOCFAIL1=A: allocator `try_alloc(v)` returns `T ? AllocError`.
+    AllocTryAlloc,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `reset()` → `(recv).reset()`.
     AllocReset,
     /// c109 Phase 20: HTTPRequest `method()`/`path()`/`body()` → `(recv).<field>.clone()`.

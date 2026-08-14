@@ -44,22 +44,29 @@ pub(crate) fn alloc_method_return(
             Some(Some(Type::Named(type_name.to_string())))
         }
         "over" if type_name == "Fixed" => Some(Some(Type::Named(type_name.to_string()))),
-        // D-ALLOC1: `alloc(value)` — allocates a value into the arena.
-        // Returns the value's type; we infer it from the argument.
-        "alloc" => {
+        // D-ALLOC1 / D-ALLOCFAIL1=A: `alloc(value)` and `try_alloc(value)`
+        // infer the payload type from the argument.
+        "alloc" | "try_alloc" => {
             if args.len() != 1 {
                 diags.push(Diagnostic::error(
                     "E0103",
-                    format!("`{}.alloc` takes exactly one argument", type_name),
+                    format!("`{}.{}` takes exactly one argument", type_name, method),
                     "pass the value you want to store in the allocator".to_string(),
-                    format!("write `arena.alloc(my_value)`"),
+                    format!("write `arena.{}(my_value)`", method),
                     Some(span),
                 ));
                 return Some(None);
             }
             // Return type is inferred from argument — caller handles inference.
             // We return a sentinel; actual type inference is done in the caller.
-            Some(Some(Type::Named("__alloc_infer__".to_string())))
+            if method == "try_alloc" {
+                Some(Some(result_ty(
+                    Type::Named("__alloc_infer__".to_string()),
+                    Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
+                )))
+            } else {
+                Some(Some(Type::Named("__alloc_infer__".to_string())))
+            }
         }
         // D-ALLOC-D: `reset()` — keeps the backing buffer, marks all allocations invalid.
         "reset" => {
@@ -82,9 +89,9 @@ pub(crate) fn alloc_method_return(
                 )
             } else {
                 let methods = if type_name == "Fixed" {
-                    "`new`, `over`, `alloc`, `reset`"
+                    "`new`, `over`, `alloc`, `try_alloc`, `reset`"
                 } else {
-                    "`new`, `alloc`, `reset`"
+                    "`new`, `alloc`, `try_alloc`, `reset`"
                 };
                 (
                     format!("`{}` supports: {}", type_name, methods),

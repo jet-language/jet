@@ -167,6 +167,20 @@ fn eval_zip_family(
     Ok(super::progress_iter_value(rows, true))
 }
 
+fn alloc_error_value(error: jet_foundation::Outcome::AllocError) -> CtValue {
+    CtValue::Struct {
+        type_name: Syntax::TYPE_ALLOC_ERROR.to_string(),
+        fields: vec![
+            ("requested_bytes".to_string(), CtValue::Int(error.requested_bytes)),
+            ("allocator".to_string(), CtValue::Str(error.allocator)),
+        ],
+    }
+}
+
+fn alloc_failure(error: jet_foundation::Outcome::AllocError) -> CtValue {
+    CtValue::failed(Box::new(alloc_error_value(error)))
+}
+
 pub(super) fn eval_builtin(
     op: &TBuiltinOp,
     recv: &mut CtValue,
@@ -178,6 +192,69 @@ pub(super) fn eval_builtin(
         TBuiltinOp::LenList => apply_method(recv, "len", args, span),
         TBuiltinOp::IsEmpty => apply_method(recv, "is_empty", args, span),
         TBuiltinOp::Push => apply_mutating(recv, "push", args, span),
+        TBuiltinOp::ListTryNew => match CollectionEval::try_list_new::<CtValue>() {
+            Ok(values) => Ok(CtValue::Present(Box::new(CtValue::List(values)))),
+            Err(error) => Ok(alloc_failure(error)),
+        },
+        TBuiltinOp::ListTryWithCapacity => {
+            let Some(CtValue::Int(capacity)) = args.first() else {
+                return Err(unsupported("List.try_with_capacity argument", span));
+            };
+            match CollectionEval::try_list_with_capacity::<CtValue>(*capacity) {
+                Ok(values) => Ok(CtValue::Present(Box::new(CtValue::List(values)))),
+                Err(error) => Ok(alloc_failure(error)),
+            }
+        }
+        TBuiltinOp::TryPush => {
+            let value = args.into_iter().next().unwrap_or(CtValue::Unit);
+            let CtValue::List(values) = recv else {
+                return Err(unsupported("List.try_push receiver", span));
+            };
+            match CollectionEval::try_list_push(values, value) {
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(error) => Ok(alloc_failure(error)),
+            }
+        }
+        TBuiltinOp::TryReserve => {
+            let Some(CtValue::Int(additional)) = args.first() else {
+                return Err(unsupported("List.try_reserve argument", span));
+            };
+            let CtValue::List(values) = recv else {
+                return Err(unsupported("List.try_reserve receiver", span));
+            };
+            match CollectionEval::try_list_reserve(values, *additional) {
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(error) => Ok(alloc_failure(error)),
+            }
+        }
+        TBuiltinOp::TryInsertMap => {
+            let mut it = args.into_iter();
+            let key = CtKey::from_value(it.next().unwrap_or(CtValue::Unit))
+                .ok_or_else(|| unsupported("Map.try_insert key", span))?;
+            let value = it.next().unwrap_or(CtValue::Unit);
+            let CtValue::Map(map) = recv else {
+                return Err(unsupported("Map.try_insert receiver", span));
+            };
+            match CollectionEval::try_map_insert(map, key, value) {
+                Ok(Some(previous)) => Ok(CtValue::Present(Box::new(CtValue::Present(
+                    Box::new(previous),
+                )))),
+                Ok(None) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::Int)))),
+                Err(error) => Ok(alloc_failure(error)),
+            }
+        }
+        TBuiltinOp::TryStringPush => {
+            let Some(CtValue::Str(addition)) = args.into_iter().next() else {
+                return Err(unsupported("String.try_push argument", span));
+            };
+            let CtValue::Str(text) = recv else {
+                return Err(unsupported("String.try_push receiver", span));
+            };
+            match CollectionEval::try_string_push(text, &addition) {
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(error) => Ok(alloc_failure(error)),
+            }
+        }
         TBuiltinOp::Pop => apply_mutating(recv, "pop", args, span),
         TBuiltinOp::PriorityQueuePop => apply_mutating(recv, "pop", args, span),
         TBuiltinOp::InsertMap => apply_mutating(recv, "add", args, span),

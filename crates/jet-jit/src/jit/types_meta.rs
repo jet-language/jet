@@ -1121,6 +1121,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     }
     let fields: &[&str] = match type_name {
         "Err" => &["message", "code", "cause"],
+        "AllocError" => &["requested_bytes", "allocator"],
         // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
         // examples define user `Point { x: Int, … }` and core Float would win.
         "Size" => &["width", "height"],
@@ -1266,6 +1267,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 
 fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
     let layout: &(Vec<String>, Vec<Type>) = match type_name {
+        "AllocError" => &*ALLOC_ERROR_LAYOUT,
         "FieldError" => &*FIELD_ERROR_LAYOUT,
         "Envelope" => &*EMAIL_ENVELOPE_LAYOUT,
         "RecipientReport" => &*EMAIL_RECIPIENT_REPORT_LAYOUT,
@@ -1283,6 +1285,11 @@ fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [T
 /// user struct); recover the real type so JIT field/print/ABI stay total.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
     match type_name {
+        "AllocError" => match field {
+            "requested_bytes" => Some(Type::Int),
+            "allocator" => Some(Type::String),
+            _ => None,
+        },
         "IOContext" => match field {
             "operation" => Some(Type::Named("IOOperation".into())),
             "resource" => Some(Type::Option(Box::new(Type::String))),
@@ -1578,6 +1585,13 @@ static FIELD_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(||
     (
         vec!["path".to_string(), "reason".to_string()],
         vec![Type::String, Type::String],
+    )
+});
+
+static ALLOC_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    (
+        vec!["requested_bytes".to_string(), "allocator".to_string()],
+        vec![Type::Int, Type::String],
     )
 });
 

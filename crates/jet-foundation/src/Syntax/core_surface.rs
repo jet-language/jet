@@ -638,6 +638,9 @@ pub const MEM_POOL: &str = "Pool";
 /// D-ALLOC-C (ratified 2026-06-19): fixed allocator (static backing buffer).
 pub const MEM_FIXED: &str = "Fixed";
 
+/// D-ALLOCFAIL1=A (ratified 2026-08-12): the typed report from `try_` allocation.
+pub const TYPE_ALLOC_ERROR: &str = "AllocError";
+
 /// D-ALLOC1 (ratified 2026-06-19): allocator constructor method name.
 /// D-SHAPE3a=A (ratified 2026-07-14): also the sole fresh-state constructor
 /// spelling, optionally written `.new(...)` when expected type resolves receiver.
@@ -647,6 +650,9 @@ pub const MEM_ALLOC_NEW: &str = "new";
 
 /// D-ALLOC1 (ratified 2026-06-19): allocate a value into an arena/bump/pool/fixed.
 pub const MEM_ALLOC_ALLOC: &str = "alloc";
+
+/// D-ALLOCFAIL1=A: fallible allocator method.
+pub const MEM_ALLOC_TRY_ALLOC: &str = "try_alloc";
 
 /// D-ALLOC-D (ratified 2026-06-19): reset the allocator, keeping the backing buffer.
 pub const MEM_ALLOC_RESET: &str = "reset";
@@ -681,6 +687,7 @@ pub const CORE_MEM_GATE_TIERS: &[(&str, CoreMemGate)] = &[
     (MEM_BUMP, CoreMemGate::Import),
     (MEM_POOL, CoreMemGate::Import),
     (MEM_FIXED, CoreMemGate::Import),
+    (TYPE_ALLOC_ERROR, CoreMemGate::Import),
 ];
 
 /// Return named `core.mem` item's gate tier.

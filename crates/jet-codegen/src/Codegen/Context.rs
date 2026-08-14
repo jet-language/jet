@@ -992,6 +992,7 @@ impl Cx {
             (Some("core.tls"), "RootCertificates") => Some("TLSRootCertificates"),
             (Some("core.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
             (Some("core.env"), "EnvError") => Some("EnvError"),
+            (Some("core.mem"), "AllocError") => Some("AllocError"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
             (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
@@ -1689,6 +1690,9 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ERR => {
                 format!("{}JetErr", self.root_prefix)
             }
+            Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
+                format!("{}AllocError", self.root_prefix)
+            }
             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
                 format!("{}JetAuthClaims", self.root_prefix)
             }
@@ -2074,6 +2078,9 @@ impl Cx {
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
+                if resolved == "AllocError" {
+                    return format!("{}AllocError", self.root_prefix);
+                }
                 if resolved == "Claims" || resolved == "AuthError" || resolved == "Session" || resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"

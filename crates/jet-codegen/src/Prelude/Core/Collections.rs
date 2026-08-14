@@ -206,6 +206,66 @@ where
 fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
     xs.to_vec()
 }
+
+// D-ALLOCFAIL1=A: collection fallibility is one Prelude path. `try_reserve`
+// is the only policy here; AOT, JIT, and TIR-eval marshal these functions.
+fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+    Ok(Vec::new())
+}
+
+fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+    if capacity < 0 {
+        return Err(jet_alloc_error(0, "List"));
+    }
+    let capacity = usize::try_from(capacity).map_err(|_| jet_alloc_error(0, "List"))?;
+    let requested = capacity.saturating_mul(std::mem::size_of::<T>().max(1));
+    let mut list = Vec::new();
+    list.try_reserve_exact(capacity)
+        .map_err(|_| jet_alloc_error(requested, "List"))?;
+    Ok(list)
+}
+
+fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
+    let requested = std::mem::size_of::<T>().max(1);
+    xs.try_reserve(1)
+        .map_err(|_| jet_alloc_error(requested, "List"))?;
+    xs.push(value);
+    Ok(())
+}
+
+fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), AllocError> {
+    if additional < 0 {
+        return Err(jet_alloc_error(0, "List"));
+    }
+    let additional = usize::try_from(additional).map_err(|_| jet_alloc_error(0, "List"))?;
+    let requested = additional.saturating_mul(std::mem::size_of::<T>().max(1));
+    xs.try_reserve(additional)
+        .map_err(|_| jet_alloc_error(requested, "List"))?;
+    Ok(())
+}
+
+fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
+    map: &mut JetMap<K, V>,
+    key: K,
+    value: V,
+) -> JetOutcome<Option<V>, AllocError> {
+    if map.contains_key(&key) {
+        return Ok(map.insert(key, value));
+    }
+    let requested = std::mem::size_of::<(K, V)>().max(1);
+    map.try_reserve(1)
+        .map_err(|_| jet_alloc_error(requested, "Map"))?;
+    Ok(map.insert(key, value))
+}
+
+fn jet_string_try_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
+    let requested = addition.len();
+    text.try_reserve(requested)
+        .map_err(|_| jet_alloc_error(requested, "String"))?;
+    text.push_str(addition);
+    Ok(())
+}
+
 fn jet_list_min<T: Ord, I>(xs: I) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,

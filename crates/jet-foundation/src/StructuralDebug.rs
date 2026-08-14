@@ -29,6 +29,11 @@ static CBOR_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
 
 static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason", false)];
 
+static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
+    ("requested_bytes", false),
+    ("allocator", false),
+];
+
 /// Return shared field metadata for a core structural type.
 pub fn jet_debug_field_metadata(type_name: &str) -> Option<&'static [(&'static str, bool)]> {
     match type_name {
@@ -36,6 +41,7 @@ pub fn jet_debug_field_metadata(type_name: &str) -> Option<&'static [(&'static s
         "CBOROptions" => Some(CBOR_OPTIONS_FIELD_METADATA),
         "CBORError" => Some(CBOR_ERROR_FIELD_METADATA),
         "FieldError" => Some(FIELD_ERROR_FIELD_METADATA),
+        "AllocError" => Some(ALLOC_ERROR_FIELD_METADATA),
         _ => None,
     }
 }

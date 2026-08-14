@@ -814,6 +814,16 @@ pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> O
 
 fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (ty, method, nargs) {
+        // D-ALLOCFAIL1=A: List constructors return the fallible carrier. The
+        // element placeholder is refined from the expected result by sema.
+        (Type::List(inner), "try_new", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::List(inner.clone())),
+            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+        })),
+        (Type::List(inner), "try_with_capacity", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::List(inner.clone())),
+            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+        })),
         (Type::Int, "parse", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
@@ -956,6 +966,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("push" | "insert" | "reverse" | "sort" | "clear", _) => Some(None),
+        ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("Unit".to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+        })),
         ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("count", 1) => Some(Some(Type::Int)),
         ("extend", 1) => Some(None),
@@ -1271,6 +1285,10 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("clear", 0) => Some(None),
         ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("try_insert", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::Option(Box::new(value.clone()))),
+            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+        })),
         ("add_new", 2) => Some(Some(Type::Bool)),
         ("get" | "remove" | "pop", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("has_key", 1) => Some(Some(Type::Bool)),
@@ -1324,6 +1342,10 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("try_push", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("Unit".to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+        })),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_title" | "to_string", 0) => {
             Some(Some(Type::String))
@@ -2045,6 +2067,8 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::List(_) => matches!(
             method,
             "push"
+                | "try_push"
+                | "try_reserve"
                 | "pop"
                 | "insert"
                 | "remove"
@@ -2059,8 +2083,9 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         ),
         Type::Map { .. } => matches!(
             method,
-            "add" | "add_new" | "remove" | "pop" | "pop_first" | "clear"
+            "add" | "try_insert" | "add_new" | "remove" | "pop" | "pop_first" | "clear"
         ),
+        Type::String => method == "try_push",
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
             matches!(method, "add" | "remove" | "pop" | "clear")
@@ -2255,7 +2280,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             builtin_method_arg_types(&Type::List(Box::new(args[0].clone())), method)
         }
         Type::List(inner) => match method {
-            "push" | "contains" => Some(vec![(**inner).clone()]),
+            "try_new" => Some(vec![]),
+            "try_with_capacity" => Some(vec![Type::Int]),
+            "push" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
+            "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
             "get" | "index_of" => Some(vec![Type::Int]),
             "remove" => Some(vec![
@@ -2440,7 +2468,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Map { key, value, .. } => match method {
-            "add" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
+            "add" | "try_insert" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "pop" | "has_key" => Some(vec![(**key).clone()]),
             "contains_value" => Some(vec![(**value).clone()]),
             "merge" | "equal" | "intersection" => Some(vec![Type::Map {
@@ -2486,6 +2514,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::String => match method {
+            "try_push" => Some(vec![Type::String]),
             "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "count"
             | "split_once" => Some(vec![Type::String]),
             "from_bytes" => Some(vec![Type::List(Box::new(u8t()))]),

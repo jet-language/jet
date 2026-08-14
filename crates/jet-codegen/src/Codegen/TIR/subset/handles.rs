@@ -365,6 +365,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ParsedArgs", "positional", 1) => THandleOp::ParsedArgsPositional,
         ("ParsedArgs", "subcommand", 0) => THandleOp::ParsedArgsSubcommand,
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
+        ("Arena" | "Bump" | "Pool" | "Fixed", "try_alloc", 1) => THandleOp::AllocTryAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
         // c109 Phase 20: HTTPRequest/HTTPResponse accessors (E2-M10, D-ROUTE1=A).
         // Now reachable because the `http.serve` lambda param type is written back

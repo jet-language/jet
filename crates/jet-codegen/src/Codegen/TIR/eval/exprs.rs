@@ -7265,6 +7265,8 @@ impl<'a> EvalCtx<'a> {
                     fields: vec![
                         ("ctor".to_string(), CtValue::Str(ctor.clone())),
                         ("sentry_id".to_string(), CtValue::Int(owner as i64)),
+                        ("used".to_string(), CtValue::Int(0)),
+                        ("allocations".to_string(), CtValue::Int(0)),
                     ],
                 })
             }

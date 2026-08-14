@@ -2728,6 +2728,38 @@ fn resident_safe_builtin_op(
                 && (jit_value_type(&args[0].ty) || jit_compound_type(&args[0].ty))
                 && resident_safe_expr(&args[0], callees)
         }
+        TBuiltinOp::ListTryNew => args.is_empty(),
+        TBuiltinOp::ListTryWithCapacity => {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::TryPush => {
+            args.len() == 1
+                && (jit_list_int_type(recv_ty) && matches!(&args[0].ty, Type::Int)
+                    || jit_list_float_type(recv_ty) && matches!(&args[0].ty, Type::Float))
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::TryReserve => {
+            (jit_list_int_type(recv_ty) || jit_list_float_type(recv_ty))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::TryInsertMap => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::String)
+                && matches!(&args[1].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
+        }
+        TBuiltinOp::TryStringPush => {
+            matches!(recv_ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
         TBuiltinOp::Keys | TBuiltinOp::Values => {
             jit_map_string_type(recv_ty) && args.is_empty()
         }
@@ -5098,7 +5130,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIn { .. } => args.len() <= 1,
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
-        THandleOp::AllocAlloc => args.len() == 1,
+        THandleOp::AllocAlloc | THandleOp::AllocTryAlloc => args.len() == 1,
         THandleOp::AllocReset
         | THandleOp::ClockNow
         | THandleOp::StopwatchElapsedMillis

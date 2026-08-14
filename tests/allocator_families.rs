@@ -26,10 +26,12 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
     let binary = dir.join("main");
     let observe = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap();
     let uninit = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap();
+    let outcome = std::fs::read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
+{outcome}
 mod jet_uninit_semantics {{
 {uninit}
 }}
@@ -215,6 +217,17 @@ fn main() {
     assert_eq!(*DROPS.lock().unwrap(), vec![2, 1]);
     assert_eq!(fixed.facts().retained_bytes, 256);
     assert_eq!(fixed.facts().live_allocations, 0);
+
+    let mut try_bytes = [0u8; 40];
+    let try_fixed = jet_mem::JetFixed::over(&mut try_bytes);
+    assert_eq!(*try_fixed.try_alloc(7u64).unwrap(), 7);
+    let error = match try_fixed.try_alloc(9u64) {
+        Ok(_) => panic!("fallible Fixed allocation unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.requested_bytes, 8);
+    assert_eq!(error.allocator, "Fixed");
+    drop(try_fixed);
 
     let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = fixed.alloc([0u8; 233]);
@@ -481,4 +494,44 @@ fn run() {
     let (code, stdout, _) = run_jet("pool_generation", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n2\n3\n4\n5\n");
+}
+
+#[test]
+fn try_allocation_example_reports_exhaustion_as_a_value() {
+    let src = include_str!("../examples/features/memory/try_allocation.jet");
+    let expected = include_str!("../examples/features/expected/memory/try_allocation.out");
+    if common::have_rustc() {
+        let (code, stdout, stderr) = run_jet("try_allocation", src);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, expected);
+
+        let dir = temp_dir("try_allocation_dev");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("main.jet");
+        std::fs::write(&path, src).unwrap();
+        for force_interpreter in [false, true] {
+            let outcome = jet::Interpreter::dev_iteration(
+                &path.to_string_lossy(),
+                false,
+                force_interpreter,
+            );
+            match outcome {
+                jet::Interpreter::RunOutcome::Ran {
+                    stdout, exit_code, ..
+                } => {
+                    assert_eq!(exit_code, 0);
+                    assert_eq!(stdout, expected);
+                }
+                jet::Interpreter::RunOutcome::Problems(diags) => {
+                    panic!(
+                        "try allocation example failed on {} tier: {diags:?}",
+                        if force_interpreter { "interpreter" } else { "default dev" }
+                    );
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        compile_jet(src).expect("try allocation example should pass the front end");
+    }
 }

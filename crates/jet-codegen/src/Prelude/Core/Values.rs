@@ -239,6 +239,36 @@ impl JetDebug for String {
         format!("{self:?}")
     }
 }
+
+impl JetShow for AllocError {
+    fn jet_show(&self) -> String {
+        format!(
+            "AllocError {{ requested_bytes: {}, allocator: {:?} }}",
+            self.requested_bytes, self.allocator
+        )
+    }
+}
+impl __jet_Display for AllocError {
+    fn display(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetDisplay for AllocError {
+    fn jet_display(&self) -> String {
+        <Self as __jet_Display>::display(self)
+    }
+}
+impl JetDebug for AllocError {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+impl __jet_Equatable for AllocError {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
 // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
 // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
 // `String` stays the one Jet-level type, so anything that already works on a

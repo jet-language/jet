@@ -1549,6 +1549,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         "Path" => Some(Type::Named("Path".to_string())),
         Syntax::TYPE_CONDITION => Some(Type::Named(Syntax::TYPE_CONDITION.to_string())),
         "Cell" => Some(Type::Named("Cell".to_string())),
+        Syntax::TYPE_LIST => Some(Type::List(Box::new(Type::Int))),
         _ => None,
     }
 }

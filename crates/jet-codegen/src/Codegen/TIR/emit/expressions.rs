@@ -1269,6 +1269,56 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::Push => format!("({}).push({})", recv, a(0)),
+                TBuiltinOp::ListTryNew => {
+                    let elem = match &e.ty {
+                        Type::Result { ok, .. } => match ok.as_ref() {
+                            Type::List(inner) => inner.as_ref(),
+                            _ => &Type::Int,
+                        },
+                        _ => &Type::Int,
+                    };
+                    format!("{}jet_list_try_new::<{}>()", cx.root_prefix, cx.rust_type(elem))
+                }
+                TBuiltinOp::ListTryWithCapacity => {
+                    let elem = match &e.ty {
+                        Type::Result { ok, .. } => match ok.as_ref() {
+                            Type::List(inner) => inner.as_ref(),
+                            _ => &Type::Int,
+                        },
+                        _ => &Type::Int,
+                    };
+                    format!(
+                        "{}jet_list_try_with_capacity::<{}>({})",
+                        cx.root_prefix,
+                        cx.rust_type(elem),
+                        a(0)
+                    )
+                }
+                TBuiltinOp::TryPush => format!(
+                    "{}jet_list_try_push(&mut ({}), {})",
+                    cx.root_prefix,
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::TryReserve => format!(
+                    "{}jet_list_try_reserve(&mut ({}), {})",
+                    cx.root_prefix,
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::TryInsertMap => format!(
+                    "{}jet_map_try_insert(&mut ({}), ({}).clone(), {})",
+                    cx.root_prefix,
+                    recv,
+                    a(0),
+                    a(1)
+                ),
+                TBuiltinOp::TryStringPush => format!(
+                    "{}jet_string_try_push(&mut ({}), &({}))",
+                    cx.root_prefix,
+                    recv,
+                    a(0)
+                ),
                 TBuiltinOp::Pop => format!("jet_list_pop_kernel(&mut ({}))", recv),
                 TBuiltinOp::PriorityQueuePop => {
                     format!("jet_priority_queue_pop_kernel(&mut ({}))", recv)
@@ -3800,6 +3850,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::AllocAlloc => {
                     let a0 = emit_tir_expr(&args[0], cx);
                     format!("({}).alloc({})", recv, a0)
+                }
+                THandleOp::AllocTryAlloc => {
+                    let a0 = emit_tir_expr(&args[0], cx);
+                    format!("({}).try_alloc({})", recv, a0)
                 }
                 THandleOp::AllocReset => format!("({}).reset()", recv),
                 // c109 Phase 20: HTTPRequest/HTTPResponse accessors, byte-for-byte the

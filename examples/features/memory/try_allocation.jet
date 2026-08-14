@@ -1,0 +1,23 @@
+// D-ALLOCFAIL1=A (ratified 2026-08-12): fallible allocation is a value.
+// Freestanding-safe: Fixed owns one compile-time inline buffer, so exhaustion
+// is deterministic and does not call the hosted aborting allocator.
+// Build with: jet build --freestanding examples/features/memory/try_allocation.jet
+use core.mem
+
+fn run() {
+    fixed :: mem.Fixed.new(size: 40)
+
+    first :: fixed.try_alloc(7)
+    if first == {
+        .Ok(value) -> { print("success {value}") }
+        .Err(error) -> { print("unexpected failure {error}") }
+    }
+
+    second :: fixed.try_alloc(9)
+    if second == {
+        .Ok(value) -> { print("unexpected success {value}") }
+        .Err(error) -> {
+            print("failure {error.requested_bytes} {error.allocator}")
+        }
+    }
+}

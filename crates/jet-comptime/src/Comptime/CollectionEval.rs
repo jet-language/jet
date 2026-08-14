@@ -103,6 +103,43 @@ mod collection_semantics {
         *map = native.0;
         result.ok()
     }
+
+    pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+        jet_list_try_new()
+    }
+
+    pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+        jet_list_try_with_capacity(capacity)
+    }
+
+    pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
+        jet_list_try_push(values, value)
+    }
+
+    pub(super) fn try_list_reserve<T>(
+        values: &mut Vec<T>,
+        additional: i64,
+    ) -> JetOutcome<(), AllocError> {
+        jet_list_try_reserve(values, additional)
+    }
+
+    pub(super) fn try_map_insert<K: Ord + Clone, V: Clone>(
+        map: &mut std::collections::BTreeMap<K, V>,
+        key: K,
+        value: V,
+    ) -> JetOutcome<Option<V>, AllocError> {
+        let mut native = JetMap(std::mem::take(map));
+        let result = jet_map_try_insert(&mut native, key, value);
+        *map = native.0;
+        result
+    }
+
+    pub(super) fn try_string_push(
+        text: &mut String,
+        addition: &str,
+    ) -> JetOutcome<(), AllocError> {
+        jet_string_try_push(text, addition)
+    }
 }
 
 pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
@@ -118,6 +155,45 @@ pub(super) fn map_pop<K: Ord + Clone, V: Clone>(
     key: &K,
 ) -> Option<V> {
     collection_semantics::map_pop(map, key)
+}
+
+pub fn try_list_new<T>() -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_list_new()
+}
+
+pub fn try_list_with_capacity<T>(
+    capacity: i64,
+) -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_list_with_capacity(capacity)
+}
+
+pub fn try_list_push<T>(
+    values: &mut Vec<T>,
+    value: T,
+) -> Result<(), jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_list_push(values, value)
+}
+
+pub fn try_list_reserve<T>(
+    values: &mut Vec<T>,
+    additional: i64,
+) -> Result<(), jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_list_reserve(values, additional)
+}
+
+pub fn try_map_insert<K: Ord + Clone, V: Clone>(
+    map: &mut std::collections::BTreeMap<K, V>,
+    key: K,
+    value: V,
+) -> Result<Option<V>, jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_map_insert(map, key, value)
+}
+
+pub fn try_string_push(
+    text: &mut String,
+    addition: &str,
+) -> Result<(), jet_foundation::Outcome::AllocError> {
+    collection_semantics::try_string_push(text, addition)
 }
 
 mod set_semantics {

@@ -445,7 +445,7 @@ impl<'a> Checker<'a> {
         // `reset` invalidates them. Do not run the ordinary owner-read check
         // for either operation, or a valid live view produces E0220 before the
         // allocator-specific transition can run.
-        let allocator_view_preserving_receiver = matches!(method, "alloc" | "reset")
+        let allocator_view_preserving_receiver = matches!(method, "alloc" | "try_alloc" | "reset")
             && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
                 .lookup(name)
                 .is_some_and(|info| is_allocator_type(&info.ty)));
@@ -3306,10 +3306,20 @@ impl<'a> Checker<'a> {
                         }
                     }
                     *recv_type_out = Some(handle_ty_s.clone());
-                    // For `alloc`, infer the argument and return its type.
-                    if method == "alloc" {
+                    // For allocator value methods, infer the payload once. The
+                    // fallible spelling keeps the same payload inside one
+                    // `T ? AllocError` carrier.
+                    if matches!(method, "alloc" | "try_alloc") {
                         if let Some(arg) = args.get_mut(0) {
                             let inferred = self.infer(&mut arg.expr);
+                            if method == "try_alloc" {
+                                let resolved = result_ty(
+                                    inferred.clone().unwrap_or(Type::Int),
+                                    Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
+                                );
+                                *resolved_ret_out = Some(resolved.clone());
+                                return Some(resolved);
+                            }
                             return inferred;
                         }
                         return None;

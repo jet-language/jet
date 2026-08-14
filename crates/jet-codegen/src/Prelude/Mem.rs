@@ -23,6 +23,7 @@ mod jet_mem {
     use std::ptr::NonNull;
     use std::sync::{Mutex, OnceLock};
 
+    pub use super::AllocError;
     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
 
     const DEFAULT_ARENA_BYTES: usize = 4096;
@@ -240,6 +241,22 @@ mod jet_mem {
     }
 
     impl RawBlock {
+        fn try_new(bytes: usize, alignment: usize, allocator: &str) -> Result<Self, AllocError> {
+            let size = bytes.max(1);
+            let align = alignment.max(1).next_power_of_two();
+            let layout = match std::alloc::Layout::from_size_align(size, align) {
+                Ok(layout) => layout,
+                Err(_) => return Err(super::jet_alloc_error(size, allocator)),
+            };
+            // SAFETY: layout is non-zero and valid. Null becomes a value error.
+            let raw = unsafe { std::alloc::alloc(layout) };
+            let Some(ptr) = NonNull::new(raw) else {
+                return Err(super::jet_alloc_error(size, allocator));
+            };
+            super::jet_observe_arena_retain(layout.size());
+            Ok(RawBlock { ptr, layout, used: 0 })
+        }
+
         fn new(bytes: usize, alignment: usize) -> Self {
             let size = bytes.max(1);
             let align = alignment.max(1).next_power_of_two();
@@ -274,6 +291,31 @@ mod jet_mem {
             unsafe { ptr.write(val) };
             self.used = offset + std::mem::size_of::<T>().max(1);
             Some(ptr)
+        }
+
+        unsafe fn try_write<T>(
+            &mut self,
+            val: T,
+            allocator: &str,
+        ) -> Result<*mut T, AllocError> {
+            let size = std::mem::size_of::<T>().max(1);
+            let Some(offset) = self.aligned_offset(std::mem::align_of::<T>(), size) else {
+                return Err(super::jet_alloc_error(size, allocator));
+            };
+            let padding = offset.saturating_sub(self.used);
+            let (val, next_used) = super::jet_try_alloc_value(
+                val,
+                self.used,
+                self.capacity(),
+                size,
+                allocator,
+                padding,
+            )?;
+            // SAFETY: aligned_offset and the shared capacity check proved the typed write fits.
+            let ptr = unsafe { self.ptr.as_ptr().add(offset).cast::<T>() };
+            unsafe { ptr.write(val) };
+            self.used = next_used;
+            Ok(ptr)
         }
 
         fn rewind(&mut self) {
@@ -381,6 +423,39 @@ mod jet_mem {
             unsafe { &mut *ptr }
         }
 
+        pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            let mut state = self.state.borrow_mut();
+            let required = std::mem::size_of::<T>().max(1)
+                .saturating_add(std::mem::align_of::<T>());
+            let selected = (state.current_block..state.blocks.len()).find(|index| {
+                state.blocks[*index]
+                    .aligned_offset(std::mem::align_of::<T>(), std::mem::size_of::<T>())
+                    .is_some()
+            });
+            let selected = if let Some(index) = selected {
+                index
+            } else {
+                let bytes = state.next_block_bytes.max(required);
+                state.blocks.push(RawBlock::try_new(
+                    bytes,
+                    BASE_ALIGNMENT.max(std::mem::align_of::<T>()),
+                    "Arena",
+                )?);
+                state.next_block_bytes = bytes.saturating_mul(2);
+                state.blocks.len() - 1
+            };
+            state.current_block = selected;
+            // SAFETY: the selected block was sized/aligned above and owns the value until reset.
+            let ptr = unsafe { state.blocks[selected].try_write(val, "Arena")? };
+            record_drop(&mut state.drops, ptr);
+            let bytes = observe_alloc::<T>();
+            state.live_allocations += 1;
+            state.live_bytes = state.live_bytes.saturating_add(bytes);
+            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+            // SAFETY: ptr remains in a retained block; &self ties the view to this arena.
+            Ok(unsafe { &mut *ptr })
+        }
+
         pub fn facts(&self) -> AllocatorFacts {
             let state = self.state.borrow();
             AllocatorFacts {
@@ -455,6 +530,17 @@ mod jet_mem {
             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
             // SAFETY: ptr remains in the single retained block until reset/close.
             unsafe { &mut *ptr }
+        }
+
+        pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            let mut state = self.state.borrow_mut();
+            let ptr = unsafe { state.block.try_write(val, "Bump")? };
+            record_drop(&mut state.drops, ptr);
+            let bytes = observe_alloc::<T>();
+            state.live_allocations += 1;
+            state.live_bytes = state.live_bytes.saturating_add(bytes);
+            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+            Ok(unsafe { &mut *ptr })
         }
 
         pub fn facts(&self) -> AllocatorFacts {
@@ -555,6 +641,39 @@ mod jet_mem {
             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
             // SAFETY: ptr remains in the retained slab until reset/close.
             unsafe { &mut *ptr }
+        }
+
+        pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            let mut state = self.state.borrow_mut();
+            let bytes = std::mem::size_of::<T>().max(1);
+            let align = std::mem::align_of::<T>();
+            let compatible = state.slots.iter().position(|slot| {
+                !slot.occupied
+                    && slot.block.as_ref().is_some_and(|block| {
+                        block.capacity() >= bytes && block.layout.align() >= align
+                    })
+            });
+            let selected = compatible
+                .or_else(|| state.slots.iter().position(|slot| !slot.occupied && slot.block.is_none()))
+                .or_else(|| state.slots.iter().position(|slot| !slot.occupied))
+                .ok_or_else(|| super::jet_alloc_error(bytes, "Pool"))?;
+            let slot = &mut state.slots[selected];
+            let replace = slot.block.as_ref().map_or(true, |block| {
+                block.capacity() < bytes || block.layout.align() < align
+            });
+            if replace {
+                slot.block = Some(RawBlock::try_new(bytes, align, "Pool")?);
+            }
+            let block = slot.block.as_mut().expect("pool slot has a block");
+            block.rewind();
+            // SAFETY: the retained slot class is capacity/alignment compatible and unique.
+            let ptr = unsafe { block.try_write(val, "Pool")? };
+            slot.occupied = true;
+            record_drop(&mut state.drops, ptr);
+            let live_bytes = observe_alloc::<T>();
+            state.live_bytes = state.live_bytes.saturating_add(live_bytes);
+            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+            Ok(unsafe { &mut *ptr })
         }
 
         pub fn facts(&self) -> AllocatorFacts {
@@ -727,6 +846,62 @@ mod jet_mem {
             // SAFETY: the value stays in caller-owned backing until reset/close;
             // sema rejects reset, escape, capture, or owner mutation while live.
             unsafe { &mut *ptr }
+        }
+
+        pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            let mut state = self.state.borrow_mut();
+            let base = state.ptr.as_ptr() as usize;
+            let value_offset = Self::aligned_offset(base, state.used, std::mem::align_of::<T>());
+            let end = value_offset.and_then(|offset| {
+                offset.checked_add(std::mem::size_of::<T>().max(1))
+            });
+            let header_offset = Self::aligned_down_offset(
+                base,
+                state.metadata_start,
+                std::mem::size_of::<FixedHeader>(),
+                std::mem::align_of::<FixedHeader>(),
+            );
+            let (header_offset, value_offset, _end) = match (header_offset, value_offset, end) {
+                (Some(header), Some(value), Some(end)) if end <= header => {
+                    (header, value, end)
+                }
+                _ => {
+                    return Err(super::jet_alloc_error(
+                        std::mem::size_of::<T>().max(1),
+                        "Fixed",
+                    ))
+                }
+            };
+            // SAFETY: both offsets were aligned against the real backing address
+            // and the complete header/payload range was checked against capacity.
+            let size = std::mem::size_of::<T>().max(1);
+            let padding = value_offset.saturating_sub(state.used);
+            let (val, next_used) = super::jet_try_alloc_value(
+                val,
+                state.used,
+                header_offset,
+                size,
+                "Fixed",
+                padding,
+            )?;
+            unsafe {
+                state.ptr.as_ptr().add(header_offset).cast::<FixedHeader>().write(FixedHeader {
+                    previous: state.last_header,
+                    value_offset,
+                    drop_fn: drop_at::<T>,
+                });
+                state.ptr.as_ptr().add(value_offset).cast::<T>().write(val);
+            }
+            state.last_header = header_offset;
+            state.metadata_start = header_offset;
+            state.used = next_used;
+            let bytes = observe_alloc::<T>();
+            state.live_allocations += 1;
+            state.live_bytes = state.live_bytes.saturating_add(bytes);
+            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+            let ptr = unsafe { state.ptr.as_ptr().add(value_offset).cast::<T>() };
+            drop(state);
+            Ok(unsafe { &mut *ptr })
         }
 
         pub fn facts(&self) -> AllocatorFacts {

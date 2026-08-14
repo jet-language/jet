@@ -315,6 +315,10 @@ pub(crate) fn resolve_builtin_op(
             }
         }
         ("is_empty", 0) => TBuiltinOp::IsEmpty,
+        ("try_push", 1) if is_string => TBuiltinOp::TryStringPush,
+        ("try_push", 1) if is_list => TBuiltinOp::TryPush,
+        ("try_reserve", 1) if is_list => TBuiltinOp::TryReserve,
+        ("try_insert", 2) if is_map => TBuiltinOp::TryInsertMap,
         ("push", 1) => TBuiltinOp::Push,
         ("pop", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePop,
         ("pop", 0) => TBuiltinOp::Pop,
@@ -787,6 +791,10 @@ pub(crate) fn resolve_builtin_op(
             }
             // Native method syntax receives Rust's two-phase `&mut self`.
             TBuiltinOp::Push
+            | TBuiltinOp::TryPush
+            | TBuiltinOp::TryReserve
+            | TBuiltinOp::TryInsertMap
+            | TBuiltinOp::TryStringPush
             | TBuiltinOp::Pop
             | TBuiltinOp::InsertMap
             | TBuiltinOp::AddNewMap

@@ -99,7 +99,7 @@ fn no_os_allocator_and_core_limits_are_data_errors() {
     machine.allocator = AllocatorPolicy::None;
     let usage = TargetMachineUse {
         heap_required: true,
-        core_apis: vec!["core.files".to_string()],
+        core_apis: vec!["core.files".to_string(), "core.mem".to_string()],
         ..TargetMachineUse::default()
     };
     let errors = machine.validate(&usage);
@@ -107,6 +107,11 @@ fn no_os_allocator_and_core_limits_are_data_errors() {
     assert!(errors.contains(&TargetMachineError::CoreApiUnavailable {
         api: "core.files".to_string(),
         required: RuntimeLayer::Std,
+        available: RuntimeLayer::Core
+    }));
+    assert!(errors.contains(&TargetMachineError::CoreApiUnavailable {
+        api: "core.mem".to_string(),
+        required: RuntimeLayer::Alloc,
         available: RuntimeLayer::Core
     }));
 }

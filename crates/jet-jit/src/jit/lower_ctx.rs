@@ -17069,8 +17069,28 @@ impl LowerCtx<'_, '_> {
                     .ok_or_else(|| format!("jit raw pointer result unsupported: {:?}", expr.ty))?;
                 Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0))
             }
-            TExprKind::AllocNew { .. } => {
-                Ok(self.call_host(self.host.memory.allocator_new, &[]))
+            TExprKind::AllocNew { ctor } => {
+                if let Some(bytes) = ctor
+                    .strip_prefix("__JET_FIXED_INLINE:")
+                    .and_then(|bytes| bytes.parse::<i64>().ok())
+                {
+                    let bytes = self.b.ins().iconst(types::I64, bytes);
+                    let fixed = self.b.ins().iconst(types::I64, 1);
+                    Ok(self.call_host(
+                        self.host.memory.allocator_new_capacity,
+                        &[bytes, fixed],
+                    ))
+                } else {
+                    let kind = if ctor.contains("JetBump") {
+                        1
+                    } else if ctor.contains("JetPool") {
+                        2
+                    } else {
+                        0
+                    };
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    Ok(self.call_host(self.host.memory.allocator_new_named, &[kind]))
+                }
             }
             TExprKind::JSONLit { variant, arg } => {
                 let disc = self
@@ -18033,6 +18053,41 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[recv_val, v]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
+            TBuiltinOp::ListTryNew => Ok(self.call_host(self.host.coll.list_try_new, &[])),
+            TBuiltinOp::ListTryWithCapacity => {
+                let capacity = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.coll.list_try_with_capacity,
+                    &[capacity],
+                ))
+            }
+            TBuiltinOp::TryPush => {
+                let value = self.lower_expr(&args[0])?;
+                let host_id = match &args[0].ty {
+                    Type::Float => self.host.coll.list_try_push_f64,
+                    _ => self.host.coll.list_try_push,
+                };
+                Ok(self.call_host(host_id, &[recv_val, value]))
+            }
+            TBuiltinOp::TryReserve => {
+                let additional = self.lower_expr(&args[0])?;
+                let host_id = if jit_list_float_type(&recv_ty) {
+                    self.host.coll.list_try_reserve_f64
+                } else {
+                    self.host.coll.list_try_reserve
+                };
+                Ok(self.call_host(
+                    host_id,
+                    &[recv_val, additional],
+                ))
+            }
+            TBuiltinOp::TryStringPush => {
+                let addition = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.coll.string_try_push,
+                    &[recv_val, addition],
+                ))
+            }
             TBuiltinOp::Sort => {
                 let host_id = if jit_list_string_type(&recv_ty) {
                     self.host.coll.list_sort_str
@@ -18184,6 +18239,24 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.map_insert, self.b.func);
                 self.b.ins().call(insert_ref, &[recv_val, key, val]);
                 Ok(prev)
+            }
+            TBuiltinOp::TryInsertMap => {
+                let key = self.lower_expr(&args[0])?;
+                let val = self.lower_expr(&args[1])?;
+                let val = match self.meta.clif_ty(&args[1].ty) {
+                    Some(types::I32) => self.b.ins().uextend(types::I64, val),
+                    Some(types::I8) => self.b.ins().uextend(types::I64, val),
+                    Some(types::F64) => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        val,
+                    ),
+                    _ => val,
+                };
+                Ok(self.call_host(
+                    self.host.coll.map_try_insert,
+                    &[recv_val, key, val],
+                ))
             }
             TBuiltinOp::AddNewMap => {
                 // Map.add_new(k, v) → Bool: insert only when vacant.
@@ -21395,6 +21468,39 @@ impl LowerCtx<'_, '_> {
                     _ => Ok(bits),
                 }
             }
+            THandleOp::AllocTryAlloc if args.len() == 1 => {
+                let value = self.lower_expr(&args[0])?;
+                let (bits, requested) = match self.meta.clif_ty(&args[0].ty) {
+                    Some(ty) if ty == types::F64 => (
+                        self.b.ins().bitcast(
+                            types::I64,
+                            Self::scalar_bitcast_memflags(),
+                            value,
+                        ),
+                        8,
+                    ),
+                    Some(ty) if ty == types::I8 => {
+                        (self.b.ins().uextend(types::I64, value), 1)
+                    }
+                    Some(ty) if ty == types::I32 => {
+                        (self.b.ins().uextend(types::I64, value), 4)
+                    }
+                    Some(ty) if ty == types::I64 => (value, 8),
+                    other => {
+                        return Err(format!(
+                            "jit allocator payload unsupported: {:?} ({other:?})",
+                            args[0].ty
+                        ))
+                    }
+                };
+                let requested = self.b.ins().iconst(types::I64, requested);
+                let result = self.call_host(
+                    self.host.memory.allocator_try_alloc,
+                    &[recv_val, bits, requested],
+                );
+                self.emit_trap_check()?;
+                Ok(result)
+            }
             THandleOp::AllocReset if args.is_empty() => {
                 let host = self
                     .module
@@ -21403,7 +21509,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
-            THandleOp::AllocAlloc | THandleOp::AllocReset => {
+            THandleOp::AllocTryAlloc | THandleOp::AllocAlloc | THandleOp::AllocReset => {
                 Err("jit allocator method arity unsupported".to_string())
             }
             THandleOp::HTTPReqField(..) => Err("jit handle method unsupported".to_string()),

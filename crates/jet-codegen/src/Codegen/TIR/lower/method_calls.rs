@@ -367,13 +367,18 @@ fn host_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TS
 fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
     match op {
         TBuiltinOp::Push
+        | TBuiltinOp::TryPush
+        | TBuiltinOp::TryStringPush
         | TBuiltinOp::Intersperse
         | TBuiltinOp::SetInsert
         | TBuiltinOp::SortedSetInsert
         | TBuiltinOp::BagAdd
         | TBuiltinOp::DequePushFront
         | TBuiltinOp::DequePushBack => index == 0,
-        TBuiltinOp::InsertMap | TBuiltinOp::AddNewMap | TBuiltinOp::InsertList => index == 1,
+        TBuiltinOp::InsertMap
+        | TBuiltinOp::TryInsertMap
+        | TBuiltinOp::AddNewMap
+        | TBuiltinOp::InsertList => index == 1,
         TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => index < 2,
         _ => false,
     }
@@ -4866,6 +4871,17 @@ fn lower_method_call_impl(
                     .first()
                     .map(|a| a.ty.clone())
                     .unwrap_or_else(unit_type),
+                THandleOp::AllocTryAlloc => resolved_ret.cloned().unwrap_or_else(|| {
+                    Type::Result {
+                        ok: Box::new(
+                            targs
+                                .first()
+                                .map(|a| a.ty.clone())
+                                .unwrap_or_else(unit_type),
+                        ),
+                        err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+                    }
+                }),
                 THandleOp::AllocReset => unit_type(),
                 THandleOp::DataStreamNext => resolved_ret.cloned().unwrap_or_else(|| {
                     Type::Result {
@@ -5329,6 +5345,47 @@ fn lower_method_call_impl(
                     method: TMethodRef::bare("new"),
                     type_args: Vec::new(),
                     args: vec![],
+                },
+            };
+        }
+        // D-ALLOCFAIL1=A: `List.try_new()` and `.try_with_capacity(n)` use
+        // the ordinary BuiltinMethod carrier; the inert Unit receiver keeps
+        // static lowering inside the existing TIR seam.
+        if type_name == Syntax::TYPE_LIST
+            && !cx.type_names.contains(Syntax::TYPE_LIST)
+            && matches!(method, "try_new" | "try_with_capacity")
+            && ((method == "try_new" && args.is_empty())
+                || (method == "try_with_capacity" && args.len() == 1))
+        {
+            let elem_ty = match resolved_ret {
+                Some(Type::Result { ok, .. }) => match ok.as_ref() {
+                    Type::List(inner) => (**inner).clone(),
+                    _ => Type::Int,
+                },
+                _ => Type::Int,
+            };
+            let ty = resolved_ret.clone().unwrap_or_else(|| Type::Result {
+                ok: Box::new(Type::List(Box::new(elem_ty.clone()))),
+                err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+            });
+            let value_args = if method == "try_with_capacity" {
+                vec![lower_expr(&args[0].expr, cx, env)]
+            } else {
+                Vec::new()
+            };
+            return TExpr {
+                ty,
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::Unit,
+                    }),
+                    op: if method == "try_new" {
+                        TBuiltinOp::ListTryNew
+                    } else {
+                        TBuiltinOp::ListTryWithCapacity
+                    },
+                    args: value_args,
                 },
             };
         }

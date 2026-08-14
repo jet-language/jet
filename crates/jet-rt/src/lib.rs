@@ -284,6 +284,26 @@ impl JetArena {
         }
     }
 
+    pub fn replace_int_list(&mut self, list: i64, values: Vec<i64>) -> Option<()> {
+        match self.values.get_mut(list as usize) {
+            Some(JetVal::List(target)) => {
+                *target = values.into_iter().map(JetVal::Int).collect();
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn replace_float_list(&mut self, list: i64, values: Vec<f64>) -> Option<()> {
+        match self.values.get_mut(list as usize) {
+            Some(JetVal::List(target)) => {
+                *target = values.into_iter().map(JetVal::Float).collect();
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     pub fn list_push_range(
         &mut self,
         list: i64,

@@ -22,9 +22,24 @@ struct SharedTransaction {
 
 type SharedTransactionCallback = unsafe extern "C" fn(i64, i64) -> i64;
 
-#[derive(Default)]
 pub(crate) struct AllocatorState {
     generation: u64,
+    used: usize,
+    capacity: usize,
+    allocator: &'static str,
+    fixed: bool,
+}
+
+impl Default for AllocatorState {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            used: 0,
+            capacity: usize::MAX,
+            allocator: "Arena",
+            fixed: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -224,6 +239,37 @@ extern "C" fn jet_jit_allocator_new() -> i64 {
     })
 }
 
+extern "C" fn jet_jit_allocator_new_named(kind: i64) -> i64 {
+    let allocator = match kind {
+        1 => "Bump",
+        2 => "Pool",
+        _ => "Arena",
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        rt.allocators.push(AllocatorState {
+            generation: 0,
+            used: 0,
+            capacity: usize::MAX,
+            allocator,
+            fixed: false,
+        });
+        rt.allocators.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.allocators.push(AllocatorState {
+            generation: 0,
+            used: 0,
+            capacity: capacity.max(1) as usize,
+            allocator: if fixed != 0 { "Fixed" } else { "Allocator" },
+            fixed: fixed != 0,
+        });
+        rt.allocators.len() as i64
+    })
+}
+
 extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
@@ -235,6 +281,49 @@ extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_allocator_try_alloc(
+    handle: i64,
+    value: i64,
+    requested_bytes: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+        let (allocator, result) = {
+            let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
+                rt.set_trap("allocator handle is closed or invalid");
+                return 0;
+            };
+            let overhead = if state.fixed {
+                3 * std::mem::size_of::<usize>()
+            } else {
+                0
+            };
+            let result = jet_foundation::Outcome::jet_try_alloc_value(
+                value,
+                state.used,
+                state.capacity,
+                requested,
+                state.allocator,
+                overhead,
+            );
+            if let Ok((_, next_used)) = &result {
+                state.used = *next_used;
+            }
+            (state.allocator, result)
+        };
+        match result {
+            Ok((value, _)) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+            Err(error) => {
+                let record = rt.heap.alloc_record(2);
+                let allocator = rt.heap.alloc_string(allocator);
+                let _ = rt.heap.record_set_int(record, 0, error.requested_bytes);
+                let _ = rt.heap.record_set_string(record, 1, allocator);
+                crate::runtime_host::alloc_jit_result(rt, false, record as u64)
+            }
+        }
+    })
+}
+
 extern "C" fn jet_jit_allocator_reset(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
@@ -242,6 +331,7 @@ extern "C" fn jet_jit_allocator_reset(handle: i64) {
             return;
         };
         state.generation = state.generation.wrapping_add(1);
+        state.used = 0;
     });
 }
 
@@ -1086,7 +1176,10 @@ host_fns! {
 
     }
     allocator_new: "jet_jit_allocator_new" => jet_jit_allocator_new: noarg_i64;
+    allocator_new_named: "jet_jit_allocator_new_named" => jet_jit_allocator_new_named: unary;
+    allocator_new_capacity: "jet_jit_allocator_new_capacity" => jet_jit_allocator_new_capacity: binary;
     allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: binary;
+    allocator_try_alloc: "jet_jit_allocator_try_alloc" => jet_jit_allocator_try_alloc: ternary;
     allocator_reset: "jet_jit_allocator_reset" => jet_jit_allocator_reset: unary_void;
     pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
     pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;

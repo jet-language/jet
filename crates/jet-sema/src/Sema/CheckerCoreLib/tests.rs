@@ -40,6 +40,7 @@ mod tests {
             ("Bump", crate::Syntax::CoreMemGate::Import),
             ("Pool", crate::Syntax::CoreMemGate::Import),
             ("Fixed", crate::Syntax::CoreMemGate::Import),
+            ("AllocError", crate::Syntax::CoreMemGate::Import),
         ];
 
         assert_eq!(

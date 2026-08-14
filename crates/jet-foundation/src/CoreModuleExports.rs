@@ -68,6 +68,8 @@ const EMAIL_LEAVES: &[(&str, CoreLeafKind)] = &[
 
 const ENV_LEAVES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)];
 
+const MEM_LEAVES: &[(&str, CoreLeafKind)] = &[("AllocError", CoreLeafKind::Plain)];
+
 /// Canonical root Core types that are not qualified module leaves. Keep these
 /// in the same Core-name authority used by generated declarations.
 const CORE_ROOT_TYPES: &[&str] = &[
@@ -110,6 +112,7 @@ const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
     ]),
     ("core.email", EMAIL_LEAVES),
     ("core.env", ENV_LEAVES),
+    ("core.mem", MEM_LEAVES),
 ];
 
 /// Look up how `module.leaf` should resolve, or `None` if that module/leaf

@@ -2570,6 +2570,18 @@ borrow is exclusive until consuming `close(^fixed)` or scope exit. Fixed
 handles and allocation views cannot escape, be stored/captured, or cross a
 task/join boundary, and `reset()` is rejected while any allocation view lives.
 
+**D-ALLOCFAIL1=A — Fallible allocation family** *(ratified 2026-08-12)*:
+`List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
+`Map.try_insert`, `String.try_push`, and
+`mem.Arena.try_alloc`/`mem.Bump.try_alloc`/`mem.Pool.try_alloc`/
+`mem.Fixed.try_alloc` return `T ? AllocError`. `AllocError` is a Core value
+with `requested_bytes: Int` and `allocator: String`; a failed allocation is
+an ordinary error value and never calls the hosted abort hook. One Prelude
+implementation owns the fallible allocation semantics for AOT, JIT, and
+interpreter tiers. Plain allocation APIs keep their existing hosted abort
+default. A fallible result remains must-use, so E0402 rejects an ignored
+`try_` call. This decision supersedes no earlier allocation surface.
+
 **D-SOA1 / D-SOA2A–D — Columnar layout**: `#Layout(columnar)` on a struct;
 a `[S]` of it lowers to a struct-of-arrays with a logical-Vec API
 (index-read gathers, field-read hits the column). Whole-struct only (partial

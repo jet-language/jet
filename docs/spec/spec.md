@@ -1828,6 +1828,16 @@ heap-backed compatibility runtime is not acceptance evidence for `Fixed`. Comple
 compiler to preserve a compile-time capacity (or an owner-ratified caller-buffer representation);
 #648 must not disguise that gate with a heap facade or silent cap.
 
+The fallible family (D-ALLOCFAIL1=A) is separate from the plain allocation
+calls: `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
+`Map.try_insert`, `String.try_push`, and each allocator's `try_alloc` return a
+fallible value whose error is the Core `AllocError` record
+`{ requested_bytes, allocator }`. The canonical Prelude path reports failure
+without invoking the hosted abort hook. The AOT emitter, Cranelift host, and
+interpreter marshal that same result; they do not decide allocation policy.
+Plain `new`/`alloc`/mutation calls retain their existing abort-on-failure
+behavior.
+
 ### Arena regions and scope-bound views (D-ALLOC2, D-REGION1; ratified 2026-06-21, implemented)
 
 The c05 upgrade makes the arena *real*: `arena.alloc(value)` places a value in retained

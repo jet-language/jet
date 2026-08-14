@@ -352,6 +352,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             Syntax::MEM_BUMP,
             Syntax::MEM_POOL,
             Syntax::MEM_FIXED,
+            Syntax::TYPE_ALLOC_ERROR,
         ],
         // D-LIB-CALLGRANT1=A: pinned native Jet library loader.
         "core.mod" => &["load"],

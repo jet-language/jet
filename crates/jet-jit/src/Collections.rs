@@ -133,6 +133,43 @@ mod collection_semantics {
         jet_zip_rows(lengths, mode, read, fill)
     }
 
+    pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+        jet_list_try_new()
+    }
+
+    pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+        jet_list_try_with_capacity(capacity)
+    }
+
+    pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
+        jet_list_try_push(values, value)
+    }
+
+    pub(super) fn try_list_reserve<T>(
+        values: &mut Vec<T>,
+        additional: i64,
+    ) -> JetOutcome<(), AllocError> {
+        jet_list_try_reserve(values, additional)
+    }
+
+    pub(super) fn try_map_insert_i64(
+        pairs: Vec<(String, i64)>,
+        key: String,
+        value: i64,
+    ) -> (Vec<(String, i64)>, JetOutcome<Option<i64>, AllocError>) {
+        let mut map = JetMap::from_iter(pairs);
+        let result = jet_map_try_insert(&mut map, key, value);
+        let pairs = map.iter().map(|(key, value)| (key.clone(), *value)).collect();
+        (pairs, result)
+    }
+
+    pub(super) fn try_string_push(
+        text: &mut String,
+        addition: &str,
+    ) -> JetOutcome<(), AllocError> {
+        jet_string_try_push(text, addition)
+    }
+
     fn show<T: JetShow>(value: &T) -> String {
         value.jet_show()
     }
@@ -437,6 +474,17 @@ fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     )
 }
 
+fn alloc_error_result(
+    rt: &mut crate::JitRuntime,
+    error: jet_foundation::Outcome::AllocError,
+) -> i64 {
+    let record = rt.heap.alloc_record(2);
+    let allocator = rt.heap.alloc_string(error.allocator);
+    let _ = rt.heap.record_set_int(record, 0, error.requested_bytes);
+    let _ = rt.heap.record_set_string(record, 1, allocator);
+    crate::runtime_host::alloc_jit_result(rt, false, record as u64)
+}
+
 /// Packed Option ABI for `Option(Int)`: 0 = None, value+1 = Some.
 fn option_packed(value: Option<i64>) -> i64 {
     match value {
@@ -504,6 +552,106 @@ extern "C" fn jet_jit_list_push_f64(list: i64, v: f64) {
             .list_push_float(list, v)
             .expect("jit list push f64: bad handle");
     });
+}
+
+extern "C" fn jet_jit_list_try_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match collection_semantics::try_list_new::<i64>() {
+            Ok(values) => {
+                let list = rt.heap.alloc_int_list(values);
+                crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_try_with_capacity(capacity: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match collection_semantics::try_list_with_capacity::<i64>(capacity) {
+            Ok(values) => {
+                let list = rt.heap.alloc_int_list(values);
+                crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_try_push(list: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut values = rt.heap.clone_int_list(list).unwrap_or_default();
+        match collection_semantics::try_list_push(&mut values, value) {
+            Ok(()) => {
+                let _ = rt.heap.replace_int_list(list, values);
+                crate::runtime_host::alloc_jit_result(rt, true, 0)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_try_push_f64(list: i64, value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut values = {
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            (0..len)
+                .map(|index| rt.heap.list_get_float(list, index).unwrap_or_default())
+                .collect::<Vec<_>>()
+        };
+        match collection_semantics::try_list_push(&mut values, value) {
+            Ok(()) => {
+                let _ = rt.heap.replace_float_list(list, values);
+                crate::runtime_host::alloc_jit_result(rt, true, 0)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_try_reserve(list: i64, additional: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut values = rt.heap.clone_int_list(list).expect("jit list try_reserve: bad handle");
+        match collection_semantics::try_list_reserve(&mut values, additional) {
+            Ok(()) => {
+                let _ = rt.heap.replace_int_list(list, values);
+                crate::runtime_host::alloc_jit_result(rt, true, 0)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_try_reserve_f64(list: i64, additional: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).expect("jit list try_reserve f64: bad handle");
+        let mut values = (0..len)
+            .map(|index| rt.heap.list_get_float(list, index).unwrap_or_default())
+            .collect::<Vec<_>>();
+        match collection_semantics::try_list_reserve(&mut values, additional) {
+            Ok(()) => {
+                let _ = rt.heap.replace_float_list(list, values);
+                crate::runtime_host::alloc_jit_result(rt, true, 0)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
+extern "C" fn jet_jit_string_try_push(text: i64, addition: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut value = rt.heap.clone_string(text).unwrap_or_default();
+        let addition = rt.heap.clone_string(addition).unwrap_or_default();
+        match collection_semantics::try_string_push(&mut value, &addition) {
+            Ok(()) => {
+                if let Some(target) = rt.heap.get_string_mut(text) {
+                    *target = value;
+                }
+                crate::runtime_host::alloc_jit_result(rt, true, 0)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
 }
 
 extern "C" fn jet_jit_list_push_range(
@@ -1100,6 +1248,22 @@ extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     });
 }
 
+extern "C" fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key_text = rt.heap.clone_string(key).unwrap_or_default();
+        let pairs = clone_map_pairs_in_runtime(&mut rt.heap, map);
+        let (_, result) = collection_semantics::try_map_insert_i64(pairs, key_text, value);
+        match result {
+            Ok(previous) => {
+                let _ = rt.heap.map_insert(map, key, value);
+                let option = option_i64(rt, previous);
+                crate::runtime_host::alloc_jit_result(rt, true, option as u64)
+            }
+            Err(error) => alloc_error_result(rt, error),
+        }
+    })
+}
+
 extern "C" fn jet_jit_map_increment(map: i64, key: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let current = rt.heap.map_get(map, key).unwrap_or(0);
@@ -1264,27 +1428,24 @@ fn clone_list_floats(list: i64) -> Vec<f64> {
     })
 }
 
+fn clone_map_pairs_in_runtime(heap: &mut jet_rt::JetArena, map: i64) -> Vec<(String, i64)> {
+    let len = heap.map_len(map).expect("jit map adapter: bad handle");
+    (0..len)
+        .map(|index| {
+            let key_id = heap.map_key_at(map, index).expect("jit map adapter: key");
+            let key = heap
+                .clone_string(key_id)
+                .expect("jit map adapter: string key");
+            let value = heap
+                .map_value_at(map, index)
+                .expect("jit map adapter: value");
+            (key, value)
+        })
+        .collect()
+}
+
 fn clone_map_pairs(map: i64) -> Vec<(String, i64)> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.map_len(map).expect("jit map adapter: bad handle");
-        (0..len)
-            .map(|index| {
-                let key_id = rt
-                    .heap
-                    .map_key_at(map, index)
-                    .expect("jit map adapter: key");
-                let key = rt
-                    .heap
-                    .clone_string(key_id)
-                    .expect("jit map adapter: string key");
-                let value = rt
-                    .heap
-                    .map_value_at(map, index)
-                    .expect("jit map adapter: value");
-                (key, value)
-            })
-            .collect()
-    })
+    Concurrency::with_runtime_mut(|rt| clone_map_pairs_in_runtime(&mut rt.heap, map))
 }
 
 fn alloc_from_ints(xs: &[i64]) -> i64 {
@@ -3928,6 +4089,18 @@ host_fns! {
         let mut sig_push_f64 = Signature::new(cc);
         sig_push_f64.params.push(AbiParam::new(types::I64));
         sig_push_f64.params.push(AbiParam::new(types::F64));
+        let sig_try_new = sig_new.clone();
+        let mut sig_try_with_capacity = Signature::new(cc);
+        sig_try_with_capacity.params.push(AbiParam::new(types::I64));
+        sig_try_with_capacity.returns.push(AbiParam::new(types::I64));
+        let mut sig_try_push = sig_push.clone();
+        sig_try_push.returns.push(AbiParam::new(types::I64));
+        let mut sig_try_push_f64 = sig_push_f64.clone();
+        sig_try_push_f64.returns.push(AbiParam::new(types::I64));
+        let mut sig_try_reserve = sig_push.clone();
+        sig_try_reserve.returns.push(AbiParam::new(types::I64));
+        let sig_try_reserve_f64 = sig_try_reserve.clone();
+        let sig_try_string_push = sig_try_push.clone();
         let mut sig_push_range = Signature::new(cc);
         sig_push_range.params.push(AbiParam::new(types::I64));
         sig_push_range.params.push(AbiParam::new(types::I64));
@@ -4024,6 +4197,7 @@ host_fns! {
         sig_map_insert.params.push(AbiParam::new(types::I64));
         let mut sig_three_ret = sig_map_insert.clone();
         sig_three_ret.returns.push(AbiParam::new(types::I64));
+        let sig_try_map_insert = sig_three_ret.clone();
         let mut sig_four_ret = sig_three_ret.clone();
         sig_four_ret.params.push(AbiParam::new(types::I64));
         let sig_map_get = sig_get.clone();
@@ -4055,9 +4229,16 @@ host_fns! {
     }
     io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
     list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
+    list_try_new: "jet_jit_list_try_new" => jet_jit_list_try_new: sig_try_new;
+    list_try_with_capacity: "jet_jit_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
     list_uninit: "jet_jit_list_uninit" => jet_jit_list_uninit: sig_uninit;
     list_push: "jet_jit_list_push" => jet_jit_list_push: sig_push;
     list_push_f64: "jet_jit_list_push_f64" => jet_jit_list_push_f64: sig_push_f64;
+    list_try_push: "jet_jit_list_try_push" => jet_jit_list_try_push: sig_try_push;
+    list_try_push_f64: "jet_jit_list_try_push_f64" => jet_jit_list_try_push_f64: sig_try_push_f64;
+    list_try_reserve: "jet_jit_list_try_reserve" => jet_jit_list_try_reserve: sig_try_reserve;
+    list_try_reserve_f64: "jet_jit_list_try_reserve_f64" => jet_jit_list_try_reserve_f64: sig_try_reserve_f64;
+    string_try_push: "jet_jit_string_try_push" => jet_jit_string_try_push: sig_try_string_push;
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
@@ -4102,6 +4283,7 @@ host_fns! {
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
+    map_try_insert: "jet_jit_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
     map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
     map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
     map_validate: "jet_jit_map_validate" => jet_jit_map_validate: sig_len;

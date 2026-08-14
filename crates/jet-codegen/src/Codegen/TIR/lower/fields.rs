@@ -414,6 +414,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         n if n == Syntax::TYPE_ERR || n == "JetErr" => {
             matches!(member, "message" | "code" | "cause")
         }
+        n if n == Syntax::TYPE_ALLOC_ERROR => {
+            matches!(member, "requested_bytes" | "allocator")
+        }
         "ProcessResult" => matches!(
             member,
             "code" | "output" | "errors" | "success" | "signal" | "timed_out"
@@ -653,6 +656,13 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "expires_at" => Some(Type::Int),
             "not_before" => Some(Type::Option(Box::new(Type::Int))),
             "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_ALLOC_ERROR && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "requested_bytes" => Some(Type::Int),
+            "allocator" => Some(Type::String),
             _ => None,
         };
     }
