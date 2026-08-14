@@ -836,7 +836,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "now_utc", "jet_time_now_utc", true, &[]),
     CoreCallRecord::new("core.time", "from_unix_ms", "JetDateTime::from_unix_ms", false, &[false])
         .with_pure_route(CoreCallPureRoute::Time),
-    CoreCallRecord::new("core.time", "today", "jet_time_today", true, &[]),
+    CoreCallRecord::new("core.time", "today", "jet_time_today", true, &[])
+        .without_direct_aot(), // AOT keeps the typed ambient clock read.
     CoreCallRecord::new("core.time", "parse_rfc3339", "jet_time_parse_rfc3339", true, &[true])
         .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "datetime", "jet_time_datetime", true, &[false, false, false, false, false, false])
