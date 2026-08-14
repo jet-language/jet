@@ -1583,6 +1583,7 @@ fn web_edge_preserves_one_report_across_js_and_wasm() {
     }
     let source = include_str!("../examples/features/errors/default_err_edge.jet");
     let expected = include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
+    let expected_frame_line = format!("frame={expected:?}");
     let harness = r#"
 const { jet_main } = await import("./app.js");
 try {
@@ -1651,10 +1652,9 @@ try {
     assert!(wasm_stdout.contains("message=unhandled default error"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("cause=disk offline"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("journey="), "{wasm_stdout}");
-    assert!(wasm_stdout.contains(&format!("frame={expected:?}")), "{wasm_stdout}");
     assert!(
-        String::from_utf8_lossy(&wasm_run.stderr).contains(expected),
-        "Wasm overlay lost the frame"
+        wasm_stdout.lines().any(|line| line == expected_frame_line.as_str()),
+        "{wasm_stdout}"
     );
 
     let js_source = format!("#Target(JS)\n{source}");
@@ -1686,10 +1686,9 @@ try {
     assert!(js_stdout.contains("message=unhandled default error"), "{js_stdout}");
     assert!(js_stdout.contains("cause=disk offline"), "{js_stdout}");
     assert!(js_stdout.contains("journey="), "{js_stdout}");
-    assert!(js_stdout.contains(&format!("frame={expected:?}")), "{js_stdout}");
     assert!(
-        String::from_utf8_lossy(&js_run.stderr).contains(expected),
-        "JS overlay lost the frame"
+        js_stdout.lines().any(|line| line == expected_frame_line.as_str()),
+        "{js_stdout}"
     );
 
     let dom_harness = r#"
@@ -1725,6 +1724,9 @@ try {
   await jet_main();
   throw new Error("unexpected success");
 } catch (error) {
+  for (const field of ["message", "code", "cause", "journey"]) {
+    if (!(field in error)) throw new Error("typed edge report lost " + field);
+  }
   const returnedFrame = showRuntimeError(error);
   const overlay = document.getElementById("jet-runtime-overlay");
   if (!overlay || overlay.hidden || returnedFrame !== error.frame || overlay.textContent !== error.frame) {
@@ -1750,6 +1752,30 @@ try {
     let _ = fs::remove_dir_all(wasm_dir);
     let _ = fs::remove_dir_all(js_dir);
     let _ = fs::remove_dir_all(cli_dir);
+}
+
+#[test]
+fn web_edge_target_is_build_fact_not_runtime_probe() {
+    let source = include_str!("../examples/features/errors/default_err_edge.jet");
+    let output = jet::compile_web_with_path(source, "examples/features/errors/default_err_edge.jet")
+        .expect("failure-edge example must compile for web");
+    let web = output.web.expect("web target must emit artifacts");
+
+    assert_eq!(web.js_app.matches("const JET_EDGE_TARGET = \"web\";").count(), 1);
+    for runtime_probe in [
+        "_isMain",
+        "process.argv",
+        "process.versions",
+        "typeof process",
+        "window.location",
+        "navigator.userAgent",
+    ] {
+        assert!(!web.js_app.contains(runtime_probe), "runtime target probe survived: {runtime_probe}");
+    }
+    assert!(web.dom_runtime.contains("class JetHostAbiError"));
+    assert!(web.dom_runtime.contains("class JetHostWasmError"));
+    assert!(!web.dom_runtime.contains("throw new Error("));
+    assert!(!include_str!("../crates/jet-codegen/src/Codegen/Web.rs").contains("throw new Error("));
 }
 
 #[test]

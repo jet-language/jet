@@ -11,6 +11,23 @@ export function print(...values) {
   return texts.length ? texts[texts.length - 1] : "";
 }
 
+// Host failures stay distinct from Jet program reports at the edge.
+class JetHostWasmError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "JetHostWasmError";
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+class JetHostAbiError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "JetHostAbiError";
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
 // D-FAIL-EDGE1=A: every browser-visible failure keeps the report frame from
 // the edge object. The overlay uses textContent so report punctuation and
 // source lines are not interpreted as markup.
@@ -629,13 +646,13 @@ export function reactiveRender(body) {
 
 export async function instantiateWasm(wasmPath, imports = {}) {
   if (typeof WebAssembly === "undefined") {
-    throw new Error("WebAssembly is not available in this runtime");
+    throw new JetHostWasmError("WebAssembly is not available in this runtime");
   }
   const source = await loadBytes(wasmPath);
   const memory = { current: null };
   const wasmImports = {
     jet_web_print(ptr, len) {
-      if (!memory.current) throw new Error("Wasm print called before memory was ready");
+      if (!memory.current) throw new JetHostWasmError("Wasm print called before memory was ready");
       const bytes = new Uint8Array(memory.current.buffer, Number(ptr), Number(len));
       print(new TextDecoder().decode(bytes));
     },
@@ -868,21 +885,21 @@ export function unmarshalAbi(value, kind, wasm) {
     let out;
     try {
       const bytes = new Uint8Array(wasm.memory.buffer, ptr, len).slice();
-      if (bytes.length < 4) throw new Error("invalid list-int ABI header");
+      if (bytes.length < 4) throw new JetHostAbiError("invalid list-int ABI header");
       const view = new DataView(bytes.buffer);
       const count = view.getUint32(0, true);
       const dec = new TextDecoder("utf-8", { fatal: true });
       out = [];
       let o = 4;
       for (let i = 0; i < count; i++) {
-        if (o + 4 > bytes.length) throw new Error("invalid list-int ABI length");
+        if (o + 4 > bytes.length) throw new JetHostAbiError("invalid list-int ABI length");
         const valueLen = view.getUint32(o, true);
         o += 4;
-        if (valueLen > bytes.length - o) throw new Error("invalid list-int ABI value");
+        if (valueLen > bytes.length - o) throw new JetHostAbiError("invalid list-int ABI value");
         out.push(BigInt(dec.decode(bytes.subarray(o, o + valueLen))));
         o += valueLen;
       }
-      if (o !== bytes.length) throw new Error("invalid list-int ABI trailing bytes");
+      if (o !== bytes.length) throw new JetHostAbiError("invalid list-int ABI trailing bytes");
     } finally {
       wasm.jet_abi_list_int_free(ptr, len);
     }
@@ -938,28 +955,28 @@ export function unmarshalAbi(value, kind, wasm) {
     } finally {
       wasm.jet_abi_map_string_int_free(ptr, byteLen);
     }
-    if (byteLen < 4) throw new Error("invalid map-string-int ABI header");
+    if (byteLen < 4) throw new JetHostAbiError("invalid map-string-int ABI header");
     const view = new DataView(bytes.buffer);
     const count = view.getUint32(0, true);
     const out = new Map();
     const dec = new TextDecoder("utf-8", { fatal: true });
     let o = 4;
     for (let i = 0; i < count; i++) {
-      if (o + 4 > byteLen) throw new Error("invalid map-string-int ABI key length");
+      if (o + 4 > byteLen) throw new JetHostAbiError("invalid map-string-int ABI key length");
       const len = view.getUint32(o, true);
       o += 4;
       if (len > byteLen - o || byteLen - o - len < 4) {
-        throw new Error("invalid map-string-int ABI entry");
+        throw new JetHostAbiError("invalid map-string-int ABI entry");
       }
       const key = dec.decode(bytes.subarray(o, o + len));
       o += len;
       const valueLen = view.getUint32(o, true);
       o += 4;
-      if (valueLen > byteLen - o) throw new Error("invalid map-string-int ABI value");
+      if (valueLen > byteLen - o) throw new JetHostAbiError("invalid map-string-int ABI value");
       out.set(key, BigInt(dec.decode(bytes.subarray(o, o + valueLen))));
       o += valueLen;
     }
-    if (o !== byteLen) throw new Error("invalid map-string-int ABI trailing bytes");
+    if (o !== byteLen) throw new JetHostAbiError("invalid map-string-int ABI trailing bytes");
     return out;
   }
   if (typeof value === "bigint") {
@@ -975,7 +992,7 @@ async function loadBytes(path) {
   }
   const response = await fetch(path);
   if (!response.ok) {
-    throw new Error(`failed to load wasm module: ${path}`);
+    throw new JetHostWasmError(`failed to load wasm module: ${path}`);
   }
   return response.arrayBuffer();
 }
