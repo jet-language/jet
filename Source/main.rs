@@ -8,6 +8,7 @@
 // Source files/modules use PascalCase names (owner decision).
 #![allow(non_snake_case)]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -239,15 +240,14 @@ impl From<jet::Package::BuildOptimize> for OptimizeLevel {
     }
 }
 
-/// D-BUILDPROFILE1: rustc flags and build env derived from a profile definition.
+/// D-BUILDPROFILE1: rustc flags and typed setting contributions derived from a
+/// profile definition.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ProfileConfig {
     pub optimize: OptimizeLevel,
     pub debug_info: bool,
     pub small: bool,
     pub panic_abort: bool,
-    pub features: Vec<String>,
-    pub env: Vec<(String, String)>,
     pub settings: BTreeMap<String, String>,
 }
 
@@ -258,8 +258,6 @@ impl ProfileConfig {
             debug_info: false,
             small: false,
             panic_abort: false,
-            features: Vec::new(),
-            env: Vec::new(),
             settings: BTreeMap::new(),
         }
     }
@@ -270,8 +268,6 @@ impl ProfileConfig {
             debug_info: true,
             small: false,
             panic_abort: false,
-            features: Vec::new(),
-            env: Vec::new(),
             settings: BTreeMap::new(),
         }
     }
@@ -282,8 +278,6 @@ impl ProfileConfig {
             debug_info: true,
             small: false,
             panic_abort: false,
-            features: Vec::new(),
-            env: Vec::new(),
             settings: BTreeMap::new(),
         }
     }
@@ -295,8 +289,6 @@ impl ProfileConfig {
             debug_info: def.debug_info,
             small: def.small,
             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
-            features: def.features.clone(),
-            env: def.env.clone(),
             settings: def.settings.clone(),
         }
     }
@@ -314,26 +306,12 @@ impl ProfileConfig {
         if self.panic_abort {
             parts.push("panic=abort".into());
         }
-        if !self.features.is_empty() {
-            parts.push(format!("feat:{}", self.features.join("+")));
-        }
-        if !self.env.is_empty() {
-            let mut env = self.env.clone();
-            env.sort_by(|a, b| a.0.cmp(&b.0));
-            parts.push(format!(
-                "env:{}",
-                env.iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                .join(",")
-            ));
-        }
         if !self.settings.is_empty() {
             parts.push(format!(
                 "settings:{}",
                 self.settings
                     .iter()
-                    .map(|(key, value)| format!("{key}={value}"))
+                    .map(|(key, value)| format!("{}:{key}{}:{value}", key.len(), value.len()))
                     .collect::<Vec<_>>()
                     .join(",")
             ));
@@ -374,17 +352,7 @@ impl ProfileConfig {
         if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
             args.extend(["-C".to_string(), "lto=thin".to_string()]);
         }
-        for feat in &self.features {
-            args.push("--cfg".to_string());
-            args.push(format!("feature=\"{feat}\""));
-        }
         args
-    }
-
-    pub(crate) fn apply_env(&self, cmd: &mut Command) {
-        for (key, value) in &self.env {
-            cmd.env(key, value);
-        }
     }
 }
 
@@ -443,8 +411,6 @@ impl BuildProfile {
                 debug_info: false,
                 small: false,
                 panic_abort: false,
-                features: Vec::new(),
-                env: Vec::new(),
                 settings: BTreeMap::new(),
             },
             BuildProfile::Release => ProfileConfig::release(),
@@ -456,8 +422,6 @@ impl BuildProfile {
                 debug_info: false,
                 small: true,
                 panic_abort: true,
-                features: Vec::new(),
-                env: Vec::new(),
                 settings: BTreeMap::new(),
             },
             BuildProfile::Freestanding => ProfileConfig {
@@ -465,8 +429,6 @@ impl BuildProfile {
                 debug_info: false,
                 small: true,
                 panic_abort: true,
-                features: Vec::new(),
-                env: Vec::new(),
                 settings: BTreeMap::new(),
             },
         }
@@ -577,9 +539,11 @@ flags:
   --sbom                       with build: write an SPDX SBOM beside the binary
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
+  --job <name>                 with run: run a named `#Job fn`
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
   --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
   --release                    with build/run/test: optimize for release
+  --set <key=value>            with build/run: set one declared package setting (D-CONF-KEY1)
   --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
   --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
   --locked                     with fetch: verify only, refuse network
@@ -1103,69 +1067,68 @@ fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
 }
 
 fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, String> {
-    let mut overrides = BTreeMap::new();
+    let mut settings = BTreeMap::new();
     let mut index = 0;
     while index < argv.len() {
         let argument = &argv[index];
         let raw = if let Some(value) = argument.strip_prefix("--set=") {
-            Some(value.to_string())
+            value.to_string()
         } else if argument == "--set" {
             match argv.get(index + 1) {
                 Some(value) => {
                     index += 1;
-                    Some(value.clone())
+                    value.clone()
                 }
-                None => None,
+                None => {
+                    emit_cli_report(
+                        "E2104",
+                        "`--set` needs a key=value assignment".to_string(),
+                        "a typed package setting override names one declared key and its value",
+                        "use `--set key=value`",
+                        json,
+                    );
+                    exit(ExitCodes::USAGE);
+                }
             }
         } else {
-            None
+            index += 1;
+            continue;
         };
-        if let Some(raw) = raw {
-            let Some((key, value)) = raw.split_once('=') else {
-                emit_cli_report(
-                    "E2104",
-                    "invalid setting override".to_string(),
-                    "`--set` contributes one key and one value".to_string(),
-                    "use `--set key=value`".to_string(),
-                    json,
-                );
-                exit(ExitCodes::USAGE);
-            };
-            if key.is_empty() || value.is_empty() {
-                emit_cli_report(
-                    "E2104",
-                    "invalid setting override".to_string(),
-                    "a setting override needs a non-empty key and value".to_string(),
-                    "use `--set key=value`".to_string(),
-                    json,
-                );
-                exit(ExitCodes::USAGE);
-            }
-            if overrides.insert(key.to_string(), value.to_string()).is_some() {
-                emit_cli_report(
-                    "E2104",
-                    format!("setting `{key}` is set more than once"),
-                    "one invocation must provide one unambiguous setting value".to_string(),
-                    format!("keep one `--set {key}=value`"),
-                    json,
-                );
-                exit(ExitCodes::USAGE);
-            }
-        } else if argument == "--set" {
+        let Some((key, value)) = raw.split_once('=') else {
             emit_cli_report(
                 "E2104",
                 "`--set` needs a key=value assignment".to_string(),
-                "the setting contribution is parsed before the package is compiled".to_string(),
-                "use `--set key=value`".to_string(),
+                "a typed package setting override names one declared key and its value",
+                "use `--set key=value`",
+                json,
+            );
+            exit(ExitCodes::USAGE);
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            emit_cli_report(
+                "E2104",
+                "`--set` needs a non-empty key".to_string(),
+                "the compiler must be able to resolve one declared setting before it parses the value",
+                "use `--set key=value` with a declared key",
+                json,
+            );
+            exit(ExitCodes::USAGE);
+        }
+        if settings.insert(key.to_string(), value.trim().to_string()).is_some() {
+            emit_cli_report(
+                "E2104",
+                format!("setting `{key}` is assigned more than once"),
+                "one invocation must contribute one unambiguous value for each declared setting",
+                "remove the duplicate `--set` assignment",
                 json,
             );
             exit(ExitCodes::USAGE);
         }
         index += 1;
     }
-    overrides
+    settings
 }
-
 /// Find an external `jet-<cmd>` executable on PATH (D-DX5).
 fn find_external(cmd: &str) -> Option<PathBuf> {
     let exe = format!("{}-{}", jet::Syntax::BINARY_NAME, cmd);
@@ -1362,7 +1325,30 @@ fn main() {
     } else {
         profile_flag
     };
-    let setting_overrides = parse_setting_overrides(jet_argv, json);
+    // D-JPK-TASKRUN1: `jet run --job <name>` / `--job=<name>`.
+    let job_name: Option<String> = {
+        let mut found = None;
+        let mut i = 0;
+        while i < jet_argv.len() {
+            let a = &jet_argv[i];
+            if let Some(value) = a.strip_prefix("--job=") {
+                found = Some(value.to_string());
+                break;
+            }
+            if a == "--job" {
+                found = Some(
+                    jet_argv
+                        .get(i + 1)
+                        .filter(|value| !value.starts_with('-'))
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                break;
+            }
+            i += 1;
+        }
+        found
+    };
     let output_name: Option<String> = {
         let mut found = None;
         let mut i = 0;
@@ -1390,6 +1376,7 @@ fn main() {
     // OutputMode already reaches (build/run/test/dev/fmt/publish/doctor/…).
     // Criterion 3 says "one spelling" — no `-q` short alias.
     let quiet = jet_argv.iter().any(|a| a == "--quiet");
+    let setting_overrides = parse_setting_overrides(jet_argv, json);
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
@@ -1408,7 +1395,7 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" {
+            if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" {
                 skip_next = true;
                 continue;
             }
@@ -2198,7 +2185,7 @@ fn main() {
             // unreachable on any file that also declared #Target(Web), e.g.
             // ui_web_click.jet, which has both.)
             if has_dev_entry_fn(file) {
-                run_dev_entry(file, mode);
+                run_dev_entry(file, mode, &setting_overrides);
                 return;
             }
             if entry_returns_app(file) {
@@ -2219,9 +2206,10 @@ fn main() {
                         mode,
                         true,
                         named_profile.as_deref().unwrap_or("dev"),
+                        &setting_overrides,
                     );
                 }
-                run_web_app_dev_entry(file, mode, dev_port);
+                run_web_app_dev_entry(file, mode, dev_port, &setting_overrides);
                 return;
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
@@ -2234,7 +2222,7 @@ fn main() {
             if effective_target("dev", file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
             {
-                run_dev_web(file, mode, verbose, dev_port);
+                run_dev_web(file, mode, verbose, dev_port, &setting_overrides);
                 return;
             }
             run_dev(
@@ -2245,6 +2233,7 @@ fn main() {
                 mode,
                 use_interpreter,
                 named_profile.as_deref().unwrap_or("dev"),
+                &setting_overrides,
             );
             return;
         }
@@ -2485,6 +2474,7 @@ fn main() {
                                         mode,
                                         use_interpreter,
                                         named_profile.as_deref().unwrap_or("dev"),
+                                        &setting_overrides,
                                     );
                                     return;
                                 }
@@ -2720,6 +2710,14 @@ fn main() {
                 target.to_string()
             };
             if cmd == "run" {
+                if let Some(job) = job_name.as_deref() {
+                    if job.is_empty() {
+                        crate::cli_error!(@fix "E2104", "`--job` needs a job name", format!("write `jet run --job <name> <file.{}>`", jet::Syntax::FILE_EXT));
+                        exit(ExitCodes::USAGE);
+                    }
+                    run_job_entry(&resolved, job, &program_args, mode, &setting_overrides);
+                    return;
+                }
                 // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
                 // aware engine; `jet dev` keeps the richer swap/overlay surface.
                 if run_wants_watch(&raw) {
@@ -2733,6 +2731,7 @@ fn main() {
                         mode,
                         use_interpreter,
                         named_profile.as_deref().unwrap_or("dev"),
+                        &setting_overrides,
                     );
                     return;
                 }

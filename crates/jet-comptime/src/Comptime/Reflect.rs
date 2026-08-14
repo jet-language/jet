@@ -1053,11 +1053,11 @@ pub fn fact_read_value(
         return None;
     };
     if let Some(path) = fact_path(expr) {
+        if let Some(key) = jet_foundation::Registry::build_setting_key(&path) {
+            return build_setting_value(build_facts, key);
+        }
         if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
             return build_fact_value(build_facts, read);
-        }
-        if let Some(name) = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
-            return build_setting_value(build_facts, name);
         }
     }
     let is_build_subject = matches!(subject.as_ref(), Expr::ComptimeName { name, .. } if name == "@build");
@@ -1151,35 +1151,20 @@ pub fn build_fact_value(
     snapshot: &jet_foundation::Facts::BuildFactSnapshot,
     read: jet_foundation::Registry::FactRead,
 ) -> Option<CtValue> {
-    match snapshot.value(read)? {
-        jet_foundation::Facts::BuildFactValue::Text(value) => Some(CtValue::Str(value)),
-        jet_foundation::Facts::BuildFactValue::OptionalText(Some(value)) => {
-            Some(CtValue::Present(Box::new(CtValue::Str(value))))
-        }
-        jet_foundation::Facts::BuildFactValue::OptionalText(None) => {
-            Some(CtValue::absent(crate::AST::Type::String))
-        }
-        jet_foundation::Facts::BuildFactValue::Bool(value) => Some(CtValue::Bool(value)),
-        jet_foundation::Facts::BuildFactValue::Int(value) => Some(CtValue::Int(value)),
-        jet_foundation::Facts::BuildFactValue::Char(value) => Some(CtValue::Char(value)),
-        jet_foundation::Facts::BuildFactValue::Enum { type_name, variant } => Some(CtValue::Enum {
-            type_name,
-            variant,
-            args: Vec::new(),
-        }),
-    }
+    build_fact_scalar(snapshot.value(read)?)
 }
 
-/// D-CONF-MODULE1=A: settings use the same CtValue conversion as registered
-/// build facts. The evaluator, not an execution tier, owns the result.
+/// Resolve one declared setting from the already-seeded build snapshot.
+/// Settings and the fixed build facts share this conversion so the top-level
+/// comptime evaluator and ordinary sema inference cannot disagree.
 pub fn build_setting_value(
     snapshot: &jet_foundation::Facts::BuildFactSnapshot,
-    name: &str,
+    key: &str,
 ) -> Option<CtValue> {
-    build_fact_value_from_value(snapshot.setting_value(name)?)
+    build_fact_scalar(snapshot.setting(key)?.value.clone())
 }
 
-fn build_fact_value_from_value(value: jet_foundation::Facts::BuildFactValue) -> Option<CtValue> {
+fn build_fact_scalar(value: jet_foundation::Facts::BuildFactValue) -> Option<CtValue> {
     match value {
         jet_foundation::Facts::BuildFactValue::Text(value) => Some(CtValue::Str(value)),
         jet_foundation::Facts::BuildFactValue::OptionalText(Some(value)) => {

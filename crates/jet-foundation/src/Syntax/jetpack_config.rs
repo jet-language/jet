@@ -602,11 +602,11 @@ pub const STALE_MANIFEST_NAMES: &[&str] = &["pack.jet", "payload.jet", "jet.toml
 pub const MANIFEST_FIELD_NAME: &str = "name";
 pub const MANIFEST_FIELD_VERSION: &str = "version";
 
-/// D-CONF-NAME1=A: the block nouns of the one Package manifest vocabulary,
-/// alongside `MANIFEST_BLOCK_PACKAGES`/`MANIFEST_BLOCK_BUILD`/
+/// D-CONF-NAME1/D-CONF-KEY1=A: the block nouns of the one Package manifest
+/// vocabulary, alongside `MANIFEST_BLOCK_PACKAGES`/`MANIFEST_BLOCK_BUILD`/
 /// `MANIFEST_BLOCK_EFFECTS`/`MANIFEST_BLOCK_GRANTS`/`MANIFEST_BLOCK_POLICY`
-/// (each already declared with its own decision). `settings:` is structural
-/// only until D-CONF-KEY1 (typed reads) is ratified.
+/// (each already declared with its own decision). `settings:` declares the
+/// typed build facts consumed by `@build.settings.*`.
 pub const MANIFEST_BLOCK_DEPS: &str = "deps";
 pub const MANIFEST_BLOCK_OUTPUTS: &str = "outputs";
 pub const MANIFEST_BLOCK_SETTINGS: &str = "settings";

@@ -520,8 +520,6 @@ pub struct BuildProfileDef {
     pub debug_info: bool,
     pub small: bool,
     pub panic: Option<BuildPanic>,
-    pub features: Vec<String>,
-    pub env: Vec<(String, String)>,
     /// D-CONF-MODULE1=A: profile contributions to declared typed settings.
     pub settings: BTreeMap<String, String>,
 }
@@ -552,8 +550,6 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let mut debug_info = false;
         let mut small = false;
         let mut panic = None;
-        let mut features = Vec::new();
-        let mut env = Vec::new();
         let mut settings = BTreeMap::new();
         let mut seen_fields = HashSet::new();
         for (key, val) in key_value_entries(inner)? {
@@ -573,39 +569,26 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     s if s == Syntax::BUILD_PANIC_UNWIND => BuildPanic::Unwind,
                     _ => return Err(err(format!("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))),
                 });
-            } else if key == Syntax::BUILD_FIELD_FEATURES {
-                features = parse_string_list(&val)
-                    .map_err(|_| err(format!("build profile `{name}` needs `features: [ \"name\", … ]`")))?;
-            } else if key == Syntax::BUILD_FIELD_ENV {
-                let inner = val
-                    .strip_prefix('{')
-                    .and_then(|s| s.strip_suffix('}'))
-                    .map(|s| s.trim())
-                    .ok_or_else(|| err(format!("build profile `{name}` needs `env: {{ KEY: \"value\", … }}`")))?;
-                let mut seen_env = HashSet::new();
-                for (k, v) in key_value_entries(inner)? {
-                    if !seen_env.insert(k.clone()) {
-                        return Err(err(format!("build profile `{name}.env.{k}` is declared more than once")));
-                    }
-                    env.push((k, unquote(&v)));
-                }
             } else if key == Syntax::BUILD_FIELD_SETTINGS {
                 let inner = val
-                    .as_str()
-                    .strip_prefix('.')
-                    .unwrap_or(val.as_str())
+                    .trim_start_matches('.')
+                    .trim()
                     .strip_prefix('{')
                     .and_then(|s| s.strip_suffix('}'))
                     .map(|s| s.trim())
-                    .ok_or_else(|| err(format!("build profile `{name}` needs `settings: {{ key: value, … }}`")))?;
-                for (key, value) in key_value_entries(inner)? {
-                    if settings.insert(key.clone(), unquote(&value)).is_some() {
-                        return Err(err(format!("build profile `{name}.settings.{key}` is declared more than once")));
+                    .ok_or_else(|| err(format!("build profile `{name}` needs `settings: .{{ key: value, … }}`")))?;
+                for (k, v) in key_value_entries(inner)? {
+                    if settings.insert(k.clone(), unquote(&v)).is_some() {
+                        return Err(err(format!("build profile `{name}.settings.{k}` is declared more than once")));
                     }
                 }
+            } else if matches!(key.as_str(), Syntax::RETIRED_BUILD_FIELD_FEATURES | Syntax::RETIRED_BUILD_FIELD_ENV) {
+                return Err(err(format!(
+                    "build profile `{name}` uses retired `{key}:`; declare a typed `settings: .{{ key: Type = default }}` entry and override it with `--set key=value`"
+                )));
             } else {
                 return Err(err(format!(
-                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, features, env, settings)"
+                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, settings)"
                 )));
             }
         }
@@ -619,7 +602,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                 )))
             }
         };
-        profiles.push(BuildProfileDef { name, optimize, debug_info, small, panic, features, env, settings });
+        profiles.push(BuildProfileDef { name, optimize, debug_info, small, panic, settings });
     }
     Ok(profiles)
 }

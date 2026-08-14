@@ -40,7 +40,12 @@ fn run() { print(tuned.slots()) }
             false,
         )
         .expect("load profile fact source");
-        jet::Driver::seed_build_facts(&mut bundle, profile, false)
+        jet::Driver::seed_build_facts(
+            &mut bundle,
+            profile,
+            false,
+            &std::collections::BTreeMap::new(),
+        )
             .expect("seed profile settings");
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
         assert!(

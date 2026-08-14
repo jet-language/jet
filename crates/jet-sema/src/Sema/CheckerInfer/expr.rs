@@ -35,6 +35,32 @@ impl<'a> Checker<'a> {
             return None;
         };
         if let Some(path) = path {
+            if let Some(key) = jet_foundation::Registry::build_setting_key(&path) {
+                let snapshot = self
+                    .modules
+                    .and_then(|modules| modules.get(self.module_idx))
+                    .map(|state| &state.build_facts);
+                let Some(snapshot) = snapshot else {
+                    return Some(None);
+                };
+                let Some(value) = crate::Comptime::build_setting_value(snapshot, key) else {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!("`@build.settings.{key}` is undeclared"),
+                        "a setting must be declared with a type and default in the package manifest before it can be read",
+                        format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
+                        Some(*span),
+                    ));
+                    return Some(None);
+                };
+                let ty = value.jet_type();
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.setting.{}", span.start),
+                    span: *span,
+                    value: Some(value),
+                };
+                return Some(Some(ty));
+            }
             if let Some(read) = jet_foundation::Registry::build_fact_read(&path) {
                 let snapshot = self
                     .modules

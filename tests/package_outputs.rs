@@ -159,3 +159,85 @@ fn entry_resolution_requires_the_outputs_block() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+fn typed_settings_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/typed_settings")
+}
+
+fn typed_settings_output(tls: &str) -> String {
+    format!("tls-{tls}\nhttps://api.example.com\n")
+}
+
+#[test]
+fn typed_settings_preserves_tier_parity_and_cli_override() {
+    let dir = typed_settings_dir();
+    let expected = typed_settings_output("on");
+
+    for args in [vec!["run"], vec!["run", "--interpret"]] {
+        let output = Command::new(jet_bin())
+            .args(&args)
+            .current_dir(&dir)
+            .output()
+            .expect("typed settings run should execute");
+        assert!(
+            output.status.success(),
+            "typed settings {:?} failed:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    }
+
+    let build_dir = dir.join("build");
+    let _ = fs::remove_dir_all(&build_dir);
+    let build = Command::new(jet_bin())
+        .arg("build")
+        .current_dir(&dir)
+        .output()
+        .expect("typed settings AOT build should execute");
+    assert!(
+        build.status.success(),
+        "typed settings AOT build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = build_dir.join("main");
+    let aot = Command::new(&binary)
+        .output()
+        .expect("typed settings AOT binary should execute");
+    assert!(aot.status.success());
+    assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+
+    let explain = Command::new(jet_bin())
+        .args(["explain", "build.settings.tls"])
+        .current_dir(&dir)
+        .output()
+        .expect("typed settings explain should execute");
+    assert!(explain.status.success());
+    let explanation = String::from_utf8_lossy(&explain.stdout);
+    assert!(explanation.contains("CLI: --set tls=<value>"));
+    assert!(explanation.contains("profile.release: false"));
+    assert!(explanation.contains("default: Bool = true"));
+
+    let _ = fs::remove_dir_all(&build_dir);
+    let override_build = Command::new(jet_bin())
+        .args(["build", "--set", "tls=false"])
+        .current_dir(&dir)
+        .output()
+        .expect("typed settings CLI override should execute");
+    assert!(
+        override_build.status.success(),
+        "typed settings CLI override failed:\n{}",
+        String::from_utf8_lossy(&override_build.stderr)
+    );
+    let overridden = Command::new(&binary)
+        .output()
+        .expect("typed settings override binary should execute");
+    assert!(overridden.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&overridden.stdout),
+        typed_settings_output("off")
+    );
+
+    let _ = fs::remove_dir_all(&build_dir);
+}

@@ -631,6 +631,19 @@ pub fn build_fact_read(path: &str) -> Option<FactRead> {
         .then_some(read)
 }
 
+/// Resolve one declared setting key through the registered Build.Settings
+/// fact row. The key is intentionally returned as a slice of the source path;
+/// declaration and value lookup remain owned by the build snapshot.
+pub fn build_setting_key(path: &str) -> Option<&str> {
+    let key = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX)?;
+    if key.is_empty() || key.contains('.') {
+        return None;
+    }
+    row("Build.Settings")
+        .is_some_and(|registered| registered.kind() == RowKind::Fact)
+        .then_some(key)
+}
+
 /// The one authority for the non-code registration rows.
 pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
 

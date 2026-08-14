@@ -1,0 +1,14 @@
+// D-CONF-KEY1 / I9: the setting switch and constant read are both folded
+// before the program reaches AOT, Cranelift, or the interpreter.
+@if @build.settings.tls == {
+    true -> { print("tls-on") }
+    else -> { print("tls-off") }
+}
+
+fn base_url() => String {
+    return @build.settings.api_base
+}
+
+fn run() {
+    print(base_url())
+}

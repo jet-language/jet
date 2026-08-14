@@ -119,6 +119,7 @@ pub mod Publish;
 pub mod Store;
 
 use Diagnostics::Diagnostic;
+use std::collections::BTreeMap;
 
 fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     // D-FRONTENDAPI1=A: install the one read-only Core compiler callback for
@@ -180,9 +181,27 @@ pub fn compile_with_target_and_gates_and_profile(
     cross_target: Option<&str>,
     profile: &str,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_with_target_and_gates_and_profile_and_settings(
+        src,
+        file,
+        gates,
+        cross_target,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_with_target_and_gates_and_profile_and_settings(
+    src: &str,
+    file: &str,
+    gates: Policy::GateSet,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     let _ = src;
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_with_profile(
+        Driver::compile_bundle_path_opts_with_profile_and_settings(
             file,
             Sema::CompileMode::Run,
             false,
@@ -190,6 +209,7 @@ pub fn compile_with_target_and_gates_and_profile(
             false,
             cross_target,
             profile,
+            setting_overrides,
         )
     })
 }
@@ -197,9 +217,25 @@ pub fn compile_with_target_and_gates_and_profile(
 /// Front-end check for a file on disk (and its imports). Library modules
 /// need not define `main`; use `compile_with_path` when building or running.
 pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
+    check_with_path_and_settings(file, &BTreeMap::new())
+}
+
+pub fn check_with_path_and_settings(
+    file: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Vec<Diagnostic> {
     with_compiler_stack(|| {
         if let Some(diagnostics) = check_workspace_file(file) {
             return diagnostics;
+        }
+        if !setting_overrides.is_empty() {
+            return jet_driver::Driver::check_file_with_effect_facts_and_settings(
+                file,
+                None,
+                false,
+                setting_overrides,
+            )
+            .0;
         }
         let mut queries = jet_driver::QueryService::CompilerQueries::new();
         queries.check_disk(file, true).diagnostics.as_ref().clone()
@@ -265,9 +301,41 @@ pub fn compile_freestanding_with_gates(file: &str, gates: Policy::GateSet) -> Re
     compile_bundle_path_opts(file, Sema::CompileMode::Run, true, gates, false, None)
 }
 
+pub fn compile_freestanding_with_gates_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_settings(
+        file,
+        Sema::CompileMode::Run,
+        true,
+        gates,
+        false,
+        None,
+        setting_overrides,
+    )
+}
+
 /// Compile with the selected audited-gate invocation permissions.
 pub fn compile_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, None)
+}
+
+pub fn compile_with_gates_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_settings(
+        file,
+        Sema::CompileMode::Run,
+        false,
+        gates,
+        false,
+        None,
+        setting_overrides,
+    )
 }
 
 /// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
@@ -348,6 +416,34 @@ pub fn compile_programmable_build_opts_with_builder_and_profile(
     remote_builder: Option<&str>,
     profile: &str,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder_and_profile_and_settings(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -360,6 +456,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile(
         false,
         remote_builder,
         profile,
+        setting_overrides,
     )
 }
 
@@ -427,6 +524,34 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
     remote_builder: Option<&str>,
     profile: &str,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -439,6 +564,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
         true,
         remote_builder,
         profile,
+        setting_overrides,
     )
 }
 
@@ -454,6 +580,7 @@ fn compile_programmable_build_opts_inner(
     emit_generated: bool,
     remote_builder: Option<&str>,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -481,6 +608,7 @@ fn compile_programmable_build_opts_inner(
                 emit_generated,
                 remote,
                 profile,
+                setting_overrides,
                 checked_workspace,
             );
         }
@@ -504,6 +632,7 @@ fn compile_programmable_build_opts_inner(
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
                 profile: profile.to_string(),
+                setting_overrides: setting_overrides.clone(),
                 remote,
             },
         )?;
@@ -530,6 +659,7 @@ fn compile_workspace_build_opts(
     emit_generated: bool,
     remote: Option<Comptime::Build::RemoteBuildBinding>,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
@@ -616,6 +746,7 @@ fn compile_workspace_build_opts(
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
                 profile: profile.to_string(),
+                setting_overrides: BTreeMap::new(),
                 remote: remote.clone(),
             },
         )?;
@@ -682,6 +813,7 @@ fn compile_workspace_build_opts(
             plugin_target,
             cross_target: cross_target.map(str::to_string),
             profile: profile.to_string(),
+            setting_overrides: setting_overrides.clone(),
             remote,
         },
     )?;
@@ -1344,14 +1476,36 @@ fn compile_bundle_path_opts(
     web_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_settings(
+        file,
+        mode,
+        freestanding,
+        gates,
+        web_target,
+        cross_target,
+        &BTreeMap::new(),
+    )
+}
+
+fn compile_bundle_path_opts_with_settings(
+    file: &str,
+    mode: Sema::CompileMode,
+    freestanding: bool,
+    gates: Policy::GateSet,
+    web_target: bool,
+    cross_target: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts(
+        Driver::compile_bundle_path_opts_with_profile_and_settings(
             file,
             mode,
             freestanding,
             gates,
             web_target,
             cross_target,
+            "dev",
+            setting_overrides,
         )
     })
 }
@@ -1365,9 +1519,41 @@ pub fn compile_web_with_gates(file: &str, gates: Policy::GateSet) -> Result<Comp
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, true, None)
 }
 
+pub fn compile_web_with_gates_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_settings(
+        file,
+        Sema::CompileMode::Run,
+        false,
+        gates,
+        true,
+        None,
+        setting_overrides,
+    )
+}
+
 pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         Driver::compile_bundle_path_opts_plugin_with_gates(file, Sema::CompileMode::Check, gates, Some(Syntax::TARGET_SANDBOX))
+    })
+}
+
+pub fn compile_plugin_with_gates_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_plugin_with_gates_and_settings(
+            file,
+            Sema::CompileMode::Check,
+            gates,
+            Some(Syntax::TARGET_SANDBOX),
+            setting_overrides,
+        )
     })
 }
 
@@ -1404,6 +1590,23 @@ pub fn compile_library_with_gates(file: &str, output: Option<&str>, gates: Polic
     })
 }
 
+pub fn compile_library_with_gates_and_settings(
+    file: &str,
+    output: Option<&str>,
+    gates: Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_library_with_gates_and_settings(
+            file,
+            Sema::CompileMode::Check,
+            gates,
+            output,
+            setting_overrides,
+        )
+    })
+}
+
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
@@ -1426,7 +1629,17 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 /// swapped in as the program's real entry point instead of `run()` (see
 /// `Driver::compile_bundle_path_with_entry`).
 pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    with_compiler_stack(|| Driver::compile_bundle_path_with_entry(file, entry_fn))
+    compile_with_entry_and_settings(file, entry_fn, &BTreeMap::new())
+}
+
+pub fn compile_with_entry_and_settings(
+    file: &str,
+    entry_fn: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_with_entry_and_settings(file, entry_fn, setting_overrides)
+    })
 }
 
 /// Compile one explicitly addressed runnable Output.
@@ -1443,8 +1656,30 @@ pub fn compile_output_with_options(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_output_with_options_and_settings(
+        file,
+        output,
+        freestanding,
+        gates,
+        web_target,
+        plugin_target,
+        cross_target,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_output_with_options_and_settings(
+    file: &str,
+    output: &str,
+    freestanding: bool,
+    gates: Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_output_opts(
+        Driver::compile_bundle_path_output_opts_with_settings(
             file,
             output,
             freestanding,
@@ -1452,6 +1687,7 @@ pub fn compile_output_with_options(
             web_target,
             plugin_target,
             cross_target,
+            setting_overrides,
         )
     })
 }

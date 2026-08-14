@@ -240,7 +240,7 @@ pub struct PackagePolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingDecl {
     pub ty: String,
-    pub default: Option<String>,
+    pub default: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -370,7 +370,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};configs={:?};settings={:?};build_profiles={:?};members={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};",
             self.name,
             self.version,
             self.jet,
@@ -380,9 +380,9 @@ impl PackageFacts {
             self.outputs,
             self.environments,
             self.defaults,
-            self.configs,
-            self.settings,
             self.build_profiles,
+            self.settings,
+            self.configs,
             self.members,
         )
         .expect("writing to a String cannot fail");
@@ -2606,25 +2606,45 @@ fn service_field_allowed(field: &str) -> bool {
     )
 }
 
-/// `settings: .{ tls: Bool = true, api_base: String }` — a name, a Tier-0
-/// type, and an optional default (D-CONF-NAME1). Structural only.
+/// `settings: .{ tls: Bool = true, api_base: String = "…" }` — a name, a
+/// Tier-0 type, and a required default (D-CONF-KEY1).
 fn parse_settings(value: &str) -> Result<BTreeMap<String, SettingDecl>, PackageParseError> {
     let mut out = BTreeMap::new();
     for (key, raw) in record_entries(value, "settings")? {
         let key = key.trim_matches('"').to_string();
-        let (ty, default) = match raw.split_once('=') {
-            Some((ty, default)) => (ty.trim().to_string(), Some(scalar(default))),
-            None => (raw.trim().to_string(), None),
+        let Some((ty, default)) = raw.split_once('=') else {
+            return Err(PackageParseError::InvalidValue {
+                field: format!("settings.{key}"),
+                value: raw,
+            });
         };
+        let ty = ty.trim().to_string();
+        let default = scalar(default);
         if ty.is_empty() {
+            return Err(PackageParseError::InvalidValue {
+                field: format!("settings.{key}"),
+                value: ty,
+            });
+        }
+        if !is_setting_key(&key) {
             return Err(PackageParseError::InvalidValue {
                 field: format!("settings.{key}"),
                 value: raw,
             });
         }
-        out.insert(key, SettingDecl { ty, default });
+        if out.insert(key.clone(), SettingDecl { ty, default }).is_some() {
+            return Err(PackageParseError::Composition(format!(
+                "`settings.{key}` is declared more than once"
+            )));
+        }
     }
     Ok(out)
+}
+
+fn is_setting_key(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn parse_string_map(

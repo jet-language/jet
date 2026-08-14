@@ -1,6 +1,7 @@
 //! dev / repl / doctor / explain / completions / bind / eval / emit / bench
 //! developer-tooling subcommand handlers.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::process::{exit, Command};
 
 use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
+use jet_foundation::JSON::json_escape;
 
 use crate::CmdCompile::{build, collect_source_files_recursive, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
@@ -28,6 +30,7 @@ pub(crate) fn run_dev(
     mode: OutputMode,
     use_interpreter: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
@@ -37,12 +40,13 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+        let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
             file,
             try_anyway,
             use_interpreter,
             gates,
             profile,
+            setting_overrides,
         );
         render_dev_outcome(&outcome, file, mode);
         exit_dev_outcome(outcome);
@@ -61,6 +65,7 @@ pub(crate) fn run_dev(
         mode,
         use_interpreter,
         profile,
+        setting_overrides,
     );
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
     let mut watch = match jet_devserver::WatchSession::open(path) {
@@ -102,6 +107,7 @@ pub(crate) fn run_dev(
                 mode,
                 use_interpreter,
                 profile,
+                setting_overrides,
             );
             // Transactional hot replacement: commit only when the new bundle
             // loaded; otherwise keep the prior session valid.
@@ -282,14 +288,20 @@ fn render_dev_change(
     mode: OutputMode,
     use_interpreter: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::AST::ProgramBundle> {
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
-            if let Err(seed_diags) = jet::Driver::seed_build_facts(&mut b, profile, false) {
+            if let Err(diags) = jet::Driver::seed_build_facts(
+                &mut b,
+                profile,
+                false,
+                setting_overrides,
+            ) {
                 let src = fs::read_to_string(file).unwrap_or_default();
                 println!("\n— {} changed —", file);
-                report_problems(mode, file, &src, &seed_diags);
+                report_problems(mode, file, &src, &diags);
                 return None;
             }
             let diags = jet::Sema::check_bundle_gates(&mut b, jet::Sema::CompileMode::Run, gates);
@@ -384,12 +396,13 @@ fn render_dev_change(
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+        let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
             file,
             try_anyway,
             use_interpreter,
             gates,
             profile,
+            setting_overrides,
         );
         render_dev_outcome(&outcome, file, mode);
     }
@@ -475,24 +488,43 @@ fn render_dev_iteration(
     mode: OutputMode,
     use_interpreter: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let outcome = jet::Interpreter::dev_iteration_with_gates_profile(
+    let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
         file,
         try_anyway,
         use_interpreter,
         gates,
         profile,
+        setting_overrides,
     );
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
     let bundle = if ran_ok {
-        jet::Loader::load_entry(file).ok().and_then(|mut bundle| {
-            jet::Driver::seed_build_facts(&mut bundle, profile, false).ok()?;
-            let diagnostics = jet::Sema::check_bundle_gates(&mut bundle, jet::Sema::CompileMode::Run, gates);
-            render_dev_lints(file, mode, &diagnostics);
-            Some(bundle)
-        })
+        match jet::Loader::load_entry(file) {
+            Ok(mut bundle) => {
+                if let Err(diags) = jet::Driver::seed_build_facts(
+                    &mut bundle,
+                    profile,
+                    false,
+                    setting_overrides,
+                ) {
+                    let source = fs::read_to_string(file).unwrap_or_default();
+                    report_problems(mode, file, &source, &diags);
+                    None
+                } else {
+                    let diagnostics = jet::Sema::check_bundle_gates(
+                        &mut bundle,
+                        jet::Sema::CompileMode::Run,
+                        gates,
+                    );
+                    render_dev_lints(file, mode, &diagnostics);
+                    Some(bundle)
+                }
+            }
+            Err(_) => None,
+        }
     } else {
         None
     };
@@ -1627,7 +1659,12 @@ pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: Out
             }
             exit(ExitCodes::USER_ERROR);
         });
-        if let Err(diags) = jet::Driver::seed_build_facts(&mut bundle, "dev", false) {
+        if let Err(diags) = jet::Driver::seed_build_facts(
+            &mut bundle,
+            "dev",
+            false,
+            &BTreeMap::new(),
+        ) {
             for diagnostic in diags {
                 eprintln!("{}", diagnostic.what);
             }
@@ -1650,6 +1687,10 @@ pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: Out
         print!("{}", jet::Explain::render(&explanation, color));
         return;
     }
+    if let Some(key) = code.strip_prefix("build.settings.") {
+        run_explain_setting(key, mode);
+        return;
+    }
     match jet::Explain::lookup(code) {
         Some(ex) => {
             let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
@@ -1659,6 +1700,103 @@ pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: Out
             crate::cli_error!(@fix "E2104", format!("no diagnostic code `{}` exists", code), format!("run a command that reports an error to see its code, e.g. `{} check file.{}`", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT));
             exit(ExitCodes::USER_ERROR);
         }
+    }
+}
+
+fn run_explain_setting(key: &str, mode: OutputMode) {
+    if key.is_empty() || key.contains('.') {
+        crate::emit_cli_report(
+            "E0302",
+            format!("`build.settings.{key}` is not a declared setting"),
+            "jet explain names declared package settings and their writers".to_string(),
+            "use `jet explain build.settings.<name>` for one declared setting".to_string(),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let Some(root) = jet::Loader::find_manifest_root(&cwd) else {
+        crate::emit_cli_report(
+            "E0302",
+            format!("`build.settings.{key}` is undeclared"),
+            "settings are declared in the package manifest".to_string(),
+            format!("add `{key}: Type = default` to `package.jet`"),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    };
+    let Some(manifest_path) = jet::Loader::manifest_path(&root) else {
+        crate::emit_cli_report(
+            "E0302",
+            format!("`build.settings.{key}` is undeclared"),
+            "settings are declared in the package manifest".to_string(),
+            format!("add `{key}: Type = default` to `package.jet`"),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    };
+    let manifest = match jet::Package::PackageFacts::load(&root) {
+        Some(Ok(manifest)) => manifest,
+        Some(Err(error)) => {
+            crate::emit_cli_report(
+                "E1206",
+                "package manifest is not valid".to_string(),
+                error.to_string(),
+                "fix `package.jet` before explaining a setting".to_string(),
+                mode.json,
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+        None => unreachable!("manifest path was found but package facts were absent"),
+    };
+    let Some(declaration) = manifest.settings.get(key) else {
+        crate::emit_cli_report(
+            "E0302",
+            format!("`build.settings.{key}` is undeclared"),
+            format!("`{}` contains no declaration for this setting", manifest_path.display()),
+            format!("add `{key}: Type = default` to `{}`", manifest_path.display()),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    };
+    let profiles = manifest
+        .build_profiles
+        .iter()
+        .filter_map(|profile| {
+            profile
+                .settings
+                .get(key)
+                .map(|value| (profile.name.as_str(), value.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let cli = format!("--set {key}=<value>");
+    if mode.json {
+        let profile_json = profiles
+            .iter()
+            .map(|(name, value)| {
+                format!(
+                    "{{\"name\":\"{}\",\"value\":\"{}\"}}",
+                    json_escape(name),
+                    json_escape(value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"setting\":\"{}\",\"type\":\"{}\",\"default\":\"{}\",\"cli\":\"{}\",\"profiles\":[{}]}}",
+            json_escape(key),
+            json_escape(&declaration.ty),
+            json_escape(&declaration.default),
+            json_escape(&cli),
+            profile_json,
+        );
+    } else {
+        println!("build.settings.{key}");
+        println!("  CLI: {cli}");
+        for (name, value) in profiles {
+            println!("  profile.{name}: {value}");
+        }
+        println!("  default: {} = {}", declaration.ty, declaration.default);
     }
 }
 

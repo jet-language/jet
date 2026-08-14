@@ -817,6 +817,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
     FlagSpec { long: "--release", help: "with build/run/test: optimize for release" },
     FlagSpec { long: "--profile", help: "with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
+    // D-CONF-KEY1=A: command-line contribution to one typed package setting.
+    FlagSpec { long: "--set", help: "with build/run: set one declared package setting as key=value" },
     FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },

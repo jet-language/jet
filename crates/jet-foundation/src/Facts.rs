@@ -41,10 +41,19 @@ pub struct BuildFactSnapshot {
     pub contributions: BTreeMap<String, crate::Policy::EffectiveFact>,
     /// D-CONF-MODULE1=A: effective declared settings for the selected build
     /// profile. The map is a folded input, not an engine-visible lookup.
-    pub settings: BTreeMap<String, BuildFactValue>,
+    pub settings: BTreeMap<String, BuildSettingFact>,
     /// The contribution chain for each effective setting, kept beside the
     /// value so semantic tools can explain a specialized argument.
     pub setting_provenance: BTreeMap<String, Vec<String>>,
+}
+
+/// One declared setting after the contribution ladder has been resolved.
+/// The declaration type stays beside the value so later readers do not need
+/// to rediscover manifest syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildSettingFact {
+    pub ty: String,
+    pub value: BuildFactValue,
 }
 
 impl Default for BuildFactSnapshot {
@@ -90,9 +99,12 @@ impl BuildFactSnapshot {
 
     /// Resolve one declared setting from the already-seeded build snapshot.
     pub fn setting_value(&self, name: &str) -> Option<BuildFactValue> {
-        self.settings.get(name).cloned()
+        self.settings.get(name).map(|setting| setting.value.clone())
     }
 
+    pub fn setting(&self, key: &str) -> Option<&BuildSettingFact> {
+        self.settings.get(key)
+    }
     /// Resolve a registered build leaf into a value shape. The registry owns
     /// the path-to-row mapping; this snapshot owns only the values.
     pub fn value(&self, read: crate::Registry::FactRead) -> Option<BuildFactValue> {

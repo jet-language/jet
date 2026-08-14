@@ -5,7 +5,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::{self, OSTarget as OS};
-use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
+use crate::AST::{BinOp, Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, StrPart, SwitchArm, Type};
 use std::collections::HashMap;
 
 /// D-CONF-READ1=A: fold every `@if @build.os == {
@@ -24,9 +24,10 @@ use std::collections::HashMap;
 /// `build` remains an ordinary identifier everywhere else.
 pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     let active = bundle.active_os;
+    let build_facts = &bundle.build_facts;
     let mut diags = Vec::new();
     for module in &mut bundle.modules {
-        desugar_items(&mut module.items, active, &mut diags);
+        desugar_items(&mut module.items, active, build_facts, &mut diags);
     }
     diags
 }
@@ -34,36 +35,41 @@ pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
 /// Walk nested code and generic modules before generic expansion. This keeps
 /// `@build.os` dispatch in a template on the same pre-registration path as a
 /// top-level function; expansion then copies the already-folded body.
-fn desugar_items(items: &mut [Item], active: OS, diags: &mut Vec<Diagnostic>) {
+fn desugar_items(
+    items: &mut [Item],
+    active: OS,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    diags: &mut Vec<Diagnostic>,
+) {
     for item in items {
         match item {
-            Item::Func(f) => desugar_stmts(&mut f.body, active, diags),
+            Item::Func(f) => desugar_stmts(&mut f.body, active, build_facts, diags),
             Item::Struct(s) => {
                 for m in &mut s.methods {
-                    desugar_stmts(&mut m.body, active, diags);
+                    desugar_stmts(&mut m.body, active, build_facts, diags);
                 }
                 for b in &mut s.trait_impls {
                     for m in &mut b.methods {
-                        desugar_stmts(&mut m.body, active, diags);
+                        desugar_stmts(&mut m.body, active, build_facts, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &mut e.methods {
-                    desugar_stmts(&mut m.body, active, diags);
+                    desugar_stmts(&mut m.body, active, build_facts, diags);
                 }
             }
             Item::Impl(i) => {
                 for m in &mut i.methods {
-                    desugar_stmts(&mut m.body, active, diags);
+                    desugar_stmts(&mut m.body, active, build_facts, diags);
                 }
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &mut module.body {
-                    desugar_items(body, active, diags);
+                    desugar_items(body, active, build_facts, diags);
                 }
             }
-            Item::GenericModule(module) => desugar_items(&mut module.body, active, diags),
+            Item::GenericModule(module) => desugar_items(&mut module.body, active, build_facts, diags),
             _ => {}
         }
     }
@@ -72,7 +78,12 @@ fn desugar_items(items: &mut [Item], active: OS, diags: &mut Vec<Diagnostic>) {
 /// Recurse through every body-bearing statement, rewriting `ComptimeSwitch` in
 /// place. Also descends into lambda block bodies and value-position `if`
 /// branches so a switch nested in an expression is still folded.
-fn desugar_stmts(stmts: &mut Vec<Stmt>, active: OS, diags: &mut Vec<Diagnostic>) {
+fn desugar_stmts(
+    stmts: &mut Vec<Stmt>,
+    active: OS,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    diags: &mut Vec<Diagnostic>,
+) {
     for stmt in stmts.iter_mut() {
         // Recurse into child blocks first, then fold this node if it is a switch.
         match stmt {
@@ -83,43 +94,50 @@ fn desugar_stmts(stmts: &mut Vec<Stmt>, active: OS, diags: &mut Vec<Diagnostic>)
                 } = stmt
                 {
                     for arm in arms.iter_mut() {
-                        desugar_stmts(&mut arm.body, active, diags);
+                        desugar_stmts(&mut arm.body, active, build_facts, diags);
                     }
                     if let Some(eb) = else_body {
-                        desugar_stmts(eb, active, diags);
+                        desugar_stmts(eb, active, build_facts, diags);
                     }
                 }
                 let taken = std::mem::replace(stmt, Stmt::Break(Span::new(0, 0)));
-                *stmt = fold_switch(taken, active, diags);
+                *stmt = fold_switch(taken, active, build_facts, diags);
             }
-            _ => desugar_child_blocks(stmt, active, diags),
+            _ => desugar_child_blocks(stmt, active, build_facts, diags),
         }
     }
 }
 
 /// Descend into every statement body a non-switch statement carries.
-fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>) {
+fn desugar_child_blocks(
+    stmt: &mut Stmt,
+    active: OS,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    diags: &mut Vec<Diagnostic>,
+) {
     match stmt {
         Stmt::Expr(e)
         | Stmt::Yield(e, _)
-        | Stmt::DeferClose { close: e, .. } => desugar_expr(e, active, diags),
-        Stmt::Val(b) => desugar_expr(&mut b.init, active, diags),
-        Stmt::Assign { value, .. } => desugar_expr(value, active, diags),
-        Stmt::Return(Some(e), _) => desugar_expr(e, active, diags),
-        Stmt::While { body, .. } | Stmt::For { body, .. } => desugar_stmts(body, active, diags),
+        | Stmt::DeferClose { close: e, .. } => desugar_expr(e, active, build_facts, diags),
+        Stmt::Val(b) => desugar_expr(&mut b.init, active, build_facts, diags),
+        Stmt::Assign { value, .. } => desugar_expr(value, active, build_facts, diags),
+        Stmt::Return(Some(e), _) => desugar_expr(e, active, build_facts, diags),
+        Stmt::While { body, .. } | Stmt::For { body, .. } => {
+            desugar_stmts(body, active, build_facts, diags)
+        }
         Stmt::Switch {
             arms, else_body, ..
         } => {
             for arm in arms {
-                desugar_stmts(&mut arm.body, active, diags);
+                desugar_stmts(&mut arm.body, active, build_facts, diags);
             }
             if let Some(eb) = else_body {
-                desugar_stmts(eb, active, diags);
+                desugar_stmts(eb, active, build_facts, diags);
             }
         }
         Stmt::CountedLoop { body, step, .. } => {
-            if let Some(step) = step { desugar_child_blocks(step, active, diags); }
-            desugar_stmts(body, active, diags);
+            if let Some(step) = step { desugar_child_blocks(step, active, build_facts, diags); }
+            desugar_stmts(body, active, build_facts, diags);
         }
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
@@ -136,15 +154,15 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. }
         | Stmt::ScopeMember { body, .. }
-        | Stmt::ContextBlock { body, .. } => desugar_stmts(body, active, diags),
+        | Stmt::ContextBlock { body, .. } => desugar_stmts(body, active, build_facts, diags),
         Stmt::ComptimeIf {
             then_body,
             else_body,
             ..
         } => {
-            desugar_stmts(then_body, active, diags);
+            desugar_stmts(then_body, active, build_facts, diags);
             if let Some(eb) = else_body {
-                desugar_stmts(eb, active, diags);
+                desugar_stmts(eb, active, build_facts, diags);
             }
         }
         _ => {}
@@ -153,11 +171,16 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>
 
 /// Descend into the few expression shapes that can hold statement blocks
 /// (lambda block bodies, value-position `if` branches).
-fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
+fn desugar_expr(
+    e: &mut Expr,
+    active: OS,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    diags: &mut Vec<Diagnostic>,
+) {
     match e {
         Expr::Lambda(l) => {
             if let LambdaBody::Block(body) = &mut l.body {
-                desugar_stmts(body, active, diags);
+                desugar_stmts(body, active, build_facts, diags);
             }
         }
         Expr::If {
@@ -165,10 +188,10 @@ fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
             else_body,
             ..
         } => {
-            desugar_stmts(then_body, active, diags);
-            desugar_stmts(else_body, active, diags);
+            desugar_stmts(then_body, active, build_facts, diags);
+            desugar_stmts(else_body, active, build_facts, diags);
         }
-        Expr::Paren(inner, _) => desugar_expr(inner, active, diags),
+        Expr::Paren(inner, _) => desugar_expr(inner, active, build_facts, diags),
         _ => {}
     }
 }
@@ -176,7 +199,12 @@ fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
 /// Validate one `@if @build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
-fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
+fn fold_switch(
+    sw: Stmt,
+    active: OS,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    diags: &mut Vec<Diagnostic>,
+) -> Stmt {
     let Stmt::ComptimeSwitch {
         subject,
         arms,
@@ -187,17 +215,60 @@ fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
         unreachable!("fold_switch only called on ComptimeSwitch");
     };
 
-    // The subject must be exactly `@build.os`.
-    let subject_ok = matches!(
-        &subject,
-        Expr::Field(base, member, _)
-            if matches!(base.as_ref(), Expr::ComptimeName { name: n, .. } if n == "@build")
-                && member == Syntax::BUILD_INFO_OS
-    );
-    if !subject_ok {
+    // `@build.os` is the original platform switch. Typed settings use the
+    // same dispatch shape and fold against the already-resolved snapshot.
+    let subject_path = expr_path(&subject);
+    if subject_path.as_deref() == Some("@build.os") {
+        return fold_os_switch(subject, arms, else_body, span, active, diags);
+    }
+    let Some(key) = subject_path
+        .as_deref()
+        .and_then(jet_foundation::Registry::build_setting_key)
+    else {
         diags.push(Syntax::os_target_build_context(Some(subject.span())));
         return empty_stmt(span);
+    };
+    let Some(setting) = build_facts.setting(key) else {
+        diags.push(Diagnostic::error(
+            "E0302",
+            format!("`@build.settings.{key}` is undeclared"),
+            "a setting must be declared with a type and default before it can be read",
+            format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
+            Some(subject.span()),
+        ));
+        return empty_stmt(span);
+    };
+
+    let mut selected: Option<Vec<Stmt>> = None;
+    for arm in &arms {
+        let Some(matches) = setting_arm_matches(&arm.cond, &subject, &setting.value) else {
+            diags.push(Diagnostic::error(
+                "E0302",
+                format!("invalid arm for `@build.settings.{key}`"),
+                "typed settings dispatch compares one setting with a literal value",
+                format!("use a literal arm or compare `{key}` with a Bool, Int, Char, String, or enum value"),
+                Some(arm.span),
+            ));
+            return empty_stmt(span);
+        };
+        if matches && selected.is_none() {
+            selected = Some(arm.body.clone());
+        }
     }
+    Stmt::ComptimeBlock {
+        body: selected.or(else_body).unwrap_or_default(),
+        span,
+    }
+}
+
+fn fold_os_switch(
+    _subject: Expr,
+    arms: Vec<SwitchArm>,
+    else_body: Option<Vec<Stmt>>,
+    span: Span,
+    active: OS,
+    diags: &mut Vec<Diagnostic>,
+) -> Stmt {
 
     // Each arm head must be a bare, payload-free OS variant; collect them.
     let mut arm_os: Vec<(OS, Vec<Stmt>, Span)> = Vec::new();
@@ -260,6 +331,109 @@ fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
     match tail.and_then(|mut v| v.pop()) {
         Some(chain) => chain,
         None => empty_stmt(span),
+    }
+}
+
+fn expr_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
+        Expr::Field(base, member, _) => Some(format!("{}.{}", expr_path(base)?, member)),
+        _ => None,
+    }
+}
+
+fn setting_arm_matches(
+    cond: &Expr,
+    subject: &Expr,
+    value: &jet_foundation::Facts::BuildFactValue,
+) -> Option<bool> {
+    match cond {
+        Expr::Binary(op, lhs, rhs, _) if matches!(op, BinOp::Eq | BinOp::Ne) => {
+            if expr_path(lhs) != expr_path(subject) {
+                return None;
+            }
+            let literal = setting_literal(rhs)?;
+            let equal = setting_values_equal(&literal, value)?;
+            Some(if *op == BinOp::Eq { equal } else { !equal })
+        }
+        Expr::PatternTest {
+            subject: lhs,
+            pattern: Pattern::Variant {
+                variant, bindings, ..
+            },
+            ..
+        } if expr_path(lhs) == expr_path(subject) && bindings.is_empty() => match value {
+            jet_foundation::Facts::BuildFactValue::Enum {
+                variant: actual, ..
+            } => Some(variant == actual),
+            _ => None,
+        },
+        _ => setting_values_equal(&setting_literal(cond)?, value),
+    }
+}
+
+fn setting_literal(expr: &Expr) -> Option<jet_foundation::Facts::BuildFactValue> {
+    match expr {
+        Expr::Bool(value, _) => Some(jet_foundation::Facts::BuildFactValue::Bool(*value)),
+        Expr::Int(value, _, _, _) => Some(jet_foundation::Facts::BuildFactValue::Int(*value)),
+        Expr::Char(value, _) => Some(jet_foundation::Facts::BuildFactValue::Char(*value)),
+        Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
+            let text = parts
+                .iter()
+                .map(|part| match part {
+                    StrPart::Lit(text) => text.as_str(),
+                    StrPart::Interp(..) => "",
+                })
+                .collect();
+            Some(jet_foundation::Facts::BuildFactValue::Text(text))
+        }
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } if args.is_empty() => Some(jet_foundation::Facts::BuildFactValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn setting_values_equal(
+    left: &jet_foundation::Facts::BuildFactValue,
+    right: &jet_foundation::Facts::BuildFactValue,
+) -> Option<bool> {
+    match (left, right) {
+        (
+            jet_foundation::Facts::BuildFactValue::Bool(left),
+            jet_foundation::Facts::BuildFactValue::Bool(right),
+        ) => Some(left == right),
+        (
+            jet_foundation::Facts::BuildFactValue::Int(left),
+            jet_foundation::Facts::BuildFactValue::Int(right),
+        ) => Some(left == right),
+        (
+            jet_foundation::Facts::BuildFactValue::Char(left),
+            jet_foundation::Facts::BuildFactValue::Char(right),
+        ) => Some(left == right),
+        (
+            jet_foundation::Facts::BuildFactValue::Text(left),
+            jet_foundation::Facts::BuildFactValue::Text(right),
+        ) => Some(left == right),
+        (
+            jet_foundation::Facts::BuildFactValue::Enum {
+                type_name: left_type,
+                variant: left,
+            },
+            jet_foundation::Facts::BuildFactValue::Enum {
+                type_name: right_type,
+                variant: right,
+            },
+        ) if left_type.is_empty() || right_type.is_empty() || left_type == right_type => {
+            Some(left == right)
+        }
+        _ => None,
     }
 }
 

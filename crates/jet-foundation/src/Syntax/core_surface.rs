@@ -532,12 +532,15 @@ pub const BUILD_INFO: &str = "build";
 /// D-OSTARGET2=B: the `.os` field of the comptime `build` value.
 pub const BUILD_INFO_OS: &str = "os";
 pub const BUILD_INFO_PROFILE: &str = "profile";
+pub const BUILD_INFO_SETTINGS: &str = "settings"; // D-CONF-KEY1
 
-/// D-CONF-READ1=A / D-CONF-STAMP1=B: registered complete build-fact paths.
+/// D-CONF-READ1=A / D-CONF-KEY1=A / D-CONF-STAMP1=B: registered complete
+/// build-fact paths.
 pub const COMPILER_BUILD_FACT_PACKAGE_NAME: &str = "@build.package.name";
 pub const COMPILER_BUILD_FACT_PACKAGE_VERSION: &str = "@build.package.version";
 pub const COMPILER_BUILD_FACT_OS: &str = "@build.os";
 pub const COMPILER_BUILD_FACT_PROFILE_PATH: &str = "@build.profile";
+pub const COMPILER_BUILD_FACT_SETTINGS_PREFIX: &str = "@build.settings.";
 pub const COMPILER_BUILD_FACT_STAMP_GIT: &str = "@build.stamp.git";
 pub const COMPILER_BUILD_FACT_STAMP_DIRTY: &str = "@build.stamp.dirty";
 pub const COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: &str = "@build.stamp.toolchain";

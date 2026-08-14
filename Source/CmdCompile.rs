@@ -307,7 +307,7 @@ pub(crate) fn run_compile_cmd(
     }
 
     if cmd == "check" {
-        let all_diags = jet::check_with_path(file);
+        let all_diags = jet::check_with_path_and_settings(file, setting_overrides);
         let errors: Vec<_> = all_diags
             .iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -559,7 +559,7 @@ pub(crate) fn run_compile_cmd(
             setting_overrides,
         )
     } else if cmd == "build" && emit_generated {
-        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile(
+        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
             file,
             build_grants,
             freestanding,
@@ -573,7 +573,7 @@ pub(crate) fn run_compile_cmd(
             setting_overrides,
         )
     } else if cmd == "build" {
-        jet::compile_programmable_build_opts_with_builder_and_profile(
+        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings(
             file,
             build_grants,
             freestanding,
@@ -598,7 +598,7 @@ pub(crate) fn run_compile_cmd(
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
         // codegen only emits/links `#Target(OS.*)`-gated impls for the OS
         // that triple builds for (host OS when the flag is absent).
-        jet::compile_with_target_and_gates_and_profile(
+        jet::compile_with_target_and_gates_and_profile_and_settings(
             &src,
             file,
             gates,
@@ -932,7 +932,11 @@ fn cli_requests_interpreter() -> bool {
 /// what happens next — normally configuring and starting a `core.web.devserver`
 /// value, but it's just an ordinary function; this call site owns none of
 /// that behavior (I3: codegen/the driver stay dumb about what `dev()` does).
-pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
+pub(crate) fn run_dev_entry(
+    file: &str,
+    mode: OutputMode,
+    setting_overrides: &BTreeMap<String, String>,
+) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -940,7 +944,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let out = match jet::compile_with_entry(file, "dev") {
+    let out = match jet::compile_with_entry_and_settings(file, "dev", setting_overrides) {
         Ok(out) => out,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
@@ -1002,7 +1006,12 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
 /// D-WEBAPP-SERVE1=D: `jet dev` serves an App returned by `fn run`
 /// through the same native app entry as `jet run`, adding only the reload
 /// response flag. A user-authored `fn dev()` is selected before this helper.
-pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<u16>) {
+pub(crate) fn run_web_app_dev_entry(
+    file: &str,
+    _mode: OutputMode,
+    port: Option<u16>,
+    setting_overrides: &BTreeMap<String, String>,
+) {
     let _src = match fs::read_to_string(file) {
         Ok(source) => source,
         Err(_) => {
@@ -1019,6 +1028,9 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     });
     let mut command = Command::new(jet_bin);
     command.arg("run").arg(file);
+    for (key, value) in setting_overrides {
+        command.arg(format!("--set={key}={value}"));
+    }
     command.env("JET_APP_DEV", "1");
     command.env("JET_DEV_FILE", dev_file);
     if let Some(port) = port {
@@ -1026,6 +1038,111 @@ pub(crate) fn run_web_app_dev_entry(file: &str, _mode: OutputMode, port: Option<
     }
     let status = command.status().unwrap_or_else(|error| {
         crate::cli_error!("E2105", "couldn't run the web app: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    exit(child_exit_code(status));
+}
+
+/// D-JPK-TASKRUN1 (card #476): `jet run --job <name> <file>` — compile with
+/// the named `#Job fn` as the entry via a synthetic `fn run { job(…) }`
+/// wrapper (same `compile_with_entry` path `fn dev()` uses; the job keeps
+/// its source name so plain-call deps stay resolvable), then run the binary
+/// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
+pub(crate) fn run_job_entry(
+    file: &str,
+    job: &str,
+    program_args: &[&String],
+    mode: OutputMode,
+    setting_overrides: &BTreeMap<String, String>,
+) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let declared = list_job_names(&src);
+    // Parse failures still flow through `compile_with_entry`, which owns the
+    // full source diagnostic. Successful discovery is the E1294 authority.
+    let is_marked = declared
+        .as_ref()
+        .map(|jobs| jobs.iter().any(|item| item.name == job))
+        .unwrap_or(true);
+    if !is_marked {
+        let declared = declared.expect("successful job discovery");
+        let list = if declared.is_empty() {
+            "(none)".to_string()
+        } else {
+            declared
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let diag = jet::Diagnostics::Diagnostic::error(
+            "E1294",
+            format!("no job named `{job}`"),
+            format!("`jet run --job` / `jetpack run` only invoke functions marked `#Job` (D-JPK-TASKRUN1)."),
+            "mark a function `#Job` to make it runnable, or check the spelling.".to_string(),
+            None,
+        )
+        .with_detail(format!("declared jobs: {list}\n"));
+        report_problems(mode, file, &src, &[diag]);
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Ok(jobs) = &declared {
+        if let Some(reason) = jobs
+            .iter()
+            .find(|item| item.name == job)
+            .and_then(|item| item.metadata.as_ref())
+            .and_then(|metadata| {
+                metadata
+                    .skip
+                    .as_ref()
+                    .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
+            })
+        {
+            println!("skipping job `{job}`: {reason}");
+            return;
+        }
+    }
+    let out = match jet::compile_with_entry_and_settings(file, job, setting_overrides) {
+        Ok(out) => out,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let clinks = match jet::resolve_c_links(file) {
+        Ok(args) => args,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = bin_path(file);
+    build(
+        file,
+        &out.rust,
+        bin.clone(),
+        BuildProfile::Default,
+        out.ffi.as_ref(),
+        &clinks,
+        false,
+        None,
+        None,
+        None,
+        mode,
+        // Job entry-swap is a one-shot; skip content-cache (same as `run_dev_entry`).
+        None,
+    );
+    let mut run_cmd = Command::new(&bin);
+    for arg in program_args {
+        run_cmd.arg(arg.as_str());
+    }
+    let status = run_cmd.status().unwrap_or_else(|e| {
+        crate::cli_error!("E2105", "couldn't run the built program: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
     exit(child_exit_code(status));
@@ -2811,6 +2928,20 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 /// `mode_tag` keeps binaries built from the same AST under different pipelines in
 /// separate key spaces (a `jet test` harness binary can never be served for a
 /// `jet run`). The toolchain version and `package.jet` fingerprint ride the salt.
+fn setting_overrides_tag(settings: &BTreeMap<String, String>) -> String {
+    if settings.is_empty() {
+        return "settings=default".to_string();
+    }
+    format!(
+        "settings={}",
+        settings
+            .iter()
+            .map(|(key, value)| format!("{}:{key}{}:{value}", key.len(), value.len()))
+            .collect::<Vec<_>>()
+            .join("")
+    )
+}
+
 fn native_cache_key(file: &str, profile: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
     native_cache_key_with_toolchain(
         file,
@@ -2845,7 +2976,7 @@ fn native_cache_key_with_toolchain(
     // #91: instance identity is a sema product. Run the front end before a
     // cache lookup so a hit is keyed by resolved template identity rather than
     // consumer spelling. A hit still skips codegen/rustc, never validation.
-    if jet::Driver::seed_build_facts(&mut bundle, profile, false).is_err() {
+    if jet::Driver::seed_build_facts(&mut bundle, profile, false, &BTreeMap::new()).is_err() {
         return None;
     }
     if jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
@@ -2939,6 +3070,7 @@ pub(crate) fn run_dev_web(
     mode: OutputMode,
     verbose: bool,
     port: Option<u16>,
+    setting_overrides: &BTreeMap<String, String>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
@@ -2953,7 +3085,7 @@ pub(crate) fn run_dev_web(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    if !rebuild_dev_web(file, mode, verbose, false, &host) {
+    if !rebuild_dev_web(file, mode, verbose, false, &host, setting_overrides) {
         exit(ExitCodes::USER_ERROR);
     }
     host.start();
@@ -2983,7 +3115,7 @@ pub(crate) fn run_dev_web(
                 artifact_token: format!("web-gen-{}", receipt.generation.saturating_sub(1)),
                 persist: jet_devserver::PersistStore::new(),
             });
-            let ok = rebuild_dev_web(file, mode, verbose, true, &host);
+            let ok = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
             if ok {
                 txn.mark_server_ready();
                 txn.mark_client_ready();
@@ -3009,11 +3141,16 @@ fn rebuild_dev_web(
     verbose: bool,
     is_rebuild: bool,
     host: &jet_devserver::WebHost::WebHost,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> bool {
     let started = Instant::now();
     host.mark_building();
     let src = fs::read_to_string(file).unwrap_or_default();
-    let out = match jet::compile_web(file) {
+    let out = match jet::compile_web_with_gates_and_settings(
+        file,
+        jet::Policy::GateSet::default(),
+        setting_overrides,
+    ) {
         Ok(out) => out,
         Err(diags) => {
             if !is_rebuild {
@@ -3798,16 +3935,7 @@ pub(crate) fn build(
     }
     rustc_flags.extend(config.rustc_args(ffi_present));
     let cache_flags = rustc_flags.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
-    let cache_env = config
-        .env
-        .iter()
-        .map(|(name, value)| {
-            (
-                std::ffi::OsString::from(name),
-                std::ffi::OsString::from(value),
-            )
-        })
-        .collect::<Vec<_>>();
+    let cache_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
     // Rust FFI glue can implement runtime traits for foreign types. Keep that
     // source in one crate until the bridge owns those impls; Rust's orphan rule
     // correctly rejects moving both the trait and type behind separate externs.
@@ -3845,7 +3973,6 @@ pub(crate) fn build(
         }
     };
     cmd.arg("--edition").arg("2021").args(&rustc_flags);
-    config.apply_env(&mut cmd);
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to

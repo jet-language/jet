@@ -5,7 +5,7 @@
 //! `jet run --interpret` and `jet dev --interpret` force tier-0 only.
 //! Experts use `--trace-tiers`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use crate::Diagnostics::Diagnostic;
@@ -399,8 +399,9 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 fn checked_bundle(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    checked_bundle_with_entry(file, gates, None, "dev")
+    checked_bundle_with_entry(file, gates, None, "dev", setting_overrides)
 }
 
 fn checked_bundle_with_entry(
@@ -408,12 +409,18 @@ fn checked_bundle_with_entry(
     gates: jet_foundation::Policy::GateSet,
     entry_fn: Option<&str>,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
-                if let Err(diags) = crate::Driver::seed_build_facts(&mut bundle, profile, false) {
+                if let Err(diags) = crate::Driver::seed_build_facts(
+                    &mut bundle,
+                    profile,
+                    false,
+                    setting_overrides,
+                ) {
                     return Err(diags);
                 }
                 if let Some(entry_fn) = entry_fn {
@@ -508,12 +515,12 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
 
 /// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
 pub fn run_jit_once(file: &str) -> RunOutcome {
-    run_jit_once_with_args(file, &[])
+    run_jit_once_with_args_and_settings(file, &[], &BTreeMap::new())
 }
 
 /// D-LENS-RUN1: strict Cranelift run with the same argv shape AOT would see.
 pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
-    run_jit_once_with_args_opts(file, program_args, false)
+    run_jit_once_with_args_and_settings(file, program_args, &BTreeMap::new())
 }
 
 /// Like [`run_jit_once_with_args`], with `json` suppressing the jet-dev signpost.
@@ -536,22 +543,52 @@ pub fn run_jit_once_with_args_opts_and_gates(
     json: bool,
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
+    run_jit_once_with_args_opts_and_gates_and_settings(
+        file,
+        program_args,
+        json,
+        gates,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn run_jit_once_with_args_and_settings(
+    file: &str,
+    program_args: &[&str],
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
+    run_jit_once_with_args_opts_and_gates_and_settings(
+        file,
+        program_args,
+        false,
+        jet_foundation::Policy::GateSet::default(),
+        setting_overrides,
+    )
+}
+
+pub fn run_jit_once_with_args_opts_and_gates_and_settings(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
     let entry = std::path::Path::new(file);
-    if let Some(outcome) = job_help_if_requested(file, program_args, gates) {
+    if let Some(outcome) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return outcome;
     }
     let requested = requested_job(program_args);
     // A cached tier-1 module has the ordinary `run` entry. A named job must
     // pass through entry selection first, so never let a warm artifact skip
     // the shared job selector.
-    if requested.is_none() {
+    if requested.is_none() && setting_overrides.is_empty() {
         if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
             return outcome;
         }
     }
-    match checked_bundle_with_entry(file, gates, requested, "dev") {
+    match checked_bundle_with_entry(file, gates, requested, "dev", setting_overrides) {
         Ok(bundle) => {
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
@@ -569,7 +606,10 @@ pub fn run_jit_once_with_args_opts_and_gates(
                 let mut backend = jet_jit::CraneliftBackend::new();
                 backend.run(&bundle, false)
             });
-            if selected.is_none() && matches!(outcome, RunOutcome::Ran { .. }) {
+            if selected.is_none()
+                && setting_overrides.is_empty()
+                && matches!(outcome, RunOutcome::Ran { .. })
+            {
                 crate::RunCache::store_after_miss(entry, program_args);
             }
             if !json {
@@ -584,10 +624,11 @@ pub fn run_jit_once_with_args_opts_and_gates(
 /// Run one program through the tier-0 interpreter with the same argv shape as
 /// the default run path.
 pub fn run_interpreter_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
-    run_interpreter_once_with_args_and_gates(
+    run_interpreter_once_with_args_and_settings(
         file,
         program_args,
         jet_foundation::Policy::GateSet::default(),
+        &BTreeMap::new(),
     )
 }
 
@@ -596,7 +637,13 @@ pub fn run_interpreter_once_with_args_and_gates(
     program_args: &[&str],
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
-    run_interpreter_once_with_args_and_gates_profile(file, program_args, gates, "dev")
+    run_interpreter_once_with_args_and_gates_profile_and_settings(
+        file,
+        program_args,
+        gates,
+        "dev",
+        &BTreeMap::new(),
+    )
 }
 
 pub fn run_interpreter_once_with_args_and_gates_profile(
@@ -605,15 +652,52 @@ pub fn run_interpreter_once_with_args_and_gates_profile(
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
 ) -> RunOutcome {
+    run_interpreter_once_with_args_and_gates_profile_and_settings(
+        file,
+        program_args,
+        gates,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn run_interpreter_once_with_args_and_settings(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
+    run_interpreter_once_with_args_and_gates_profile_and_settings(
+        file,
+        program_args,
+        gates,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
     crate::RunCache::reset_phases();
-    if let Some(outcome) = job_help_if_requested(file, program_args, gates) {
+    if let Some(outcome) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return outcome;
     }
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
         let requested = requested_job(program_args);
-        let outcome = match checked_bundle_with_entry(file, gates, requested, profile) {
+        let outcome = match checked_bundle_with_entry(
+            file,
+            gates,
+            requested,
+            profile,
+            setting_overrides,
+        ) {
             Ok(bundle) => {
                 let selected = selected_job(&bundle, requested);
                 let runtime_args = if selected.is_some() {
@@ -652,7 +736,14 @@ pub fn dev_iteration_with_gates(
     use_interpreter: bool,
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
-    dev_iteration_with_gates_profile(file, try_anyway, use_interpreter, gates, "dev")
+    dev_iteration_with_gates_profile_and_settings(
+        file,
+        try_anyway,
+        use_interpreter,
+        gates,
+        "dev",
+        &BTreeMap::new(),
+    )
 }
 
 pub fn dev_iteration_with_gates_profile(
@@ -662,10 +753,51 @@ pub fn dev_iteration_with_gates_profile(
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
 ) -> RunOutcome {
+    dev_iteration_with_gates_profile_and_settings(
+        file,
+        try_anyway,
+        use_interpreter,
+        gates,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn dev_iteration_with_gates_and_settings(
+    file: &str,
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
+    dev_iteration_with_gates_profile_and_settings(
+        file,
+        try_anyway,
+        use_interpreter,
+        gates,
+        "dev",
+        setting_overrides,
+    )
+}
+ 
+pub fn dev_iteration_with_gates_profile_and_settings(
+    file: &str,
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
         jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle_with_entry(file, gates, None, profile) {
+        let outcome = match checked_bundle_with_entry(
+            file,
+            gates,
+            None,
+            profile,
+            setting_overrides,
+        ) {
             Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
             Err(diags) => RunOutcome::Problems(diags),
         };
@@ -682,11 +814,12 @@ fn job_help_if_requested(
     file: &str,
     program_args: &[&str],
     gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Option<RunOutcome> {
     if program_args.first().copied() != Some("--help") {
         return None;
     }
-    match checked_bundle(file, gates) {
+    match checked_bundle(file, gates, setting_overrides) {
         Ok(bundle) => {
             let specs = job_specs(&bundle);
             if !jet_jit::Job::jet_job_has_visible(&specs) {

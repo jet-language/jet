@@ -133,6 +133,7 @@ pub fn compile_bundle_path_opts(
         cross_target,
         None,
         "dev",
+        &BTreeMap::new(),
     )
 }
 
@@ -148,6 +149,28 @@ pub fn compile_bundle_path_opts_with_profile(
     cross_target: Option<&str>,
     profile: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_profile_and_settings(
+        file,
+        mode,
+        freestanding,
+        gates,
+        web_target,
+        cross_target,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_bundle_path_opts_with_profile_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         mode,
@@ -160,6 +183,7 @@ pub fn compile_bundle_path_opts_with_profile(
         cross_target,
         None,
         profile,
+        setting_overrides,
     )
 }
 
@@ -195,6 +219,7 @@ pub fn compile_bundle_path_with_target_machine(
         Some(machine.triple.as_str()),
         None,
         "dev",
+        &BTreeMap::new(),
     )
     .map_err(TargetMachineCompileError::Diagnostics)
 }
@@ -502,7 +527,23 @@ pub fn compile_bundle_path_opts_plugin_with_gates(
     gates: crate::Policy::GateSet,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None, "dev")
+    compile_bundle_path_opts_plugin_with_gates_and_settings(
+        file,
+        mode,
+        gates,
+        cross_target,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_bundle_path_opts_plugin_with_gates_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    cross_target: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None, "dev", setting_overrides)
 }
 
 /// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
@@ -523,6 +564,22 @@ pub fn compile_bundle_path_opts_library_with_gates(
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_library_with_gates_and_settings(
+        file,
+        mode,
+        gates,
+        explicit_output,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_bundle_path_opts_library_with_gates_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    explicit_output: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         mode,
@@ -535,6 +592,7 @@ pub fn compile_bundle_path_opts_library_with_gates(
         None,
         explicit_output,
         "dev",
+        setting_overrides,
     )
 }
 
@@ -564,6 +622,7 @@ pub fn compile_bundle_path_opts_dbg(
         cross_target,
         None,
         "dev",
+        &BTreeMap::new(),
     )
 }
 
@@ -593,6 +652,28 @@ pub fn compile_bundle_path_output_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_output_opts_with_settings(
+        file,
+        output,
+        freestanding,
+        gates,
+        web_target,
+        plugin_target,
+        cross_target,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_bundle_path_output_opts_with_settings(
+    file: &str,
+    output: &str,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         crate::Sema::CompileMode::Run,
@@ -605,6 +686,7 @@ pub fn compile_bundle_path_output_opts(
         cross_target,
         Some(output),
         "dev",
+        setting_overrides,
     )
 }
 
@@ -613,6 +695,7 @@ fn target_machine_usage_for_file(
     mode: crate::Sema::CompileMode,
 ) -> Result<crate::TargetMachine::TargetMachineUse, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new())?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = gate_diagnostics(
@@ -991,6 +1074,8 @@ pub struct BuildRunOptions {
     /// D-CONF-WORD1=A: the selected optimization bundle, exposed as the
     /// compile-time `@build.profile` fact.
     pub profile: String,
+    /// D-CONF-KEY1: command-line contributions to declared package settings.
+    pub setting_overrides: BTreeMap<String, String>,
     /// Optional host-owned remote builder binding. Source and CLI input cannot
     /// construct an endpoint or credential; `None` is always local.
     pub remote: Option<crate::Comptime::Build::RemoteBuildBinding>,
@@ -1011,6 +1096,7 @@ impl Default for BuildRunOptions {
             plugin_target: false,
             cross_target: None,
             profile: "dev".to_string(),
+            setting_overrides: BTreeMap::new(),
             remote: None,
         }
     }
@@ -1024,9 +1110,21 @@ pub fn seed_build_facts(
     bundle: &mut crate::AST::ProgramBundle,
     profile: &str,
     locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(), Vec<Diagnostic>> {
-    let manifest = crate::Package::PackageFacts::load(&bundle.project_root)
-        .and_then(Result::ok);
+    let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
+        None => None,
+        Some(Ok(facts)) => Some(facts),
+        Some(Err(error)) => {
+            return Err(vec![Diagnostic::error(
+                "E1206",
+                "package manifest is not valid".to_string(),
+                error.to_string(),
+                "fix `package.jet` before compiling the package".to_string(),
+                None,
+            )]);
+        }
+    };
     let package_name = manifest
         .as_ref()
         .map(|facts| facts.name.clone())
@@ -1046,10 +1144,6 @@ pub fn seed_build_facts(
         .as_ref()
         .and_then(|facts| facts.version.clone())
         .unwrap_or_else(|| "0.0.0".to_string());
-    let (settings, setting_provenance) = manifest
-        .as_ref()
-        .map(|facts| effective_build_settings(facts, profile))
-        .unwrap_or_default();
     let stamp = crate::Lock::build_stamp(&bundle.project_root, locked).map_err(|error| {
         vec![Diagnostic::error(
             "E3512",
@@ -1094,6 +1188,62 @@ pub fn seed_build_facts(
         .into_iter()
         .map(|fact| (fact.key.name.clone(), fact))
         .collect();
+    let enum_types = fieldless_setting_enums(bundle);
+    let mut settings = BTreeMap::new();
+    let mut setting_provenance = BTreeMap::new();
+    if let Some(facts) = manifest.as_ref() {
+        for (key, declaration) in &facts.settings {
+            let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types).map_err(|detail| {
+                vec![setting_value_diagnostic(key, &declaration.ty, &declaration.default, detail)]
+            })?;
+            settings.insert(
+                key.clone(),
+                jet_foundation::Facts::BuildSettingFact {
+                    ty: declaration.ty.clone(),
+                    value,
+                },
+            );
+            setting_provenance.insert(
+                key.clone(),
+                vec![format!("{}:settings.{key} (default)", facts.origin)],
+            );
+        }
+        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
+            for (key, raw) in &profile_def.settings {
+                apply_setting(
+                    &mut settings,
+                    facts,
+                    key,
+                    raw,
+                    "profile",
+                    &enum_types,
+                )?;
+                setting_provenance
+                    .entry(key.clone())
+                    .or_default()
+                    .push(format!("{}:build.{profile}.settings.{key}", facts.origin));
+            }
+        }
+    }
+    for (key, raw) in setting_overrides {
+        let Some(facts) = manifest.as_ref() else {
+            let declaration_site = bundle
+                .project_root
+                .join(crate::Syntax::PACKAGE_FILE)
+                .display()
+                .to_string();
+            return Err(vec![undeclared_setting_diagnostic(
+                key,
+                "the package has no `settings:` declaration",
+                &declaration_site,
+            )]);
+        };
+        apply_setting(&mut settings, facts, key, raw, "CLI", &enum_types)?;
+        setting_provenance
+            .entry(key.clone())
+            .or_default()
+            .push(format!("command line:--set {key}={raw}"));
+    }
     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
         package_name,
         package_version,
@@ -1107,74 +1257,89 @@ pub fn seed_build_facts(
     Ok(())
 }
 
-/// D-CONF-MODULE1=A: resolve declaration defaults plus the selected profile's
-/// same-layer contributions into the one typed fact snapshot. Invalid values
-/// remain absent and are diagnosed when a source expression asks for them,
-/// keeping this seed step free of a second settings diagnostic family.
-fn effective_build_settings(
-    facts: &jet_pkg_model::Package::PackageFacts,
-    profile: &str,
-) -> (
-    BTreeMap<String, jet_foundation::Facts::BuildFactValue>,
-    BTreeMap<String, Vec<String>>,
-) {
-    let mut values = BTreeMap::new();
-    let mut provenance = BTreeMap::new();
-    for (name, declaration) in &facts.settings {
-        if let Some(raw) = &declaration.default {
-            if let Some(value) = parse_build_setting(declaration, raw) {
-                values.insert(name.clone(), value);
-                provenance.insert(
-                    name.clone(),
-                    vec![format!("{}:settings.{name} (default)", facts.origin)],
-                );
-            }
-        }
-    }
-    let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) else {
-        return (values, provenance);
+fn apply_setting(
+    settings: &mut BTreeMap<String, jet_foundation::Facts::BuildSettingFact>,
+    facts: &crate::Package::PackageFacts,
+    key: &str,
+    raw: &str,
+    source: &str,
+    enum_types: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<(), Vec<Diagnostic>> {
+    let Some(declaration) = facts.settings.get(key) else {
+        return Err(vec![undeclared_setting_diagnostic(
+            key,
+            &format!("the {source} contribution names no declaration in `package.jet`"),
+            &facts.origin,
+        )]);
     };
-    for (name, raw) in &profile_def.settings {
-        let Some(declaration) = facts.settings.get(name) else {
-            continue;
-        };
-        let Some(value) = parse_build_setting(declaration, raw) else {
-            continue;
-        };
-        values.insert(name.clone(), value);
-        provenance
-            .entry(name.clone())
-            .or_default()
-            .push(format!("{}:build.{profile}.settings.{name}", facts.origin));
-    }
-    (values, provenance)
+    let value = parse_setting_value(&declaration.ty, raw, enum_types).map_err(|detail| {
+        vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+    })?;
+    settings.insert(
+        key.to_string(),
+        jet_foundation::Facts::BuildSettingFact {
+            ty: declaration.ty.clone(),
+            value,
+        },
+    );
+    Ok(())
 }
 
-fn parse_build_setting(
-    declaration: &jet_pkg_model::Package::SettingDecl,
+fn undeclared_setting_diagnostic(key: &str, why: &str, declaration_site: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0302",
+        format!("`@build.settings.{key}` is undeclared"),
+        why.to_string(),
+        format!(
+            "add `{key}: Type = default` to the `settings: .{{ … }}` block in `{declaration_site}`"
+        ),
+        None,
+    )
+}
+
+fn setting_value_diagnostic(key: &str, ty: &str, raw: &str, detail: String) -> Diagnostic {
+    Diagnostic::error(
+        "E0302",
+        format!("setting `{key}` cannot use `{raw}` as `{ty}`"),
+        detail,
+        format!("use a `{ty}` value for the declared setting `{key}`"),
+        None,
+    )
+}
+
+fn parse_setting_value(
+    ty: &str,
     raw: &str,
-) -> Option<jet_foundation::Facts::BuildFactValue> {
+    enum_types: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<jet_foundation::Facts::BuildFactValue, String> {
     let raw = raw.trim();
-    match declaration.ty.trim().trim_start_matches('.') {
+    match ty.trim() {
         "Bool" => match raw {
-            "true" => Some(jet_foundation::Facts::BuildFactValue::Bool(true)),
-            "false" => Some(jet_foundation::Facts::BuildFactValue::Bool(false)),
-            _ => None,
+            "true" => Ok(jet_foundation::Facts::BuildFactValue::Bool(true)),
+            "false" => Ok(jet_foundation::Facts::BuildFactValue::Bool(false)),
+            _ => Err("Bool settings use `true` or `false`".to_string()),
         },
         "Int" => raw
-            .parse()
-            .ok()
-            .map(jet_foundation::Facts::BuildFactValue::Int),
-        "Char" => parse_char_setting(raw).map(jet_foundation::Facts::BuildFactValue::Char),
-        "String" => Some(jet_foundation::Facts::BuildFactValue::Text(raw.to_string())),
+            .parse::<i64>()
+            .map(jet_foundation::Facts::BuildFactValue::Int)
+            .map_err(|_| "Int settings use a signed 64-bit whole number".to_string()),
+        "Char" => parse_setting_char(raw).map(jet_foundation::Facts::BuildFactValue::Char),
+        "String" => Ok(jet_foundation::Facts::BuildFactValue::Text(unquote_setting(raw))),
         type_name => {
-            let variant = raw
-                .strip_prefix(type_name)
-                .and_then(|value| value.strip_prefix('.'))
-                .unwrap_or(raw)
-                .trim_start_matches('.')
-                .trim();
-            (!variant.is_empty()).then(|| jet_foundation::Facts::BuildFactValue::Enum {
+            if !valid_setting_type_name(type_name) {
+                return Err("settings use Bool, Int, Char, String, or a fieldless enum type".to_string());
+            }
+            let variant = raw.strip_prefix('.').unwrap_or(raw).trim();
+            if variant.is_empty() || !valid_setting_variant(variant) {
+                return Err("fieldless enum settings use a named variant such as `.On`".to_string());
+            }
+            let Some(variants) = enum_types.get(type_name) else {
+                return Err(format!("`{type_name}` is not a declared fieldless enum"));
+            };
+            if !variants.contains(variant) {
+                return Err(format!("`{type_name}` has no fieldless variant `{variant}`"));
+            }
+            Ok(jet_foundation::Facts::BuildFactValue::Enum {
                 type_name: type_name.to_string(),
                 variant: variant.to_string(),
             })
@@ -1182,11 +1347,109 @@ fn parse_build_setting(
     }
 }
 
-fn parse_char_setting(raw: &str) -> Option<char> {
-    let raw = raw.strip_prefix('\'').and_then(|value| value.strip_suffix('\''))?;
-    let mut chars = raw.chars();
-    let value = chars.next()?;
-    chars.next().is_none().then_some(value)
+fn fieldless_setting_enums(
+    bundle: &crate::AST::ProgramBundle,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut out = BTreeMap::new();
+    for module in &bundle.modules {
+        collect_fieldless_setting_enums(&module.items, &mut out);
+    }
+    out
+}
+
+fn collect_fieldless_setting_enums(
+    items: &[crate::AST::Item],
+    out: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    for item in items {
+        match item {
+            crate::AST::Item::Enum(def) => {
+                let variants = def
+                    .variants
+                    .iter()
+                    .filter_map(|variant| {
+                        matches!(&variant.payload, crate::AST::VariantPayload::Unit)
+                            .then_some(variant.name.clone())
+                    })
+                    .collect::<BTreeSet<_>>();
+                if variants.len() == def.variants.len() {
+                    out.insert(def.name.clone(), variants);
+                }
+            }
+            crate::AST::Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_fieldless_setting_enums(body, out);
+                }
+            }
+            crate::AST::Item::GenericModule(module) => {
+                collect_fieldless_setting_enums(&module.body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn valid_setting_type_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_uppercase())
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn valid_setting_variant(name: &str) -> bool {
+    name.split('.').all(|segment| {
+        let mut chars = segment.chars();
+        matches!(chars.next(), Some(first) if first.is_ascii_uppercase())
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    })
+}
+
+fn unquote_setting(raw: &str) -> String {
+    let raw = raw.trim();
+    let body = raw
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(raw);
+    let mut out = String::new();
+    let mut escaped = false;
+    for ch in body.chars() {
+        if escaped {
+            out.push(match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
+}
+
+fn parse_setting_char(raw: &str) -> Result<char, String> {
+    let body = match raw
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        Some(body) => body,
+        None if raw.chars().count() == 1 => return Ok(raw.chars().next().unwrap()),
+        None => return Err("Char settings use one quoted character".to_string()),
+    };
+    let value = unquote_setting(body);
+    let mut chars = value.chars();
+    let Some(ch) = chars.next() else {
+        return Err("Char settings need one character".to_string());
+    };
+    if chars.next().is_some() {
+        return Err("Char settings need one character".to_string());
+    }
+    Ok(ch)
 }
 
 #[derive(Debug, Clone)]
@@ -1414,6 +1677,7 @@ fn build_query_options() -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        setting_overrides: BTreeMap::new(),
         remote: None,
     }
 }
@@ -1606,7 +1870,12 @@ fn compile_bundle_path_build_inner(
         crate::Sema::CompileMode::Run
     };
     bundle.active_os = active_os;
-    seed_build_facts(&mut bundle, &options.profile, options.locked)?;
+    seed_build_facts(
+        &mut bundle,
+        &options.profile,
+        options.locked,
+        &options.setting_overrides,
+    )?;
     bundle.web_partition_enforced = options.web_target;
     let local_build_indices = bundle.modules[bundle.entry]
         .items
@@ -1660,7 +1929,12 @@ fn compile_bundle_path_build_inner(
                 false,
             )?;
             bundle.active_os = active_os;
-            seed_build_facts(&mut bundle, &options.profile, options.locked)?;
+            seed_build_facts(
+                &mut bundle,
+                &options.profile,
+                options.locked,
+                &options.setting_overrides,
+            )?;
             bundle.web_partition_enforced = options.web_target;
         }
     }
@@ -2054,6 +2328,7 @@ fn compile_bundle_path_build_inner(
                 &existing_source_paths,
                 &selected_action_outputs,
                 build_span,
+                &bundle.build_facts,
             )?
         } else {
             selected_generated
@@ -2091,6 +2366,7 @@ fn compile_bundle_path_build_inner(
                 &bundle.project_root,
                 &existing_source_paths,
                 build_span,
+                &bundle.build_facts,
             )?);
             let mut locked_provenance = generated
                 .iter()
@@ -2160,7 +2436,12 @@ fn compile_bundle_path_build_inner(
         });
         bundle = planned_bundle;
         bundle.active_os = active_os;
-        seed_build_facts(&mut bundle, &options.profile, options.locked)?;
+        seed_build_facts(
+            &mut bundle,
+            &options.profile,
+            options.locked,
+            &options.setting_overrides,
+        )?;
         bundle.web_partition_enforced = options.web_target;
     }
 
@@ -2500,6 +2781,7 @@ fn check_action_generated_sources(
     root: &std::path::Path,
     existing_source_paths: &[std::path::PathBuf],
     span: Option<crate::Diagnostics::Span>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let registered = plan
         .generated_modules()
@@ -2562,6 +2844,8 @@ fn check_action_generated_sources(
                 }
                 diags
             })?;
+            generated_bundle.build_facts = build_facts.clone();
+            generated_bundle.active_os = build_facts.os;
             let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
             let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
@@ -3254,6 +3538,7 @@ fn materialize_and_check_generated(
     existing_source_paths: &[std::path::PathBuf],
     action_outputs: &[String],
     span: Option<crate::Diagnostics::Span>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let mut modules = modules.to_vec();
     modules.sort_by(|left, right| left.path.as_str().cmp(right.path.as_str()).then_with(|| left.name.cmp(&right.name)));
@@ -3347,6 +3632,8 @@ fn materialize_and_check_generated(
                 }
                 diags
             })?;
+            generated_bundle.build_facts = build_facts.clone();
+            generated_bundle.active_os = build_facts.os;
             let generated_diags =
                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
             let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
@@ -3691,6 +3978,7 @@ fn compile_bundle_path_opts_full(
     cross_target: Option<&str>,
     explicit_output: Option<&str>,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
@@ -3703,7 +3991,7 @@ fn compile_bundle_path_opts_full(
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;
-    seed_build_facts(&mut bundle, profile, false)?;
+    seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     if web_target {
         bundle.web_partition_enforced = true;
     }
@@ -4085,9 +4373,22 @@ pub fn check_file_with_effect_facts(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
+    check_file_with_effect_facts_and_settings(file, overlay, is_lsp, &BTreeMap::new())
+}
+
+pub fn check_file_with_effect_facts_and_settings(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, "dev");
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, "dev", setting_overrides);
     (diagnostics, bundle, facts)
 }
 
@@ -4105,7 +4406,7 @@ pub fn check_file_with_effect_facts_profile(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, profile);
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, profile, &BTreeMap::new());
     (diagnostics, bundle, facts)
 }
 
@@ -4121,7 +4422,7 @@ pub fn check_file_with_effect_facts_incremental(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache), "dev");
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache), "dev", &BTreeMap::new());
     (diagnostics, bundle, facts)
 }
 
@@ -4136,7 +4437,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
-    check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache), "dev")
+    check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache), "dev", &BTreeMap::new())
 }
 
 fn check_file_with_effect_facts_impl(
@@ -4145,6 +4446,7 @@ fn check_file_with_effect_facts_impl(
     is_lsp: bool,
     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> (
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
@@ -4156,8 +4458,13 @@ fn check_file_with_effect_facts_impl(
     match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            if let Err(seed_diags) = seed_build_facts(&mut bundle, profile, false) {
-                diags.extend(seed_diags);
+            if let Err(fact_diags) = seed_build_facts(
+                &mut bundle,
+                profile,
+                false,
+                setting_overrides,
+            ) {
+                diags.extend(fact_diags);
                 return (
                     diags,
                     None,
@@ -4218,7 +4525,7 @@ pub fn check_file_with_overlays(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, overlays, is_lsp, None, "dev");
+        check_file_with_effect_facts_impl(file, overlays, is_lsp, None, "dev", &BTreeMap::new());
     (diagnostics, bundle, facts)
 }
 
@@ -4236,6 +4543,19 @@ pub fn check_file_with_overlays_and_import_root(
     match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
+            if let Err(fact_diags) = seed_build_facts(
+                &mut bundle,
+                "dev",
+                false,
+                &BTreeMap::new(),
+            ) {
+                diags.extend(fact_diags);
+                return (
+                    diags,
+                    None,
+                    crate::Sema::SemIndexEffectFacts::default(),
+                );
+            }
             let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
                 &mut bundle,
                 crate::Sema::CompileMode::Check,
@@ -4442,7 +4762,16 @@ pub fn compile_bundle_path_with_entry(
     file: &str,
     entry_fn: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_with_entry_and_settings(file, entry_fn, &BTreeMap::new())
+}
+
+pub fn compile_bundle_path_with_entry_and_settings(
+    file: &str,
+    entry_fn: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    seed_build_facts(&mut bundle, "dev", false, setting_overrides)?;
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);

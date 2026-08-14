@@ -4207,9 +4207,8 @@ defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source
 lands under `.jet/generated/`, never committed; lock records source+output
-hashes. Profiles: `Build.{optimize, debug_info, small, panic, features,
-env}`, selected by explicit flag (`--release`/`--profile=<name>`), never
-ambient env.
+hashes. Profiles: `Build.{optimize, debug_info, small, panic, settings}`,
+selected by explicit flag (`--release`/`--profile=<name>`), never ambient env.
 
 D-BUILDTARGET1=A: build targets are registered once with `b.add_executable`,
 `b.add_library`, `b.add_test`, `b.add_bench`, `b.add_asset_bundle`,
@@ -6453,6 +6452,12 @@ spelling. `features:` and `env:` are deleted from `Build.{}`. This amends
 D-BUILDPROFILE1. The setting value set is Bool, Int, Char, String, and
 fieldless enum, as ratified by D-GENMOD-VALUE1.
 
+**2026-08-13 — card #1519 implementation log.** The package parser, build-fact
+snapshot, CLI/profile contribution path, `@build.settings.*` folding, and
+execution-tier callers now use the typed settings plane. Retired `features:`
+and `env:` profile fields teach the declaration-plus-`--set` form and do not
+reach rustc configuration or process environment.
+
 **D-CONF-MERGE1=A — nearest source, most explicit layer, `.Force` pins**
 *(ratified 2026-08-06, card #1520)*: one contribution law has two halves. In
 source scopes, the nearest scope wins across item, block, function, module,
@@ -6677,7 +6682,7 @@ The named instances, as rows of the one table
 | Duty (`D-CONC-JOIN1`) | `Duty` | a value | `discharge` | `detach`, `drop` |
 | The rights law (`D-AUTHORITY-MODEL1`) | `Rights` | a scope | `shrink` | `Unsafe`, `Impure`, `Grant` |
 | Package policy (`D-PACKAGE-POLICY-SCOPE1`) | `PackagePolicy` | a scope | `shrink` | `Unsafe`, `Grant` |
-| The fact plane (`D-CONF-MERGE1`) | `BuildSettings` | the build | `shrink` | `Force` |
+| The fact plane (`D-CONF-KEY1`) | `Build.Settings` | the build | `shrink` | `Force` |
 
 Marker law zero is the instance with no meaningful direction. A rule on written
 code says what a writer may attach and where; it holds no fact that moves, so

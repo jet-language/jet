@@ -542,9 +542,11 @@ pub const BUILD_PROFILE_CI: &str = "ci"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_DEBUG_INFO: &str = "debug_info"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_SMALL: &str = "small"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_PANIC: &str = "panic"; // D-BUILDPROFILE1
-pub const BUILD_FIELD_FEATURES: &str = "features"; // D-BUILDPROFILE1
-pub const BUILD_FIELD_ENV: &str = "env"; // D-BUILDPROFILE1
-pub const BUILD_FIELD_SETTINGS: &str = "settings"; // D-CONF-MODULE1
+pub const BUILD_FIELD_SETTINGS: &str = "settings"; // D-CONF-KEY1
+/// D-CONF-KEY1: retired Build fields are recognized only to teach the typed
+/// `settings:` replacement; they never contribute compiler configuration.
+pub const RETIRED_BUILD_FIELD_FEATURES: &str = "features";
+pub const RETIRED_BUILD_FIELD_ENV: &str = "env";
 /// D-BUILDSCOPE1=A: standing programmable-build authority grant.
 pub const BUILD_FIELD_ALLOW: &str = "allow";
 
