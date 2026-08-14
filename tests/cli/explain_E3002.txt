@@ -1,0 +1,12 @@
+E3002
+
+What this means:
+  `error propagated from: {fn} ({file}:{line}) via ?` with an optional `: {note}` suffix — one journey frame appended when a `?` re-raises an error.
+
+Why Jet enforces it:
+  Each failed `?` joins the failure's journey, with or without a note, making the full error path visible.
+
+How to fix it:
+  Follow the journey from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it.
+
+This explanation comes from jet's diagnostics reference.

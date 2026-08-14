@@ -381,8 +381,24 @@ fn snapshot_codes() -> BTreeSet<String> {
         for e in entries.flatten() {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) == Some("txt") {
-                for code in extract_snapshot_codes(&read(&p)) {
+                let text = read(&p);
+                for code in extract_snapshot_codes(&text) {
                     out.insert(code);
+                }
+                // `jet explain` names its code on the first line instead of
+                // using the rendered `[E####]` diagnostic form.
+                if p.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("explain_"))
+                {
+                    if let Some(code) = text
+                        .lines()
+                        .next()
+                        .map(str::trim)
+                        .filter(|code| jet::Explain::is_code(code))
+                    {
+                        out.insert(code.to_string());
+                    }
                 }
             }
         }
@@ -1093,7 +1109,6 @@ fn registered_unimplemented_codes_are_expected() {
         ("E2804", "staged #17"),
         ("E2902", "staged #1530"),
         ("E2940", "staged #240"),
-        ("E3002", "staged #1530"),
         ("E3104", "retired"),
         ("E0958", "retired"),
         ("E0951", "retired"),
