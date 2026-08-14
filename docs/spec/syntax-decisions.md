@@ -2675,6 +2675,18 @@ architecture.md "Compiler-extension plugins".
 
 ### Testing & benchmarks
 
+**D-TESTFAULT1=A** (ratified 2026-08-12, card #1916): a test may name the
+effect-root operations whose ordinary error rail it must survive:
+#Test(faults: [Fs.Write]). faults is a typed marker configuration, not a new
+test keyword or effect-row suffix. Sema canonicalizes the selector root
+against the existing effect vocabulary and reports the existing E0119 teaching
+diagnostic for an unknown root. The one test Prelude runs a clean body, records
+each reachable selected call site, then reruns a deterministic schedule that
+fails each selector at each ordinal; an injected iteration passes when it
+returns without panic, including through cleanup/defer paths. A selector names
+an effect root and its open leaf path, so Fs.Write selects the existing
+canonical FS.Write operation.
+
 **S43 — Tests** *(D-TESTPAREN1, D-TGT5)*: `#Test("name") { … }` blocks with
 `require`/`require_eq`; `jet test` auto-collects every `#Test` in the
 package; optional `test { entry: … }` target adds an out-of-tree file.
@@ -7017,6 +7029,11 @@ a lint that names the value form `name :: loop … -> value` for collection, or
 the write-capability form `loop item, &values -> item *= 2` for in-place edits.
 Value-position finite loops keep their collection arrow semantics. The
 formatter chooses the arrow when one simple body fits and braces otherwise.
+
+**2026-08-14 — D-TESTFAULT1=A** *(card #1916)*. The existing Test marker now
+accepts the typed faults list. Sema canonicalizes effect roots and the shared
+Prelude owns deterministic fail-nth schedules; AOT and JIT adapters marshal
+the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 
 **2026-08-13 — D-MARK-BLOCK1=A** *(card #1606)*. Dedicated block-construct
 nodes keep their typed fields. Tools recover the registered marker row and its
