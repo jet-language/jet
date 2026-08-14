@@ -659,6 +659,10 @@ fn jet_entry_error_text_jet<E: JetDisplay>(error: &E) -> String {
     error.jet_display()
 }
 
+fn jet_entry_error_text_show<E: JetShow>(error: &E) -> String {
+    error.jet_show()
+}
+
 fn jet_entry_report(error: String) -> String {
     let journey = jet_journey_take();
     let mut report = format!("{journey}{error}");

@@ -1512,6 +1512,7 @@ fn emit_entry_invocation(
     let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
     let error_text = |error: &str| match entry_error {
         Some(EntryError::Jet) => format!("jet_entry_error_text_jet(&{error})"),
+        Some(EntryError::JetShow) => format!("jet_entry_error_text_show(&{error})"),
         Some(EntryError::Rust) => format!("jet_entry_error_text(&{error})"),
         None => unreachable!("entry error text requested for an infallible entry"),
     };
@@ -1555,6 +1556,7 @@ fn emit_entry_invocation(
 #[derive(Clone, Copy)]
 enum EntryError {
     Jet,
+    JetShow,
     Rust,
 }
 
@@ -1619,7 +1621,13 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
         Type::Named(name) | Type::Apply { name, .. } => cx.has_display_type(name),
         _ => false,
     };
-    Some(if uses_jet_display {
+    Some(if matches!(
+        err.as_ref(),
+        Type::List(inner)
+            if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
+    ) {
+        EntryError::JetShow
+    } else if uses_jet_display {
         EntryError::Jet
     } else if jet_showable_type(cx, err) {
         EntryError::JetShow
