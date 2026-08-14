@@ -888,7 +888,8 @@ mod jet_mem {
                 state.ptr.as_ptr().add(header_offset).cast::<FixedHeader>().write(FixedHeader {
                     previous: state.last_header,
                     value_offset,
-                    drop_fn: drop_at::<T>,
+                    drop_fn: std::mem::needs_drop::<T>().then_some(drop_at::<T>),
+                    bytes: std::mem::size_of::<T>(),
                 });
                 state.ptr.as_ptr().add(value_offset).cast::<T>().write(val);
             }
