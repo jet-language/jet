@@ -3346,6 +3346,10 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_panic_call(&mut self, call: &mut Call) {
+        // D-NOPANIC1=D: the existing reachability sentinel is the source of
+        // both the legacy `reaches_panic` fact and the deniable Panic effect.
+        self.fx_edges.insert("__jet_panic__".to_string());
+        self.record_effect(Effect::Panic.name(), call.name_span);
         if call.args.len() != 1 {
             self.diags.push(Diagnostic::error(
                 "E0103",

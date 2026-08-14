@@ -1,0 +1,7 @@
+Error [E0749]: `parse_port` can stop, but Panic is denied here
+  --> tests/ui/panic_effect_prohibition.jet:2:31
+    |
+  2 | fn parse_port(raw: String) =[!Panic]=> Int {
+    |                               ^^^^^
+ Why: `parse_port` can stop; `parse_port` and every reachable callee must not stop when Panic is denied
+ Fix: return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `=[!Panic]=>` prohibition

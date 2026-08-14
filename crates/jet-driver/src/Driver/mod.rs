@@ -218,6 +218,38 @@ fn apply_package_lint_policy(
     Ok(jet_foundation::LintPolicy::apply(&deny, diagnostics))
 }
 
+/// D-EFFBUDGET1 / D-NOPANIC1=D: apply the manifest's one whole-graph effect
+/// budget to the same solved rows the sema checker already produced. This is a
+/// diagnostic gate only; no execution tier receives a second policy path.
+fn apply_package_effect_budget(
+    bundle: &crate::AST::ProgramBundle,
+    facts: &crate::Sema::SemIndexEffectFacts,
+    diagnostics: Vec<Diagnostic>,
+) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+    let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
+        None => return Ok(diagnostics),
+        Some(Ok(facts)) => facts,
+        Some(Err(error)) => {
+            return Err(vec![Diagnostic::error(
+                "E1206",
+                "package manifest is not valid".to_string(),
+                error.to_string(),
+                "fix `package.jet` before compiling the package".to_string(),
+                None,
+            )])
+        }
+    };
+    let entries = crate::EffectBudget::compute_package_effects(
+        bundle,
+        &facts.solved,
+        &facts.summaries,
+    );
+    Ok(diagnostics
+        .into_iter()
+        .chain(crate::EffectBudget::enforce(&entries, &manifest))
+        .collect())
+}
+
 fn classify_diagnostics(
     bundle: &crate::AST::ProgramBundle,
     diagnostics: Vec<Diagnostic>,
@@ -2127,6 +2159,7 @@ fn compile_bundle_path_build_inner(
     // the selected runtime program replaces it.
     let (diags, effect_facts) =
         crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode);
+    let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
     let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
         &bundle,
         Some(&effect_facts),
@@ -2633,6 +2666,10 @@ fn compile_bundle_path_build_inner(
             let (diags, facts) =
                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
             (diags, Some(facts))
+        };
+        let planned_diags = match planned_facts.as_ref() {
+            Some(facts) => apply_package_effect_budget(&bundle, facts, planned_diags)?,
+            None => planned_diags,
         };
         let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
             &bundle,
@@ -4161,29 +4198,37 @@ fn compile_bundle_path_opts_full(
     if timing {
         timer.lap("load"); // lex + parse + module resolution
     }
-    let diags = if let Some(output) = explicit_output {
-        crate::Sema::check_bundle_for_output_opts(
-            &mut bundle,
-            mode,
-            output,
-            freestanding,
-            gates,
+    let (diags, effect_facts) = if let Some(output) = explicit_output {
+        (
+            crate::Sema::check_bundle_for_output_opts(
+                &mut bundle,
+                mode,
+                output,
+                freestanding,
+                gates,
+            ),
+            None,
         )
     } else if freestanding {
-        crate::Sema::check_bundle_freestanding(&mut bundle, mode)
+        (crate::Sema::check_bundle_freestanding(&mut bundle, mode), None)
     } else if !gates.is_empty() {
-        crate::Sema::check_bundle_gates(&mut bundle, mode, gates)
+        (crate::Sema::check_bundle_gates(&mut bundle, mode, gates), None)
     } else {
-        crate::Sema::check_bundle(&mut bundle, mode)
+        let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
+        (diags, Some(facts))
     };
     if timing {
         timer.lap("sema");
     }
-    let extension_diags =
-        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
-    // Freestanding / impure / output / default compile variants here do not
-    // surface `SemIndexEffectFacts`. Pass `None` so the hook omits
-    // `ReadEffects` honestly — never invent placeholders (D-DX5-HOOK1).
+    let diags = match effect_facts.as_ref() {
+        Some(facts) => apply_package_effect_budget(&bundle, facts, diags)?,
+        None => diags,
+    };
+    let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
+        &bundle,
+        effect_facts.as_ref(),
+        &diags,
+    );
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(
         &bundle,
@@ -4663,6 +4708,10 @@ fn check_file_with_effect_facts_impl(
                 &diags,
             );
             diags.extend(extension_diags);
+            let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
+                Ok(diags) => diags,
+                Err(diags) => return (diags, None, facts, dependencies),
+            };
             match apply_package_lint_policy(&bundle, diags) {
                 Ok(diags) => (diags, Some(bundle), facts, dependencies),
                 Err(diags) => (diags, None, facts, dependencies),
@@ -4731,6 +4780,10 @@ pub fn check_file_with_overlays_and_import_root(
                 &diags,
             );
             diags.extend(extension_diags);
+            let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
+                Ok(diags) => diags,
+                Err(diags) => return (diags, None, facts),
+            };
             match apply_package_lint_policy(&bundle, diags) {
                 Ok(diags) => (diags, Some(bundle), facts),
                 Err(diags) => (diags, None, facts),

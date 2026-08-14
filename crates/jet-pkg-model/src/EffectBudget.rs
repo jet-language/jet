@@ -19,9 +19,12 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Package::PackageFacts;
-use crate::Sema::{effect_covers, parse_effect_name, EffectSet};
+use crate::Sema::{
+    effect_covers, effect_root, effect_set_has_root, parse_effect_name, Effect, EffectSet,
+    EffectSummary,
+};
 use crate::AST::{Item, ProgramBundle};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// One package's (root, or a dependency) aggregated effect set.
 #[derive(Debug, Clone)]
@@ -29,6 +32,15 @@ pub struct PackageEffects {
     /// `"root"` for the building package itself, else the dependency name.
     pub name: String,
     pub effects: EffectSet,
+    /// Function identities where a deniable Panic stop enters the graph.
+    /// This is the package-budget provenance used by E1220.
+    pub panic_sites: Vec<String>,
+}
+
+#[derive(Default)]
+struct PackageEffectAggregate {
+    effects: EffectSet,
+    panic_sites: BTreeSet<String>,
 }
 
 /// Attribute every function's solved effect set (`Sema::check_bundle_with_effect_facts`
@@ -37,8 +49,9 @@ pub struct PackageEffects {
 pub fn compute_package_effects(
     bundle: &ProgramBundle,
     solved: &HashMap<String, EffectSet>,
+    summaries: &HashMap<String, EffectSummary>,
 ) -> Vec<PackageEffects> {
-    let mut by_pkg: BTreeMap<String, EffectSet> = BTreeMap::new();
+    let mut by_pkg: BTreeMap<String, PackageEffectAggregate> = BTreeMap::new();
 
     for module in &bundle.modules {
         let owner = bundle
@@ -49,52 +62,124 @@ pub fn compute_package_effects(
             .unwrap_or_else(|| "root".to_string());
         let out = by_pkg.entry(owner).or_default();
         for item in &module.items {
-            collect_item_effects(item, solved, out);
+            collect_item_effects(
+                item,
+                solved,
+                summaries,
+                &mut out.effects,
+                &mut out.panic_sites,
+            );
         }
     }
 
     by_pkg
         .into_iter()
-        .map(|(name, effects)| PackageEffects { name, effects })
+        .map(|(name, aggregate)| PackageEffects {
+            name,
+            effects: aggregate.effects,
+            panic_sites: aggregate.panic_sites.into_iter().collect(),
+        })
         .collect()
 }
 
-fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &mut EffectSet) {
+fn collect_effects_for_key(
+    key: String,
+    solved: &HashMap<String, EffectSet>,
+    summaries: &HashMap<String, EffectSummary>,
+    out: &mut EffectSet,
+    panic_sites: &mut BTreeSet<String>,
+) {
+    let Some(set) = solved.get(&key) else {
+        return;
+    };
+    out.extend(set.iter().cloned());
+    if let Some(site) = panic_site(&key, summaries, &mut HashSet::new()) {
+        panic_sites.insert(site);
+    }
+}
+
+fn panic_site(
+    key: &str,
+    summaries: &HashMap<String, EffectSummary>,
+    seen: &mut HashSet<String>,
+) -> Option<String> {
+    if !seen.insert(key.to_string()) {
+        return None;
+    }
+    let Some(summary) = summaries.get(key) else {
+        return None;
+    };
+    if summary.maximal
+        || effect_set_has_root(&summary.direct, Effect::Panic)
+        || summary.edges.contains("__jet_panic__")
+    {
+        return Some(key.to_string());
+    }
+    summary
+        .edges
+        .iter()
+        .find_map(|callee| panic_site(callee, summaries, seen))
+}
+
+fn collect_item_effects(
+    item: &Item,
+    solved: &HashMap<String, EffectSet>,
+    summaries: &HashMap<String, EffectSummary>,
+    out: &mut EffectSet,
+    panic_sites: &mut BTreeSet<String>,
+) {
     match item {
         Item::Func(f) => {
-            if let Some(set) = solved.get(&crate::Sema::effect_key(None, &f.name)) {
-                out.extend(set.iter().cloned());
-            }
+            collect_effects_for_key(
+                crate::Sema::effect_key(None, &f.name),
+                solved,
+                summaries,
+                out,
+                panic_sites,
+            );
         }
         Item::Impl(im) => {
             for m in &im.methods {
-                if let Some(set) =
-                    solved.get(&crate::Sema::effect_key(Some(&im.type_name), &m.name))
-                {
-                    out.extend(set.iter().cloned());
-                }
+                collect_effects_for_key(
+                    crate::Sema::effect_key(Some(&im.type_name), &m.name),
+                    solved,
+                    summaries,
+                    out,
+                    panic_sites,
+                );
             }
         }
         Item::Struct(s) => {
             for m in &s.methods {
-                if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name)) {
-                    out.extend(set.iter().cloned());
-                }
+                collect_effects_for_key(
+                    crate::Sema::effect_key(Some(&s.name), &m.name),
+                    solved,
+                    summaries,
+                    out,
+                    panic_sites,
+                );
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
-                    if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name))
-                    {
-                        out.extend(set.iter().cloned());
-                    }
+                    collect_effects_for_key(
+                        crate::Sema::effect_key(Some(&s.name), &m.name),
+                        solved,
+                        summaries,
+                        out,
+                        panic_sites,
+                    );
                 }
             }
         }
         Item::Enum(e) => {
             for m in &e.methods {
-                if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&e.name), &m.name)) {
-                    out.extend(set.iter().cloned());
-                }
+                collect_effects_for_key(
+                    crate::Sema::effect_key(Some(&e.name), &m.name),
+                    solved,
+                    summaries,
+                    out,
+                    panic_sites,
+                );
             }
         }
         _ => {}
@@ -189,7 +274,16 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                 .is_some_and(|a| !a.iter().any(|b| effect_covers(b, effect)));
             let inside_deny = deny.iter().any(|b| effect_covers(b, effect));
             if outside_allow || inside_deny {
-                diags.push(e1220(&pkg.name, effect));
+                if effect_root(effect) == Effect::Panic.name() {
+                    let site = pkg
+                        .panic_sites
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("a reachable dependency function");
+                    diags.push(e1220_panic(&pkg.name, site));
+                } else {
+                    diags.push(e1220(&pkg.name, effect));
+                }
             }
         }
     }
@@ -232,6 +326,22 @@ pub fn e1220(dep: &str, effect: &str) -> Diagnostic {
         format!(
             "add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency"
         ),
+        None::<Span>,
+    )
+}
+
+/// E1220 / D-NOPANIC1=D: package denial keeps the panic provenance visible
+/// and gives the same three exits as function-scope prohibition.
+pub fn e1220_panic(dep: &str, panic_site: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1220",
+        format!(
+            "`{dep}` uses the `Panic` effect at `{panic_site}`, which this package's budget doesn't allow"
+        ),
+        format!(
+            "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary"
+        ),
+        "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or allow/grant Panic to this dependency".to_string(),
         None::<Span>,
     )
 }

@@ -20,6 +20,8 @@ pub enum Effect {
     Exec,
     Log,
     GPU,
+    /// D-NOPANIC1=D: a reachable stop that callers and package manifests may deny.
+    Panic,
     /// D-BOUND-UNDO1=A: a foreign call is irreversible in a transaction
     /// unless its binding declares a compensating undo function.
     FFI,
@@ -96,6 +98,7 @@ impl Effect {
             Effect::Exec => "Exec",
             Effect::Log => "Log",
             Effect::GPU => "GPU",
+            Effect::Panic => "Panic",
             Effect::FFI => "FFI",
             Effect::Go => "Go",
             Effect::Java => "Java",
@@ -131,6 +134,7 @@ impl Effect {
             "Exec" => Effect::Exec,
             "Log" => Effect::Log,
             "GPU" => Effect::GPU,
+            "Panic" => Effect::Panic,
             "FFI" => Effect::FFI,
             "Go" => Effect::Go,
             "Java" => Effect::Java,

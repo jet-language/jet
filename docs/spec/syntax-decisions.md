@@ -7045,6 +7045,16 @@ accepts the typed faults list. Sema canonicalizes effect roots and the shared
 Prelude owns deterministic fail-nth schedules; AOT and JIT adapters marshal
 the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 
+**2026-08-14 — D-NOPANIC1=D** *(card #1925)*. `Panic` is a closed effect-tree
+row. A function or package may deny it with `=[!Panic]=>` or
+`effects: { deny: [Panic] }`; the existing prohibition and manifest-budget
+machinery enforce the denial across the whole reachable dependency graph.
+Expected failure returns `T ? E`. A programmer-error stop is admissible only
+when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
+The diagnostic names the panic site and gives the three exits: return a
+fallible result, add facts, or stay undenied. The row is compile-time only and
+does not add a runtime effect mechanism or an execution-tier exception.
+
 **2026-08-13 — D-MARK-BLOCK1=A** *(card #1606)*. Dedicated block-construct
 nodes keep their typed fields. Tools recover the registered marker row and its
 argument values through one accessor instead of storing a second marker node.

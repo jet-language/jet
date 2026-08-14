@@ -832,6 +832,29 @@ pub(crate) fn check_effect_boundaries(
         None
     }
 
+    fn panic_site(
+        key: &str,
+        summaries: &HashMap<String, EffectSummary>,
+        seen: &mut HashSet<String>,
+    ) -> Option<String> {
+        if !seen.insert(key.to_string()) {
+            return None;
+        }
+        let summary = summaries.get(key)?;
+        if summary.maximal
+            || effect_set_has_root(&summary.direct, Effect::Panic)
+            || summary.edges.contains("__jet_panic__")
+        {
+            return Some(key.to_string());
+        }
+        for callee in &summary.edges {
+            if let Some(site) = panic_site(callee, summaries, seen) {
+                return Some(site);
+            }
+        }
+        None
+    }
+
     fn check_one(
         f: &Func,
         owner: Option<&str>,
@@ -918,7 +941,13 @@ pub(crate) fn check_effect_boundaries(
                     .find(|(n, _)| n.starts_with('!'))
                     .map(|(_, s)| *s)
                     .unwrap_or(f.name_span);
-                diags.push(e0749(&f.name, &reached_prohibited, &prohibited, span));
+                if effect_set_has_root(&reached_prohibited, Effect::Panic) {
+                    let site = panic_site(&key, summaries, &mut HashSet::new())
+                        .unwrap_or_else(|| "the reachable call graph".to_string());
+                    diags.push(e0749_panic(&f.name, &site, &prohibited, span));
+                } else {
+                    diags.push(e0749(&f.name, &reached_prohibited, &prohibited, span));
+                }
             }
         }
     }

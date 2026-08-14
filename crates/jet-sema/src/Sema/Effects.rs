@@ -26,7 +26,7 @@
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
-//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the 29 declared names below
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the 31 declared names below
 //! become tree **roots**. A user-written effect name may now be a dotted path
 //! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
@@ -37,7 +37,7 @@
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
 //! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! 29-root enum, used for root validation/
+//! 31-root enum, used for root validation/
 //! classification and by the small set of call sites (D-TXN2, D-TAINT1,
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
@@ -64,7 +64,7 @@ pub fn effect_root(name: &str) -> &str {
 }
 
 /// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
-/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed 29
+/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed 31
 /// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
 /// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
@@ -661,6 +661,10 @@ pub fn solve_reachability(
 
     let mut panic = BTreeMap::new();
     add_seed(&mut panic, "__jet_panic__", "panic");
+    // D-NOPANIC1=D: the existing stop sentinel is also a normal deniable
+    // effect fact. It stays on this one projection, so callers and manifests
+    // see the same transitive row as the legacy `reaches_panic` consumer.
+    add_seed(&mut effects, "__jet_panic__", Effect::Panic.name());
 
     let mut taint = BTreeMap::new();
     for (name, facts) in taint_seeds {
@@ -786,6 +790,7 @@ mod reachability_tests {
         let result = solve_reachability(&summaries, &taint);
 
         assert!(result.nodes_with("effects", "Exec").contains("root"));
+        assert!(result.nodes_with("effects", "Panic").contains("root"));
         assert!(result.nodes_with("secret", "Secret").contains("root"));
         assert!(result.nodes_with("panic", "panic").contains("root"));
         assert!(result.nodes_with("taint", "Credential").contains("root"));
@@ -1243,6 +1248,28 @@ pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: S
         format!(
             "remove the call that introduces `{}`, or drop the `=[!{}]=>` prohibition",
             reached_list, decl_list
+        ),
+        Some(span),
+    )
+}
+
+/// E0749 / D-NOPANIC1=D: a denied Panic row names the reachable function
+/// where the stop enters the call graph and gives the three legal exits.
+pub fn e0749_panic(
+    fn_name: &str,
+    panic_site: &str,
+    prohibited: &EffectSet,
+    span: Span,
+) -> Diagnostic {
+    let prohibition = show_set(prohibited);
+    Diagnostic::error(
+        "E0749",
+        format!("`{fn_name}` can stop, but Panic is denied here"),
+        format!(
+            "`{panic_site}` can stop; `{fn_name}` and every reachable callee must not stop when Panic is denied"
+        ),
+        format!(
+            "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `=[!{prohibition}]=>` prohibition"
         ),
         Some(span),
     )

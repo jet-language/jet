@@ -1205,14 +1205,37 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\neffects: .{\n    allow: [FS, Time],\n    deny: [Net],\n}\n";
+        + "\neffects: .{\n    allow: [FS, Time],\n    deny: [Net, Panic],\n}\n";
     let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("effects block should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
         Some(vec!["FS".to_string(), "Time".to_string()])
     );
-    assert_eq!(pm.effects_deny, Some(vec!["Net".to_string()]));
+    assert_eq!(
+        pm.effects_deny,
+        Some(vec!["Net".to_string(), "Panic".to_string()])
+    );
+}
+
+#[test]
+fn manifest_panic_budget_names_the_dependency_stop_site() {
+    let raw = min_manifest("app", "0.1.0")
+        + "\neffects: .{\n    deny: [Panic],\n}\n";
+    let manifest = jetpack::Package::PackageFacts::parse(&raw, "test")
+        .expect("Panic should be a manifest effect root");
+    let entries = [jetpack::EffectBudget::PackageEffects {
+        name: "panicdep".to_string(),
+        effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
+        panic_sites: vec!["panicdep::parse_port".to_string()],
+    }];
+    let diagnostics = jetpack::EffectBudget::enforce(&entries, &manifest);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "E1220");
+    assert!(diagnostics[0].what.contains("panicdep"));
+    assert!(diagnostics[0].what.contains("parse_port"));
+    assert!(diagnostics[0].fix.contains("fallible result"));
+    assert!(diagnostics[0].fix.contains("#Pre"));
 }
 
 #[test]

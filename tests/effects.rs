@@ -239,6 +239,75 @@ fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
     );
 }
 
+/// D-NOPANIC1=D: Panic is an ordinary deniable effect row, not a second
+/// failure mechanism. The diagnostic names the reachable stop and its exits.
+#[test]
+fn panic_prohibition_is_e0749_with_three_exits() {
+    let src = r#"
+fn parse_port(raw: String) =[!Panic]=> Int {
+    return Int.parse(raw) ?? panic("bad port")
+}
+fn run() { print(parse_port("8080")) }
+"#;
+    let diagnostics = jet::compile(src).expect_err("a denied panic must fail sema");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0749")
+        .expect("expected E0749");
+    assert!(diagnostic.what.contains("parse_port"), "{diagnostic:#?}");
+    assert!(diagnostic.why.contains("parse_port"), "{diagnostic:#?}");
+    assert!(diagnostic.fix.contains("fallible result"), "{diagnostic:#?}");
+    assert!(diagnostic.fix.contains("facts"), "{diagnostic:#?}");
+    assert!(diagnostic.fix.contains("#Pre"), "{diagnostic:#?}");
+}
+
+/// D-NOPANIC1=D: the existing call graph projects Panic through every
+/// reachable caller and preserves the legacy panic row at the same time.
+#[test]
+fn panic_effect_propagates_transitively() {
+    let src = r#"
+fn leaf() { panic("bad input") }
+fn middle() { leaf() }
+fn top() =[!Panic]=> { middle() }
+fn run() { top() }
+"#;
+    let root = common::unique_tmp("jet_panic_effect");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    fs::write(&entry, src).unwrap();
+    let (diagnostics, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0749"));
+    assert!(facts.solved["leaf"].contains("Panic"));
+    assert!(facts.solved["middle"].contains("Panic"));
+    assert!(facts.solved["top"].contains("Panic"));
+    assert!(facts
+        .reachability
+        .nodes_with("panic", "panic")
+        .contains("main::top"));
+}
+
+/// A refinement fact discharges a Panic denial for a fixed-list read. The
+/// example and this fixture use the same sema proof (`FixedListProof`).
+#[test]
+fn fixed_list_refinement_discharges_panic_denial() {
+    let src = r#"
+Die :: distinct Int(1..6)
+fn pick(faces: [String#6], roll: Die) =[!Panic]=> String :: ~faces[roll.raw() - 1]
+fn run() {}
+"#;
+    assert!(codes(src).is_empty(), "refined fixed-list read should compile: {:?}", codes(src));
+}
+
+/// Panic is a closed root. A nearby spelling remains E0119, not a new row.
+#[test]
+fn unknown_panic_effect_name_is_e0119_only() {
+    let src = "fn work() =[!Panics]=> {}\nfn run() {}\n";
+    let c = codes(src);
+    assert!(c.iter().any(|code| code == "E0119"), "expected E0119, got {c:?}");
+    assert!(!c.iter().any(|code| code == "E0749"), "unknown root must not deny: {c:?}");
+}
+
 /// A `#(FS)` bound that matches the body's only effect compiles clean.
 #[test]
 fn declared_bound_matching_body_ok() {

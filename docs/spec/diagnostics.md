@@ -508,7 +508,7 @@ renumbered, and no new `W` code may be allocated.
 | E0746 | sema  | an irreversible effect (Net/FS/Exec/FFI) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2, D-BOUND-UNDO1) |
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) =[]=>` / `fn(…) =[E]=>`) (D-EFF2) |
 | E0748 | sema  | `=[via f]=>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
-| E0749 | sema  | a function reaches an effect it prohibits with `=[!E]=>` in its own call graph (D-PROP1=A) |
+| E0749 | sema  | a function reaches an effect it prohibits with `=[!E]=>` in its own call graph, including a denied `Panic` stop (D-PROP1=A, D-NOPANIC1=D) |
 | E0750 | sema  | an effect declaration lacks a leaf, or a dotted effect under a checked root is not a declared package-view leaf (D-EFFECT-DECL1=A) |
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
@@ -766,7 +766,7 @@ renumbered, and no new `W` code may be allocated.
 | E1217 | jet   | a dependency in `package.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
-| E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `effects:` budget (D-EFFBUDGET1) |
+| E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `effects:` budget (Panic names the stop site) (D-EFFBUDGET1, D-NOPANIC1=D) |
 | E1221 | jet   | a malformed `effects:`/`grants:` block in `package.jet` (D-EFFBUDGET1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
 | E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-ECO-FILEROOT1) |
@@ -1221,7 +1221,7 @@ output is machine-parseable with `--json`.
 | E1217 | `{dep}` is in `package.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
-| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error. | Add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency. |
+| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site. | Add `{effect}` to `allow`, grant it to `{dep}` in `grants:`, or for `Panic` return a fallible result or add facts/`#Pre`/refinement proof. |
 | E1221 | `package.jet` has a malformed `effects:`/`grants:` block. | `effects: { allow: […], deny: […] }` and `grants: { "dep": […] }` only take effect names from the closed vocabulary declared in `Prelude/Effects.jet`, as lists. | Fix the field name or effect name; see docs/spec/syntax-decisions.md. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
