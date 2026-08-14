@@ -1921,7 +1921,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 let Some(shape_pat) = union_member_datatree_pat(items, m) else {
                     continue;
                 };
-                if let Some(decoded) = crate::Codegen::TIR::emit::emit_inline_range_decode(
+                if let Some(decoded) = crate::Codegen::TIR::emit_inline_range_decode(
                     m,
                     "__t",
                     &cx.root_prefix,
