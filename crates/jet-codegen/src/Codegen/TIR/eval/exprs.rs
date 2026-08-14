@@ -1087,11 +1087,9 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
         | THostCall::YieldSend { value: recv }
         | THostCall::ExpectSnapshot { value: recv, .. } => vec![recv.as_ref()],
         THostCall::FixedListIndex { base, index, .. } => vec![base.as_ref(), index.as_ref()],
-        THostCall::GcEdit {
-            edit, index_temp, ..
-        } => std::iter::once(edit.as_ref())
-            .chain(index_temp.iter().map(|(_, expr)| expr))
-            .collect(),
+        // A GC edit seeds the generated `value` root before evaluating these
+        // expressions. The host-call arm evaluates them after that seed.
+        THostCall::GcEdit { .. } => Vec::new(),
         THostCall::TypedTextInterp { holes, .. } => holes.iter().collect(),
         THostCall::EnvSet { name, value, .. } => vec![name.as_ref(), value.as_ref()],
         THostCall::ExpiringSecretNew {
@@ -6640,6 +6638,75 @@ impl<'a> EvalCtx<'a> {
                     .switch_subject
                     .clone()
                     .ok_or_else(|| unsupported("switch subject", self.span())),
+                crate::Codegen::TIR::THostCall::GcRead { root } => {
+                    let source_root = root
+                        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(root.as_str());
+                    scope
+                        .get(root)
+                        .cloned()
+                        .or_else(|| scope.get(source_root).cloned())
+                        .or_else(|| self.globals.get(root).cloned())
+                        .or_else(|| self.globals.get(source_root).cloned())
+                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))
+                }
+                crate::Codegen::TIR::THostCall::GcEdit {
+                    root,
+                    edit,
+                    index_temp,
+                    ..
+                } => {
+                    // AOT and Cranelift use the collector's root/edit API. The
+                    // interpreter has no collector object in its CtValue model,
+                    // so it marshals the same value through the generated root
+                    // alias and writes the edited snapshot back to the source
+                    // root. It does not choose policy or edge meaning here.
+                    let root_key = if scope.contains_key(root) {
+                        root.clone()
+                    } else {
+                        root.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            .unwrap_or(root.as_str())
+                            .to_string()
+                    };
+                    let current = scope
+                        .get(&root_key)
+                        .cloned()
+                        .or_else(|| self.globals.get(root).cloned())
+                        .or_else(|| self.globals.get(&root_key).cloned())
+                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                    let value_key = mangle_generated("value");
+                    let prior_value = scope.insert(value_key.clone(), current);
+                    let prior_index = index_temp.as_ref().map(|(temp, _)| {
+                        let prior = scope.get(temp).cloned();
+                        (temp.clone(), prior)
+                    });
+                    let edited = (|| -> Result<CtValue, Diagnostic> {
+                        if let Some((temp, value)) = index_temp {
+                            let index = self.eval_expr_child(value, scope)?;
+                            scope.insert(temp.clone(), index);
+                        }
+                        self.eval_expr_child(edit, scope)
+                    })();
+                    let updated = scope.get(&value_key).cloned();
+                    if let Some((temp, prior)) = prior_index {
+                        if let Some(prior) = prior {
+                            scope.insert(temp, prior);
+                        } else {
+                            scope.remove(&temp);
+                        }
+                    }
+                    if let Some(prior) = prior_value {
+                        scope.insert(value_key, prior);
+                    } else {
+                        scope.remove(&value_key);
+                    }
+                    let edited = edited?;
+                    scope.insert(
+                        root_key,
+                        updated.ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?,
+                    );
+                    Ok(edited)
+                }
                 crate::Codegen::TIR::THostCall::CellGuardProject {
                     recv,
                     paths,

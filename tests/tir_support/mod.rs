@@ -198,6 +198,71 @@ pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     }
 }
 
+/// Run an executable example through the three hosted lenses named by I9:
+/// release/AOT, default `jet run`, and forced TIR interpretation.
+pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = root.join("examples/features").join(format!("{stem}.jet"));
+    assert!(
+        source.is_file(),
+        "missing executable allocator example: {}",
+        source.display()
+    );
+
+    let modes = [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ];
+    let mut baseline = None;
+    for (mode, release, interpret) in modes {
+        let cache = unique_tmp(&format!("jet_example_{mode}"));
+        fs::create_dir_all(&cache).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        command
+            .arg(&source)
+            .current_dir(&root)
+            .env("JET_CACHE_DIR", cache.join("cache"))
+            .env("NO_COLOR", "1");
+        let output = command.output().unwrap();
+        let result = (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        );
+        let _ = fs::remove_dir_all(&cache);
+        assert_eq!(
+            result.0, 0,
+            "{mode} run failed for {stem}:\n{}",
+            result.2
+        );
+        assert_eq!(
+            result.1, expected_stdout,
+            "{mode} output disagreed for {stem}:\n{}",
+            result.2
+        );
+        if let Some((baseline_mode, baseline_code, baseline_stdout)) = &baseline {
+            assert_eq!(
+                result.0, *baseline_code,
+                "{mode} exit code disagreed with {baseline_mode} for {stem}"
+            );
+            assert_eq!(
+                &result.1, baseline_stdout,
+                "{mode} output disagreed with {baseline_mode} for {stem}"
+            );
+        } else {
+            baseline = Some((mode, result.0, result.1));
+        }
+    }
+}
+
 pub fn build_and_run_full_with_cfg(
     prefix: &str,
     name: &str,

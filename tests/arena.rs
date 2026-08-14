@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 /// Unique temp dir per call. Keying only on PID let parallel tests clobber a
 /// shared `fixture.jet`, so a test compiled another's source — flaky races.
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -100,6 +103,14 @@ fn run() {
     if let Some(out) = build_and_run("ok", src) {
         assert_eq!(out, "42\n100\n7\n");
     }
+    tir_support::assert_example_cli_tiers_agree(
+        "memory/arena",
+        include_str!("../examples/features/expected/memory/arena.out"),
+    );
+    tir_support::assert_example_cli_tiers_agree(
+        "memory/try_allocation",
+        include_str!("../examples/features/expected/memory/try_allocation.out"),
+    );
 }
 
 #[test]

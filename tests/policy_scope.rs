@@ -1,5 +1,8 @@
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 use jet::Policy::{self, PolicyKey, PolicyValue};
 
 fn fixture(path: &str) -> String {
@@ -57,6 +60,14 @@ fn package_gc_policy_applies_once_across_imported_modules() {
         .unwrap();
     assert!(function.gc_scope);
     assert!(matches!(function.body.first(), Some(jet::AST::Stmt::Val(binding)) if binding.gc_promotion.is_some()));
+}
+
+#[test]
+fn hosted_gc_policy_matches_all_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "memory/gc_cyclic",
+        include_str!("../examples/features/expected/memory/gc_cyclic.out"),
+    );
 }
 
 #[test]

@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 use crate::AST::Type;
-use crate::Codegen::mangle;
+use crate::Codegen::{mangle, mangle_generated};
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::{CtReport, CtValue};
@@ -1652,7 +1652,58 @@ impl<'a> EvalCtx<'a> {
                 Ok(Flow::Normal)
             }
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
-            TStmt::GcEdit { .. } => Err(unsupported("gc edit", self.span())),
+            TStmt::GcEdit {
+                root,
+                index_temp,
+                stmt,
+                ..
+            } => {
+                // AOT and Cranelift perform the collector mutation and edge
+                // bookkeeping. TIR keeps the same observable value by
+                // marshalling the source root through the generated edit slot;
+                // policy and edge meaning remain in the shared collector path.
+                let root_key = if scope.contains_key(root) {
+                    root.clone()
+                } else {
+                    strip_user(root)
+                };
+                let current = scope
+                    .get(&root_key)
+                    .cloned()
+                    .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                let value_key = mangle_generated("value");
+                let prior_value = scope.insert(value_key.clone(), current);
+                let prior_index = index_temp.as_ref().map(|(temp, _)| {
+                    let prior = scope.get(temp).cloned();
+                    (temp.clone(), prior)
+                });
+                let edited = (|| -> Result<Flow, Diagnostic> {
+                    if let Some((temp, value)) = index_temp {
+                        let index = self.eval_expr_child(value, scope)?;
+                        scope.insert(temp.clone(), index);
+                    }
+                    self.exec_stmt(stmt, scope)
+                })();
+                let updated = scope.get(&value_key).cloned();
+                if let Some((temp, prior)) = prior_index {
+                    if let Some(prior) = prior {
+                        scope.insert(temp, prior);
+                    } else {
+                        scope.remove(&temp);
+                    }
+                }
+                if let Some(prior) = prior_value {
+                    scope.insert(value_key, prior);
+                } else {
+                    scope.remove(&value_key);
+                }
+                let edited = edited?;
+                scope.insert(
+                    root_key,
+                    updated.ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?,
+                );
+                Ok(edited)
+            }
             TStmt::SplitViews {
                 owner,
                 root,
