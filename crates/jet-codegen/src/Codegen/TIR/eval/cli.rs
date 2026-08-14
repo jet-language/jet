@@ -524,7 +524,7 @@ pub(super) fn prepare(
                     args,
                 })
                 .map_err(|error| {
-                    Diagnostic::error(
+                    crate::Sema::Diagnostics::render_registered(
                         "E2201",
                         error,
                         "typed CLI decoding failed".to_string(),
@@ -547,7 +547,7 @@ pub(super) fn prepare(
         )
             .map(Dispatch::Run)
             .map_err(|error| {
-                Diagnostic::error(
+                crate::Sema::Diagnostics::render_registered(
                     "E2201",
                     error,
                     "typed CLI decoding failed".to_string(),
@@ -618,7 +618,7 @@ pub(super) fn prepare(
                 span,
             )
             .map_err(|error| {
-                Diagnostic::error(
+                crate::Sema::Diagnostics::render_registered(
                     "E2201",
                     error,
                     "typed CLI decoding failed".to_string(),
@@ -643,7 +643,7 @@ pub(super) fn prepare(
         .collect::<Vec<_>>();
     let args = decode_params(&command_params, &command_schema.inputs, &mut parsed, &help, span)
         .map_err(|error| {
-            Diagnostic::error(
+            crate::Sema::Diagnostics::render_registered(
                 "E2201",
                 error,
                 "typed CLI decoding failed".to_string(),

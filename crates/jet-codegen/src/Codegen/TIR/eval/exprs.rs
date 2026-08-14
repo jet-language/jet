@@ -4393,7 +4393,7 @@ impl<'a> EvalCtx<'a> {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
             sink.stderr.push_str(&report.rendered);
             sink.exit_code = Some(report.exit_code);
-            Diagnostic::soft_exit(
+            crate::Sema::Diagnostics::soft_exit(
                 "70".to_string(),
                 format!("runtime sentry stop {}", report.code),
                 Some(self.span()),
