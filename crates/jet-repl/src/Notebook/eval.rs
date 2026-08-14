@@ -244,8 +244,13 @@ pub(crate) fn evaluate_step_with_items(
             }
         }
 
-        InputKind::Stmts(stmts, suppress, _check_src) => {
-            let checked_stmts = match type_check_stmts(session, &stmts, session.step) {
+        InputKind::Stmts(stmts, suppress, check_src) => {
+            let checked_stmts = match type_check_stmts(
+                session,
+                &stmts,
+                session.step,
+                &check_src,
+            ) {
                 Ok(s) => s,
                 Err(errors) => {
                     for d in &errors {
