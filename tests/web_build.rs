@@ -1772,6 +1772,9 @@ console.log(JSON.stringify({ raw, bridge }));
     );
 
     let dom_harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
 class FakeElement {
   constructor(tag) {
     this.tagName = tag.toUpperCase();
