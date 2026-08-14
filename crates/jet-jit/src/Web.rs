@@ -91,10 +91,17 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
                 .cloned()
         })
         .expect("jit app: bad handle");
-        if method_name == "serve_on" {
-            app_handle.serve_on(a0);
-        } else {
-            app_handle.serve();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if method_name == "serve_on" {
+                app_handle.serve_on(a0);
+            } else {
+                app_handle.serve();
+            }
+        }));
+        if let Err(payload) = result {
+            if !payload.is::<crate::runtime_host::JitRuntimeStop>() {
+                std::panic::resume_unwind(payload);
+            }
         }
         return app;
     }
