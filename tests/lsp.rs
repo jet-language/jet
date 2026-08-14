@@ -11,6 +11,7 @@
 
 mod common;
 
+use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -85,6 +86,54 @@ fn json_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+fn json_object_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+    json_get(value, key).unwrap_or_else(|| panic!("missing JSON field `{key}`"))
+}
+
+fn json_array<'a>(value: &'a JSONValue, context: &str) -> &'a [JSONValue] {
+    match value {
+        JSONValue::Array(values) => values,
+        other => panic!("{context} is not an array: {other:?}"),
+    }
+}
+
+fn json_array_field<'a>(value: &'a JSONValue, key: &str) -> &'a [JSONValue] {
+    json_array(json_object_field(value, key), &format!("JSON field `{key}`"))
+}
+
+fn json_values_equal(left: &JSONValue, right: &JSONValue) -> bool {
+    match (left, right) {
+        (JSONValue::Null, JSONValue::Null) => true,
+        (JSONValue::Bool(left), JSONValue::Bool(right)) => left == right,
+        (JSONValue::Number(left), JSONValue::Number(right)) => left == right,
+        (JSONValue::Flt(left), JSONValue::Flt(right)) => left == right,
+        (JSONValue::String(left), JSONValue::String(right)) => left == right,
+        (JSONValue::Array(left), JSONValue::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| json_values_equal(left, right))
+        }
+        (JSONValue::Object(left), JSONValue::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, left)| {
+                    right
+                        .get(key)
+                        .is_some_and(|right| json_values_equal(left, right))
+                })
+        }
+        _ => false,
+    }
+}
+
+fn assert_json_values_equal(label: &str, actual: &JSONValue, expected: &JSONValue) {
+    assert!(
+        json_values_equal(actual, expected),
+        "{label}: actual={actual:?}, expected={expected:?}"
+    );
 }
 
 #[derive(Debug)]
@@ -1175,7 +1224,7 @@ fn lsp_check_json_matches_jet_check_json_for_diagnostic_fixture() {
 }
 
 #[test]
-fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
+fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     let jet = jet_bin();
     if !jet.exists() {
         return;
@@ -1183,6 +1232,29 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
     let _guard = lock_lsp_process();
 
     let source = "#[Codable]\nstruct Widget {\n    label: String\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let path = PathBuf::from("/tmp/lsp_report_test.jet");
+    let path_string = path.to_string_lossy().into_owned();
+    std::fs::write(&path, source).expect("write tier-parity diagnostic fixture");
+    let aot = jet::compile_with_path(source, &path_string)
+        .expect_err("AOT front end must reject a bare marker with brackets");
+    let run = match jet::Interpreter::run_jit_once(&path_string) {
+        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
+        other => panic!("default resident JIT must reject E0999: {other:?}"),
+    };
+    let interpreter = match jet::Interpreter::dev_iteration(&path_string, false, true) {
+        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
+        other => panic!("interpreter must reject E0999: {other:?}"),
+    };
+    let tiers = [
+        ("AOT", aot.as_slice()),
+        ("default resident JIT", run.as_slice()),
+        ("interpreter", interpreter.as_slice()),
+    ];
+    for (tier, diags) in tiers.iter().copied() {
+        assert_eq!(diags.len(), 1, "{tier} must produce one canonical diagnostic");
+        assert_eq!(diags[0].code, "E0999", "{tier} diagnostic code drifted");
+    }
+    let report_path = jet::Diagnostics::ReportPath::from_path(&path);
     let uri = "file:///tmp/lsp_report_test.jet";
     let mut child = Command::new(&jet)
         .args(["self", "lsp"])
@@ -1213,6 +1285,30 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
     );
     let diagnostics = read_msg(&mut stdout);
     assert!(diagnostics.contains("publishDiagnostics"), "{diagnostics}");
+    let notification = parse_json(&diagnostics).expect("parse publishDiagnostics notification");
+    let editor_params = json_object_field(&notification, "params");
+    let editor_diagnostics = json_array_field(editor_params, "diagnostics");
+    assert_eq!(editor_diagnostics.len(), 1, "editor must receive one canonical diagnostic");
+    let editor_diagnostic = &editor_diagnostics[0];
+    let editor_report = json_object_field(editor_diagnostic, "data");
+    assert!(
+        json_get(editor_diagnostic, "relatedInformation").is_none(),
+        "root report with empty cause must not gain related locations: {diagnostics}"
+    );
+    for (tier, diags) in tiers.iter().copied() {
+        let report = parse_json(jet::render_all_json(&report_path, source, diags).trim_end())
+            .unwrap_or_else(|_| panic!("parse {tier} structured report"));
+        assert_json_values_equal(
+            &format!("editor data drifted from {tier}"),
+            editor_report,
+            &report,
+        );
+        assert_json_values_equal(
+            &format!("editor What drifted from {tier}"),
+            json_object_field(editor_diagnostic, "message"),
+            json_object_field(&report, "what"),
+        );
+    }
     assert!(
         diagnostics.contains(r#""message":"one marker is written without brackets""#),
         "{diagnostics}"
@@ -1259,6 +1355,31 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
         "{actions}"
     );
     assert!(actions.contains(r##""newText":"#Codable""##), "{actions}");
+    let actions_value = parse_json(&actions).expect("parse code-action response");
+    let actions = json_array(json_object_field(&actions_value, "result"), "code-action result");
+    let quickfix = actions
+        .iter()
+        .find(|action| json_str(json_object_field(action, "kind")) == Some("quickfix"))
+        .expect("registry fix code action");
+    let document_changes = json_array(
+        json_object_field(json_object_field(quickfix, "edit"), "documentChanges"),
+        "code-action documentChanges",
+    );
+    let action_edits = json_array(
+        json_object_field(
+            document_changes.first().expect("code-action document change"),
+            "edits",
+        ),
+        "code-action edits",
+    );
+    let report_edits = json_array_field(editor_report, "fix_edits");
+    assert_eq!(report_edits.len(), 1, "canonical report must carry one recovery edit");
+    assert_eq!(action_edits.len(), 1, "canonical code action must carry one recovery edit");
+    assert_json_values_equal(
+        "code action edit drifted from report fix_edits",
+        json_object_field(&action_edits[0], "newText"),
+        json_object_field(&report_edits[0], "new_text"),
+    );
 
     send_msg(
         &mut stdin,
@@ -1271,6 +1392,7 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
     );
     drop(stdin);
     let _ = child.wait();
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
