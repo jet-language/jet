@@ -170,6 +170,48 @@ fn derive_source_reentry() {
         "direct Rust serde synthesis must stay deleted"
     );
 
+    let parser = read("crates/jet-parser/src/Parser/Items/states_protocols.rs");
+    let pipeline = read("crates/jet-sema/src/Sema/Bundle/Pipeline.rs");
+    let comptime = read("crates/jet-comptime/src/Comptime/mod.rs");
+    let tir_eval = read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs");
+    let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let diagnostics = read("crates/jet-codegen/src/Prelude/Diagnostics.jet");
+    let reflection = read("examples/features/reflection/reflect-value.jet");
+    assert!(
+        parser.contains("fn derive_body_items")
+            && parser.contains("DeriveBodyItem::Item")
+            && parser.contains("DeriveBodyItem::Loop"),
+        "derive bodies must parse as typed item templates"
+    );
+    assert!(
+        pipeline.contains("expand_derive_body")
+            && !pipeline.contains("Lexer::lex")
+            && !pipeline.contains("Parser::parse")
+            && !pipeline.contains("parse_generated_fragment"),
+        "derive expansion must enter ordinary sema without source re-entry"
+    );
+    assert!(
+        comptime.contains("fn expand_derive_items")
+            && comptime.contains("DeriveBodyItem::Loop")
+            && !comptime.contains("emitted_fragments")
+            && !comptime.contains("parse_generated_fragment"),
+        "comptime derive expansion must produce typed items"
+    );
+    assert!(
+        !tir_eval.contains("parse_generated_fragment")
+            && !tir_eval.contains("emitted_fragments")
+            && !dispatch.contains("name == \"emit\""),
+        "old source-template re-entry and emit dispatch must stay deleted"
+    );
+    assert!(
+        !diagnostics.contains("E2710"),
+        "retired derive source-emission diagnostics must stay absent"
+    );
+    assert!(
+        !reflection.contains("emit("),
+        "reflection derive examples must use typed members"
+    );
+
     let source = r#"
 use core.encoding.json as json
 #Codable
