@@ -170,13 +170,7 @@ fn load_pkg_profiles(
 /// details remain owned by the package profile table; this function decides
 /// only which writer supplies the selected name.
 fn resolve_profile_name(named_profile: Option<&str>) -> Option<String> {
-    let mut contributions = vec![jet::Policy::FactContribution::new(
-        "Build.Profile",
-        jet::Policy::FactValue::Text("dev".to_string()),
-        jet::Policy::SourceScope::Package,
-        jet::Policy::ContributionLayer::Declaration,
-        "<default>",
-    )];
+    let mut contributions = Vec::new();
     if let Some(name) = named_profile {
         contributions.push(jet::Policy::FactContribution::new(
             "Build.Profile",
@@ -186,7 +180,13 @@ fn resolve_profile_name(named_profile: Option<&str>) -> Option<String> {
             "command line",
         ));
     }
-    let fact = match jet::Policy::resolve(jet::Policy::FactKey::new("Build.Profile"), contributions) {
+    let fact = match jet::Policy::resolve(
+        jet::Policy::FactKey::with_default(
+            "Build.Profile",
+            jet::Policy::FactValue::Text("dev".to_string()),
+        ),
+        contributions,
+    ) {
         Ok(fact) => fact,
         Err(error) => {
             crate::cli_error!(

@@ -119,21 +119,46 @@ impl ContributionLayer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactMerge { Override, TightenOnly }
 
-/// A registered fact key. The registry supplies the key's merge direction;
-/// contributors supply only a value and provenance.
+/// A fact key carries its resolver merge direction and an optional resolver-
+/// owned default writer; contributors supply only a value and provenance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FactKey {
     pub name: String,
-    pub merge: FactMerge,
+    merge: FactMerge,
+    default: Option<(FactValue, String)>,
 }
 
 impl FactKey {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), merge: FactMerge::Override }
+        let name = name.into();
+        Self {
+            merge: FactMerge::Override,
+            name,
+            default: None,
+        }
     }
 
     pub fn tighten_only(name: impl Into<String>) -> Self {
-        Self { name: name.into(), merge: FactMerge::TightenOnly }
+        let mut key = Self::new(name);
+        key.merge = FactMerge::TightenOnly;
+        key
+    }
+
+    /// Set the resolver-owned declaration default for this fact.
+    pub fn with_default(name: impl Into<String>, value: FactValue) -> Self {
+        Self::with_default_source(name, value, "<default>")
+    }
+
+    /// Set the resolver-owned declaration default and preserve its source label
+    /// for the explanation chain.
+    pub fn with_default_source(
+        name: impl Into<String>,
+        value: FactValue,
+        source: impl Into<String>,
+    ) -> Self {
+        let mut key = Self::new(name);
+        key.default = Some((value, source.into()));
+        key
     }
 }
 
@@ -201,6 +226,7 @@ pub struct FactContribution {
     pub reason: Option<String>,
     pub force: bool,
     pub force_reason: Option<String>,
+    default: bool,
 }
 
 impl FactContribution {
@@ -222,6 +248,7 @@ impl FactContribution {
             reason: None,
             force: false,
             force_reason: None,
+            default: false,
         }
     }
 
@@ -248,6 +275,18 @@ impl FactContribution {
     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
         self.reason = Some(reason.into());
         self
+    }
+
+    fn default_for(key: &FactKey, value: FactValue, source: String) -> Self {
+        let mut contribution = Self::new(
+            key.name.clone(),
+            value,
+            SourceScope::Package,
+            ContributionLayer::Declaration,
+            source,
+        );
+        contribution.default = true;
+        contribution
     }
 }
 
@@ -450,6 +489,11 @@ fn resolve_fact(
         .into_iter()
         .filter(|declaration| declaration.key == key.name)
         .collect::<Vec<_>>();
+    if let Some((default, source)) = key.default.clone() {
+        if !chain.iter().any(|declaration| declaration.default) {
+            chain.push(FactContribution::default_for(&key, default, source));
+        }
+    }
     if chain.is_empty() {
         return Ok(None);
     }
@@ -1908,6 +1952,34 @@ mod tests {
         assert!(explanation.contains("[effective] system"));
         assert!(explanation.contains("pin=release certification"));
         assert!(explanation.contains("[shadowed] command line"));
+    }
+
+    #[test]
+    fn resolver_owns_defaults_and_replays_default_writer() {
+        let profile = super::FactKey::with_default(
+            "Build.Profile",
+            super::FactValue::Text("dev".to_string()),
+        );
+        let effective = super::resolve(
+            profile.clone(),
+            [super::FactContribution::new(
+                "Build.Profile",
+                super::FactValue::Text("release".to_string()),
+                super::SourceScope::Package,
+                super::ContributionLayer::CommandLine,
+                "command line",
+            )],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(effective.value, super::FactValue::Text("release".to_string()));
+        assert_eq!(effective.provenance.len(), 2);
+        assert!(super::explain(&effective).contains("[shadowed] declaration / package \"dev\""));
+
+        let replayed = super::resolve(profile, effective.provenance.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed.provenance.len(), 2);
     }
 
     #[test]

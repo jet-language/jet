@@ -1368,17 +1368,15 @@ pub fn seed_build_facts_with_contributions(
             None,
         )]
     })?;
-    let profile_key = jet_foundation::Policy::FactKey::new("Build.Profile");
-    let mut profile_contributions = vec![jet_foundation::Policy::FactContribution::new(
+    let profile_key = jet_foundation::Policy::FactKey::with_default_source(
         "Build.Profile",
         jet_foundation::Policy::FactValue::Text("dev".to_string()),
-        jet_foundation::Policy::SourceScope::Package,
-        jet_foundation::Policy::ContributionLayer::Declaration,
         manifest
             .as_ref()
             .map(|_| "package.jet")
             .unwrap_or("<default>"),
-    )];
+    );
+    let mut profile_contributions = Vec::new();
     if profile != "dev" {
         profile_contributions.push(jet_foundation::Policy::FactContribution::new(
             "Build.Profile",
@@ -1458,22 +1456,18 @@ pub fn seed_build_facts_with_contributions(
             String,
             Vec<jet_foundation::Policy::FactContribution>,
         >::new();
+        let mut setting_defaults = BTreeMap::<
+            String,
+            jet_foundation::Policy::FactValue,
+        >::new();
         for (key, declaration) in &facts.settings {
             let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types).map_err(|detail| {
                 vec![setting_value_diagnostic(key, &declaration.ty, &declaration.default, detail)]
             })?;
+            setting_defaults.insert(key.clone(), policy_fact_value(&value));
             setting_contributions
                 .entry(key.clone())
-                .or_default()
-                .push(
-                    jet_foundation::Policy::FactContribution::new(
-                        build_setting_fact_key(key),
-                        policy_fact_value(&value),
-                        jet_foundation::Policy::SourceScope::Package,
-                        jet_foundation::Policy::ContributionLayer::Declaration,
-                        format!("package.jet:settings.{key} (default)"),
-                    ),
-                );
+                .or_default();
         }
         // Validate every profile before selecting one. An inactive profile is
         // still package input and must not hide an undeclared or ill-typed key.
@@ -1562,7 +1556,14 @@ pub fn seed_build_facts_with_contributions(
                 .push(contribution.clone());
         }
         for (key, declarations) in setting_contributions {
-            let fact_key = jet_foundation::Policy::FactKey::new(build_setting_fact_key(&key));
+            let default = setting_defaults
+                .remove(&key)
+                .expect("every declared setting has one default");
+            let fact_key = jet_foundation::Policy::FactKey::with_default_source(
+                build_setting_fact_key(&key),
+                default,
+                format!("package.jet:settings.{key} (default)"),
+            );
             let fact = resolve_build_fact(fact_key, declarations)?;
             let declaration = facts
                 .settings
