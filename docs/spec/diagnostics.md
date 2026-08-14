@@ -659,7 +659,7 @@ renumbered, and no new `W` code may be allocated.
 | E0953 | sema  | @panic :: user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
 | E0955 | sema  | comptime file input missing / unreadable (`embed_file` also: not UTF-8) |
-| E0956 | sema  | construct not yet supported in comptime evaluation; `core.compiler` is also explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
+| E0956 | sema  | construct not yet supported by the canonical evaluator; `core.compiler` is explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
 | E0957 | sema  | `embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..` |
 | E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
 | E0959 | tooling | a compiler-owned layout byte fact is unavailable because no canonical target layout engine supplies it (D-LAYOUT-FACTS1=B) |

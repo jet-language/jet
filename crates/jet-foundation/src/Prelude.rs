@@ -206,7 +206,10 @@ mod tests {
             let error = jet_as_bytes(&value, span)
                 .expect_err("invalid byte value must be rejected");
             assert_eq!(error.code, "E0956");
-            assert_eq!(error.what, "`this as_bytes call` can't run at compile time yet");
+            assert_eq!(
+                error.what,
+                "`this as_bytes call` isn't supported by the current evaluator yet"
+            );
             assert_eq!(
                 error.why,
                 "the canonical TIR evaluator doesn't cover this construct yet"
