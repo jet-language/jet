@@ -2324,6 +2324,17 @@ fn run() {
 }
 ```
 
+### `core.data.plot` — deterministic plots
+
+`core.data.plot` owns deterministic text and SVG bar and line renderers over
+`[DataGroup]`. Line renderers also take `DataLineOptions` for labels, markers,
+an optional reference line, style, color, and legend.
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output |
+| `line_text(groups, options)` / `line_svg(groups, options)` | `String ? DataError` | Deterministic text/SVG line output |
+
 ### `core.text.fmt` — human-readable formatting
 
 D-HUMANFMT1 keeps formatting as library calls, not a second syntax inside
