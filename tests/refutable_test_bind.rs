@@ -12,7 +12,7 @@ fn parse_age() => Int ? String {
 }
 
 fn run() {
-    parse_age() == .Ok(age) ?? return
+    parse_age() == .Ok(age) ?? panic("invalid age")
     print(age)
 }
 "#;

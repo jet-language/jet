@@ -1,5 +1,5 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, Pattern, PlaceAccess, Stmt, Type, UnOp};
+use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, PlaceAccess, Stmt, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle_generated;
 #[cfg(test)]
@@ -1665,6 +1665,41 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     expr
 }
 
+fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
+    matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
+        || (super::is_eval_fragment()
+            && matches!(
+                pattern,
+                Pattern::Variant { variant, .. }
+                    if variant == Syntax::LIT_OK || variant == Syntax::LIT_VALUE
+            ))
+}
+
+fn refutable_binding_name<'a>(pattern: &'a Pattern, init: &TExpr) -> Option<&'a str> {
+    match pattern {
+        Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => Some(binding),
+        Pattern::Variant {
+            variant,
+            bindings,
+            leading_dot,
+            ..
+        } if super::is_eval_fragment() && bindings.len() == 1 => {
+            let TExprKind::OrFallback { value, .. } = &init.kind else {
+                return None;
+            };
+            let carrier_matches = match &value.ty {
+                Type::Result { .. } => variant == Syntax::LIT_OK,
+                Type::Option(_) => *leading_dot && variant == Syntax::LIT_VALUE,
+                _ => false,
+            };
+            carrier_matches
+                .then(|| bindings.first().and_then(PatSlot::as_bind))
+                .flatten()
+        }
+        _ => None,
+    }
+}
+
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
@@ -1884,15 +1919,16 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Val(b)
             if matches!(
                 &b.pattern,
-                Some(BindPattern::Refutable {
-                    pattern: Pattern::Ok { .. } | Pattern::Present { .. },
-                    ..
-                })
+                Some(BindPattern::Refutable { pattern, .. })
+                    if is_refutable_unwrap_pattern(pattern)
             ) => {
             // D-CHOOSE-TEST1=A: a successful `Ok`/`value` pattern test is the
             // canonical fallible unwrap already used by `??`. The miss route
-            // is retained in the same TExpr so AOT, JIT, and interpreter all
-            // execute one prelude-backed fallback operation.
+            // is retained in the same TExpr so AOT, JIT, interpreter, and the
+            // pre-sema comptime fragment all execute one prelude-backed
+            // fallback operation. The comptime pass runs before body sema, so
+            // its raw contextual variant is normalized from the lowered
+            // carrier type here; sema remains authoritative for validity.
             let Some(BindPattern::Refutable {
                 pattern,
                 fallback,
@@ -1901,11 +1937,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             else {
                 unreachable!("refutable-binding guard lost its pattern")
             };
-            let binding = match pattern {
-                Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => binding,
-                _ => unreachable!("refutable-binding guard admitted another pattern"),
-            };
             let init = super::expressions::lower_or_fallback(&b.init, fallback, cx, env);
+            let binding = refutable_binding_name(pattern, &init)
+                .expect("refutable unwrap pattern must carry one validated binding");
             env.bind(binding, TLocal::user(binding), Some(init.ty.clone()));
             ready_return!(TStmt::Let {
                 name: binding.clone(),
