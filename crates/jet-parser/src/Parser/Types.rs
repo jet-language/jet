@@ -46,9 +46,12 @@ impl<'a> Parser<'a> {
             self.sync_type_arg();
             return Ok((Type::Int, span));
         }
-        let parsed = self.type_()?;
+        // A collection-type probe may fail while parsing an expression (for
+        // example, `[.Function, .Method]` is a value list, not `[T]`). Keep
+        // the generic-depth accounting balanced on that error path too.
+        let parsed = self.type_();
         self.leave_generic_type_layer();
-        Ok(parsed)
+        Ok(parsed?)
     }
 
     pub(in crate::Parser) fn type_starts_here(&self) -> bool {
