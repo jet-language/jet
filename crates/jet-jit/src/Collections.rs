@@ -99,8 +99,7 @@ mod collection_semantics {
     }
 
     fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
-        super::Concurrency::with_runtime_mut(|rt| rt.set_runtime_stop("E3001", line, msg));
-        std::process::exit(70)
+        crate::runtime_host::runtime_stop_unwind("E3001", line, msg)
     }
 
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");

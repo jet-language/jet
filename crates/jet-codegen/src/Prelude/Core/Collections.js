@@ -18,7 +18,14 @@ function jet_iter_lazy(pull) {
   const view = {
     __jet_iter: true,
     _pull() {
-      if (used) throw new Error("lazy collection view was already consumed");
+      if (used) {
+        jet_runtime_stop(
+          "E3001",
+          "<core.collections>",
+          0,
+          "lazy collection view was already consumed",
+        );
+      }
       used = true;
       return pull();
     },

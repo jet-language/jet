@@ -164,6 +164,15 @@ fn run() {
 "#;
     let dir = build_web_fixture("eager_collection_adapters", src, "tests/fixtures/web_eager_collection_adapters.jet");
     assert_eq!(run_web_app(&dir), "2\n8\n3\n4\n30\n40\n");
+    let app = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        app.contains("jet_runtime_stop(") && app.contains("\"<core.collections>\","),
+        "web lazy collection must use the shared runtime-stop boundary"
+    );
+    assert!(
+        !app.contains("throw new Error(\"lazy collection view was already consumed\")"),
+        "web lazy collection must not leak a raw JavaScript Error"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 

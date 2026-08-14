@@ -79,8 +79,8 @@ mod os_rt {
             .and_then(|(_, value)| value.into_string().ok())
     }
 
-    fn jet_std_process_exit(code: i64) -> ! {
-        std::process::exit(code as i32)
+    fn jet_std_process_exit(code: i64) {
+        super::jet_jit_process_exit(code);
     }
 
     mod prelude_impl {
@@ -728,7 +728,7 @@ extern "C" fn jet_jit_log_fatal(msg: i64) {
         jit_log_emit("fatal", &clone_string(msg), &[]);
     }
     let _ = std::io::Write::flush(&mut std::io::stderr());
-    std::process::exit(1);
+    jet_jit_process_exit(1);
 }
 
 extern "C" fn jet_jit_log_disable() {
@@ -1763,8 +1763,8 @@ extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
 
 extern "C" fn jet_jit_process_exit(code: i64) {
     // Soft exit: set the code + trap so `resident_invoke` returns `Ran` with
-    // that exit status. Never `std::process::exit` — that would kill the
-    // resident/test process (three-way battery, `jet serve`, …).
+    // that exit status. Never terminate the resident host — that would kill
+    // the resident/test process (three-way battery, `jet serve`, …).
     Concurrency::with_runtime_mut(|rt| {
         rt.exit_code = Some(code as i32);
         rt.set_trap("__jet_process_exit__");

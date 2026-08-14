@@ -280,6 +280,17 @@ pub(crate) struct JitRuntime {
     pub(crate) web: crate::Web::WebState,
 }
 
+/// Control transfer for a shared Prelude stop whose Rust signature is `!`.
+/// The report is recorded first; the resident caller remains the owner of
+/// cleanup and the final target exit.
+#[derive(Debug)]
+pub(crate) struct JitRuntimeStop;
+
+pub(crate) fn runtime_stop_unwind(code: &'static str, line: u32, message: &str) -> ! {
+    with_runtime_mut(|rt| rt.set_runtime_stop(code, line, message));
+    std::panic::resume_unwind(Box::new(JitRuntimeStop));
+}
+
 impl JitRuntime {
     /// Snapshot string handles allocated during lowering (baked into code).
     pub(crate) fn snapshot_compile_strings(&mut self) {

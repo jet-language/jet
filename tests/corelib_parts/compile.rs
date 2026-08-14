@@ -841,3 +841,16 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(core.contains("if jet_runtime_should_unwind()"));
     assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
 }
+
+#[test]
+fn resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary() {
+    let collections = include_str!("../../crates/jet-jit/src/Collections.rs");
+    let core_host = include_str!("../../crates/jet-jit/src/CoreHost.rs");
+    let runtime = include_str!("../../crates/jet-jit/src/jit/runtime_host.rs");
+    assert!(collections.contains("runtime_host::runtime_stop_unwind(\"E3001\""));
+    assert!(!collections.contains("std::process::exit"));
+    assert!(core_host.contains("super::jet_jit_process_exit(code)"));
+    assert!(core_host.contains("jet_jit_process_exit(1);"));
+    assert!(!core_host.contains("std::process::exit"));
+    assert!(runtime.contains("pub(crate) fn runtime_stop_unwind"));
+}

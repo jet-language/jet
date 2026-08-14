@@ -67,10 +67,10 @@ struct JetFileWriter {
 fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
 }
-fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
-    // RUNTIME_PANIC (exit 70): user-program panic path for include!d net host, not I2 ICE.
-    Concurrency::with_runtime_mut(|rt| rt.set_trap(msg));
-    std::process::exit(70);
+fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
+    // The shared Prelude owns report text. This bridge records it, then lets
+    // the resident boundary own cleanup and the final exit status.
+    crate::runtime_host::runtime_stop_unwind("E3001", line, msg)
 }
 fn jet_log_emit(_level: &str, _msg: &str, _fields: &[jet_std::LogField]) {}
 

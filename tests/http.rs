@@ -70,6 +70,19 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
 }
 
 #[test]
+fn resident_http_stop_uses_the_shared_runtime_boundary() {
+    let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
+    assert!(
+        runtime.contains("runtime_host::runtime_stop_unwind(\"E3001\""),
+        "resident HTTP failures must enter the shared runtime report boundary"
+    );
+    assert!(
+        !runtime.contains("std::process::exit"),
+        "resident HTTP helpers must not terminate the host process"
+    );
+}
+
+#[test]
 fn http_readiness_matches_interpreter_default_jit_and_aot() {
     if !common::have_rustc() {
         return;
