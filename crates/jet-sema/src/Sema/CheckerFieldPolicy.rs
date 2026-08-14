@@ -435,12 +435,11 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         post: Vec::new(),
         inline_foreign: None,
         undo: None,
-        markers: f
-            .serde_markers
-            .iter()
-            .filter(|marker| marker.name == Syntax::MARKER_MEMO)
-            .cloned()
-            .collect(),
+        // The field marker is consumed by `process_computed_fields` and by
+        // codegen's field memo table. Do not copy it onto the synthetic
+        // getter: it is an internal method, not a second user-facing memo
+        // site, and method lowering has no function-result cache.
+        markers: Vec::new(),
         body: vec![Stmt::Return(Some(body_expr), span)],
     }
 }
