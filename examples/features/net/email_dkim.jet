@@ -1,7 +1,7 @@
 use core.crypto as crypto
 use core.email as email
 
-fn run() {
+fn run() ? {
     key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
     password :: crypto.Secret.from_text("example-only")
     dkim :: email.DkimConfig.{
@@ -20,6 +20,6 @@ fn run() {
         limits: email.Limits.safe(),
         dkim: Val(dkim)
     }
-    mailer :: email.smtp(config) ?? panic("invalid DKIM mailer policy")
+    mailer :: email.smtp(config)?
     print("DKIM mailer ready for login-2026._domainkey.example.com")
 }

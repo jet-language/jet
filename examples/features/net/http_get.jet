@@ -5,18 +5,18 @@ use core.http as http
 use core.net as net
 use core.tasks as tasks
 
-fn run() {
+fn run() ? {
     (sender, ch) :: tasks.channel<String>()
     // Mini one-shot server: bind, send address back, handle one request.
     t :: task {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        sender.send(listener.local_addr() ?? panic("address failed"))
-        stream :: listener.accept() ?? panic("accept failed")
-        _req :: stream.read_text(8192) ?? panic("read failed")
-        net.tcp_reply(^stream, "200 OK", "hello, world!") ?? panic("tcp reply")
+        listener :: net.tcp_listen("127.0.0.1:0") ?? return
+        sender.send(listener.local_addr() ?? return)
+        stream :: listener.accept() ?? return
+        _req :: stream.read_text(8192) ?? return
+        net.tcp_reply(^stream, "200 OK", "hello, world!") ?? return
     }
-    addr :: ch.receive() ?? panic("no address")
-    resp :: http.get("http://{addr}/") ?? panic("http get failed")
-    print(resp.body().text(8 * 1024 * 1024) ?? panic("body text"))
-    t.join() ?? panic("server failed")
+    addr :: ch.receive()?
+    resp :: http.get("http://{addr}/")?
+    print(resp.body().text(8 * 1024 * 1024)?)
+    t.join()?
 }

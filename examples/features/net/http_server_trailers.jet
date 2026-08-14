@@ -4,19 +4,19 @@ use core.net as net
 use core.tasks as tasks
 
 fn handle_trailers(req: HTTPRequest) => HTTPResponse ? HTTPError {
-    body :: req.body().text(1024) ?? panic("body")
+    body :: req.body().text(1024)?
     // Request trailers are available only after Body reaches EOF.
-    trailers :: req.trailers() ?? panic("trailers")
+    trailers :: req.trailers()?
     response :: http_server.response(200, body)
     return response.trailers(^trailers)
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr() ?? panic("address")
+fn run() ? {
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: http_server.mux()
     mux.post("/", (req: HTTPRequest) => handle_trailers(req))
-    wire_stream :: net.tcp_connect(addr) ?? panic("connect")
+    wire_stream :: net.tcp_connect(addr)?
     raw_request := "".bytes()
     loop line,
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
@@ -27,11 +27,11 @@ fn run() {
     raw_response := ""
     chunk := ""
     server_task :: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        http_server.serve_once_listener(listener, mux) ?? return
     }
-    wire_stream.write_all(raw_request) ?? panic("write")
+    wire_stream.write_all(raw_request)?
     loop _, 0..32 {
-        chunk = wire_stream.read_text(8192) ?? panic("read")
+        chunk = wire_stream.read_text(8192)?
         if chunk == "" { break }
         raw_response = "{raw_response}{chunk}"
     }
@@ -39,5 +39,5 @@ fn run() {
     print(raw_response.contains("X-Trace: first"))
     print(raw_response.contains("x-trace: second"))
     print(raw_response.contains("body"))
-    server_task.join() ?? panic("server failed")
+    server_task.join()?
 }

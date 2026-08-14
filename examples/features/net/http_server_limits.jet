@@ -3,16 +3,16 @@ use core.http.server as http_server
 use core.net as net
 use core.tasks as tasks
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr() ?? panic("address")
+fn run() ? {
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: http_server.mux()
     mux.post("/", (req: HTTPRequest) => Ok(http_server.response(200, "handler ran")))
     server :: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve body limit")
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
     }
-    smuggling :: net.tcp_connect(addr) ?? panic("connect smuggling")
+    smuggling :: net.tcp_connect(addr)?
     smuggling_request := "".bytes()
     loop line,
         ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
@@ -20,20 +20,20 @@ fn run() {
         smuggling_request.push(13)
         smuggling_request.push(10)
     }
-    smuggling.write_all(smuggling_request) ?? panic("write smuggling")
-    smuggling_response :: smuggling.read_text(8192) ?? panic("read smuggling")
+    smuggling.write_all(smuggling_request)?
+    smuggling_response :: smuggling.read_text(8192)?
     print(smuggling_response.starts_with("HTTP/1.1 400 Bad Request"))
     print(smuggling_response.contains("handler ran"))
-    oversized :: net.tcp_connect(addr) ?? panic("connect oversized")
+    oversized :: net.tcp_connect(addr)?
     oversized_request := "".bytes()
     loop line, ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
         loop byte, line.bytes() { oversized_request.push(byte) }
         oversized_request.push(13)
         oversized_request.push(10)
     }
-    oversized.write_all(oversized_request) ?? panic("write oversized")
-    oversized_response :: oversized.read_text(8192) ?? panic("read oversized")
+    oversized.write_all(oversized_request)?
+    oversized_response :: oversized.read_text(8192)?
     print(oversized_response.starts_with("HTTP/1.1 413 Payload Too Large"))
     print(oversized_response.contains("handler ran"))
-    server.join() ?? panic("server failed")
+    server.join()?
 }

@@ -20,41 +20,41 @@ fn store_reading(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.json(201, Reading.{city: reading.city, degrees: reading.degrees + 1}))
 }
 
-fn run() {
-    files.create_dir_all("/tmp/jet_http_public") ?? panic("public")
-    files.write("/tmp/jet_http_public/index.html", "home") ?? panic("index")
-    files.write("/tmp/jet_http_public/.env", "TOKEN=private") ?? panic("dotfile")
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr() ?? panic("address")
+fn run() ? {
+    files.create_dir_all("/tmp/jet_http_public")?
+    files.write("/tmp/jet_http_public/index.html", "home")?
+    files.write("/tmp/jet_http_public/.env", "TOKEN=private")?
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: http_server.mux()
     // Named origins only. `.Any` with credentials is refused when the policy is
     // built, so that mistake never reaches a running server.
-    policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors policy")
+    policy :: http_server.cors_policy(["https://app.example"])?
     http_server.cors(mux, policy)
     mux.post("/readings", (req: HTTPRequest) => store_reading(req))
     // Serve a whole folder under /assets. Dot-files stay hidden, and a
     // directory request serves its index.html.
     http_server.static_files(mux, "/assets", "/tmp/jet_http_public")
     t :: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve1")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve2")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve3")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve4")
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
     }
     post :: http_client.request("POST", "http://{addr}/readings")
     sent :: post.header("origin", "https://app.example").body("{{\"city\":\"Reno\",\"degrees\":31}}")
-    answer :: sent.send() ?? panic("readings")
+    answer :: sent.send()?
     print(answer.status())
     print(answer.header("content-type") ?? "missing")
     print(answer.header("access-control-allow-origin") ?? "missing")
-    reading :: answer.json<Reading>() ?? panic("reading")
+    reading :: answer.json<Reading>()?
     print("{reading.city}|{reading.degrees}")
-    index :: http_client.get("http://{addr}/assets/") ?? panic("index")
+    index :: http_client.get("http://{addr}/assets/")?
     print(index.status())
     print(index.body().text(8 * 1024 * 1024) ?? "invalid body")
-    asset :: http_client.get("http://{addr}/assets/index.html") ?? panic("asset")
+    asset :: http_client.get("http://{addr}/assets/index.html")?
     print(asset.header("content-type") ?? "missing")
-    hidden :: http_client.get("http://{addr}/assets/.env") ?? panic("hidden")
+    hidden :: http_client.get("http://{addr}/assets/.env")?
     print(hidden.status())
-    t.join() ?? panic("server failed")
+    t.join()?
 }

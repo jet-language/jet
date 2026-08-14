@@ -1,10 +1,10 @@
 // DNS PTR + well-known service port table (core.net).
 use core.net as net
 
-fn run() {
-    http_port :: net.getservbyname("http") ?? panic("getservbyname")
+fn run() ? {
+    http_port :: net.getservbyname("http")?
     print("getservbyname:http:{http_port}")
-    https_name :: net.getservbyport(443) ?? panic("getservbyport")
+    https_name :: net.getservbyport(443)?
     print("getservbyport:443:{https_name}")
     // Live PTR is network-dependent; prove the call returns a Result without
     // baking answers into the golden.

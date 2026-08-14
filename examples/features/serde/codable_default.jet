@@ -11,11 +11,11 @@ struct Config {
     env: String = "prod"
 }
 
-fn run() {
+fn run() ? {
     // `ports` and `env` are absent on the wire → both defaults apply.
-    c :: json.decode<Config>("{{\"name\":\"web\"}}") ?? panic("bad config")
+    c :: json.decode<Config>("{{\"name\":\"web\"}}")?
     print(c.name, c.ports, c.env)
     // A wire value overrides the default.
-    d :: json.decode<Config>("{{\"name\":\"api\",\"ports\":[8080]}}") ?? panic("bad config")
+    d :: json.decode<Config>("{{\"name\":\"api\",\"ports\":[8080]}}")?
     print(d.ports)
 }

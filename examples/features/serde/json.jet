@@ -1,8 +1,8 @@
 use core.encoding.json as json
 
-fn run() {
+fn run() ? {
     raw :: "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
-    data :: json.parse(raw) ?? panic("bad json")
+    data :: json.parse(raw)?
     print(json.to_string(data))
     print(json.to_string_pretty(data).contains("\n"))
     // Key count without `if data == .Object(entries)` — that shape still deopts

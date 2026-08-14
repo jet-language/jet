@@ -3,25 +3,25 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn write_catalog(path: Path) {
-    output :: files.create(path) ?? panic("create")
-    writer :: cbor.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
-    writer.write(encoding.DataEvent.Key("ok")) ?? panic("key")
-    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
-    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
-    writer.flush() ?? panic("flush")
-    writer.finish() ?? panic("finish")
+fn write_catalog(path: Path) ? {
+    output :: files.create(path)?
+    writer :: cbor.writer(^output, encoding.EncodingLimits.safe())?
+    writer.write(encoding.DataEvent.ObjectStart)?
+    writer.write(encoding.DataEvent.Key("ok"))?
+    writer.write(encoding.DataEvent.Bool(true))?
+    writer.write(encoding.DataEvent.ObjectEnd)?
+    writer.flush()?
+    writer.finish()?
 }
 
-fn run() {
+fn run() ? {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-cbor") ?? panic("temp_dir")
+    scratch :: files.temp_dir("jet-encoding-cbor")?
     path :: Path.from(scratch.path).join("catalog.cbor")
-    write_catalog(path)
-    input :: files.open(path) ?? panic("open")
-    reader :: cbor.reader(^input) ?? panic("reader")
+    write_catalog(path)?
+    input :: files.open(path)?
+    reader :: cbor.reader(^input)?
     loop event, reader {
         print("event")
     }

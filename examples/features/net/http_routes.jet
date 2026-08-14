@@ -16,23 +16,23 @@ fn handle_user(req: HTTPRequest) => HTTPResponse ? HTTPError {
 
 fn handle_create(req: HTTPRequest) => HTTPResponse ? HTTPError :: Ok(server.response(201, "created"))
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-    addr :: listener.local_addr() ?? panic("address failed")
+fn run() ? {
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) => handle_root(req))
     mux.get("/users/:id", (req: HTTPRequest) => handle_user(req))
     mux.post("/users", (req: HTTPRequest) => handle_create(req))
     t :: task {
-        loop i, [0, 1, 2, 3] { server.serve_once_listener(listener, mux) ?? panic("serve failed") }
+        loop i, [0, 1, 2, 3] { server.serve_once_listener(listener, mux) ?? return }
     }
-    r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
-    print(r1.body().text(8388608) ?? panic("body failed"))
-    r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
-    print(r2.body().text(8388608) ?? panic("body failed"))
-    r3 :: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
-    print(r3.body().text(8388608) ?? panic("body failed"))
-    r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
+    r1 :: http.get("http://{addr}/")?
+    print(r1.body().text(8388608)?)
+    r2 :: http.get("http://{addr}/users/42")?
+    print(r2.body().text(8388608)?)
+    r3 :: http.post("http://{addr}/users", "")?
+    print(r3.body().text(8388608)?)
+    r4 :: http.get("http://{addr}/missing")?
     print(r4.status())
-    t.join() ?? panic("server failed")
+    t.join()?
 }

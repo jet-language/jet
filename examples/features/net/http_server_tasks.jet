@@ -11,15 +11,15 @@ fn handle(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, greeting))
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-    addr :: listener.local_addr() ?? panic("address failed")
+fn run() ? {
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) => handle(req))
     t :: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? return
     }
-    resp :: http.get("http://{addr}/") ?? panic("http get failed")
-    print(resp.body().text(8388608) ?? panic("body failed"))
-    t.join() ?? panic("server failed")
+    resp :: http.get("http://{addr}/")?
+    print(resp.body().text(8388608)?)
+    t.join()?
 }

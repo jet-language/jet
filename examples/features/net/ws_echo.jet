@@ -15,20 +15,20 @@ fn handle_ws(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.response(500, "unused"))
 }
 
-fn run() {
+fn run() ? {
     mux :: http_server.mux()
     mux.get("/live", (req: HTTPRequest) => handle_ws(req))
-    server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
-    addr :: server.local_addr() ?? panic("address")
+    server :: http_server.bind("127.0.0.1:0", mux)?
+    addr :: server.local_addr()?
     serving :: task {
-        server.serve() ?? panic("serve")
+        server.serve() ?? return
     }
     time.sleep(20)
-    client :: ws.connect("ws://{addr}/live") ?? panic("connect")
-    client.send_text("ping") ?? panic("send")
-    reply :: client.recv() ?? panic("recv")
+    client :: ws.connect("ws://{addr}/live")?
+    client.send_text("ping")?
+    reply :: client.recv()?
     print(reply.text() ?? "missing")
-    grace :: Duration.milliseconds(100) ?? panic("duration")
-    server.shutdown(grace) ?? panic("shutdown")
-    serving.join() ?? panic("server failed")
+    grace :: Duration.milliseconds(100)?
+    server.shutdown(grace)?
+    serving.join()?
 }

@@ -23,6 +23,7 @@
 
 mod common;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -242,6 +243,290 @@ fn count_bare_panics(text: &str) -> usize {
             !trimmed.starts_with("//") && line.contains("panic!(")
         })
         .count()
+}
+
+#[derive(Debug, Clone)]
+struct ExamplePanicBudgetEntry {
+    path: String,
+    max: usize,
+    reason: String,
+}
+
+const EXAMPLES_PANIC_BUDGET: &str =
+    include_str!("fixtures/examples_panic_budget.txt");
+
+fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
+    let mut entries = Vec::new();
+    let mut previous_path: Option<String> = None;
+
+    for (line_index, line) in EXAMPLES_PANIC_BUDGET.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let mut fields = line.splitn(3, '\t');
+        let path = fields
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let max = fields
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .parse::<usize>()
+            .unwrap_or_else(|_| panic!("invalid panic budget count on line {}", line_index + 1));
+        let reason = fields
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        assert!(
+            path.starts_with("examples/features/"),
+            "panic budget path must be a feature-corpus source: {path}"
+        );
+        assert!(max > 0, "panic budget count must be positive: {path}");
+        assert!(
+            !reason.is_empty(),
+            "panic budget entry needs a teaching reason: {path}"
+        );
+        if let Some(previous_path) = previous_path {
+            assert!(
+                previous_path.as_str() < path.as_str(),
+                "panic budget paths must be sorted and unique: {path}"
+            );
+        }
+        previous_path = Some(path.clone());
+        entries.push(ExamplePanicBudgetEntry { path, max, reason });
+    }
+
+    assert!(
+        !entries.is_empty(),
+        "examples panic budget must contain at least one entry"
+    );
+    entries
+}
+
+fn collect_feature_example_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("read feature example directory") {
+        let path = entry.expect("read feature example entry").path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("expected") {
+                continue;
+            }
+            collect_feature_example_files(&path, out);
+        } else if path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+            && path.extension().is_some_and(|extension| extension == "jet")
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// The panic ratchet scans every non-manifest `.jet` source under the feature
+/// corpus. Expected output and package manifests are data, not example source.
+fn collect_feature_example_sources(root: &Path) -> Vec<PathBuf> {
+    let ex_dir = root.join("examples/features");
+    let mut files = Vec::new();
+    collect_feature_example_files(&ex_dir, &mut files);
+    files.sort();
+    files
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn is_jet_panic_call(bytes: &[u8], index: usize) -> bool {
+    if index + 5 > bytes.len()
+        || (index > 0 && is_identifier_byte(bytes[index - 1]))
+        || !bytes[index..].starts_with(b"panic")
+    {
+        return false;
+    }
+
+    let mut after_name = index + 5;
+    while after_name < bytes.len() && bytes[after_name].is_ascii_whitespace() {
+        after_name += 1;
+    }
+    after_name < bytes.len() && bytes[after_name] == b'('
+}
+
+/// Counts non-comment `panic(` calls in Jet source. The scanner ignores line
+/// and block comments only; it remains conservative around strings because
+/// interpolation can contain executable expressions, and false positives are
+/// safer than allowing a new panic call through the ratchet.
+fn count_jet_panic_calls(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let mut count = 0;
+    let mut index = 0;
+    let mut in_block_comment = false;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while index < bytes.len() {
+        if in_block_comment {
+            if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                in_block_comment = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+
+        if in_string {
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if bytes[index] == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if bytes[index] == b'"' {
+                in_string = false;
+                index += 1;
+                continue;
+            }
+            if is_jet_panic_call(bytes, index) {
+                count += 1;
+                index += 5;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+
+        if bytes[index] == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'/') {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            in_block_comment = true;
+            index += 2;
+            continue;
+        }
+        if is_jet_panic_call(bytes, index) {
+            count += 1;
+            index += 5;
+        } else {
+            index += 1;
+        }
+    }
+
+    count
+}
+
+fn example_panic_counts(root: &Path) -> Vec<(String, usize)> {
+    collect_feature_example_sources(root)
+        .into_iter()
+        .map(|file| {
+            let path = file
+                .strip_prefix(root)
+                .expect("example must be below repository root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = fs::read_to_string(&file).expect("read feature example source");
+            let count = count_jet_panic_calls(&text);
+            (path, count)
+        })
+        .collect()
+}
+
+fn example_panic_budget_violations(
+    current: &[(String, usize)],
+    budget: &[ExamplePanicBudgetEntry],
+) -> Vec<String> {
+    let mut allowed = BTreeMap::new();
+    let mut maximum_total = 0;
+    for entry in budget {
+        maximum_total += entry.max;
+        allowed.insert(entry.path.clone(), entry.max);
+    }
+
+    let mut current_paths = BTreeSet::new();
+    let mut current_total = 0;
+    let mut violations = Vec::new();
+    for (path, count) in current {
+        current_paths.insert(path.clone());
+        current_total += *count;
+        match allowed.get(path) {
+            None if *count > 0 => violations.push(format!(
+                "{path}: {count} panic( calls are unbudgeted; add a real teaching reason before keeping this path"
+            )),
+            Some(max) if *count > *max => violations.push(format!(
+                "{path}: {count} panic( calls grew past its budget of {max} ({}); migrate the failure instead",
+                budget
+                    .iter()
+                    .find(|entry| entry.path.as_str() == path.as_str())
+                    .map(|entry| entry.reason.as_str())
+                    .unwrap_or("missing reason")
+            )),
+            _ => {}
+        }
+    }
+
+    for entry in budget {
+        if !current_paths.contains(&entry.path) {
+            violations.push(format!(
+                "{}: budget path no longer exists in the feature corpus; remove the stale entry",
+                entry.path
+            ));
+        }
+    }
+    if current_total > maximum_total {
+        violations.push(format!(
+            "feature corpus total grew to {current_total} panic( calls; budget is {maximum_total}"
+        ));
+    }
+    violations
+}
+
+#[test]
+fn examples_panic_budget_only_shrinks() {
+    let root = root();
+    let budget = parse_examples_panic_budget();
+    let current = example_panic_counts(&root);
+    let violations = example_panic_budget_violations(&current, &budget);
+
+    assert!(
+        violations.is_empty(),
+        "feature example panic budget grew or became stale:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn examples_panic_budget_trips_on_seeded_growth() {
+    let budget = parse_examples_panic_budget();
+    let seed = budget
+        .first()
+        .expect("panic budget needs a seeded growth entry");
+    let seeded_source = "panic(\"seeded\")\n".repeat(seed.max + 1);
+    let seeded_count = count_jet_panic_calls(&seeded_source);
+    assert_eq!(seeded_count, seed.max + 1);
+
+    let current = vec![(seed.path.clone(), seeded_count)];
+    let violations = example_panic_budget_violations(&current, &budget);
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with(seed.path.as_str())),
+        "seeded panic growth did not trip the path budget: {violations:?}"
+    );
 }
 
 #[test]

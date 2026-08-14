@@ -4,26 +4,26 @@ use core.encoding.json as json
 use core.files as files
 use core.testing as testing
 
-fn write_catalog(path: Path) {
-    out :: files.create(path) ?? panic("create")
+fn write_catalog(path: Path) ? {
+    out :: files.create(path)?
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer :: json.writer(^out, canonical: true) ?? panic("writer")
-    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
-    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
-    writer.write(encoding.DataEvent.Int(2)) ?? panic("value b")
-    writer.write(encoding.DataEvent.Key("a")) ?? panic("key a")
-    writer.write(encoding.DataEvent.Int(1)) ?? panic("value a")
-    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
-    writer.flush() ?? panic("flush")
-    writer.finish() ?? panic("finish")
+    writer :: json.writer(^out, canonical: true)?
+    writer.write(encoding.DataEvent.ObjectStart)?
+    writer.write(encoding.DataEvent.Key("b"))?
+    writer.write(encoding.DataEvent.Int(2))?
+    writer.write(encoding.DataEvent.Key("a"))?
+    writer.write(encoding.DataEvent.Int(1))?
+    writer.write(encoding.DataEvent.ObjectEnd)?
+    writer.flush()?
+    writer.finish()?
 }
 
-fn run() {
+fn run() ? {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
-    write_catalog(path)
-    input :: files.open(path) ?? panic("open")
-    reader :: json.reader(^input) ?? panic("reader")
+    write_catalog(path)?
+    input :: files.open(path)?
+    reader :: json.reader(^input)?
     read_count := 0
     loop event, reader {
         if event == {
@@ -33,12 +33,14 @@ fn run() {
             .Key(key) && key == "a" -> print("event:Key:a")
             .Int(value) && value == 1 -> print("event:Int:1")
             .ObjectEnd -> print("event:ObjectEnd")
+            // The writer above emits only the five events handled here. Any
+            // other event means this example and its reader contract disagree.
             else -> panic("unexpected JSON event")
         }
         read_count++
     }
     print("read-count:{read_count}")
     print("eof")
-    print(files.read(path) ?? panic("read"))
-    files.remove(path) ?? panic("remove")
+    print(files.read(path)?)
+    files.remove(path)?
 }

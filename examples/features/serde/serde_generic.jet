@@ -18,10 +18,10 @@ struct Tagged<K> {
     #Skip marker: K?
 }
 
-fn run() {
+fn run() ? {
     wi :: Wrap<Int>.{value: 7}
     print(json.to_string(wi))
-    back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad wrap")
+    back :: json.decode<Wrap<Int>>("{{\"value\":42}}")?
     print(back.value)
     ws :: Wrap<String>.{value: "hi"}
     print(json.to_string(ws))
@@ -29,6 +29,6 @@ fn run() {
     // no Encode bound on K. The #Skip field is omitted from the wire entirely.
     id :: Tagged<Wrap<Int>>.{raw: 9, marker: None}
     print(json.to_string(id))
-    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}")?
     print(rid.raw)
 }

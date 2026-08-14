@@ -12,10 +12,10 @@ fn xml_name(local: String) => DataTree {
     ])
 }
 
-fn write_catalog(path: Path) {
-    output :: files.create(path) ?? panic("create")
-    writer :: xml.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])])) ?? panic("document_start")
+fn write_catalog(path: Path) ? {
+    output :: files.create(path)?
+    writer :: xml.writer(^output, encoding.EncodingLimits.safe())?
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])]))?
     semantic :: DataTree.Object([
         "name": xml_name("r"),
         "namespaces": DataTree.Array([]),
@@ -35,20 +35,20 @@ fn write_catalog(path: Path) {
         "empty_style": DataTree.Text("empty"),
         "open_lexical": open_lexical
     ])
-    writer.write(root_event) ?? panic("root")
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("document_end")
-    writer.flush() ?? panic("flush")
-    writer.finish() ?? panic("finish")
+    writer.write(root_event)?
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")]))?
+    writer.flush()?
+    writer.finish()?
 }
 
-fn run() {
+fn run() ? {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-xml") ?? panic("temp_dir")
+    scratch :: files.temp_dir("jet-encoding-xml")?
     path :: Path.from(scratch.path).join("catalog.xml")
-    write_catalog(path)
-    input :: files.open(path) ?? panic("open")
-    reader :: xml.reader(^input) ?? panic("reader")
+    write_catalog(path)?
+    input :: files.open(path)?
+    reader :: xml.reader(^input)?
     loop event, reader {
         print("event")
     }

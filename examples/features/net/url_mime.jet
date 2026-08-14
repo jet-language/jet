@@ -1,14 +1,14 @@
 use core.mime as mime
 use core.url as url
 
-fn run() {
-    base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag") ?? panic("bad url")
+fn run() ? {
+    base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag")?
     print(base.to_string())
     print(base.host() ?? "none")
     print(base.path())
     print(base.query_pairs()[0][0])
     print(base.query_pairs()[0][1])
-    rel :: base.join("../notify?user=ada lovelace&user=grace#done") ?? panic("bad join")
+    rel :: base.join("../notify?user=ada lovelace&user=grace#done")?
     print(rel.to_string())
     print(rel.path_segments().join("|"))
     print(rel.fragment() ?? "none")
@@ -16,16 +16,16 @@ fn run() {
     print(query)
     print(url.percent_encode("a b/c"))
     print(url.percent_decode("a%20b%2Fc") ?? "bad")
-    html :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("bad mime")
+    html :: mime.parse("Text/HTML; charset=UTF-8")?
     print(html.essence())
     print(html.param("charset") ?? "none")
     print(mime.from_extension("png") ?? "none")
     print(mime.extension("image/png") ?? "none")
-    png :: mime.parse("image/png") ?? panic("bad mime")
+    png :: mime.parse("image/png")?
     print(url.data(png, "<h1>Hi</h1>").to_string())
     print(url.file("/tmp/a b.txt").to_string())
 
-    auth :: url.parse("https://ada:s3cret@example.com:8443/inbox") ?? panic("bad auth url")
+    auth :: url.parse("https://ada:s3cret@example.com:8443/inbox")?
     print(auth.username())
     print(auth.password())
     print(auth.userinfo())

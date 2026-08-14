@@ -6,19 +6,19 @@ use core.encoding.cbor as cbor
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-fn run() {
-    data :: json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
-    print(json.canonical(data) ?? panic("value is not canonical JSON"))
+fn run() ? {
+    data :: json.parse("{{\"b\":2,\"a\":1}}")?
+    print(json.canonical(data)?)
     print(json.events(data).contains("object_start $"))
-    rows :: jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
+    rows :: jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n")?
     print(rows.len())
     print(jsonl.to_string(rows).contains("\"a\":1"))
-    doc :: xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml")
+    doc :: xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>")?
     print(xml.to_string(doc))
-    encoded :: cbor.to_bytes(data) ?? panic("cbor encode")
+    encoded :: cbor.to_bytes(data)?
     print(encoded.len() > 0)
-    decoded :: cbor.parse(encoded) ?? panic("cbor decode")
-    print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
+    decoded :: cbor.parse(encoded)?
+    print(json.canonical(decoded)?)
     bytes :: [U8].{104, 105}
     u :: base64.encode_url(bytes)
     print(u)

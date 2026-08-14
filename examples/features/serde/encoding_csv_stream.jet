@@ -3,22 +3,22 @@ use core.encoding as encoding
 use core.encoding.csv as csv
 use core.files as files
 
-fn write_catalog(path: Path) {
-    output :: files.create(path) ?? panic("create")
-    writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    writer.write(["ok", "true"]) ?? panic("record")
-    writer.flush() ?? panic("flush")
-    writer.finish() ?? panic("finish")
+fn write_catalog(path: Path) ? {
+    output :: files.create(path)?
+    writer :: csv.writer(^output, encoding.EncodingLimits.safe())?
+    writer.write(["ok", "true"])?
+    writer.flush()?
+    writer.finish()?
 }
 
-fn run() {
+fn run() ? {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-csv") ?? panic("temp_dir")
+    scratch :: files.temp_dir("jet-encoding-csv")?
     path :: Path.from(scratch.path).join("catalog.csv")
-    write_catalog(path)
-    input :: files.open(path) ?? panic("open")
-    reader :: csv.reader(^input) ?? panic("reader")
+    write_catalog(path)?
+    input :: files.open(path)?
+    reader :: csv.reader(^input)?
     loop record, reader {
         print("record")
     }

@@ -4,11 +4,11 @@
 // The decoded value comes back plain — usable directly (no wrapper).
 use core.encoding.json as json
 
-fn run() {
+fn run() ? {
     // "port" is a string in the JSON source but coerces to a number.
     // "enabled" is a string "true" that coerces to a boolean.
     raw :: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
-    data :: json.decode(raw) ?? panic("bad json")
+    data :: json.decode(raw)?
     if data == .Object(entries) {
         port :: entries["port"]
         name :: entries["name"]

@@ -26,10 +26,10 @@ struct Signup {
     email: Email
 }
 
-fn run() {
+fn run() ? {
     signup :: Signup.{name: "Ada", email: Email.{address: "ada@lovelace.org"}}
     wire :: json.to_string(signup)
     print(wire)
-    decoded :: json.decode<Signup>(wire) ?? panic("decode failed")
+    decoded :: json.decode<Signup>(wire)?
     print(decoded.email.address)
 }

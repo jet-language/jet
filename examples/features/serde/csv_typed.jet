@@ -10,9 +10,9 @@ struct Sale {
     qty: Int
 }
 
-fn run() {
+fn run() ? {
     raw :: "item,qty\npen,3\nink,5"
-    sales :: csv.decode<Sale>(raw) ?? panic("bad csv")
+    sales :: csv.decode<Sale>(raw)?
     total := 0
     loop s, sales { total += s.qty }
     print("rows: {sales.len()}")

@@ -10,18 +10,18 @@ fn handle_api(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
 
-fn run() {
-    files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static")
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr() ?? panic("address")
+fn run() ? {
+    files.write("/tmp/jet_http_static.txt", "0123456789")?
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    addr :: listener.local_addr()?
     mux :: http_server.mux()
     mux.post("/api/:name/*path", (req: HTTPRequest) => handle_api(req))
     mux.get("/events", (req: HTTPRequest) => Ok(http_server.sse("ready")))
     mux.get("/file", (req: HTTPRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve1")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve2")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve3")
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux) ?? return
     }
     req0 :: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1 :: req0.form("tool", "jet")
@@ -29,16 +29,16 @@ fn run() {
     req3 :: req2.redirects(0)
     req4 :: req3.connect_timeout(1000)
     req :: req4.read_timeout(1000)
-    resp :: req.send() ?? panic("request")
+    resp :: req.send()?
     print(resp.status())
     print(resp.body().text(8 * 1024 * 1024) ?? "invalid body")
     print(resp.cookies().len())
-    events :: http_client.get("http://{addr}/events") ?? panic("events")
+    events :: http_client.get("http://{addr}/events")?
     print(events.header("content-type") ?? "missing")
     print(events.body().text(8 * 1024 * 1024) ?? "invalid body")
     file_req :: http_client.request("GET", "http://{addr}/file")
-    file_resp :: file_req.header("range", "bytes=2-5").send() ?? panic("file")
+    file_resp :: file_req.header("range", "bytes=2-5").send()?
     print(file_resp.status())
     print(file_resp.body().text(8 * 1024 * 1024) ?? "invalid body")
-    t.join() ?? panic("server failed")
+    t.join()?
 }
