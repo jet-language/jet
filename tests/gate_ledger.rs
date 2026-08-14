@@ -74,8 +74,10 @@ fn write_tier_fixture(root: &Path) {
 }
 
 fn knowledge_tier_source() -> &'static str {
-    r#"@answer :: 40 + 2
-#Numeric Severity :: distinct Int(0..10)
+    r#"#Numeric Severity :: distinct Int(0..10)
+
+@answer :: 40 + 2
+@gated_answer :: wrapping(Severity.from_int(4) + Severity.from_int(5))
 
 fn run() {
     left :: Severity.from_int(4)
@@ -83,9 +85,10 @@ fn run() {
     // The range fact is kept until this written bounded-arithmetic gate.
     total :: wrapping(left + right)
     print("{@answer}")
+    print("{@gated_answer}")
     print("{total}")
 }
-"#
+    "#
 }
 
 fn have_tool(name: &str) -> bool {
@@ -166,6 +169,17 @@ fn source_gate_kinds_keep_their_written_reasons() {
         "precision_demotion",
     ] {
         assert!(json.contains(&format!("\"kind\":\"{kind}\"")), "{kind}: {json}");
+    }
+    for subject in ["approx", "wrapping", "from_meter_rounded"] {
+        let marker = format!("\"subject\":\"{subject}\"");
+        let subject_at = json.find(&marker).expect("precision gate subject");
+        let entry_at = json[..subject_at]
+            .rfind("{\"kind\":\"")
+            .expect("precision gate entry");
+        assert!(
+            json[entry_at..subject_at].starts_with("{\"kind\":\"precision_demotion\""),
+            "precision gate {subject} did not use exact ledger kind: {json}"
+        );
     }
     assert!(json.contains("intentional result discard"), "{json}");
     assert!(json.contains("#Scrub(Input)"), "{json}");
@@ -274,14 +288,14 @@ fn i9_tir_tier_keeps_the_fixture_behavior() {
 }
 
 #[test]
-fn i9_aot_tier_keeps_the_fixture_buildable() {
+fn i9_aot_tier_keeps_the_fixture_behavior() {
     if !common::have_rustc() {
         eprintln!("note: skipping gate AOT tier proof (need rustc)");
         return;
     }
     let scratch = common::Scratch::new("gate-tier-aot");
     write_tier_fixture(&scratch.path);
-    let _ = stdout(&run(&scratch.path, &["build", "tier.jet"]));
+    assert_tier_output(run(&scratch.path, &["run", "--release", "tier.jet"]));
 }
 
 #[test]
@@ -301,6 +315,7 @@ fn i9_comptime_tier_keeps_the_compile_time_value() {
     write_tier_fixture(&scratch.path);
     let rust = stdout(&run(&scratch.path, &["emit", "--rust", "tier.jet"]));
     assert!(rust.contains("42"), "comptime value was not emitted: {rust}");
+    assert!(rust.contains("9"), "comptime knowledge gate was not emitted: {rust}");
 }
 
 #[test]
