@@ -864,7 +864,17 @@ fn jet_net_scheduler_wait(
     operation: &str,
 ) -> Result<(), JetNetError> {
     match jet_scheduler_wait_without_unwind(|| {
-        jet_scheduler_io_wait(stream, read, write, operation)
+        #[cfg(unix)]
+        {
+            // TCP listeners and streams must share the raw-fd poller. The
+            // clone-based poller can leave a loopback task's request read
+            // parked after accept.
+            let _ = jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation);
+        }
+        #[cfg(not(unix))]
+        {
+            jet_scheduler_io_wait(stream, read, write, operation);
+        }
     }) {
         JetSchedulerWait::Ready(()) => Ok(()),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
