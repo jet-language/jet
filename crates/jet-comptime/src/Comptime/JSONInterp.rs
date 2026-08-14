@@ -1,260 +1,66 @@
-//! RFC 8259 JSON parse/render for the comptime/REPL interpreter (std-only, I6).
-//! Mirrors `jet_std::parse_json` / `render_json` in the codegen prelude.
+//! JSON rendering and value conversion for the comptime/REPL interpreter.
+//! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
 
 use std::collections::BTreeMap;
 
 use crate::AST::{CtFloat, CtKey, CtValue};
 
-#[derive(Clone, Debug)]
-pub(super) struct JSONError {
-    line: i64,
-    message: String,
-}
-
-fn json_err(line: i64, message: impl Into<String>) -> JSONError {
-    JSONError {
-        line,
-        message: message.into(),
-    }
-}
-
-struct Parser {
-    chars: Vec<char>,
-    pos: usize,
-    ordered: bool,
-}
-
-impl Parser {
-    fn line(&self) -> i64 {
-        self.chars[..self.pos.min(self.chars.len())]
-            .iter()
-            .filter(|c| **c == '\n')
-            .count() as i64
-            + 1
-    }
-
-    fn err(&self, msg: &str) -> JSONError {
-        json_err(self.line(), msg)
-    }
-
-    fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
-    }
-
-    fn ws(&mut self) {
-        while self.pos < self.chars.len() && self.chars[self.pos].is_whitespace() {
-            self.pos += 1;
+fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+    match value {
+        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
+        jet_foundation::EncodingJson::Value::Bool(value) => {
+            json_variant("Bool", Some(CtValue::Bool(value)))
         }
-    }
-
-    fn parse_value(&mut self) -> Result<CtValue, JSONError> {
-        self.ws();
-        match self.peek() {
-            Some('n') => self.word("null", json_variant("Null", None)),
-            Some('t') => self.word("true", json_variant("Bool", Some(CtValue::Bool(true)))),
-            Some('f') => self.word("false", json_variant("Bool", Some(CtValue::Bool(false)))),
-            Some('"') => Ok(json_variant("Text", Some(CtValue::Str(self.string()?)))),
-            Some('[') => self.array(),
-            Some('{') => self.object(),
-            Some('-') | Some('0'..='9') => self.number(),
-            _ => Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_VALUE)),
+        jet_foundation::EncodingJson::Value::Int(value) => {
+            json_variant("Int", Some(CtValue::Int(value)))
         }
-    }
-
-    fn word(&mut self, w: &str, v: CtValue) -> Result<CtValue, JSONError> {
-        for ch in w.chars() {
-            if self.peek() != Some(ch) {
-                return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_WORD));
-            }
-            self.pos += 1;
+        jet_foundation::EncodingJson::Value::Float(value) => {
+            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        Ok(v)
-    }
-
-    fn string(&mut self) -> Result<String, JSONError> {
-        if self.peek() != Some('"') {
-            return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_QUOTED_TEXT));
+        jet_foundation::EncodingJson::Value::Text(value) => {
+            json_variant("Text", Some(CtValue::Str(value)))
         }
-        self.pos += 1;
-        let mut out = String::new();
-        while let Some(c) = self.peek() {
-            self.pos += 1;
-            match c {
-                '"' => return Ok(out),
-                '\\' => {
-                    let Some(e) = self.peek() else {
-                        return Err(self.err(jet_foundation::EncodingErrors::JSON_UNFINISHED_ESCAPE));
-                    };
-                    self.pos += 1;
-                    match e {
-                        '"' => out.push('"'),
-                        '\\' => out.push('\\'),
-                        '/' => out.push('/'),
-                        'b' => out.push('\u{0008}'),
-                        'f' => out.push('\u{000c}'),
-                        'n' => out.push('\n'),
-                        'r' => out.push('\r'),
-                        't' => out.push('\t'),
-                        'u' => self.unicode_escape(&mut out)?,
-                        _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_INVALID_ESCAPE)),
-                    }
-                }
-                c if (c as u32) < 0x20 => {
-                    return Err(self.err(jet_foundation::EncodingErrors::JSON_CONTROL_CHARACTER))
-                }
-                other => out.push(other),
-            }
-        }
-        Err(self.err(jet_foundation::EncodingErrors::JSON_MISSING_CLOSING_QUOTE))
-    }
-
-    fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
-        let cp = self.hex4()?;
-        match char::from_u32(cp) {
-            Some(ch) => out.push(ch),
-            None => return Err(self.err(jet_foundation::EncodingErrors::JSON_INVALID_UNICODE_ESCAPE)),
-        }
-        Ok(())
-    }
-
-    fn hex4(&mut self) -> Result<u32, JSONError> {
-        let mut v = 0u32;
-        for _ in 0..4 {
-            let Some(c) = self.peek() else {
-                return Err(self.err(jet_foundation::EncodingErrors::JSON_TRUNCATED_UNICODE_ESCAPE));
-            };
-            let d = c
-                .to_digit(16)
-                .ok_or_else(|| self.err(jet_foundation::EncodingErrors::JSON_INVALID_UNICODE_ESCAPE))?;
-            v = v * 16 + d;
-            self.pos += 1;
-        }
-        Ok(v)
-    }
-
-    fn number(&mut self) -> Result<CtValue, JSONError> {
-        let start = self.pos;
-        if self.peek() == Some('-') {
-            self.pos += 1;
-        }
-        match self.peek() {
-            Some('0') => self.pos += 1,
-            Some('1'..='9') => {
-                self.pos += 1;
-                while matches!(self.peek(), Some('0'..='9')) {
-                    self.pos += 1;
-                }
-            }
-            _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER)),
-        }
-        if self.peek() == Some('.') {
-            self.pos += 1;
-            if !matches!(self.peek(), Some('0'..='9')) {
-                return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER));
-            }
-            while matches!(self.peek(), Some('0'..='9')) {
-                self.pos += 1;
-            }
-        }
-        if matches!(self.peek(), Some('e' | 'E')) {
-            self.pos += 1;
-            if matches!(self.peek(), Some('+' | '-')) {
-                self.pos += 1;
-            }
-            if !matches!(self.peek(), Some('0'..='9')) {
-                return Err(self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER));
-            }
-            while matches!(self.peek(), Some('0'..='9')) {
-                self.pos += 1;
-            }
-        }
-        let s: String = self.chars[start..self.pos].iter().collect();
-        if s.contains('.') || s.contains('e') || s.contains('E') {
-            s.parse::<f64>()
-                .map(|value| json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))))
-                .map_err(|_| self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER))
-        } else {
-            s.parse::<i64>()
-                .map(|n| json_variant("Int", Some(CtValue::Int(n))))
-                .map_err(|_| self.err(jet_foundation::EncodingErrors::JSON_BAD_NUMBER))
-        }
-    }
-
-    fn array(&mut self) -> Result<CtValue, JSONError> {
-        self.pos += 1;
-        let mut items = Vec::new();
-        self.ws();
-        if self.peek() == Some(']') {
-            self.pos += 1;
-            return Ok(json_variant("Array", Some(CtValue::List(items))));
-        }
-        loop {
-            items.push(self.parse_value()?);
-            self.ws();
-            match self.peek() {
-                Some(',') => {
-                    self.pos += 1;
-                    self.ws();
-                }
-                Some(']') => {
-                    self.pos += 1;
-                    break;
-                }
-                _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_ARRAY_SEPARATOR)),
-            }
-        }
-        Ok(json_variant("Array", Some(CtValue::List(items))))
-    }
-
-    fn object(&mut self) -> Result<CtValue, JSONError> {
-        self.pos += 1;
-        let mut map = BTreeMap::new();
-        let mut fields = Vec::new();
-        self.ws();
-        if self.peek() == Some('}') {
-            self.pos += 1;
-            return Ok(if self.ordered {
-                json_object(fields)
-            } else {
-                json_variant("Object", Some(CtValue::Map(map)))
-            });
-        }
-        loop {
-            self.ws();
-            let key = self.string()?;
-            self.ws();
-            if self.peek() != Some(':') {
-                return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_OBJECT_COLON));
-            }
-            self.pos += 1;
-            let val = self.parse_value()?;
-            if self.ordered {
-                if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
-                    *current = val;
-                } else {
-                    fields.push((key, val));
-                }
-            } else {
-                map.insert(CtKey::Str(key), val);
-            }
-            self.ws();
-            match self.peek() {
-                Some(',') => {
-                    self.pos += 1;
-                    self.ws();
-                }
-                Some('}') => {
-                    self.pos += 1;
-                    break;
-                }
-                _ => return Err(self.err(jet_foundation::EncodingErrors::JSON_EXPECTED_OBJECT_SEPARATOR)),
-            }
-        }
-        Ok(if self.ordered {
-            json_object(fields)
-        } else {
+        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+            "Array",
+            Some(CtValue::List(values.into_iter().map(from_json).collect())),
+        ),
+        jet_foundation::EncodingJson::Value::Object(fields) => {
+            let map = fields
+                .into_iter()
+                .map(|(key, value)| (CtKey::Str(key), from_json(value)))
+                .collect();
             json_variant("Object", Some(CtValue::Map(map)))
-        })
+        }
+    }
+}
+
+fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+    match value {
+        jet_foundation::EncodingJson::Value::Object(fields) => json_object(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key, from_ordered_json(value)))
+                .collect(),
+        ),
+        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
+        jet_foundation::EncodingJson::Value::Bool(value) => {
+            json_variant("Bool", Some(CtValue::Bool(value)))
+        }
+        jet_foundation::EncodingJson::Value::Int(value) => {
+            json_variant("Int", Some(CtValue::Int(value)))
+        }
+        jet_foundation::EncodingJson::Value::Float(value) => {
+            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
+        }
+        jet_foundation::EncodingJson::Value::Text(value) => {
+            json_variant("Text", Some(CtValue::Str(value)))
+        }
+        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+            "Array",
+            Some(CtValue::List(
+                values.into_iter().map(from_ordered_json).collect(),
+            )),
+        ),
     }
 }
 
@@ -298,29 +104,19 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
     }
 }
 
-pub(super) fn parse_json(text: &str) -> Result<CtValue, JSONError> {
-    parse_json_with_order(text, false)
+pub(super) fn parse_json(
+    text: &str,
+) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
+    jet_foundation::EncodingJson::parse_json(text, false).map(from_json)
 }
 
-pub(super) fn parse_json_ordered(text: &str) -> Result<CtValue, JSONError> {
-    parse_json_with_order(text, true)
+pub(super) fn parse_json_ordered(
+    text: &str,
+) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
+    jet_foundation::EncodingJson::parse_json(text, false).map(from_ordered_json)
 }
 
-fn parse_json_with_order(text: &str, ordered: bool) -> Result<CtValue, JSONError> {
-    let mut p = Parser {
-        chars: text.chars().collect(),
-        pos: 0,
-        ordered,
-    };
-    let v = p.parse_value()?;
-    p.ws();
-    if p.pos != p.chars.len() {
-        return Err(p.err(jet_foundation::EncodingErrors::JSON_EXTRA_TEXT));
-    }
-    Ok(v)
-}
-
-pub(super) fn json_error_value(e: JSONError) -> CtValue {
+pub(super) fn json_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
     CtValue::Struct {
         type_name: "JSONError".to_string(),
         fields: vec![
@@ -335,8 +131,11 @@ pub(super) fn json_error_value(e: JSONError) -> CtValue {
 /// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
 /// line index to the per-line JSON parser's own line number.
 /// parity: guard tests/encoding_parity.rs::jsonl_csv_xml_cbor_streams_match_aot_and_default_dev
-pub(super) fn json_error_value_at_line(e: JSONError, line_offset: i64) -> CtValue {
-    json_error_value(JSONError {
+pub(super) fn json_error_value_at_line(
+    e: jet_foundation::EncodingJson::Error,
+    line_offset: i64,
+) -> CtValue {
+    json_error_value(jet_foundation::EncodingJson::Error {
         line: line_offset + e.line,
         message: e.message,
     })

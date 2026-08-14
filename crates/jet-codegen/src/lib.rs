@@ -7,6 +7,9 @@ pub use jet_sema::{
 };
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
+pub(crate) mod jet_encoding_json {
+    include!("../../jet-foundation/src/EncodingJson.rs");
+}
 pub mod Codegen;
 mod BrowserHost;
 /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the

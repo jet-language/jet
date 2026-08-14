@@ -1,13 +1,22 @@
-    // JSON/DataTree bridges layered on the canonical JSONCodec.rs core.
+    // JSON/DataTree bridges layered on the canonical JSON parser.
     pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
-        let context = IOContext::new(operation, Some(path.to_string()), e.raw_os_error().map(i64::from), Some(e.to_string()));
+        let context = IOContext::new(
+            operation,
+            Some(path.to_string()),
+            e.raw_os_error().map(i64::from),
+            Some(e.to_string()),
+        );
         match e.kind() {
-            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => IOError::InvalidInput(context),
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                IOError::InvalidInput(context)
+            }
             std::io::ErrorKind::NotFound => IOError::NotFound(context),
             std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
             std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
             std::io::ErrorKind::WouldBlock => IOError::Other(context),
-            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => IOError::Closed(context),
+            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+                IOError::Closed(context)
+            }
             _ => IOError::Other(context),
         }
     }
@@ -48,6 +57,8 @@
                 if entries.is_empty() {
                     return "{}".to_string();
                 }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
                 if !pretty {
                     let parts: Vec<String> = entries
                         .iter()
@@ -61,8 +72,6 @@
                         .collect();
                     return format!("{{{}}}", parts.join(","));
                 }
-                let pad = "  ".repeat(depth + 1);
-                let end = "  ".repeat(depth);
                 let parts: Vec<String> = entries
                     .iter()
                     .map(|(k, v)| {
@@ -77,6 +86,25 @@
                 format!("{{\n{}\n{}}}", parts.join(",\n"), end)
             }
         }
+    }
+
+    fn quote_json(s: &str) -> String {
+        let mut out = String::from("\"");
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000c}' => out.push_str("\\f"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                _ => out.push(c),
+            }
+        }
+        out.push('"');
+        out
     }
 
     // JSON (dynamic, BTreeMap-keyed) → DataTree. Numbers that are integral collapse
@@ -99,264 +127,42 @@
             }
             JSON::Text(s) => DataTree::Text(s.clone()),
             JSON::Array(items) => DataTree::Array(items.iter().map(datatree_from_json).collect()),
-            JSON::Object(m) => DataTree::Object(
-                m.iter()
-                    .map(|(k, v)| (k.clone(), datatree_from_json(v)))
+            JSON::Object(entries) => DataTree::Object(
+                entries
+                    .iter()
+                    .map(|(key, value)| (key.clone(), datatree_from_json(value)))
                     .collect(),
             ),
         }
     }
 
-    /// Parse typed wire data directly into the ordered tree. Dynamic `JSON`
-    /// remains BTreeMap-backed; typed codecs need the wire order so a
-    /// `#PublishedSchema` can retain unknown fields without a second parser
-    /// or a host-side policy.
+    /// Parse typed wire data directly into the ordered tree. The parser and
+    /// malformed-input vocabulary are shared with dynamic JSON and comptime.
     pub fn parse_json_datatree(text: &str) -> Result<DataTree, JSONError> {
-        let mut parser = DataTreeParser {
-            chars: text.chars().collect(),
-            pos: 0,
-        };
-        let value = parser.value()?;
-        parser.ws();
-        if parser.pos != parser.chars.len() {
-            return Err(parser.err(crate::jet_encoding_errors::JSON_EXTRA_TEXT));
-        }
-        Ok(value)
+        crate::jet_encoding_json::parse_json(text, false)
+            .map(datatree_from_shared)
+            .map_err(json_error_from_shared)
     }
 
-    struct DataTreeParser {
-        chars: Vec<char>,
-        pos: usize,
-    }
-
-    impl DataTreeParser {
-        fn err(&self, message: &str) -> JSONError {
-            let line = self.chars[..self.pos.min(self.chars.len())]
-                .iter()
-                .filter(|c| **c == '\n')
-                .count() as i64
-                + 1;
-            JSONError {
-                line,
-                message: message.to_string(),
+    fn datatree_from_shared(value: crate::jet_encoding_json::Value) -> DataTree {
+        match value {
+            crate::jet_encoding_json::Value::Null => DataTree::Null,
+            crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
+            crate::jet_encoding_json::Value::Int(value) => DataTree::Int(value),
+            crate::jet_encoding_json::Value::Float(value) => DataTree::Float(value),
+            crate::jet_encoding_json::Value::Text(value) => DataTree::Text(value),
+            crate::jet_encoding_json::Value::Array(values) => {
+                DataTree::Array(values.into_iter().map(datatree_from_shared).collect())
             }
-        }
-
-        fn peek(&self) -> Option<char> {
-            self.chars.get(self.pos).copied()
-        }
-
-        fn ws(&mut self) {
-            while self.pos < self.chars.len()
-                && is_json_structural_whitespace(self.chars[self.pos])
-            {
-                self.pos += 1;
-            }
-        }
-
-        fn value(&mut self) -> Result<DataTree, JSONError> {
-            self.ws();
-            match self.peek() {
-                Some('n') => self.word("null", DataTree::Null),
-                Some('t') => self.word("true", DataTree::Bool(true)),
-                Some('f') => self.word("false", DataTree::Bool(false)),
-                Some('"') => Ok(DataTree::Text(self.string()?)),
-                Some('[') => self.array(),
-                Some('{') => self.object(),
-                Some('-') | Some('0'..='9') => self.number(),
-                _ => Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_VALUE)),
-            }
-        }
-
-        fn word(&mut self, word: &str, value: DataTree) -> Result<DataTree, JSONError> {
-            for ch in word.chars() {
-                if self.peek() != Some(ch) {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_WORD));
-                }
-                self.pos += 1;
-            }
-            Ok(value)
-        }
-
-        fn string(&mut self) -> Result<String, JSONError> {
-            if self.peek() != Some('"') {
-                return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_QUOTED_TEXT));
-            }
-            self.pos += 1;
-            let mut out = String::new();
-            while let Some(c) = self.peek() {
-                self.pos += 1;
-                match c {
-                    '"' => return Ok(out),
-                    '\\' => {
-                        let Some(escape) = self.peek() else {
-                            return Err(self.err(crate::jet_encoding_errors::JSON_UNFINISHED_ESCAPE));
-                        };
-                        self.pos += 1;
-                        match escape {
-                            '"' => out.push('"'),
-                            '\\' => out.push('\\'),
-                            '/' => out.push('/'),
-                            'b' => out.push('\u{0008}'),
-                            'f' => out.push('\u{000c}'),
-                            'n' => out.push('\n'),
-                            'r' => out.push('\r'),
-                            't' => out.push('\t'),
-                            'u' => self.unicode_escape(&mut out)?,
-                            _ => return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_ESCAPE)),
-                        }
-                    }
-                    c if (c as u32) < 0x20 => {
-                        return Err(self.err(crate::jet_encoding_errors::JSON_CONTROL_CHARACTER));
-                    }
-                    other => out.push(other),
-                }
-            }
-            Err(self.err(crate::jet_encoding_errors::JSON_MISSING_CLOSING_QUOTE))
-        }
-
-        fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
-            let cp = self.hex4()?;
-            if (0xD800..=0xDBFF).contains(&cp) {
-                if self.peek() != Some('\\') {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-                }
-                self.pos += 1;
-                if self.peek() != Some('u') {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-                }
-                self.pos += 1;
-                let low = self.hex4()?;
-                if !(0xDC00..=0xDFFF).contains(&low) {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-                }
-                let combined = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-                let Some(ch) = char::from_u32(combined) else {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
-                };
-                out.push(ch);
-            } else if (0xDC00..=0xDFFF).contains(&cp) {
-                return Err(self.err(crate::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-            } else {
-                let Some(ch) = char::from_u32(cp) else {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
-                };
-                out.push(ch);
-            }
-            Ok(())
-        }
-
-        fn hex4(&mut self) -> Result<u32, JSONError> {
-            let mut value = 0u32;
-            for _ in 0..4 {
-                let Some(ch) = self.peek() else {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_TRUNCATED_UNICODE_ESCAPE));
-                };
-                let digit = ch
-                    .to_digit(16)
-                    .ok_or_else(|| self.err(crate::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE))?;
-                value = value * 16 + digit;
-                self.pos += 1;
-            }
-            Ok(value)
-        }
-
-        fn number(&mut self) -> Result<DataTree, JSONError> {
-            let start = self.pos;
-            if self.peek() == Some('-') {
-                self.pos += 1;
-            }
-            match self.peek() {
-                Some('0') => self.pos += 1,
-                Some('1'..='9') => {
-                    self.pos += 1;
-                    while matches!(self.peek(), Some('0'..='9')) {
-                        self.pos += 1;
-                    }
-                }
-                _ => return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER)),
-            }
-            if self.peek() == Some('.') {
-                self.pos += 1;
-                if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
-                }
-                while matches!(self.peek(), Some('0'..='9')) {
-                    self.pos += 1;
-                }
-            }
-            if matches!(self.peek(), Some('e') | Some('E')) {
-                self.pos += 1;
-                if matches!(self.peek(), Some('+') | Some('-')) {
-                    self.pos += 1;
-                }
-                if !matches!(self.peek(), Some('0'..='9')) {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER));
-                }
-                while matches!(self.peek(), Some('0'..='9')) {
-                    self.pos += 1;
-                }
-            }
-            let text: String = self.chars[start..self.pos].iter().collect();
-            if !text.contains('.') && !text.contains('e') && !text.contains('E') {
-                if let Ok(value) = text.parse::<i64>() {
-                    return Ok(DataTree::Int(value));
-                }
-            }
-            text.parse::<f64>()
-                .map(DataTree::Float)
-                .map_err(|_| self.err(crate::jet_encoding_errors::JSON_BAD_NUMBER))
-        }
-
-        fn array(&mut self) -> Result<DataTree, JSONError> {
-            self.pos += 1;
-            let mut values = Vec::new();
-            loop {
-                self.ws();
-                if self.peek() == Some(']') {
-                    self.pos += 1;
-                    return Ok(DataTree::Array(values));
-                }
-                values.push(self.value()?);
-                self.ws();
-                match self.peek() {
-                    Some(',') => self.pos += 1,
-                    Some(']') => {}
-                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR)),
-                }
-            }
-        }
-
-        fn object(&mut self) -> Result<DataTree, JSONError> {
-            self.pos += 1;
-            let mut fields = Vec::new();
-            loop {
-                self.ws();
-                if self.peek() == Some('}') {
-                    self.pos += 1;
-                    return Ok(DataTree::Object(fields));
-                }
-                let key = self.string()?;
-                self.ws();
-                if self.peek() != Some(':') {
-                    return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
-                }
-                self.pos += 1;
-                let value = self.value()?;
-                if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
-                    *current = value;
-                } else {
-                    fields.push((key, value));
-                }
-                self.ws();
-                match self.peek() {
-                    Some(',') => self.pos += 1,
-                    Some('}') => {}
-                    _ => return Err(self.err(crate::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR)),
-                }
-            }
+            crate::jet_encoding_json::Value::Object(entries) => DataTree::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, datatree_from_shared(value)))
+                    .collect(),
+            ),
         }
     }
+
     // Look up a key in an ordered Object.
     pub fn datatree_get<'a>(t: &'a DataTree, key: &str) -> Option<&'a DataTree> {
         match t {

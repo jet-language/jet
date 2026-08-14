@@ -20,6 +20,9 @@ pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
 pub mod EncodingErrors;
+pub mod EncodingJson;
+#[allow(unused_imports)]
+pub(crate) use EncodingErrors as jet_encoding_errors;
 pub mod LintPolicy;
 pub mod Numeric;
 pub mod OSTarget;

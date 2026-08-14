@@ -415,17 +415,17 @@ struct Row {
 }
 
 fn json_parse_error() => String {
-    result :: json.parse("{oops")
+    result :: json.parse("\n{oops")
     if result == {
-        .Err(error) -> return error.message
+        .Err(error) -> return "{error.line}|{error.message}"
         else -> return "accepted"
     }
 }
 
 fn json_decode_error() => String {
-    result :: json.decode<Row>("{oops")
+    result :: json.decode<Row>("\n{oops")
     if result == {
-        .Err(errors) -> return errors[0].reason
+        .Err(errors) -> return "{errors[0].path}|{errors[0].reason}"
         else -> return "accepted"
     }
 }
@@ -456,8 +456,8 @@ fn run() {
     let scratch = Scratch::new("malformed_text_codecs");
     let path = scratch.write_project("2026", source);
     let expected = concat!(
-        "expected quoted text\n",
-        "invalid JSON (line 1): expected quoted text\n",
+        "2|expected quoted text\n",
+        "|invalid JSON (line 2): expected quoted text\n",
         "expected a value\n",
         "expected `key: value`\n",
     );
