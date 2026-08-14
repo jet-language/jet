@@ -1605,7 +1605,10 @@ fn main() {
                 return;
             }
             if let (Some(subject), Some(file)) = (args.get(1), args.get(2)) {
-                if subject.contains('.') && file.ends_with(jet::Syntax::FILE_EXT) {
+                if subject.contains('.')
+                    && file.ends_with(jet::Syntax::FILE_EXT)
+                    && !jet::Explain::is_build_fact_query(subject)
+                {
                     if let Some(profile) = named_profile.as_deref() {
                         let _ = resolve_named_profile(profile, file, mode);
                     }
@@ -1626,14 +1629,18 @@ fn main() {
             if code
                 .map(|value| {
                     is_diagnostic_code(value)
-                        || value.starts_with("build.settings.")
+                        || jet::Explain::is_build_fact_query(value)
                         || jet::Explain::lookup(value).is_some()
-                        || value.eq_ignore_ascii_case("Build.Profile")
-                        || value == "@build.profile"
                 })
                 .unwrap_or(true)
             {
-                run_explain(code, args.get(2).map(|s| s.as_str()), mode);
+                run_explain(
+                    code,
+                    args.get(2).map(|s| s.as_str()),
+                    mode,
+                    named_profile.as_deref().unwrap_or("dev"),
+                    &setting_overrides,
+                );
             } else {
                 exit(EngineDispatch::dispatch(
                     jet::Syntax::JETPACK_BINARY_NAME,

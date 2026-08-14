@@ -184,6 +184,7 @@ impl GateLedger {
             visit_statements(&module.display, &module.script_body, &mut ledger);
             visit_items(&module.display, &module.items, &mut ledger);
         }
+        append_fact_gates(&mut ledger, &bundle.build_facts);
         ledger.sort();
         ledger
     }
@@ -244,6 +245,39 @@ impl GateLedger {
                     right.detail.as_str(),
                 ))
         });
+    }
+}
+
+/// D-FACT-GATE1=A: a system/fleet `.Force` writer is a build gate, so it is
+/// recorded in the same ledger as every other written move away from safety.
+/// The effective snapshot already owns the complete provenance chain; this
+/// adapter only projects the forced writers into the ledger's build kind.
+fn append_fact_gates(
+    ledger: &mut GateLedger,
+    facts: &jet_foundation::Facts::BuildFactSnapshot,
+) {
+    for fact in facts.contributions.values() {
+        for contribution in fact.provenance.iter().filter(|contribution| contribution.force) {
+            ledger.push(GateEntry {
+                kind: GateKind::BuildFlag,
+                domain: "build".to_string(),
+                scope: contribution.layer.name().to_string(),
+                source: contribution.source.clone(),
+                span: Some(contribution.span),
+                subject: fact.key.name.clone(),
+                reason: contribution
+                    .force_reason
+                    .clone()
+                    .or_else(|| Some(".Force".to_string())),
+                status: Some("recorded".to_string()),
+                detail: format!(".Force {}", contribution.value.display()),
+                provenance: vec![format!(
+                    "{}:{}..{}",
+                    contribution.source, contribution.span.start, contribution.span.end
+                )],
+                operations: Vec::new(),
+            });
+        }
     }
 }
 
@@ -691,5 +725,39 @@ mod tests {
         ledger.push(second);
         assert_eq!(ledger.entries().len(), 1);
         assert_eq!(ledger.entries()[0].provenance.len(), 2);
+    }
+
+    #[test]
+    fn forced_build_fact_is_one_build_gate_entry() {
+        let span = Span::new(7, 12);
+        let contribution = jet_foundation::Policy::FactContribution::new(
+            "Build.Settings.tls",
+            jet_foundation::Policy::FactValue::Bool(false),
+            jet_foundation::Policy::SourceScope::Package,
+            jet_foundation::Policy::ContributionLayer::System,
+            "system.jet",
+        )
+        .at(span)
+        .force_with_reason("fleet certification");
+        let fact = jet_foundation::Policy::resolve(
+            jet_foundation::Policy::FactKey::new("Build.Settings.tls"),
+            [contribution],
+        )
+        .expect("system force is a valid build contribution")
+        .expect("the forced writer resolves");
+        let mut facts = jet_foundation::Facts::BuildFactSnapshot::default();
+        facts.contributions.insert(fact.key.name.clone(), fact);
+
+        let mut ledger = GateLedger::default();
+        append_fact_gates(&mut ledger, &facts);
+
+        assert_eq!(ledger.entries().len(), 1);
+        let entry = &ledger.entries()[0];
+        assert_eq!(entry.kind, GateKind::BuildFlag);
+        assert_eq!(entry.domain, "build");
+        assert_eq!(entry.subject, "Build.Settings.tls");
+        assert_eq!(entry.source, "system.jet");
+        assert_eq!(entry.reason.as_deref(), Some("fleet certification"));
+        assert_eq!(entry.span, Some(span));
     }
 }

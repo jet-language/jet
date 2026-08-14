@@ -1371,8 +1371,8 @@ pub fn seed_build_facts_with_contributions(
         jet_foundation::Policy::ContributionLayer::Declaration,
         manifest
             .as_ref()
-            .map(|facts| facts.origin.clone())
-            .unwrap_or_else(|| "<default>".to_string()),
+            .map(|_| "package.jet")
+            .unwrap_or("<default>"),
     )];
     if profile != "dev" {
         profile_contributions.push(jet_foundation::Policy::FactContribution::new(
@@ -1383,20 +1383,68 @@ pub fn seed_build_facts_with_contributions(
             "command line",
         ));
     }
-    let profile_fact = jet_foundation::Policy::resolve(profile_key, profile_contributions)
-        .map_err(|error| {
-            vec![Diagnostic::error(
-                "E3521",
-                "the selected build profile has conflicting contributions".to_string(),
-                error.message(),
-                "make the profile writers agree, or select one explicit profile".to_string(),
-                None,
-            )]
-        })?;
-    let mut contributions = profile_fact
-        .into_iter()
-        .map(|fact| (fact.key.name.clone(), fact))
-        .collect::<BTreeMap<_, _>>();
+    let profile_fact = resolve_build_fact(profile_key, profile_contributions)?;
+    let resolved_profile = match &profile_fact.value {
+        jet_foundation::Policy::FactValue::Text(value) => value.clone(),
+        _ => profile.to_string(),
+    };
+    let mut contributions = BTreeMap::from([(profile_fact.key.name.clone(), profile_fact)]);
+
+    // D-CONF-READ1=A / D-CONF-STAMP1=B: fixed build leaves are facts too.
+    // They enter the same resolver and retain one writer chain, so explain
+    // does not grow a special provenance path for package, OS, or stamp data.
+    let package_source = if manifest.is_some() { "package.jet" } else { "<source>" };
+    let fixed_facts = [
+        (
+            "Build.Package.Name",
+            jet_foundation::Policy::FactValue::Text(package_name.clone()),
+            package_source,
+        ),
+        (
+            "Build.Package.Version",
+            jet_foundation::Policy::FactValue::Text(package_version.clone()),
+            package_source,
+        ),
+        (
+            "Build.OS",
+            jet_foundation::Policy::FactValue::Enum(bundle.active_os.name().to_string()),
+            "<target>",
+        ),
+        (
+            "Build.Stamp.Git",
+            jet_foundation::Policy::FactValue::OptionalText(stamp.git.clone()),
+            ".jet/lock",
+        ),
+        (
+            "Build.Stamp.Dirty",
+            jet_foundation::Policy::FactValue::Bool(stamp.dirty),
+            ".jet/lock",
+        ),
+        (
+            "Build.Stamp.Toolchain",
+            jet_foundation::Policy::FactValue::Text(stamp.toolchain.clone()),
+            ".jet/lock",
+        ),
+        (
+            "Build.Stamp.At",
+            jet_foundation::Policy::FactValue::Text(stamp.at.clone()),
+            ".jet/lock",
+        ),
+    ];
+    for (name, value, source) in fixed_facts {
+        let contribution = jet_foundation::Policy::FactContribution::new(
+            name,
+            value,
+            jet_foundation::Policy::SourceScope::Package,
+            jet_foundation::Policy::ContributionLayer::Declaration,
+            source,
+        );
+        let fact = resolve_build_fact(
+            jet_foundation::Policy::FactKey::new(name),
+            [contribution],
+        )?;
+        contributions.insert(fact.key.name.clone(), fact);
+    }
     let enum_types = fieldless_setting_enums(bundle);
     let mut settings = BTreeMap::new();
     let mut setting_provenance = BTreeMap::new();
@@ -1418,7 +1466,7 @@ pub fn seed_build_facts_with_contributions(
                         policy_fact_value(&value),
                         jet_foundation::Policy::SourceScope::Package,
                         jet_foundation::Policy::ContributionLayer::Declaration,
-                        format!("{}:settings.{key} (default)", facts.origin),
+                        format!("package.jet:settings.{key} (default)"),
                     ),
                 );
         }
@@ -1456,7 +1504,7 @@ pub fn seed_build_facts_with_contributions(
                             policy_fact_value(&value),
                             jet_foundation::Policy::SourceScope::Package,
                             jet_foundation::Policy::ContributionLayer::OptimizationBundle,
-                            format!("{}:build.{profile}.settings.{key}", facts.origin),
+                            format!("package.jet:build.{profile}.settings.{key}"),
                         ),
                     );
             }
@@ -1510,9 +1558,7 @@ pub fn seed_build_facts_with_contributions(
         }
         for (key, declarations) in setting_contributions {
             let fact_key = jet_foundation::Policy::FactKey::new(build_setting_fact_key(&key));
-            let fact = jet_foundation::Policy::resolve(fact_key, declarations)
-                .map_err(|error| vec![fact_contribution_diagnostic(error)])?
-                .expect("a declared setting always has a default contribution");
+            let fact = resolve_build_fact(fact_key, declarations)?;
             let declaration = facts
                 .settings
                 .get(&key)
@@ -1556,7 +1602,7 @@ pub fn seed_build_facts_with_contributions(
         package_name,
         package_version,
         os: bundle.active_os,
-        profile: profile.to_string(),
+        profile: resolved_profile,
         stamp,
         contributions,
         settings,
@@ -1652,6 +1698,23 @@ fn fact_contribution_diagnostic(error: jet_foundation::Policy::FactError) -> Dia
             None,
         ),
     }
+}
+
+fn resolve_build_fact(
+    key: jet_foundation::Policy::FactKey,
+    contributions: impl IntoIterator<Item = jet_foundation::Policy::FactContribution>,
+) -> Result<jet_foundation::Policy::EffectiveFact, Vec<Diagnostic>> {
+    jet_foundation::Policy::resolve(key, contributions)
+        .map_err(|error| vec![fact_contribution_diagnostic(error)])?
+        .ok_or_else(|| {
+            vec![Diagnostic::error(
+                "E3521",
+                "build fact has no contribution".to_string(),
+                "the selected build fact must have at least one registered writer".to_string(),
+                "restore the declaration or choose a source with a complete build fact plane".to_string(),
+                None,
+            )]
+        })
 }
 
 fn validate_build_contributions(

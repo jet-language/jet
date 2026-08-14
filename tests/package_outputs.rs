@@ -215,9 +215,26 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
         .expect("typed settings explain should execute");
     assert!(explain.status.success());
     let explanation = String::from_utf8_lossy(&explain.stdout);
-    assert!(explanation.contains("CLI: --set tls=<value>"));
-    assert!(explanation.contains("profile.release: false"));
-    assert!(explanation.contains("default: Bool = true"));
+    assert!(explanation.contains("Build.Settings.tls = true"));
+    assert!(explanation.contains("[effective] declaration / package"));
+    assert!(!explanation.contains("CLI: --set tls=<value>"));
+    assert!(!explanation.contains("default: Bool = true"));
+
+    let explained_override = Command::new(jet_bin())
+        .args([
+            "explain",
+            "build.settings.tls",
+            "--profile=release",
+            "--set",
+            "tls=true",
+        ])
+        .current_dir(&dir)
+        .output()
+        .expect("typed settings contribution chain should execute");
+    assert!(explained_override.status.success());
+    let override_explanation = String::from_utf8_lossy(&explained_override.stdout);
+    assert!(override_explanation.contains("[shadowed] optimization bundle / package false"));
+    assert!(override_explanation.contains("[effective] command line / package true"));
 
     let _ = fs::remove_dir_all(&build_dir);
     let override_build = Command::new(jet_bin())

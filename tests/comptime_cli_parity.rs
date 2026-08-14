@@ -185,6 +185,49 @@ fn fact_plane_runs_through_aot_jit_and_interpreter() {
 }
 
 #[test]
+fn build_fact_precedence_example_matches_release_default_and_dev() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("build_fact_precedence_parity");
+    fs::copy(
+        root.join("examples/features/comptime/build_fact_precedence.jet"),
+        scratch.path.join("build_fact_precedence.jet"),
+    )
+    .expect("copy build fact precedence example");
+    let expected = fs::read(
+        root.join("examples/features/expected/comptime/build_fact_precedence.out"),
+    )
+    .expect("read build fact precedence golden");
+
+    let release = run_jet(
+        &["run", "--release", "build_fact_precedence.jet"],
+        &scratch.path,
+        &scratch.join("cache/release"),
+    );
+    let default = run_jet(
+        &["run", "build_fact_precedence.jet"],
+        &scratch.path,
+        &scratch.join("cache/default"),
+    );
+    let dev = run_jet(
+        &["dev", "build_fact_precedence.jet", "--interpret", "--watch=off"],
+        &scratch.path,
+        &scratch.join("cache/dev"),
+    );
+
+    for (tier, output) in [("release", &release), ("default", &default), ("dev", &dev)] {
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{tier} build-fact example failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected, "{tier} build-fact output differs");
+    }
+    assert_eq!(release.status.code(), default.status.code());
+    assert_eq!(release.status.code(), dev.status.code());
+}
+
+#[test]
 fn computed_constants_match_aot_default_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("computed_constants_parity");

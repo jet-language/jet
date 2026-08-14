@@ -98,6 +98,43 @@ fn escape_markdown_cell(value: &str) -> String {
     value.replace('\\', "\\\\").replace('|', "\\|")
 }
 
+/// D-CONF-READ1=A: normalize every user spelling of a registered build fact
+/// before the command layer chooses its source file. Dynamic settings keep
+/// their declared key; the registry still owns the `Build.Settings` row.
+pub fn build_fact_name(query: &str) -> Option<String> {
+    let query = query.trim();
+    let query = query.strip_prefix('@').unwrap_or(query);
+    let lower = query.to_ascii_lowercase();
+    let registered_path = format!("@{lower}");
+    let fixed = match lower.as_str() {
+        "build.package.name" => Some("Build.Package.Name"),
+        "build.package.version" => Some("Build.Package.Version"),
+        "build.os" => Some("Build.OS"),
+        "build.profile" => Some("Build.Profile"),
+        "build.stamp.git" => Some("Build.Stamp.Git"),
+        "build.stamp.dirty" => Some("Build.Stamp.Dirty"),
+        "build.stamp.toolchain" => Some("Build.Stamp.Toolchain"),
+        "build.stamp.at" => Some("Build.Stamp.At"),
+        _ => None,
+    };
+    if let Some(name) = fixed.filter(|_| {
+        jet_foundation::Registry::build_fact_read(&registered_path).is_some()
+    }) {
+        return Some(name.to_string());
+    }
+    let prefix = "build.settings.";
+    if lower.starts_with(prefix) {
+        if let Some(key) = jet_foundation::Registry::build_setting_key(&registered_path) {
+            return Some(format!("Build.Settings.{key}"));
+        }
+    }
+    None
+}
+
+pub fn is_build_fact_query(query: &str) -> bool {
+    build_fact_name(query).is_some()
+}
+
 /// Look up one code (case-insensitive).
 pub fn lookup(code: &str) -> Option<Explanation> {
     let want = normalize(code);
@@ -113,6 +150,19 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 what: Some(format!("`{}` participates in the package → module → function → block policy ladder.", key.name())),
                 why: Some("one registry owns applicability, inheritance, conflicts, and provenance".to_string()),
                 fix: Some("inspect the semantic index at the target site for the effective value and full declaration chain".to_string()),
+                example: None,
+                retired: false,
+            })
+        })
+        .or_else(|| {
+            let name = build_fact_name(code)?;
+            Some(Explanation {
+                code: name.clone(),
+                stage: "build fact".to_string(),
+                meaning: format!("registered build fact `{name}`"),
+                what: Some("the compiler resolves this value from one complete writer chain".to_string()),
+                why: Some("the contribution law owns source scope, layer precedence, conflicts, and provenance".to_string()),
+                fix: Some("pass a source entry when you need the effective writer chain".to_string()),
                 example: None,
                 retired: false,
             })
@@ -514,5 +564,23 @@ mod marker_registry_tests {
         let pure = super::lookup("Pure").expect("Pure retirement explanation");
         assert!(pure.retired);
         assert_eq!(pure.fix.as_deref(), Some("replace it with `=[]=>`"));
+    }
+
+    #[test]
+    fn build_fact_queries_use_the_registered_paths() {
+        assert_eq!(
+            super::build_fact_name("@BUILD.PACKAGE.NAME").as_deref(),
+            Some("Build.Package.Name")
+        );
+        assert_eq!(
+            super::build_fact_name("build.settings.cache_slots").as_deref(),
+            Some("Build.Settings.cache_slots")
+        );
+        assert_eq!(
+            super::build_fact_name("@BUILD.SETTINGS.CACHE_SLOTS").as_deref(),
+            Some("Build.Settings.cache_slots")
+        );
+        assert!(super::is_build_fact_query("Build.Stamp.Dirty"));
+        assert!(!super::is_build_fact_query("build.settings.cache.slots"));
     }
 }

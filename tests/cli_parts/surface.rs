@@ -1012,6 +1012,26 @@ fn explain_golden() {
 }
 
 #[test]
+fn explain_build_fact_golden() {
+    let dir = isolated_cwd("explain_build_fact");
+    let file = dir.join("fact.jet");
+    fs::write(&file, "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .args(["explain", "Build.Package.Name", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "build fact explain failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    check_snapshot("explain_build_fact.txt", &stdout);
+}
+
+#[test]
 fn explain_runtime_stop_golden() {
     for code in ["E3010", "E3011", "E3012"] {
         let out = Command::new(jet()).arg("explain").arg(code).output().unwrap();

@@ -7,9 +7,8 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet::Diagnostics::ColorChoice;
+use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
-use jet_foundation::JSON::json_escape;
 
 use crate::CmdCompile::{build, collect_source_files_recursive, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
@@ -1633,7 +1632,13 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
 
 /// `jet explain <CODE|FACT> [file]` — print a diagnostic essay or one complete
 /// build-fact writer chain.
-pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: OutputMode) {
+pub(crate) fn run_explain(
+    code: Option<&str>,
+    fact_file: Option<&str>,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) {
     let code = match code {
         Some(c) => c,
         None => {
@@ -1645,60 +1650,18 @@ pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: Out
             exit(ExitCodes::USAGE);
         }
     };
-    if code.eq_ignore_ascii_case("Build.Profile") || code == "@build.profile" {
-        let file = fact_file
-            .map(PathBuf::from)
-            .or_else(|| {
-                let cwd = std::env::current_dir().ok()?;
-                crate::resolve_bare_entry("run", &cwd, None)
-            })
-            .unwrap_or_else(|| {
-                crate::cli_error!("E2104", "a source file is required to explain this build fact");
-                exit(ExitCodes::USAGE);
-            });
-        let mut bundle = jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
-            for diagnostic in diags {
-                eprintln!("{}", diagnostic.what);
-            }
-            exit(ExitCodes::USER_ERROR);
-        });
-        if let Err(diags) = jet::Driver::seed_build_facts(
-            &mut bundle,
-            "dev",
-            false,
-            &BTreeMap::new(),
-        ) {
-            for diagnostic in diags {
-                eprintln!("{}", diagnostic.what);
-            }
-            exit(ExitCodes::USER_ERROR);
-        }
-        let Some(fact) = bundle.build_facts.contribution("Build.Profile") else {
-            crate::cli_error!("E2104", "the selected build has no `Build.Profile` fact");
-            exit(ExitCodes::USER_ERROR);
-        };
-        let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone()) else {
-            crate::cli_error!(
-                @full "E3521",
-                "the build fact contribution chain could not be resolved",
-                "the selected fact writers must pass the shared contribution law",
-                "remove the conflicting writer or choose one explicit contribution"
-            );
-            exit(ExitCodes::USER_ERROR);
-        };
-        let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
-        print!("{}", jet::Explain::render(&explanation, color));
+    if let Some(name) = jet::Explain::build_fact_name(code) {
+        run_explain_fact(&name, fact_file, mode, profile, setting_overrides);
         return;
     }
-    if let Some(key) = code.strip_prefix("build.settings.") {
-        run_explain_setting(key, mode);
-        return;
+    if let Some(key) = jet::Policy::PolicyKey::parse(code.trim_start_matches('@')) {
+        if fact_file.is_some() {
+            run_explain_policy(key, fact_file, mode, profile, setting_overrides);
+            return;
+        }
     }
     match jet::Explain::lookup(code) {
-        Some(ex) => {
-            let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
-            print!("{}", jet::Explain::render(&ex, color));
-        }
+        Some(ex) => print_explanation(&ex, mode),
         None => {
             crate::cli_error!(@fix "E2104", format!("no diagnostic code `{}` exists", code), format!("run a command that reports an error to see its code, e.g. `{} check file.{}`", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT));
             exit(ExitCodes::USER_ERROR);
@@ -1706,132 +1669,121 @@ pub(crate) fn run_explain(code: Option<&str>, fact_file: Option<&str>, mode: Out
     }
 }
 
-fn run_explain_setting(key: &str, mode: OutputMode) {
-    if key.is_empty() || key.contains('.') {
-        crate::emit_cli_report(
-            "E0302",
-            format!("`build.settings.{key}` is not a declared setting"),
-            "jet explain names declared package settings and their writers".to_string(),
-            "use `jet explain build.settings.<name>` for one declared setting".to_string(),
-            mode.json,
-        );
-        exit(ExitCodes::USER_ERROR);
-    }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(root) = jet::Loader::find_manifest_root(&cwd) else {
-        crate::emit_cli_report(
-            "E0302",
-            format!("`build.settings.{key}` is undeclared"),
-            "settings are declared in the package manifest".to_string(),
-            format!("add `{key}: Type = default` to `package.jet`"),
-            mode.json,
-        );
-        exit(ExitCodes::USER_ERROR);
-    };
-    let Some(manifest_path) = jet::Loader::manifest_path(&root) else {
-        crate::emit_cli_report(
-            "E0302",
-            format!("`build.settings.{key}` is undeclared"),
-            "settings are declared in the package manifest".to_string(),
-            format!("add `{key}: Type = default` to `package.jet`"),
-            mode.json,
-        );
-        exit(ExitCodes::USER_ERROR);
-    };
-    let manifest = match jet::Package::PackageFacts::load(&root) {
-        Some(Ok(manifest)) => manifest,
-        Some(Err(error)) => {
-            crate::emit_cli_report(
-                "E1206",
-                "package manifest is not valid".to_string(),
-                error.to_string(),
-                "fix `package.jet` before explaining a setting".to_string(),
-                mode.json,
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
-        None => unreachable!("manifest path was found but package facts were absent"),
-    };
-    let Some(declaration) = manifest.settings.get(key) else {
-        crate::emit_cli_report(
-            "E0302",
-            format!("`build.settings.{key}` is undeclared"),
-            format!("`{}` contains no declaration for this setting", manifest_path.display()),
-            format!("add `{key}: Type = default` to `{}`", manifest_path.display()),
-            mode.json,
-        );
-        exit(ExitCodes::USER_ERROR);
-    };
-    let profiles = manifest
-        .build_profiles
-        .iter()
-        .filter_map(|profile| {
-            profile
-                .settings
-                .get(key)
-                .map(|value| (profile.name.as_str(), value.as_str()))
+fn explain_source_file(fact_file: Option<&str>) -> PathBuf {
+    fact_file
+        .map(PathBuf::from)
+        .or_else(|| {
+            let cwd = std::env::current_dir().ok()?;
+            crate::resolve_bare_entry("run", &cwd, None)
         })
-        .collect::<Vec<_>>();
-    let build_facts = crate::resolve_bare_entry("run", &cwd, None).map(|file| {
-        jet::Driver::query_build_facts(file.to_string_lossy().as_ref(), "dev", &BTreeMap::new())
-    });
-    let build_facts = match build_facts {
-        Some(Ok(facts)) => Some(facts),
-        Some(Err(diags)) => {
-            for diagnostic in diags {
-                eprintln!("{}", diagnostic.what);
-            }
-            exit(ExitCodes::USER_ERROR);
-        }
-        None => None,
-    };
-    let resolved = build_facts
-        .as_ref()
-        .and_then(|facts| facts.contribution(&format!("Build.Settings.{key}")))
-        .and_then(|fact| {
-            jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone())
-                .and_then(|explanation| explanation.what)
-        });
-    let cli = format!("--set {key}=<value>");
-    if mode.json {
-        let profile_json = profiles
-            .iter()
-            .map(|(name, value)| {
-                format!(
-                    "{{\"name\":\"{}\",\"value\":\"{}\"}}",
-                    json_escape(name),
-                    json_escape(value)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        println!(
-            "{{\"setting\":\"{}\",\"type\":\"{}\",\"default\":\"{}\",\"cli\":\"{}\",\"profiles\":[{}],\"resolved\":{}}}",
-            json_escape(key),
-            json_escape(&declaration.ty),
-            json_escape(&declaration.default),
-            json_escape(&cli),
-            profile_json,
-            resolved
-                .as_deref()
-                .map(|value| format!("\"{}\"", json_escape(value)))
-                .unwrap_or_else(|| "null".to_string()),
-        );
-    } else {
-        println!("build.settings.{key}");
-        println!("  CLI: {cli}");
-        for (name, value) in profiles {
-            println!("  profile.{name}: {value}");
-        }
-        println!("  default: {} = {}", declaration.ty, declaration.default);
-        if let Some(resolved) = resolved {
-            println!("  resolved:");
-            for line in resolved.lines() {
-                println!("    {line}");
-            }
-        }
-    }
+        .unwrap_or_else(|| {
+            crate::cli_error!("E2104", "a source file is required to explain this build fact");
+            exit(ExitCodes::USAGE);
+        })
 }
+
+fn explain_bundle(
+    fact_file: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> jet::AST::ProgramBundle {
+    let file = explain_source_file(fact_file);
+    let mut bundle = jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
+        for diagnostic in diags {
+            eprintln!("{}", diagnostic.what);
+        }
+        exit(ExitCodes::USER_ERROR);
+    });
+    if let Err(diags) = jet::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides) {
+        for diagnostic in diags {
+            eprintln!("{}", diagnostic.what);
+        }
+        exit(ExitCodes::USER_ERROR);
+    }
+    bundle
+}
+
+fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) {
+    if mode.json {
+        let what = explanation
+            .what
+            .as_deref()
+            .unwrap_or(explanation.meaning.as_str());
+        let optional = |value: Option<&String>| {
+            value
+                .map(|value| json_string(value))
+                .unwrap_or_else(|| "null".to_string())
+        };
+        println!(
+            "{{\"schema_version\":1,\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
+            json_string(&explanation.code),
+            json_string(&explanation.stage),
+            json_string(what),
+            optional(explanation.why.as_ref()),
+            optional(explanation.fix.as_ref()),
+        );
+        return;
+    }
+    let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
+    print!("{}", jet::Explain::render(explanation, color));
+}
+
+fn run_explain_fact(
+    name: &str,
+    fact_file: Option<&str>,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) {
+    let bundle = explain_bundle(fact_file, profile, setting_overrides);
+    let Some(fact) = bundle.build_facts.contribution(name) else {
+        if let Some(key) = name.strip_prefix("Build.Settings.") {
+            crate::cli_error!(@fix "E0302", format!("`build.settings.{key}` is undeclared"), "settings are declared in the package manifest", format!("add `{key}: Type = default` to `package.jet`"));
+        } else {
+            crate::cli_error!("E2104", format!("the selected build has no `{name}` fact"));
+        }
+        exit(ExitCodes::USER_ERROR);
+    };
+    let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone()) else {
+        crate::cli_error!(
+            @full "E3521",
+            "the build fact contribution chain could not be resolved",
+            "the selected fact writers must pass the shared contribution law",
+            "remove the conflicting writer or choose one explicit contribution"
+        );
+        exit(ExitCodes::USER_ERROR);
+    };
+    print_explanation(&explanation, mode);
+}
+
+fn run_explain_policy(
+    key: jet::Policy::PolicyKey,
+    fact_file: Option<&str>,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) {
+    let bundle = explain_bundle(fact_file, profile, setting_overrides);
+    let declarations = bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.policy_declarations.iter())
+        .filter(|declaration| declaration.key == key)
+        .cloned()
+        .collect::<Vec<_>>();
+    let Some(explanation) = jet::Explain::lookup_policy(key, declarations) else {
+        crate::cli_error!(@fix "E2104", format!("policy `{}` has no effective declaration", key.name()), "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site");
+        exit(ExitCodes::USER_ERROR);
+    };
+    print_explanation(&explanation, mode);
+}
+
+/*
+    The settings path deliberately has no separate renderer. `run_explain_fact`
+    reads the resolved snapshot and sends every build fact through
+    `Policy::explain`, so settings, fixed facts, and policy explanations keep
+    one writer per line and one effective marker.
+*/
 
 /// D-MARK-SCOPE1: `jet explain marker <file>:<line> <policy-key>`.
 pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: OutputMode) {

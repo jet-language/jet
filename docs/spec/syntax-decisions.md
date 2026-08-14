@@ -6600,6 +6600,14 @@ overrides are legal while same-layer conflicts still error. Safety facts
 tighten only. Ambient contributions remain forbidden. The
 D-JOS-PRIORITY-SURFACE2 surface is unchanged.
 
+**2026-08-14 — D-CONF-MERGE1=A implementation log** *(card #1520)*: the
+foundation resolver now applies the six source scopes and seven contribution
+layers to the complete build-fact snapshot, including package identity, OS,
+settings, profile, and lock stamp. `jet explain` renders one writer chain for
+each fact and scoped policy, while `.Force` writers enter the build gate
+ledger. The contribution-law tests, conflict UI snapshot, CLI golden, and
+cross-tier example are the observable proof surface.
+
 **D-CONF-SPLIT1=A — facts in text, actions in `fn build`** *(ratified
 2026-08-06, card #1522)*: manifest text is the complete index of configurable
 facts. Each fact has a type and default. `fn build` performs probes, steps, and
