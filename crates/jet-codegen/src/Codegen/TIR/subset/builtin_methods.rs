@@ -547,7 +547,7 @@ pub(crate) fn resolve_numeric_conversion_op(
             dst_rust: dst_rust.to_string(),
         });
     };
-    if source_name == "Int" {
+    if source_name == "Int" && target_name != "Int" {
         return Some(TNumericOp::TryFrom {
             host_kind: numeric_host_kind(dsigned, dbits)?,
             dst_rust: dst_rust.to_string(),

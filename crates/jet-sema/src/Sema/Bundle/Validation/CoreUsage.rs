@@ -472,6 +472,12 @@ pub(crate) fn collect_core_expr(
     // a math-type *constructor* call and a static `T.method(...)` both surface the
     // type NAME, which is enough to require the prelude.
     match expr {
+        // D-INTBIG1: an unsized integer literal is the exact `Int` carrier.
+        // AOT lowering routes its arithmetic/display through the shared JetStd
+        // exact-number Prelude even when the source has no Core import.
+        Expr::Int(_, span, None, _) => {
+            note_core_usage(used, spans, "core.math::__exact_int__", Some(*span));
+        }
         Expr::Call(c) if is_math_type(&c.name) => {
             note_core_usage(used, spans, "core.math::__mathtypes__", Some(c.name_span));
         }
