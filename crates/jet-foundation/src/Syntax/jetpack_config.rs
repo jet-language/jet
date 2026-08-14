@@ -138,8 +138,10 @@ pub const NS_WORKSPACE: &str = "workspace";
 /// docs/spec/performance-budget-decisions.md.
 pub const NS_PERF: &str = "perf";
 pub const PERF_FIELD_BUDGETS: &str = "budgets";
+pub const PERF_FIELD_COMPILE_WORKLOADS: &str = "compile_workloads";
 pub const TYPE_BUDGET: &str = "Budget";
 pub const TYPE_BUDGET_APPLIES: &str = "BudgetApplies";
+pub const TYPE_COMPILER_WORKLOAD: &str = "CompilerWorkload";
 
 /// D-JOS-PRIORITY-SURFACE2=A: typed wrapper used only when one option
 /// contribution needs explicit precedence. Plain values remain ordinary.
@@ -152,13 +154,13 @@ pub const PERF_BUDGET_SCOPES: &[&str] =
     &["Package", "Env", "Service", "Scene", "Bench", "Target"];
 pub const PERF_BUDGET_PROVIDERS: &[&str] = &[
     "BuildArtifact", "CompilerFacts", "AllocationProbe", "BenchMeasurement",
-    "ServiceProbe", "SceneProbe",
+    "ServiceProbe", "SceneProbe", "CompilerProbe",
 ];
 pub const PERF_BUDGET_METRICS: &[&str] = &[
     "BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems",
     "DependencyCount", "EffectCount", "AllocationCount", "AllocationBytes",
     "StartupTime", "FrameTime", "Latency", "Throughput", "MemoryHighWater",
-    "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls",
+    "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls", "CompileTime",
 ];
 pub const PERF_BUDGET_PERCENTILES: &[&str] = &["P50", "P90", "P95", "P99", "P999"];
 pub const PERF_BUDGET_COMPARISONS: &[&str] = &["Absolute", "AbsoluteFrom", "RelativeTo"];

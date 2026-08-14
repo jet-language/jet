@@ -231,15 +231,19 @@ fn fmt_preserves_binary_pattern_holes() {
 
 #[test]
 fn fmt_preserves_typed_performance_budget_role() {
-    let src = r#"module perf.release{budgets:[Budget.{name:"binary",scope:.Target("cli"),metric:.BinarySize,limit:.AtMost(2MiB)}]}"#;
+    let src = r#"module perf.release{compile_workloads:{rename_route:CompilerWorkload.Edit.{target:"cli",patch:"edits/rename-route.patch"}}budgets:[Budget.{name:"compile",scope:.Target("cli"),metric:.CompileTime(.P95),provider:.CompilerProbe(.Edit("rename_route")),comparison:.RelativeTo("ci/linux-x64"),limit:.RegressionAtMost(5pct)}]}"#;
     let once = jet::format_source(src).expect("perf budget role should format");
     for token in [
         "module perf.release",
+        "compile_workloads:",
+        "CompilerWorkload.Edit.{",
+        "patch: \"edits/rename-route.patch\"",
         "budgets:",
         "Budget.{",
         ".Target(\"cli\")",
-        ".BinarySize",
-        ".AtMost(2MiB)",
+        ".CompileTime(.P95)",
+        ".CompilerProbe(.Edit(\"rename_route\"))",
+        ".RegressionAtMost(5pct)",
     ] {
         assert!(once.contains(token), "formatter dropped `{token}`:\n{once}");
     }

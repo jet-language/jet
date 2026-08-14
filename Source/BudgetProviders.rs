@@ -6,24 +6,26 @@
 
 use jet_foundation::PerformanceBudget::{CanonicalJson, Rational};
 use jet_foundation::PerformanceBudget::{Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile};
+use jet_foundation::SHA256::sha256_hex;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering as AtomicOrdering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering}};
 use std::time::{Duration, Instant};
 
 pub const MAX_SAMPLES: usize = 1_000_000;
 pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SPECS: usize = 4_096;
 pub const MAX_DETAIL_SCALARS: usize = 512;
+pub const MAX_METADATA_SCALARS: usize = 262_144;
 const MAGIC: &[u8] = b"JETBUDGET1\n";
 #[cfg(test)]static FILE_READER_DELAY_MS:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]static ACTIVE_FILE_READERS:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]static ACTIVE_ISOLATED_WORKERS:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]static LAST_ISOLATED_GROUP:AtomicU64=AtomicU64::new(0);
-#[cfg(test)]use std::sync::atomic::AtomicU64;
+static COMPILE_WORKLOAD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]struct ActiveFileReader;
 #[cfg(test)]impl ActiveFileReader{fn new()->Self{ACTIVE_FILE_READERS.fetch_add(1,AtomicOrdering::SeqCst);Self}}
 #[cfg(test)]impl Drop for ActiveFileReader{fn drop(&mut self){ACTIVE_FILE_READERS.fetch_sub(1,AtomicOrdering::SeqCst);}}
@@ -90,6 +92,10 @@ impl ProviderRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderEvent {
     Sample { spec: u32, metric: String, value: Rational },
+    /// Bounded canonical provenance attached to one sample family. Compile
+    /// probes use this extension so the shared provider protocol carries the
+    /// exact workload and phase evidence into the shared report path.
+    Metadata { spec: u32, details: Vec<(String, String)> },
     Unavailable { spec: u32, reason: String, details: Vec<(String, String)> },
     Complete { request_id: String, samples: u64 },
 }
@@ -129,13 +135,15 @@ enum Provider { InProcess(InProcessProvider), Subprocess(PathBuf), File(PathBuf)
 #[derive(Default)]
 pub struct ProviderRegistry { providers: BTreeMap<String, Provider> }
 impl ProviderRegistry {
-    /// Registry used by `jet budget` for compiler-owned deterministic facts.
+    /// Registry used by `jet budget` for compiler-owned facts and compile probes.
     /// Values travel through the same typed request/stream validation as every
     /// other provider; the registry never consults PATH.
     pub fn with_compiler_facts() -> Self {
         let mut registry = Self::default();
         registry.register_in_process("CompilerFacts", compiler_facts_provider)
             .expect("fixed compiler provider identity");
+        registry.register_in_process("CompilerProbe", compiler_latency_provider)
+            .expect("fixed compiler probe provider identity");
         registry
     }
     pub fn with_builtins() -> Self {
@@ -219,6 +227,479 @@ fn build_artifact_provider(request: &ProviderRequest, _: &ProviderCancellation) 
     Ok(events)
 }
 
+const COMPILE_WARMUPS: u128 = 1;
+const COMPILE_SAMPLES: usize = 20;
+const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Build the command-owned workload identity. The path is carried only in the
+/// request; report identity uses the source and patch digests below.
+pub fn compiler_probe_workload(
+    project_root: &Path,
+    entry: &Path,
+    mode: &str,
+    target: &str,
+    profile: &str,
+    patch: Option<&str>,
+) -> Result<CanonicalJson, String> {
+    let root = project_root.canonicalize().map_err(|error| format!("cannot resolve compile workload root: {error}"))?;
+    let entry = entry.canonicalize().map_err(|error| format!("cannot resolve compile workload entry: {error}"))?;
+    if !entry.starts_with(&root) { return Err("compile workload entry escapes its project root".into()); }
+    let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
+    CanonicalJson::object([
+        ("entry".into(), CanonicalJson::String(entry.to_string_lossy().into_owned())),
+        ("mode".into(), CanonicalJson::String(mode.into())),
+        ("patch".into(), patch.map(|value| CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null)),
+        ("patch_sha256".into(), CanonicalJson::String(descriptor.patch_sha256)),
+        ("profile".into(), CanonicalJson::String(profile.into())),
+        ("project_root".into(), CanonicalJson::String(root.to_string_lossy().into_owned())),
+        ("samples".into(), CanonicalJson::Integer(COMPILE_SAMPLES.to_string())),
+        ("source_tree_sha256".into(), CanonicalJson::String(descriptor.source_tree_sha256)),
+        ("target".into(), CanonicalJson::String(target.into())),
+        ("warmups".into(), CanonicalJson::Integer(COMPILE_WARMUPS.to_string())),
+    ])
+}
+
+/// Stable provider version used by the shared context key. It changes when
+/// the measured source tree or named patch changes, but never contains time.
+pub fn compiler_probe_version(
+    project_root: &Path,
+    mode: &str,
+    target: &str,
+    profile: &str,
+    patch: Option<&str>,
+) -> Result<String, String> {
+    let root = project_root.canonicalize().map_err(|error| format!("cannot resolve compile workload root: {error}"))?;
+    let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
+    Ok(format!(
+        "jet-compile-latency-v1;mode={mode};target={target};profile={profile};backend=rustc;linker={};warmups=1;samples=20;source={};patch={}",
+        std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into()),
+        descriptor.source_tree_sha256, descriptor.patch_sha256
+    ))
+}
+
+#[derive(Clone)]
+struct CompileDescriptor {
+    source_tree_sha256: String,
+    patch_sha256: String,
+}
+
+fn compile_descriptor(root: &Path, mode: &str, target: &str, profile: &str, patch: Option<&str>) -> Result<CompileDescriptor, String> {
+    if !matches!(mode, "Clean" | "NoChange" | "Edit") || target.is_empty() || profile.is_empty() {
+        return Err("compile workload has an unsupported mode, empty target, or empty profile".into());
+    }
+    if target != "cli" { return Err(format!("compile workload target `{target}` is unsupported by the resident fixture compiler")); }
+    if mode == "Edit" && patch.is_none() { return Err("CompileProbe Edit workload has no patch path".into()); }
+    if mode != "Edit" && patch.is_some() { return Err("only an Edit workload may name a patch path".into()); }
+    let patch_sha256 = match patch {
+        Some(path) if safe_relative_path(path) => {
+            let path = root.join(path);
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| format!("compile workload patch is unavailable: {error}"))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() { return Err("compile workload patch is not a regular file".into()); }
+            let bytes = std::fs::read(&path).map_err(|error| format!("cannot read compile workload patch: {error}"))?;
+            sha256_hex(&bytes)
+        }
+        Some(_) => return Err("compile workload patch path is not project-relative".into()),
+        None => sha256_hex(&[]),
+    };
+    Ok(CompileDescriptor { source_tree_sha256: source_tree_digest(root)?, patch_sha256 })
+}
+
+fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation) -> Result<Vec<ProviderEvent>, ProviderFailure> {
+    let CanonicalJson::Object(workload) = &request.workload else {
+        return Err(ProviderFailure::malformed("CompilerProbe workload is not an object"));
+    };
+    let mode = workload_text(workload, "mode")?;
+    let target = workload_text(workload, "target")?;
+    let profile = workload_text(workload, "profile")?;
+    let root = PathBuf::from(workload_text(workload, "project_root")?);
+    let entry = PathBuf::from(workload_text(workload, "entry")?);
+    let patch = match workload.get("patch") {
+        Some(CanonicalJson::Null) => None,
+        Some(CanonicalJson::String(value)) => Some(value.as_str()),
+        _ => return Err(ProviderFailure::malformed("CompilerProbe patch is not text or null")),
+    };
+    let warmups = workload_unsigned(workload, "warmups")?;
+    let sample_count = workload_unsigned(workload, "samples")?;
+    if warmups != COMPILE_WARMUPS || sample_count != COMPILE_SAMPLES as u128 {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "CompilerProbe workload does not use the pinned warmup/sample policy"));
+    }
+    for spec in &request.specs {
+        if !matches!(spec.metric.as_str(), "CompileTime(P50)" | "CompileTime(P90)" | "CompileTime(P95)" | "CompileTime(P99)" | "CompileTime(P999)") {
+            return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("CompilerProbe does not support metric `{}`", spec.metric)));
+        }
+    }
+    let root = root.canonicalize().map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("compile workload root is unavailable: {error}")))?;
+    let entry = entry.canonicalize().map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("compile workload entry is unavailable: {error}")))?;
+    if !entry.starts_with(&root) { return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload entry escapes its project root")); }
+    let descriptor = compile_descriptor(&root, mode.as_str(), target.as_str(), profile.as_str(), patch).map_err(ProviderFailure::malformed)?;
+    let source_tree_sha256 = workload_text(workload, "source_tree_sha256")?;
+    let patch_sha256 = workload_text(workload, "patch_sha256")?;
+    if source_tree_sha256.as_str() != descriptor.source_tree_sha256.as_str() || patch_sha256.as_str() != descriptor.patch_sha256.as_str() {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source or patch identity is stale or forged"));
+    }
+    let scratch = std::env::temp_dir().join(format!(
+        "jet-compile-latency-{}-{}-{}",
+        std::process::id(),
+        COMPILE_WORKLOAD_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed),
+        &request.request_id[..12]
+    ));
+    let result = compile_latency_samples(&root, &entry, &scratch, mode.as_str(), patch, &descriptor.source_tree_sha256, &descriptor.patch_sha256, target.as_str(), profile.as_str(), warmups as usize, sample_count as usize, &request.specs, &request.request_id);
+    let _ = std::fs::remove_dir_all(&scratch);
+    result
+}
+
+fn compile_latency_samples(
+    root: &Path,
+    entry: &Path,
+    scratch: &Path,
+    mode: &str,
+    patch: Option<&str>,
+    expected_source_tree_sha256: &str,
+    expected_patch_sha256: &str,
+    target: &str,
+    profile: &str,
+    warmups: usize,
+    sample_count: usize,
+    specs: &[ProviderSpec],
+    request_id: &str,
+) -> Result<Vec<ProviderEvent>, ProviderFailure> {
+    copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
+    let copied_source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
+    if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
+    }
+    let relative_entry = entry.strip_prefix(root).map_err(|_| ProviderFailure::malformed("compile workload entry is outside its project root"))?;
+    let scratch_entry = scratch.join(relative_entry);
+    if let Some(patch) = patch {
+        apply_unified_patch(scratch, patch).map_err(ProviderFailure::malformed)?;
+    }
+    let source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
+    let edit_bytes_data = patch.map(|path| std::fs::read(scratch.join(path))).transpose().map_err(|error| ProviderFailure::malformed(format!("cannot read edit bytes: {error}")))?;
+    let edit_bytes = edit_bytes_data.as_ref().map(|bytes| bytes.len() as u128).unwrap_or(0);
+    let edit_sha256 = edit_bytes_data.as_deref().map(sha256_hex).unwrap_or_else(|| sha256_hex(&[]));
+    if edit_sha256.as_str() != expected_patch_sha256 {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload patch changed while it was copied"));
+    }
+    let workload_bytes = source_tree_bytes(scratch).map_err(ProviderFailure::malformed)?;
+    let compiler_digest = env!("JET_COMPILER_BUILD_ID").to_string();
+    let core_digest = env!("JET_STDLIB_BUILD_ID").to_string();
+    let host = format!("{}:{}", std::env::consts::OS, env!("JET_BUILD_TARGET"));
+    let backend = "rustc";
+    let linker = std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into());
+    let mut sample_values = Vec::with_capacity(sample_count);
+    let mut sample_records = Vec::with_capacity(sample_count);
+    for _ in 0..warmups {
+        if mode == "Clean" { reset_compile_cache(scratch)?; }
+        run_compile_child(&scratch_entry, scratch, target, profile)?;
+    }
+    for _ in 0..sample_count {
+        if mode == "Clean" { reset_compile_cache(scratch)?; }
+        let started = Instant::now();
+        run_compile_child(&scratch_entry, scratch, target, profile)?;
+        let elapsed_ns = started.elapsed().as_nanos();
+        let phase_totals = read_compile_phases(scratch)?;
+        sample_values.push(Rational::parse(&elapsed_ns.to_string(), "1").map_err(ProviderFailure::malformed)?);
+        sample_records.push(CanonicalJson::object([
+            ("backend".into(), CanonicalJson::String(backend.into())),
+            ("cache_state".into(), CanonicalJson::String(mode.into())),
+            ("compiler_digest".into(), CanonicalJson::String(compiler_digest.clone())),
+            ("core_digest".into(), CanonicalJson::String(core_digest.clone())),
+            ("edit_bytes".into(), CanonicalJson::Integer(edit_bytes.to_string())),
+            ("elapsed_ns".into(), CanonicalJson::Integer(elapsed_ns.to_string())),
+            ("host".into(), CanonicalJson::String(host.clone())),
+            ("linker".into(), CanonicalJson::String(linker.clone())),
+            ("phase_totals".into(), phase_totals_json(&phase_totals)?),
+            ("profile".into(), CanonicalJson::String(profile.into())),
+            ("source_tree_sha256".into(), CanonicalJson::String(source_tree_sha256.clone())),
+            ("target".into(), CanonicalJson::String(target.into())),
+            ("workload_bytes".into(), CanonicalJson::Integer(workload_bytes.to_string())),
+        ]).map_err(ProviderFailure::malformed)?);
+    }
+    let mean = sample_values.iter().try_fold(Rational::zero(), |sum, value| sum.add(value)).map_err(ProviderFailure::malformed)?.div(&Rational::integer(sample_values.len() as i128)).map_err(ProviderFailure::malformed)?;
+    let variance = sample_values.iter().try_fold(Rational::zero(), |sum, value| {
+        let delta = value.sub(&mean)?;
+        sum.add(&delta.mul(&delta)?)
+    }).map_err(ProviderFailure::malformed)?.div(&Rational::integer(sample_values.len() as i128)).map_err(ProviderFailure::malformed)?;
+    let aggregate_phases = aggregate_compile_phases(&sample_records)?;
+    let metadata = CanonicalJson::object([
+        ("backend".into(), CanonicalJson::String(backend.into())),
+        ("cache_state".into(), CanonicalJson::String(mode.into())),
+        ("compiler_digest".into(), CanonicalJson::String(compiler_digest)),
+        ("core_digest".into(), CanonicalJson::String(core_digest)),
+        ("edit_bytes".into(), CanonicalJson::Integer(edit_bytes.to_string())),
+        ("edit_sha256".into(), CanonicalJson::String(edit_sha256)),
+        ("host".into(), CanonicalJson::String(host)),
+        ("linker".into(), CanonicalJson::String(linker)),
+        ("phase_totals".into(), aggregate_phases),
+        ("profile".into(), CanonicalJson::String(profile.into())),
+        ("sample_records".into(), CanonicalJson::Array(sample_records)),
+        ("samples".into(), CanonicalJson::Integer(sample_count.to_string())),
+        ("source_tree_sha256".into(), CanonicalJson::String(source_tree_sha256)),
+        ("target".into(), CanonicalJson::String(target.into())),
+        ("variance".into(), variance.to_json()),
+        ("warmups".into(), CanonicalJson::Integer(warmups.to_string())),
+        ("workload_bytes".into(), CanonicalJson::Integer(workload_bytes.to_string())),
+    ]).map_err(ProviderFailure::malformed)?;
+    let metadata = String::from_utf8(metadata.bytes()).map_err(|_| ProviderFailure::malformed("compile metadata is not UTF-8"))?;
+    let mut events = Vec::with_capacity(sample_count.saturating_mul(specs.len()).saturating_add(specs.len() + 1));
+    for (spec, request_spec) in specs.iter().enumerate() {
+        for value in &sample_values {
+            events.push(ProviderEvent::Sample { spec: spec as u32, metric: request_spec.metric.clone(), value: value.clone() });
+        }
+        events.push(ProviderEvent::Metadata { spec: spec as u32, details: vec![("compile".into(), metadata.clone())] });
+    }
+    events.push(ProviderEvent::Complete { request_id: request_id.into(), samples: (sample_count * specs.len()) as u64 });
+    Ok(events)
+}
+
+fn workload_text(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Result<String, ProviderFailure> {
+    match fields.get(key) {
+        Some(CanonicalJson::String(value)) if !value.is_empty() => Ok(value.clone()),
+        _ => Err(ProviderFailure::malformed(format!("CompilerProbe workload has no nonempty `{key}` text"))),
+    }
+}
+
+fn workload_unsigned(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Result<u128, ProviderFailure> {
+    let value = match fields.get(key) {
+        Some(CanonicalJson::Integer(value)) => value,
+        _ => return Err(ProviderFailure::malformed(format!("CompilerProbe workload `{key}` is not a canonical unsigned integer"))),
+    };
+    let parsed = value.parse::<u128>().map_err(|_| ProviderFailure::malformed(format!("CompilerProbe workload `{key}` is not a canonical unsigned integer")))?;
+    if parsed.to_string() != value.as_str() { return Err(ProviderFailure::malformed(format!("CompilerProbe workload `{key}` is not a canonical unsigned integer"))); }
+    Ok(parsed)
+}
+
+fn safe_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && value.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn source_files(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    fn visit(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+        let mut entries = std::fs::read_dir(dir).map_err(|error| format!("cannot read compile workload directory: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("cannot enumerate compile workload directory: {error}"))?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), ".jet" | ".jet-compile-cache" | "build" | "target" | ".git") { continue; }
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| format!("cannot inspect compile workload path: {error}"))?;
+            if metadata.file_type().is_symlink() { return Err(format!("compile workload contains a symlink: {}", path.display())); }
+            if metadata.is_dir() {
+                visit(root, &path, files)?;
+            } else if metadata.is_file() {
+                let relative = path.strip_prefix(root).map_err(|_| "compile workload path escaped its root".to_string())?.to_string_lossy().replace('\\', "/");
+                if relative == "package.jet" || relative.ends_with(".jet") {
+                    files.push((relative, path));
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    visit(root, root, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    if files.is_empty() { return Err("compile workload has no package or Jet source files".into()); }
+    Ok(files)
+}
+
+fn source_tree_digest(root: &Path) -> Result<String, String> {
+    let files = source_files(root)?;
+    let mut frame = Vec::new();
+    for (relative, path) in files {
+        let bytes = std::fs::read(path).map_err(|error| format!("cannot read compile workload source: {error}"))?;
+        frame.extend_from_slice(&(relative.len() as u64).to_be_bytes());
+        frame.extend_from_slice(relative.as_bytes());
+        frame.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        frame.extend_from_slice(&bytes);
+    }
+    Ok(sha256_hex(&frame))
+}
+
+fn source_tree_bytes(root: &Path) -> Result<u128, String> {
+    source_files(root)?.into_iter().try_fold(0u128, |total, (_, path)| {
+        let bytes = std::fs::metadata(path).map_err(|error| format!("cannot inspect compile workload source: {error}"))?.len() as u128;
+        total.checked_add(bytes).ok_or_else(|| "compile workload source byte count overflowed".to_string())
+    })
+}
+
+fn copy_compile_project(source: &Path, destination: &Path) -> Result<(), String> {
+    fn copy_dir(source: &Path, destination: &Path, total: &mut u64) -> Result<(), String> {
+        std::fs::create_dir_all(destination).map_err(|error| format!("cannot create compile workload scratch directory: {error}"))?;
+        let mut entries = std::fs::read_dir(source).map_err(|error| format!("cannot read compile workload project: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("cannot enumerate compile workload project: {error}"))?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), ".jet" | ".jet-compile-cache" | "build" | "target" | ".git") { continue; }
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| format!("cannot inspect compile workload project path: {error}"))?;
+            if metadata.file_type().is_symlink() { return Err(format!("compile workload contains a symlink: {}", path.display())); }
+            let target = destination.join(entry.file_name());
+            if metadata.is_dir() {
+                copy_dir(&path, &target, total)?;
+            } else if metadata.is_file() {
+                *total = total.checked_add(metadata.len()).ok_or_else(|| "compile workload exceeds its byte limit".to_string())?;
+                if *total > COMPILE_MAX_PROJECT_BYTES { return Err("compile workload exceeds the 64 MiB project limit".into()); }
+                std::fs::copy(&path, &target).map_err(|error| format!("cannot copy compile workload input: {error}"))?;
+            }
+        }
+        Ok(())
+    }
+    let mut total = 0;
+    copy_dir(source, destination, &mut total)
+}
+
+fn reset_compile_cache(root: &Path) -> Result<(), ProviderFailure> {
+    for cache in [root.join("build"), root.join(".jet-compile-cache")] {
+        match std::fs::remove_dir_all(cache) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot reset compile workload cache: {error}"))),
+        }
+    }
+    Ok(())
+}
+
+fn apply_unified_patch(root: &Path, patch: &str) -> Result<(), String> {
+    if !safe_relative_path(patch) { return Err("compile workload patch path is not project-relative".into()); }
+    let patch_bytes = std::fs::read(root.join(patch)).map_err(|error| format!("cannot read compile workload patch: {error}"))?;
+    let patch_text = std::str::from_utf8(&patch_bytes).map_err(|_| "compile workload patch is not UTF-8".to_string())?;
+    let lines = patch_text.lines().collect::<Vec<_>>();
+    let old_header = lines.iter().find(|line| line.starts_with("--- ")).ok_or("compile workload patch has no old-file header")?;
+    let new_header = lines.iter().find(|line| line.starts_with("+++ ")).ok_or("compile workload patch has no new-file header")?;
+    let old_path = patch_header_path(old_header)?;
+    let new_path = patch_header_path(new_header)?;
+    if old_path != new_path { return Err("compile workload patch changes more than one file".into()); }
+    let hunk_index = lines.iter().position(|line| line.starts_with("@@")).ok_or("compile workload patch has no hunk")?;
+    let mut header = lines[hunk_index].split_whitespace();
+    if header.next() != Some("@@") { return Err("compile workload patch has an invalid hunk header".into()); }
+    let parse_range = |value: &str| -> Result<(usize, usize), String> {
+        let value = value.get(1..).ok_or("compile workload patch has an invalid hunk range")?;
+        let (start, count) = value.split_once(',').map_or((value, "1"), |(start, count)| (start, count));
+        let start = start.parse::<usize>().map_err(|_| "compile workload patch has an invalid hunk start".to_string())?;
+        let count = count.parse::<usize>().map_err(|_| "compile workload patch has an invalid hunk count".to_string())?;
+        if start == 0 { return Err("compile workload patch has a zero hunk start".into()); }
+        Ok((start, count))
+    };
+    let (old_start, old_count) = parse_range(header.next().ok_or("compile workload patch has no old hunk range")?)?;
+    let (_, new_count) = parse_range(header.next().ok_or("compile workload patch has no new hunk range")?)?;
+    let target = root.join(&new_path);
+    let metadata = std::fs::symlink_metadata(&target).map_err(|error| format!("compile workload patch target is unavailable: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() { return Err("compile workload patch target is not a regular file".into()); }
+    let original = std::fs::read_to_string(&target).map_err(|error| format!("cannot read compile workload patch target: {error}"))?;
+    let trailing_newline = original.ends_with('\n');
+    let current = original.lines().map(str::to_owned).collect::<Vec<_>>();
+    let old_start = old_start - 1;
+    if old_start > current.len() { return Err("compile workload patch hunk starts outside the source tree".into()); }
+    let mut output = current[..old_start].to_vec();
+    let mut cursor = old_start;
+    let mut seen_old = 0usize;
+    let mut seen_new = 0usize;
+    for line in &lines[hunk_index + 1..] {
+        if line.starts_with("@@") { return Err("compile workload patch must contain exactly one hunk".into()); }
+        if line.starts_with("\\ No newline") { continue; }
+        let (kind, body) = line.split_at(1);
+        match kind {
+            " " => {
+                if current.get(cursor).map(String::as_str) != Some(body) { return Err("compile workload patch context does not match the source tree".into()); }
+                output.push(body.to_string());
+                cursor += 1;
+                seen_old += 1;
+                seen_new += 1;
+            }
+            "-" => {
+                if current.get(cursor).map(String::as_str) != Some(body) { return Err("compile workload patch removal does not match the source tree".into()); }
+                cursor += 1;
+                seen_old += 1;
+            }
+            "+" => {
+                output.push(body.to_string());
+                seen_new += 1;
+            }
+            _ => return Err("compile workload patch contains an invalid hunk line".into()),
+        }
+    }
+    if seen_old != old_count || seen_new != new_count { return Err("compile workload patch hunk counts do not match its body".into()); }
+    output.extend_from_slice(&current[cursor..]);
+    let mut rewritten = output.join("\n");
+    if trailing_newline { rewritten.push('\n'); }
+    std::fs::write(target, rewritten).map_err(|error| format!("cannot apply compile workload patch: {error}"))
+}
+
+fn patch_header_path(header: &str) -> Result<String, String> {
+    let value = header[4..].split('\t').next().unwrap_or_default();
+    let value = value.strip_prefix("a/").or_else(|| value.strip_prefix("b/")).unwrap_or(value);
+    if !safe_relative_path(value) { return Err("compile workload patch header has an unsafe path".into()); }
+    Ok(value.into())
+}
+
+fn run_compile_child(entry: &Path, root: &Path, _target: &str, profile: &str) -> Result<(), ProviderFailure> {
+    let executable = std::env::current_exe().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
+    let mut command = Command::new(executable);
+    command.arg("build").arg(entry).current_dir(root).env("JET_TIMING", "1").env("JET_CACHE_DIR", root.join(".jet-compile-cache")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    if profile == "release" { command.arg("--release"); }
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
+    let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload build: {error}")))?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("compile workload build exited with {status}"))),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Timeout, "compile workload build exceeded its deadline")); }
+            Err(error) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot supervise compile workload build: {error}"))); }
+        }
+    }
+}
+
+fn read_compile_phases(root: &Path) -> Result<Vec<(String, u128)>, ProviderFailure> {
+    let mut phases = BTreeMap::<String, u128>::new();
+    for path in [root.join("jet-timing.json"), root.join("build/jet-timing-backend.json")] {
+        let bytes = std::fs::read(&path).map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("compile timing artifact `{}` is unavailable: {error}", path.display())))?;
+        let value = CanonicalJson::parse_canonical(&bytes).map_err(ProviderFailure::malformed)?;
+        let CanonicalJson::Object(fields) = value else { return Err(ProviderFailure::malformed("compile timing artifact is not an object")); };
+        let Some(CanonicalJson::Array(entries)) = fields.get("phases") else { return Err(ProviderFailure::malformed("compile timing artifact has no phases")); };
+        for entry in entries {
+            let CanonicalJson::Object(entry) = entry else { return Err(ProviderFailure::malformed("compile timing phase is not an object")); };
+            let Some(CanonicalJson::String(name)) = entry.get("name") else { return Err(ProviderFailure::malformed("compile timing phase has no name")); };
+            if name == "rust_bytes" { continue; }
+            let Some(CanonicalJson::Integer(us)) = entry.get("us") else { return Err(ProviderFailure::malformed("compile timing phase has no duration")); };
+            let ns = us.parse::<u128>().map_err(|_| ProviderFailure::malformed("compile timing duration is not an unsigned integer"))?.checked_mul(1_000).ok_or_else(|| ProviderFailure::malformed("compile timing duration overflowed"))?;
+            let slot = phases.entry(name.clone()).or_default();
+            *slot = slot.checked_add(ns).ok_or_else(|| ProviderFailure::malformed("compile phase total overflowed"))?;
+        }
+    }
+    if phases.is_empty() { return Err(ProviderFailure::operation(FailureClass::Unavailable, "compile timing artifacts contained no phase totals")); }
+    Ok(phases.into_iter().collect())
+}
+
+fn phase_totals_json(phases: &[(String, u128)]) -> Result<CanonicalJson, ProviderFailure> {
+    Ok(CanonicalJson::Array(phases.iter().map(|(name, ns)| CanonicalJson::object([
+        ("name".into(), CanonicalJson::String(name.clone())),
+        ("ns".into(), CanonicalJson::Integer(ns.to_string())),
+    ]).map_err(ProviderFailure::malformed)).collect::<Result<Vec<_>, _>>()?))
+}
+
+fn aggregate_compile_phases(records: &[CanonicalJson]) -> Result<CanonicalJson, ProviderFailure> {
+    let mut totals = BTreeMap::<String, u128>::new();
+    for record in records {
+        let CanonicalJson::Object(record) = record else { return Err(ProviderFailure::malformed("compile sample record is not an object")); };
+        let Some(CanonicalJson::Array(phases)) = record.get("phase_totals") else { return Err(ProviderFailure::malformed("compile sample record has no phase totals")); };
+        for phase in phases {
+            let CanonicalJson::Object(phase) = phase else { return Err(ProviderFailure::malformed("compile phase total is not an object")); };
+            let Some(CanonicalJson::String(name)) = phase.get("name") else { return Err(ProviderFailure::malformed("compile phase total has no name")); };
+            let Some(CanonicalJson::Integer(ns)) = phase.get("ns") else { return Err(ProviderFailure::malformed("compile phase total has no duration")); };
+            let ns = ns.parse::<u128>().map_err(|_| ProviderFailure::malformed("compile phase total is not an unsigned integer"))?;
+            let slot = totals.entry(name.clone()).or_default();
+            *slot = slot.checked_add(ns).ok_or_else(|| ProviderFailure::malformed("compile phase total overflowed"))?;
+        }
+    }
+    phase_totals_json(&totals.into_iter().collect::<Vec<_>>())
+}
+
 fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: &str) -> Result<Vec<ProviderEvent>, ProviderFailure> {
     #[cfg(target_os="linux")]{let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let bytes=run_isolated_bytes(timeout,&format!("provider `{identity}`"),move||std::panic::catch_unwind(std::panic::AssertUnwindSafe(||function(request,&cancellation))).map_err(|_|ProviderFailure::operation(FailureClass::Panic,"in-process provider failed unexpectedly"))?.map(|events|encode_stream(&events)))?;decode_stream(&bytes,request)}
     #[cfg(not(target_os="linux"))]{let _=(function,request,timeout,identity);Err(ProviderFailure::operation(FailureClass::Execution,"bounded in-process providers are enabled only on Linux"))}
@@ -270,13 +751,13 @@ pub fn terminate_group(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-pub fn encode_stream(events: &[ProviderEvent]) -> Vec<u8> { let mut out=MAGIC.to_vec();for event in events{match event{ProviderEvent::Sample{spec,metric,value}=>{out.push(1);put_u32(&mut out,*spec);put_text(&mut out,metric);put_text(&mut out,&value.num.to_string());put_text(&mut out,&value.den.to_string());},ProviderEvent::Unavailable{spec,reason,details}=>{out.push(2);put_u32(&mut out,*spec);put_text(&mut out,reason);put_u32(&mut out,details.len() as u32);for(k,v)in details{put_text(&mut out,k);put_text(&mut out,v);}},ProviderEvent::Complete{request_id,samples}=>{out.push(3);put_text(&mut out,request_id);out.extend_from_slice(&samples.to_be_bytes());}}}out }
+pub fn encode_stream(events: &[ProviderEvent]) -> Vec<u8> { let mut out=MAGIC.to_vec();for event in events{match event{ProviderEvent::Sample{spec,metric,value}=>{out.push(1);put_u32(&mut out,*spec);put_text(&mut out,metric);put_text(&mut out,&value.num.to_string());put_text(&mut out,&value.den.to_string());},ProviderEvent::Unavailable{spec,reason,details}=>{out.push(2);put_u32(&mut out,*spec);put_text(&mut out,reason);put_u32(&mut out,details.len() as u32);for(k,v)in details{put_text(&mut out,k);put_text(&mut out,v);}},ProviderEvent::Metadata{spec,details}=>{out.push(4);put_u32(&mut out,*spec);put_u32(&mut out,details.len() as u32);for(k,v)in details{put_text(&mut out,k);put_text(&mut out,v);}},ProviderEvent::Complete{request_id,samples}=>{out.push(3);put_text(&mut out,request_id);out.extend_from_slice(&samples.to_be_bytes());}}}out }
 fn put_u32(out:&mut Vec<u8>,value:u32){out.extend_from_slice(&value.to_be_bytes())}fn put_text(out:&mut Vec<u8>,value:&str){put_u32(out,value.len() as u32);out.extend_from_slice(value.as_bytes())}
 
-fn decode_stream(bytes:&[u8],request:&ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}let mut r=Reader{bytes,at:0};if r.take(MAGIC.len())?!=MAGIC{return Err(ProviderFailure::malformed("provider stream has bad magic"));}let mut events=Vec::new();while r.at<bytes.len(){let tag=r.byte()?;let event=match tag{1=>ProviderEvent::Sample{spec:r.u32()?,metric:r.text()?,value:Rational::parse(&r.text()?,&r.text()?).map_err(ProviderFailure::malformed)?},2=>{let spec=r.u32()?;let reason=r.text()?;let count=r.u32()? as usize;if count>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}let mut details=Vec::with_capacity(count);for _ in 0..count{details.push((r.text()?,r.text()?));}if detail_scalars(&reason,&details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}ProviderEvent::Unavailable{spec,reason,details}},3=>ProviderEvent::Complete{request_id:r.text()?,samples:r.u64()?},_=>return Err(ProviderFailure::malformed("provider stream has unknown event tag"))};events.push(event);}validate_events(events,request).map(|v|v.events)}
+fn decode_stream(bytes:&[u8],request:&ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}let mut r=Reader{bytes,at:0};if r.take(MAGIC.len())?!=MAGIC{return Err(ProviderFailure::malformed("provider stream has bad magic"));}let mut events=Vec::new();while r.at<bytes.len(){let tag=r.byte()?;let event=match tag{1=>ProviderEvent::Sample{spec:r.u32()?,metric:r.text()?,value:Rational::parse(&r.text()?,&r.text()?).map_err(ProviderFailure::malformed)?},2=>{let spec=r.u32()?;let reason=r.text()?;let count=r.u32()? as usize;if count>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}let mut details=Vec::with_capacity(count);for _ in 0..count{details.push((r.text()?,r.text()?));}if detail_scalars(&reason,&details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}ProviderEvent::Unavailable{spec,reason,details}},4=>{let spec=r.u32()?;let count=r.u32()? as usize;if count>MAX_METADATA_SCALARS{return Err(ProviderFailure::malformed("provider metadata exceeds its scalar limit"));}let mut details=Vec::with_capacity(count);for _ in 0..count{details.push((r.text()?,r.text()?));}ProviderEvent::Metadata{spec,details}},3=>ProviderEvent::Complete{request_id:r.text()?,samples:r.u64()?},_=>return Err(ProviderFailure::malformed("provider stream has unknown event tag"))};events.push(event);}validate_events(events,request).map(|v|v.events)}
 struct Reader<'a>{bytes:&'a[u8],at:usize}impl<'a>Reader<'a>{fn take(&mut self,n:usize)->Result<&'a[u8],ProviderFailure>{let end=self.at.checked_add(n).ok_or_else(||ProviderFailure::malformed("provider frame length overflow"))?;let value=self.bytes.get(self.at..end).ok_or_else(||ProviderFailure::malformed("provider stream is truncated"))?;self.at=end;Ok(value)}fn byte(&mut self)->Result<u8,ProviderFailure>{Ok(self.take(1)?[0])}fn u32(&mut self)->Result<u32,ProviderFailure>{Ok(u32::from_be_bytes(self.take(4)?.try_into().unwrap()))}fn u64(&mut self)->Result<u64,ProviderFailure>{Ok(u64::from_be_bytes(self.take(8)?.try_into().unwrap()))}fn text(&mut self)->Result<String,ProviderFailure>{let n=self.u32()? as usize;String::from_utf8(self.take(n)?.to_vec()).map_err(|_|ProviderFailure::malformed("provider text is not UTF-8"))}}
 
-fn validate_events(events:Vec<ProviderEvent>,request:&ProviderRequest)->Result<ProviderEvidence,ProviderFailure>{if events.is_empty(){return Err(ProviderFailure::malformed("provider stream is empty"));}let mut sample_count=0usize;let mut complete=false;let mut last_spec=0u32;let mut seen=false;for(index,event)in events.iter().enumerate(){if complete{return Err(ProviderFailure::malformed("event follows final Complete"));}match event{ProviderEvent::Sample{spec,metric,..}=>{if *spec as usize>=request.specs.len()||request.specs[*spec as usize].metric!=*metric{return Err(ProviderFailure::operation(FailureClass::Incompatible,"provider sample does not match requested spec/metric"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;sample_count+=1;if sample_count>MAX_SAMPLES{return Err(ProviderFailure::malformed("provider emitted more than 1000000 samples"));}},ProviderEvent::Unavailable{spec,reason,details}=>{if *spec as usize>=request.specs.len()||reason.is_empty(){return Err(ProviderFailure::malformed("provider Unavailable has invalid spec or empty reason"));}if detail_scalars(reason,details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;},ProviderEvent::Complete{request_id,samples}=>{if index+1!=events.len()||request_id!=&request.request_id||*samples!=sample_count as u64{return Err(ProviderFailure::malformed("provider Complete request id/count/finality mismatch"));}complete=true;}}}if !complete{return Err(ProviderFailure::malformed("provider stream has no final Complete"));}Ok(ProviderEvidence{events})}
+fn validate_events(events:Vec<ProviderEvent>,request:&ProviderRequest)->Result<ProviderEvidence,ProviderFailure>{if events.is_empty(){return Err(ProviderFailure::malformed("provider stream is empty"));}let mut sample_count=0usize;let mut complete=false;let mut last_spec=0u32;let mut seen=false;for(index,event)in events.iter().enumerate(){if complete{return Err(ProviderFailure::malformed("event follows final Complete"));}match event{ProviderEvent::Sample{spec,metric,..}=>{if *spec as usize>=request.specs.len()||request.specs[*spec as usize].metric!=*metric{return Err(ProviderFailure::operation(FailureClass::Incompatible,"provider sample does not match requested spec/metric"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;sample_count+=1;if sample_count>MAX_SAMPLES{return Err(ProviderFailure::malformed("provider emitted more than 1000000 samples"));}},ProviderEvent::Metadata{spec,details}=>{if *spec as usize>=request.specs.len()||details.is_empty(){return Err(ProviderFailure::malformed("provider metadata has an invalid spec or no fields"));}if detail_scalars("",details)>MAX_METADATA_SCALARS{return Err(ProviderFailure::malformed("provider metadata exceeds its scalar limit"));}let mut previous=None;for(key,value)in details{if key.is_empty()||previous.is_some_and(|prior|prior>=key.as_str()){return Err(ProviderFailure::malformed("provider metadata keys are not unique and sorted"));}if value.is_empty(){return Err(ProviderFailure::malformed("provider metadata contains an empty value"));}previous=Some(key.as_str());}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;},ProviderEvent::Unavailable{spec,reason,details}=>{if *spec as usize>=request.specs.len()||reason.is_empty(){return Err(ProviderFailure::malformed("provider Unavailable has invalid spec or empty reason"));}if detail_scalars(reason,details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;},ProviderEvent::Complete{request_id,samples}=>{if index+1!=events.len()||request_id!=&request.request_id||*samples!=sample_count as u64{return Err(ProviderFailure::malformed("provider Complete request id/count/finality mismatch"));}complete=true;}}}if !complete{return Err(ProviderFailure::malformed("provider stream has no final Complete"));}Ok(ProviderEvidence{events})}
 fn detail_scalars(reason:&str,details:&[(String,String)])->usize{reason.chars().count().saturating_add(details.iter().map(|(key,value)|key.chars().count().saturating_add(value.chars().count())).sum::<usize>())}
 fn is_hex64(value:&str)->bool{value.len()==64&&value.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())}
 

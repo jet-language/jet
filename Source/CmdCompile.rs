@@ -3654,6 +3654,7 @@ pub(crate) fn build(
         crate::cli_error!("E2105", "couldn't write {}: {}", rs_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
+    let mut compile_timer = jet::PhaseTiming::enabled().then(jet::PhaseTiming::PhaseTimer::new);
 
     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
@@ -3759,6 +3760,10 @@ pub(crate) fn build(
                 if let Ok(meta) = std::fs::metadata(&bin) {
                     eprintln!("jet-timing binary_bytes={}", meta.len());
                 }
+            }
+            if let Some(timer) = compile_timer.as_mut() {
+                timer.lap("backend_link");
+                let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), timer.to_json());
             }
             return;
         }
@@ -3900,6 +3905,10 @@ pub(crate) fn build(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    if let Some(timer) = compile_timer.as_mut() {
+        timer.lap("backend_link");
+        let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), timer.to_json());
+    }
 
     if !out.status.success() {
         // Preserve the shared `build/<stem>.rs` artifact (written above) for the

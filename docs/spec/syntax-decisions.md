@@ -4928,13 +4928,16 @@ specialized decisions there override umbrella examples.
 D-PERFBUDGET-GRAMMAR1=A / D-PERFBUDGET-REPORT1=A /
 D-PERFBUDGET-OUTPUT1=A / D-PERFBUDGET-BENCHMIGRATE1=B /
 D-PERFBUDGET-GAMEMIGRATE1=A / D-PERFBUDGET-PROVIDER1=A /
-D-PERFBUDGET-INTEGRATION1=A**: performance budgets use typed
+D-PERFBUDGET-INTEGRATION1=A / D-PERFBUDGET-COMPILE1=C**: performance budgets use typed
 `module perf.<role> { budgets: [Budget.{ ... }] }` declarations, pinned
 statistical baselines, one canonical `BudgetReport`, and exact `jet budget
 check` / plan-first `jet budget update` projections. Full closed grammar,
 inference, arithmetic, collision, report, baseline, storage, output,
 diagnostic, fixture, migration, and prototype-retirement law is normative in
 [`performance-budget-decisions.md`](performance-budget-decisions.md).
+Compile budgets use the same surface with the closed
+`CompileTime`/`CompilerProbe` workload values and typed `compile_workloads`
+entries defined by D-PERFBUDGET-COMPILE1.
 
 **D-BPE-NAME1=A / D-BPE-HOST1=B / D-BPE-LAYOUT1=A / D-BPE-ALTITUDE1=A /
 D-BPE-TAXONOMY1=A / D-BPE-EDITSCOPE1=A / D-BPE-PROTOCOL1=C**: Jet's visual

@@ -169,7 +169,7 @@ impl<'a> Parser<'a> {
             Ok(TypedLitBody::Entries(entries))
         }
 
-        fn finish_struct_fields_already_open(
+        pub(crate) fn finish_struct_fields_already_open(
             &mut self,
         ) -> Result<Vec<(String, Span, Expr)>, Diagnostic> {
             let mut fields = Vec::new();

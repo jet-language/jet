@@ -15,8 +15,20 @@ pub struct BudgetSpec {
     pub limit: String,
     pub comparison_fact: BudgetComparisonFact,
     pub limit_fact: BudgetLimitFact,
+    /// D-PERFBUDGET-COMPILE1=C: the exact named workload behind a compiler
+    /// probe. Clean and NoChange carry no patch; Edit resolves here, once,
+    /// against the role's typed workload map.
+    pub compile_workload: Option<CompileWorkloadFact>,
     pub span: Span,
     pub field_spans: BTreeMap<String, Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileWorkloadFact {
+    pub mode: String,
+    pub name: Option<String>,
+    pub target: String,
+    pub patch: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,7 +267,8 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
                 "Service" => catalog.services.contains(name),
                 "Scene" => catalog.scenes.contains(name),
                 "Bench" => catalog.benches.contains(name),
-                "Target" => catalog.targets.contains(name),
+                "Target" => catalog.targets.contains(name)
+                    || (spec.metric.starts_with("CompileTime(") && provider_kind(&spec.provider) == "CompilerProbe"),
                 _ => true,
             };
             if !found {
@@ -270,6 +283,7 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
                 "BenchMeasurement" => catalog.benches.contains(name),
                 "ServiceProbe" => catalog.services.contains(name),
                 "SceneProbe" => catalog.scenes.contains(name),
+                "CompilerProbe" => true,
                 _ => true,
             };
             if !found {
@@ -360,8 +374,9 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
             ));
             continue;
         }
+        let workloads = compile_workload_catalog(&contribution.path, &perf.compile_workloads, diags);
         for entry in &perf.budgets {
-            match elaborate(&contribution.path, entry) {
+            match elaborate(&contribution.path, entry, &workloads) {
                 Ok(spec) => specs.push(spec),
                 Err(diag) => diags.push(diag),
             }
@@ -369,7 +384,7 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
     }
 }
 
-fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
+fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, CompileWorkloadFact>) -> Result<BudgetSpec, Diagnostic> {
     let span = entry.span;
     const ALLOWED: &[&str] = &["name", "scope", "metric", "provider", "comparison", "limit", "enforcement", "applies"];
     let mut map: BTreeMap<&str, (&Expr, Span)> = BTreeMap::new();
@@ -436,6 +451,52 @@ fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
             metric_expr.span(),
         ));
     }
+    let compile_workload = if metric_variant == "CompileTime" {
+        let target = named_key(&scope)
+            .filter(|(kind, _)| *kind == "Target")
+            .map(|(_, value)| value.to_string())
+            .unwrap_or_else(|| "Package".into());
+        let identity = provider_identity(&provider).ok_or_else(|| invalid(
+            &name,
+            "`CompileTime` requires a typed `CompilerProbe` workload value",
+            "use `.CompilerProbe(.Clean)`, `.CompilerProbe(.NoChange)`, or `.CompilerProbe(.Edit(\"name\"))`",
+            map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
+        ))?;
+        match identity {
+            "Clean" | "NoChange" => Some(CompileWorkloadFact {
+                mode: identity.into(),
+                name: None,
+                target,
+                patch: None,
+            }),
+            edit if edit.starts_with("Edit(") && edit.ends_with(')') => {
+                let workload_name = &edit[5..edit.len() - 1];
+                let workload = workloads.get(workload_name).ok_or_else(|| invalid(
+                    &name,
+                    format!("compile edit workload `{workload_name}` is not declared"),
+                    "add the named `CompilerWorkload.Edit` entry to `compile_workloads`",
+                    map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
+                ))?;
+                if workload.target.as_str() != target {
+                    return Err(invalid(
+                        &name,
+                        format!("compile edit workload `{workload_name}` targets `{}` but the budget scope targets `{target}`", workload.target),
+                        "make the workload target and `.Target(...)` scope name identical",
+                        map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
+                    ));
+                }
+                Some(workload.clone())
+            }
+            _ => return Err(invalid(
+                &name,
+                "`CompilerProbe` has an unsupported workload value",
+                "use `.Clean`, `.NoChange`, or `.Edit(\"declared_workload\")`",
+                map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
+            )),
+        }
+    } else {
+        None
+    };
     let applicability = match map.get("applies") {
         Some((expr, _)) => parse_applicability(&name, expr)?,
         None => BudgetApplicability { targets: BudgetAxis::Current, profiles: BudgetAxis::Current },
@@ -451,7 +512,7 @@ fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
     };
     validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, span)?;
     let field_spans = map.into_iter().map(|(k, (_, s))| (k.to_string(), s)).collect();
-    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, comparison_fact, limit_fact, span, field_spans })
+    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, comparison_fact, limit_fact, compile_workload, span, field_spans })
 }
 
 fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
@@ -468,7 +529,8 @@ fn closed_provider(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
     match (enum_variant(expr).as_deref(), named_key(&key)) {
         (Some("CompilerFacts"), None) => Ok(key),
         (Some("BuildArtifact" | "AllocationProbe" | "BenchMeasurement" | "ServiceProbe" | "SceneProbe"), Some((_, value))) if !value.is_empty() => Ok(key),
-        _ => Err(invalid(name, "`provider` must be one closed provider value with the required name", "use `.CompilerFacts` or a named provider such as `.ServiceProbe(\"api\")`", expr.span())),
+        (Some("CompilerProbe"), Some((_, value))) if matches!(value, "Clean" | "NoChange") || value.starts_with("Edit(") && value.ends_with(')') && snake_case(&value[5..value.len() - 1]) => Ok(key),
+        _ => Err(invalid(name, "`provider` must be one closed provider value with the required name", "use `.CompilerFacts`, `.CompilerProbe(.Clean)`, or a named provider such as `.ServiceProbe(\"api\")`", expr.span())),
     }
 }
 
@@ -479,7 +541,7 @@ fn closed_metric(name: &str, expr: &Expr) -> Result<(String, String), Diagnostic
     if !crate::Syntax::PERF_BUDGET_METRICS.contains(&variant.as_str()) {
         return Err(invalid(name, format!("`.{variant}` is not a performance metric"), "use one metric from the registered performance-budget vocabulary", expr.span()));
     }
-    let percentile_metric = matches!(variant.as_str(), "FrameTime" | "Latency" | "BenchTime" | "DrawCalls");
+    let percentile_metric = matches!(variant.as_str(), "FrameTime" | "Latency" | "BenchTime" | "DrawCalls" | "CompileTime");
     if percentile_metric {
         let [arg] = args.as_slice() else {
             return Err(invalid(name, format!("`.{variant}` requires exactly one percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr.span()));
@@ -538,6 +600,7 @@ fn validate_scope_provider_pair(name: &str, metric: &str, scope: &str, provider:
     let valid = match metric {
         "BinarySize" | "ArtifactSize" => (scope == "Package" || scope.starts_with("Target(")) && provider.starts_with("BuildArtifact("),
         "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount" => (scope == "Package" || scope.starts_with("Target(")) && provider == "CompilerFacts",
+        "CompileTime" => scope.starts_with("Target(") && provider_kind(provider) == "CompilerProbe",
         "ServiceReadiness" => match (named_key(scope), named_key(provider)) {
             (Some(("Service", scope_name)), Some(("ServiceProbe", provider_name))) => scope_name == provider_name,
             _ => false,
@@ -545,6 +608,70 @@ fn validate_scope_provider_pair(name: &str, metric: &str, scope: &str, provider:
         _ => true,
     };
     if valid { Ok(()) } else { Err(invalid(name, format!("`{metric}` cannot use scope `{scope}` with provider `{provider}`"), "choose the metric's ratified scope/provider pair", span)) }
+}
+
+fn compile_workload_catalog(
+    role: &str,
+    declarations: &[crate::AST::CompileWorkloadDecl],
+    diags: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, CompileWorkloadFact> {
+    let mut catalog = BTreeMap::new();
+    for declaration in declarations {
+        let target = match string_value(&declaration.target) {
+            Some(value) if !value.is_empty() && snake_or_kebab(&value) => value,
+            _ => {
+                diags.push(invalid(
+                    role,
+                    format!("compile workload `{}` has an invalid target", declaration.name),
+                    "write a constant lowercase target name such as `target: \"cli\"`",
+                    declaration.target.span(),
+                ));
+                continue;
+            }
+        };
+        let patch = match string_value(&declaration.patch) {
+            Some(value) if safe_relative_path(&value) => value,
+            _ => {
+                diags.push(invalid(
+                    role,
+                    format!("compile workload `{}` has an invalid patch path", declaration.name),
+                    "write a project-relative patch path without `..`, a root, or a backslash",
+                    declaration.patch.span(),
+                ));
+                continue;
+            }
+        };
+        if !snake_case(&declaration.name) {
+            diags.push(invalid(
+                role,
+                format!("compile workload name `{}` is not lowercase snake_case", declaration.name),
+                "name workloads with lowercase words joined by underscores",
+                declaration.name_span,
+            ));
+            continue;
+        }
+        if catalog.insert(declaration.name.clone(), CompileWorkloadFact { mode: "Edit".into(), name: Some(declaration.name.clone()), target, patch: Some(patch), }).is_some() {
+            diags.push(invalid(role, format!("compile workload `{}` is declared more than once", declaration.name), "keep one declaration for each workload name", declaration.name_span));
+        }
+    }
+    catalog
+}
+
+fn safe_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && value.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn snake_or_kebab(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-')
+}
+
+fn provider_kind(provider: &str) -> &str { provider.split_once('(').map(|(kind, _)| kind).unwrap_or(provider) }
+
+fn provider_identity(provider: &str) -> Option<&str> {
+    provider.split_once('(').and_then(|(_, rest)| rest.strip_suffix(')'))
 }
 
 fn parse_applicability(name: &str, expr: &Expr) -> Result<BudgetApplicability, Diagnostic> {
@@ -690,7 +817,7 @@ fn normalize_limit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result
         let (quantity, raw) = normalize_rate(name, value)?;
         return Ok(BudgetLimitFact { kind: limit.into(), quantity, raw });
     }
-    let allowed = if matches!(metric, "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes") { &["B", "KiB", "MiB", "GiB"][..] } else if matches!(metric, "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness") { &["ns", "us", "ms", "s"][..] } else { &[][..] };
+    let allowed = if matches!(metric, "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes") { &["B", "KiB", "MiB", "GiB"][..] } else if matches!(metric, "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness" | "CompileTime") { &["ns", "us", "ms", "s"][..] } else { &[][..] };
     if allowed.is_empty() {
         let Expr::Int(n, _, _, _) = value else { return Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) };
         let count = u128::try_from(*n).map_err(|_| invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span()))?;

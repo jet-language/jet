@@ -33,7 +33,7 @@ pub use items::{
     CModule, ModuleDecl, SourceDecl, Contribution, ContribValue, EnvLit, SystemLit, SystemField,
     SystemFieldValue, ServiceEntry, OptionEntry, ImageLit, ImageField, ImageFromRef,
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,
-    VmTestFieldValue, PerfLit, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
+    VmTestFieldValue, PerfLit, CompileWorkloadDecl, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
     ProtocolDecl, StateDecl, EffectDecl, MarkerDecl, MarkerDeclParam, FactDecl, DeriveDef, DeriveBodyItem, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, JobScope, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,

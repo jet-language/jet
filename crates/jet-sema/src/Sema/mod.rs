@@ -2021,7 +2021,7 @@ mod ScopeMembers;
 mod PolicyFacts;
 mod Prelude;
 mod BudgetSpecs;
-pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec, LocatedBudgetSpec};
+pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec, CompileWorkloadFact, LocatedBudgetSpec};
 mod CheckerReferences;
 mod State;
 mod Taint;

@@ -406,7 +406,21 @@ pub struct PerfLit {
     /// canonical AST identity and exact spans.
     pub budgets: Vec<BudgetDecl>,
     pub budgets_span: Span,
+    /// D-PERFBUDGET-COMPILE1=C: named source patches for representative edit
+    /// workloads. Clean and NoChange are provider values and need no entry.
+    pub compile_workloads: Vec<CompileWorkloadDecl>,
+    pub compile_workloads_span: Option<Span>,
     pub list_span: Span,
+    pub span: Span,
+}
+
+/// One `CompilerWorkload.Edit.{ target: ..., patch: ... }` declaration.
+#[derive(Debug, Clone)]
+pub struct CompileWorkloadDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub target: Expr,
+    pub patch: Expr,
     pub span: Span,
 }
 

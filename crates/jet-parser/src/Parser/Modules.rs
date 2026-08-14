@@ -133,6 +133,7 @@ impl<'a> Parser<'a> {
         let mut vmtest_fields: Vec<crate::AST::VmTestField> = Vec::new();
         let mut profile_fields: Vec<(String, Span, Expr)> = Vec::new();
         let mut perf_budgets: Option<(Span, Expr)> = None;
+        let mut perf_compile_workloads: Option<(Span, Expr)> = None;
         let body_start = self.peek().span.start;
 
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -205,16 +206,31 @@ impl<'a> Parser<'a> {
                     Namespace::Perf => {
                         let (field, field_span) = self.expect_ident("for a performance policy field")?;
                         self.expect(TokKind::Colon, "after a performance policy field")?;
-                        if field != Syntax::PERF_FIELD_BUDGETS || perf_budgets.is_some() {
+                        if field == Syntax::PERF_FIELD_BUDGETS && perf_budgets.is_none() {
+                            perf_budgets = Some((field_span, self.expr()?));
+                        } else if field == Syntax::PERF_FIELD_COMPILE_WORKLOADS
+                            && perf_compile_workloads.is_none()
+                        {
+                            if !matches!(self.peek().kind, TokKind::LBrace) {
+                                return Err(Diagnostic::error(
+                                    "E2903",
+                                    format!("performance budget role `{path}` is not valid"),
+                                    "`compile_workloads` uses one bare inferred record".to_string(),
+                                    "write `compile_workloads: { name: CompilerWorkload.Edit.{ target: \"cli\", patch: \"...\" } }`".to_string(),
+                                    Some(self.peek().span),
+                                ));
+                            }
+                            let value = self.perf_compile_workloads_value()?;
+                            perf_compile_workloads = Some((field_span, value));
+                        } else {
                             return Err(Diagnostic::error(
                                 "E2903",
                                 format!("performance budget role `{path}` is not valid"),
-                                "a performance role contains exactly one `budgets` list".to_string(),
-                                "write `budgets: [Budget.{ ... }]` once".to_string(),
+                                "a performance role contains one `budgets` list and at most one `compile_workloads` map".to_string(),
+                                "write `budgets: [Budget.{ ... }]` and, for edit probes, `compile_workloads: { ... }`".to_string(),
                                 Some(field_span),
                             ));
                         }
-                        perf_budgets = Some((field_span, self.expr()?));
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
                         }
@@ -270,9 +286,18 @@ impl<'a> Parser<'a> {
                 // D-PERFBUDGET-SURFACE1: `budgets: [Budget.{ … }]`.
                 // D-DOTCTOR3: also `budgets: [Budget].{ .{ … }, … }` (typed-list head).
                 let typed_budgets = Self::perf_budget_decls(budgets, &path)?;
+                let (compile_workloads, compile_workloads_span) = match perf_compile_workloads {
+                    Some((field_span, value)) => (
+                        Self::perf_compile_workload_decls(value, &path)?,
+                        Some(field_span),
+                    ),
+                    None => (Vec::new(), None),
+                };
                 crate::AST::ContribValue::Perf(crate::AST::PerfLit {
                     budgets: typed_budgets,
                     budgets_span,
+                    compile_workloads,
+                    compile_workloads_span,
                     list_span,
                     span: body_span,
                 })
@@ -360,6 +385,151 @@ impl<'a> Parser<'a> {
             typed_budgets.push(Self::perf_budget_entry(entry, allow_inferred)?);
         }
         Ok(typed_budgets)
+    }
+
+    /// Collect the closed `compile_workloads` map. The map is deliberately
+    /// captured as a small AST family so sema can validate constant paths and
+    /// resolve each named edit against the provider value.
+    fn perf_compile_workload_decls(
+        value: Expr,
+        path: &str,
+    ) -> Result<Vec<crate::AST::CompileWorkloadDecl>, Diagnostic> {
+        let Expr::StructLit {
+            type_name,
+            fields,
+            inferred: true,
+            span,
+            ..
+        } = value
+        else {
+            return Err(Diagnostic::error(
+                "E2903",
+                format!("performance budget role `{path}` is not valid"),
+                "`compile_workloads` must be an inferred record of named edit workloads".to_string(),
+                "write `compile_workloads: { name: CompilerWorkload.Edit.{ target: \"cli\", patch: \"...\" } }`".to_string(),
+                Some(value.span()),
+            ));
+        };
+        if !type_name.is_empty() {
+            return Err(Diagnostic::error(
+                "E2903",
+                format!("performance budget role `{path}` is not valid"),
+                "`compile_workloads` must be an inferred record".to_string(),
+                "remove the record type name and write `compile_workloads: { ... }`".to_string(),
+                Some(span),
+            ));
+        }
+        let mut workloads = Vec::with_capacity(fields.len());
+        for (name, name_span, value) in fields {
+            let Expr::EnumLit { type_name, variant, args, span, .. } = value else {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance workload `{name}` is not valid"),
+                    "a compile workload must be `CompilerWorkload.Edit`".to_string(),
+                    "write `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                    Some(value.span()),
+                ));
+            };
+            if type_name != Syntax::TYPE_COMPILER_WORKLOAD || variant != "Edit" {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance workload `{name}` is not valid"),
+                    format!("`{variant}` is not a compile edit workload"),
+                    "use `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                    Some(span),
+                ));
+            }
+            let mut target = None;
+            let mut patch = None;
+            for arg in args {
+                let crate::AST::EnumLitArg::Named { label, expr } = arg else {
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        format!("performance workload `{name}` is not valid"),
+                        "`CompilerWorkload.Edit` requires named `target` and `patch` fields".to_string(),
+                        "write `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                        Some(span),
+                    ));
+                };
+                match label.as_str() {
+                    "target" => {
+                        if target.is_some() {
+                            return Err(Diagnostic::error(
+                                "E2903",
+                                format!("performance workload `{name}` writes `target` more than once"),
+                                "`CompilerWorkload.Edit` has exactly one `target` field".to_string(),
+                                "keep one constant target value".to_string(),
+                                Some(expr.span()),
+                            ));
+                        }
+                        target = Some(expr);
+                    }
+                    "patch" => {
+                        if patch.is_some() {
+                            return Err(Diagnostic::error(
+                                "E2903",
+                                format!("performance workload `{name}` writes `patch` more than once"),
+                                "`CompilerWorkload.Edit` has exactly one `patch` field".to_string(),
+                                "keep one constant patch path".to_string(),
+                                Some(expr.span()),
+                            ));
+                        }
+                        patch = Some(expr);
+                    }
+                    _ => {
+                        return Err(Diagnostic::error(
+                            "E2903",
+                            format!("performance workload `{name}` has an invalid or duplicate field `{label}`"),
+                            "`CompilerWorkload.Edit` has exactly `target` and `patch`".to_string(),
+                            "remove the extra field and keep one constant value for each required field".to_string(),
+                            Some(expr.span()),
+                        ));
+                    }
+                }
+            }
+            let Some(target) = target else {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance workload `{name}` is missing `target`"),
+                    "every edit workload names the target it measures".to_string(),
+                    "add `target: \"cli\"`".to_string(),
+                    Some(span),
+                ));
+            };
+            let Some(patch) = patch else {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance workload `{name}` is missing `patch`"),
+                    "every edit workload names its deterministic source patch".to_string(),
+                    "add `patch: \"tests/perf/rename-route.patch\"`".to_string(),
+                    Some(span),
+                ));
+            };
+            workloads.push(crate::AST::CompileWorkloadDecl {
+                name,
+                name_span,
+                target,
+                patch,
+                span,
+            });
+        }
+        Ok(workloads)
+    }
+
+    fn perf_compile_workloads_value(&mut self) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::LBrace, "to open `compile_workloads`")?;
+        let fields = self.finish_struct_fields_already_open()?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Expr::StructLit {
+            type_name: String::new(),
+            type_args: Vec::new(),
+            import_ns: None,
+            as_trait: None,
+            fields,
+            inferred: true,
+            span: Span::new(start.start, end),
+        })
     }
 
     fn perf_budget_entry(

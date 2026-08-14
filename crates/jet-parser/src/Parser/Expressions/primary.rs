@@ -456,6 +456,21 @@ impl<'a> Parser<'a> {
                         if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                             return self.ptr_from_addr(type_name, span);
                         }
+                        if type_name == Syntax::TYPE_COMPILER_WORKLOAD
+                            && member == "Edit"
+                            && matches!(self.peek().kind, TokKind::Dot)
+                            && matches!(self.peek2().kind, TokKind::LBrace)
+                        {
+                            self.bump();
+                            let (args, end) = self.enum_lit_named_fields()?;
+                            return Ok(Expr::EnumLit {
+                                type_name,
+                                variant: member,
+                                args,
+                                leading_dot: false,
+                                span: Span::new(span.start, end),
+                            });
+                        }
                         // D-GENERIC-CALL1=A: optional call-site type arguments on
                         // every qualified call, such as `csv.decode<Order>(raw)`.
                         // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a

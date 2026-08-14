@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn compiler_probe_rejects_missing_edit_input_and_closed_metric_typos() {
+    let dir = compile_latency_budget_project("compile_probe_hostile_inputs");
+    fs::remove_file(dir.join("edits/rename-route.patch")).unwrap();
+    let missing = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    let missing_text = String::from_utf8_lossy(&missing.stdout);
+    assert!(missing_text.contains("E2908") || String::from_utf8_lossy(&missing.stderr).contains("E2908"));
+    assert!(!dir.join(".jet/perf/reports").exists(), "missing edit input must not produce a report");
+
+    let typo_dir = compile_latency_budget_project("compile_probe_closed_metric");
+    let source = fs::read_to_string(typo_dir.join("src/run.jet")).unwrap().replace(".CompileTime(.P95)", ".CompileLatency(.P95)");
+    fs::write(typo_dir.join("src/run.jet"), source).unwrap();
+    let typo = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&typo_dir).output().unwrap();
+    assert_eq!(typo.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&typo.stdout).contains("E2903") || String::from_utf8_lossy(&typo.stderr).contains("E2903"));
+}
+
+#[test]
 fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = allocation_budget_project("allocation_probe_runtime");

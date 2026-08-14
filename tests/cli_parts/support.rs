@@ -155,6 +155,12 @@ fn run() {{}}
     dir
 }
 
+fn compile_latency_budget_project(tag: &str) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    copy_dir_all(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compile_latency"), &dir);
+    dir
+}
+
 fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();

@@ -571,18 +571,19 @@ fn budget_check_measures_typed_compile_edit_and_records_provenance() {
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
     let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
+    let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+    assert_eq!(provider["kind"], CanonicalJson::String("CompilerProbe".into()));
     assert_eq!(measurement["unit"], CanonicalJson::String("Duration".into()));
-    assert_eq!(measurement["provider"].as_object().unwrap()["kind"], CanonicalJson::String("CompilerProbe".into()));
     let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
     assert_eq!(samples.len(), 20);
     let CanonicalJson::Object(statistics) = &measurement["statistics"] else { panic!("statistics") };
     assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
     let CanonicalJson::Object(compile) = &measurement["compile"] else { panic!("compile metadata") };
-    for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "phase_totals", "sample_records", "variance"] {
+    for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "warmups", "samples", "variance", "phase_totals", "sample_records", "edit_bytes", "edit_sha256", "workload_bytes"] {
         assert!(compile.contains_key(key), "missing compile metadata field {key}");
     }
-    let bytes = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
-    jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(bytes).unwrap()).unwrap();
+    let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
+    jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap()).unwrap();
 }
 
 #[test]

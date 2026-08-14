@@ -186,10 +186,10 @@ fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedB
     let needs_artifact=specs.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let expected_subject=subject(root,bundle,"identity","identity",target,profile,if needs_artifact{artifact}else{None})?;
     let expected_subject=as_object(&expected_subject)?;
-    let expected_tool_value=toolchain()?;let expected_tool=as_object(&expected_tool_value)?;
+    let expected_tool_value=toolchain()?;let expected_tool=as_object(&expected_tool_value)?;let entry=project_entry(root);
     let expected_ids=specs.iter().map(|located|format!("{}:{}",located.spec.role,located.spec.name)).collect::<std::collections::BTreeSet<_>>();
     let mut expected=std::collections::BTreeMap::new();
-    for located in specs { let provider=provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider))?;let(base,hash,context)=measurement_base_truthful(root,bundle,located,&CanonicalJson::Object(expected_subject.clone()),&expected_tool_value,&provider,target,profile)?;let _=base;expected.insert(format!("{}:{}",located.spec.role,located.spec.name),(hash,context,provider)); }
+    for located in specs { let provider=provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider),root,&entry,profile,located.spec.compile_workload.as_ref())?;let(base,hash,context)=measurement_base_truthful(root,bundle,located,&CanonicalJson::Object(expected_subject.clone()),&expected_tool_value,&provider,target,profile)?;let _=base;expected.insert(format!("{}:{}",located.spec.role,located.spec.name),(hash,context,provider)); }
     let dir=root.join(".jet/perf/reports");let Ok(entries)=std::fs::read_dir(dir)else{return Ok(None)};
     let mut paths=entries.filter_map(Result::ok).map(|entry|entry.path()).filter(|path|path.extension().and_then(|ext|ext.to_str())==Some("json")).collect::<Vec<_>>();paths.sort();paths.reverse();
     for path in paths{
@@ -299,13 +299,14 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 type ArtifactIdentity = (PathBuf, u64, String);
 
 fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>, dev_evidence:Option<&DevEvidence>)->Result<BuiltReport,String>{
-    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
+    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe"|"CompilerProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let tool=toolchain()?;
     let artifact=if needs_artifact{Some(match supplied_artifact{Some(artifact)=>artifact,None=>build_selected_artifact(root,&project_entry(root))?})}else{None};
     let context_subject=subject(root,bundle,at,at,target,profile,artifact.as_ref())?;
-    let providers=ordered.iter().map(|located|provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider))).collect::<Result<Vec<_>,_>>()?;
+    let entry = project_entry(root);
+    let providers=ordered.iter().map(|located|provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider),root,&entry,profile,located.spec.compile_workload.as_ref())).collect::<Result<Vec<_>,_>>()?;
     let mut bases=Vec::new();
     for (located,provider) in ordered.iter().zip(&providers) { bases.push(measurement_base_truthful(root,bundle,located,&context_subject,&tool,provider,target,profile)?); }
     let mut groups=std::collections::BTreeMap::<String,Vec<usize>>::new();
@@ -316,6 +317,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     registry.register_in_process("ServiceProbe",service_probe_provider).map_err(|error|format!("cannot register ServiceProbe: {error}"))?;
     registry.register_in_process("SceneProbe",scene_probe_provider).map_err(|error|format!("cannot register SceneProbe: {error}"))?;
     let mut samples=vec![Vec::new();ordered.len()];
+    let mut compile_metadata=vec![None;ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
         if matches!(kind,"BenchMeasurement"|"AllocationProbe") {
@@ -371,34 +373,49 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
                 continue;
             }
         }
-        let provider=&providers[indices[0]];
+        let mut request_indices = indices.clone();
+        request_indices.sort_by(|left, right| {
+            ordered[*left].spec.metric.cmp(&ordered[*right].spec.metric)
+                .then_with(|| bases[*left].1.cmp(&bases[*right].1))
+        });
+        let provider=&providers[request_indices[0]];
         let workload=if kind=="BuildArtifact"{
             CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?
         }else if matches!(kind,"BenchMeasurement"|"AllocationProbe"){
             CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
         }else if matches!(kind,"ServiceProbe"|"SceneProbe"){
             CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
+        }else if kind=="CompilerProbe" {
+            let workload = ordered[request_indices[0]].spec.compile_workload.as_ref().ok_or_else(|| format!("CompilerProbe budget `{}` has no resolved workload", ordered[request_indices[0]].spec.name))?;
+            jet::BudgetProviders::compiler_probe_workload(root, &entry, &workload.mode, &workload.target, profile, workload.patch.as_deref())?
         }else{
-            CanonicalJson::Array(indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
+            CanonicalJson::Array(request_indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
         };
-        let requests=indices.iter().map(|index|ProviderSpec{budget_hash:bases[*index].1.clone(),metric:ordered[*index].spec.metric.clone()}).collect();
+        let requests=request_indices.iter().map(|index|ProviderSpec{budget_hash:bases[*index].1.clone(),metric:ordered[*index].spec.metric.clone()}).collect();
         let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&workload),provider_hash:stable_id(provider),context_hash:stable_id(&context_subject),specs:requests,workload,policy:CanonicalJson::Null};
         let evidence=registry.collect(kind,&request,PROVIDER_DEADLINE).map_err(|e|e.reason)?;
         for event in evidence.events {
             match event {
                 ProviderEvent::Sample{spec,value,..}=>{
-                    let global=*indices.get(spec as usize).ok_or("provider sample index escaped its measurement group")?;
+                    let global=*request_indices.get(spec as usize).ok_or("provider sample index escaped its measurement group")?;
                     samples[global].push(value);
                 }
+                ProviderEvent::Metadata{spec,details}=>{
+                    let global=*request_indices.get(spec as usize).ok_or("provider metadata index escaped its measurement group")?;
+                    if kind!="CompilerProbe" { return Err(format!("provider `{provider_name}` returned metadata outside CompilerProbe")); }
+                    let payload=details.iter().find(|(key,_)|key=="compile").map(|(_,value)|value).ok_or("CompilerProbe metadata has no compile payload")?;
+                    if compile_metadata[global].is_some() { return Err(format!("CompilerProbe returned duplicate metadata for budget `{}`",ordered[global].spec.name)); }
+                    compile_metadata[global]=Some(CanonicalJson::parse_canonical(payload.as_bytes()).map_err(|error|format!("CompilerProbe metadata is not canonical: {error}"))?);
+                }
                 ProviderEvent::Unavailable{spec,reason,..}=>{
-                    let global=*indices.get(spec as usize).ok_or("provider unavailable index escaped its measurement group")?;
+                    let global=*request_indices.get(spec as usize).ok_or("provider unavailable index escaped its measurement group")?;
                     return Err(format!("provider `{provider_name}` has no evidence for budget `{}`: {reason}",ordered[global].spec.name));
                 }
                 ProviderEvent::Complete{..}=>{}
             }
         }
     }
-    for(index,values)in samples.iter().enumerate(){let statistical=ordered[index].spec.comparison_fact.kind!="Absolute";if values.is_empty()||(!statistical&&values.len()!=1)||statistical&&values.len()<20{return Err(format!("provider `{}` returned {} samples for budget `{}`; policy requires {}",ordered[index].spec.provider,values.len(),ordered[index].spec.name,if statistical{20}else{1}));}}
+    for(index,values)in samples.iter().enumerate(){let statistical=ordered[index].spec.comparison_fact.kind!="Absolute";if values.is_empty()||(!statistical&&values.len()!=1)||statistical&&values.len()<20{return Err(format!("provider `{}` returned {} samples for budget `{}`; policy requires {}",ordered[index].spec.provider,values.len(),ordered[index].spec.name,if statistical{20}else{1}));}if ordered[index].spec.metric.starts_with("CompileTime(")&&compile_metadata[index].is_none(){return Err(format!("CompilerProbe returned no provenance for budget `{}`",ordered[index].spec.name));}}
     let subject=subject(root,bundle,at,&timestamp_now(),target,profile,artifact.as_ref())?;
     for (index, provider_samples) in samples.iter().enumerate() {
         let metric_name=ordered[index].spec.metric.split('(').next().unwrap_or(&ordered[index].spec.metric);
@@ -406,6 +423,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         let mut base = as_object(&bases[index].0)?.clone();
         base.insert("samples".into(), CanonicalJson::Array(provider_samples.iter().map(Rational::to_json).collect()));
         if ordered[index].spec.comparison_fact.kind!="Absolute"{base.insert("statistics".into(),statistics_json(&provider_samples)?);}
+        if let Some(metadata)=&compile_metadata[index]{base.insert("compile".into(),metadata.clone());}
         base.insert("context_key".into(), CanonicalJson::String(context.clone()));
         bases[index].0 = CanonicalJson::Object(base);
         bases[index].2 = context;
@@ -535,8 +553,9 @@ pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence],
 }
 
 fn dev_owned(spec: &BudgetSpec) -> bool {
-    matches!(provider_kind(&spec.provider), "ServiceProbe" | "SceneProbe")
-        && (spec.scope.starts_with("Service(") || spec.scope.starts_with("Scene("))
+    (matches!(provider_kind(&spec.provider), "ServiceProbe" | "SceneProbe")
+        && (spec.scope.starts_with("Service(") || spec.scope.starts_with("Scene(")))
+        || provider_kind(&spec.provider) == "CompilerProbe"
 }
 
 fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
@@ -621,11 +640,11 @@ fn context_key(subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJso
     Ok(sha256_hex(&input))
 }
 
-fn compiler_fact(bundle:&jet::AST::ProgramBundle,effect_facts:&jet::Sema::SemIndexEffectFacts,spec:&BudgetSpec)->Result<u128,String>{match spec.metric.as_str(){"PublicApiItems"=>Ok(bundle.modules.iter().enumerate().flat_map(|(module_idx,m)|m.items.iter().map(move |item|(module_idx,item))).filter(|&(module_idx,item)|match item{Item::Func(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Struct(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Enum(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Trait(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::CodeModule(v)=>effect_facts.name_ledger.public(module_idx,&v.name),_=>false}).count()as u128),"DependencyCount"=>Ok(bundle.dep_roots.len()as u128),"EffectCount"=>{let effects=effect_facts.solved.values().flat_map(|set|set.iter().cloned()).collect::<std::collections::BTreeSet<_>>();Ok(effects.len()as u128)},"GeneratedUnsafe"=>Err("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement".into()),other=>Err(format!("CompilerFacts metric `{other}` is not implemented"))}}
+fn compiler_fact(bundle:&jet::AST::ProgramBundle,effect_facts:&jet::Sema::SemIndexEffectFacts,spec:&BudgetSpec)->Result<u128,String>{match spec.metric.as_str(){"PublicApiItems"=>Ok(bundle.modules.iter().enumerate().flat_map(|(module_idx,m)|m.items.iter().map(move |item|(module_idx,item))).filter(|&(module_idx,item)|match item{Item::Func(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Struct(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Enum(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Trait(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::CodeModule(v)=>effect_facts.name_ledger.public(module_idx,&v.name),_=>false}).count()as u128),"DependencyCount"=>Ok(bundle.dep_roots.len()as u128),"EffectCount"=>{let effects=effect_facts.solved.values().flat_map(|set|set.iter().cloned()).collect::<std::collections::BTreeSet<_>>();Ok(effects.len()as u128)},"GeneratedUnsafe"=>Err("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement".into()),"CompileTime"=>Err("CompilerFacts metric `CompileTime` is unsupported; use the typed CompilerProbe provider".into()),other=>Err(format!("CompilerFacts metric `{other}` is not implemented"))}}
 fn provider_kind(provider:&str)->&str{provider.split_once('(').map(|(kind,_)|kind).unwrap_or(provider)}
 fn provider_identity(provider:&str)->&str{provider.split_once('(').and_then(|(_,rest)|rest.strip_suffix(')')).unwrap_or("")}
 fn bench_owned(spec:&BudgetSpec)->bool{matches!(provider_kind(&spec.provider),"BenchMeasurement"|"AllocationProbe")&&spec.scope.starts_with("Bench(")}
-fn metric_unit(metric:&str)->&'static str{match metric.split('(').next().unwrap_or(metric){"BinarySize"|"ArtifactSize"=>"Bytes","StartupTime"|"FrameTime"|"Latency"|"BenchTime"|"ServiceReadiness"=>"Duration","MemoryHighWater"|"AllocationBytes"|"SceneAssetBytes"=>"Bytes","Throughput"=>"Rate",_=>"Count"}}
+fn metric_unit(metric:&str)->&'static str{match metric.split('(').next().unwrap_or(metric){"BinarySize"|"ArtifactSize"=>"Bytes","StartupTime"|"FrameTime"|"Latency"|"BenchTime"|"ServiceReadiness"|"CompileTime"=>"Duration","MemoryHighWater"|"AllocationBytes"|"SceneAssetBytes"=>"Bytes","Throughput"=>"Rate",_=>"Count"}}
 fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),String>{
     let executable=running_executable().map_err(|e|format!("cannot identify compiler for BuildArtifact: {e}"))?;
     let mut command=Command::new(executable);command.arg("build").arg(entry).current_dir(root).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -673,7 +692,7 @@ impl<T: BudgetSource + ?Sized> BudgetSource for &T {
 fn source_location<T:BudgetSource+?Sized>(root:&Path,bundle:&jet::AST::ProgramBundle,located:&T)->(String,usize,usize){let spec=located.spec();let module=&bundle.modules[located.module_index(bundle)];let(line,column)=jet::Diagnostics::span_line_col(&module.source,spec.span.start.min(module.source.len()));let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");(path,line,column)}
 fn subject(root:&Path,bundle:&jet::AST::ProgramBundle,start:&str,end:&str,target:&str,profile:&str,artifact:Option<&(PathBuf,u64,String)>)->Result<CanonicalJson,String>{let mut sources=Vec::new();for module in &bundle.modules{let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");sources.push((path,sha256_hex(module.source.as_bytes())))}sources.sort();let artifact=artifact.map(|(_,bytes,sha256)|CanonicalJson::object([("bytes".into(),CanonicalJson::Integer(bytes.to_string())),("sha256".into(),CanonicalJson::String(sha256.clone()))]).unwrap()).unwrap_or(CanonicalJson::Null);CanonicalJson::object([("artifact".into(),artifact),("measured_end".into(),CanonicalJson::String(end.into())),("measured_start".into(),CanonicalJson::String(start.into())),("member_sources".into(),CanonicalJson::Array(sources.into_iter().map(|(path,hash)|CanonicalJson::object([("path".into(),CanonicalJson::String(path)),("sha256".into(),CanonicalJson::String(hash))]).unwrap()).collect())),("profile".into(),CanonicalJson::String(profile.into())),("target_class".into(),CanonicalJson::String(target.into())),("target_id".into(),CanonicalJson::String(package_name(root))),("target_triple".into(),CanonicalJson::String(host_triple()?))])}
 fn toolchain()->Result<CanonicalJson,String>{let executable=running_executable().map_err(|e|format!("cannot identify running compiler executable: {e}"))?;let _=executable_digest(&executable)?;let body=CanonicalJson::object([("compiler_build_id".into(),CanonicalJson::String(env!("JET_COMPILER_BUILD_ID").into())),("jet_version".into(),CanonicalJson::String(env!("CARGO_PKG_VERSION").into())),("runner_id".into(),CanonicalJson::String(env!("JET_RUNNER_BUILD_ID").into())),("stdlib_id".into(),CanonicalJson::String(env!("JET_STDLIB_BUILD_ID").into()))])?;let mut map=as_object(&body)?.clone();map.insert("digest".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
-fn provider(kind:&str,identity:&str)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let(version,isolation)=if kind=="AllocationProbe"{("jet-arena-events-v1-warmup-auto-trials-20","benchmark-process-counter-reset-per-trial")}else if kind=="ServiceProbe"{("jet-service-readiness-v1-trials-20","service-process-group-down-up-per-trial")}else if kind=="SceneProbe"{("jet-scene-headless-v1-warmup-5-measure-20","scene-in-process-frame-loop")}else{("1","process")};let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String(isolation.into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String(version.into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
+fn provider(kind:&str,identity:&str,root:&Path,_entry:&Path,profile:&str,compile:Option<&jet::Sema::CompileWorkloadFact>)->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let compile_version=if kind=="CompilerProbe"{let workload=compile.ok_or("CompilerProbe provider has no resolved workload")?;Some(jet::BudgetProviders::compiler_probe_version(root,&workload.mode,&workload.target,profile,workload.patch.as_deref())?)}else{None};let(version,isolation)=if kind=="AllocationProbe"{("jet-arena-events-v1-warmup-auto-trials-20","benchmark-process-counter-reset-per-trial")}else if kind=="ServiceProbe"{("jet-service-readiness-v1-trials-20","service-process-group-down-up-per-trial")}else if kind=="SceneProbe"{("jet-scene-headless-v1-warmup-5-measure-20","scene-in-process-frame-loop")}else if kind=="CompilerProbe"{(compile_version.as_deref().expect("compile provider version"),"child-process-per-sample")}else{("1","process")};let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(identity.into())),("isolation".into(),CanonicalJson::String(isolation.into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String(kind.into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String(version.into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
 fn executable_digest(path:&Path)->Result<String,String>{jet::SHA256::sha256_file_hex(path).map_err(|e|format!("cannot hash running compiler executable: {e}"))}
 /// Stable handle to this process's executable bytes. Cargo may atomically
 /// replace the pathname returned by `current_exe` while parallel test targets
