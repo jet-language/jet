@@ -1,0 +1,23 @@
+// D-FAIL-EXIT1: explicit OS termination uses the one cleanup boundary.
+use core.sys as os
+use core.mem.scope as scope
+
+struct Resource { name: String }
+
+impl Resource.Close {
+    fn close(^self) {
+        print("close {self.name}")
+    }
+}
+
+fn run() {
+    outer :: scope.guard(() => print("guard outer"))
+    inner :: scope.guard(() => print("guard inner"))
+    resource := Resource.{ name: "resource" }
+    defer close(^resource)
+    print("body")
+    #Unsafe("the stop callback uses the shared cleanup boundary") {
+        os.atexit(() => print("atexit"))
+        os.stop(0)
+    }
+}

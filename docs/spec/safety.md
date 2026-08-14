@@ -89,6 +89,13 @@ baseline is refreshed.
     },
     {
       "package": "examples",
+      "file": "examples/features/io/os_stop_cleanup.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "the stop callback uses the shared cleanup boundary"
+    },
+    {
+      "package": "examples",
       "file": "examples/features/io/process_exit_cleanup.jet",
       "line": 15,
       "column": 5,
@@ -509,9 +516,9 @@ baseline is refreshed.
 | crate/package | regions |
 | --- | ---: |
 | docs | 2 |
-| examples | 22 |
+| examples | 23 |
 | tests | 43 |
-| **total** | **67** |
+| **total** | **68** |
 
 ### Regions
 
@@ -525,6 +532,7 @@ baseline is refreshed.
 | examples | examples/features/effects/audited_gate_ladder.jet | 7:5 | "the audited block has no low-level operation" |
 | examples | examples/features/effects/single_use_discard.jet | 39:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
 | examples | examples/features/io/os_process_control.jet | 25:5 | "POSIX process and pipe control for the core.sys surface" |
+| examples | examples/features/io/os_stop_cleanup.jet | 19:5 | "the stop callback uses the shared cleanup boundary" |
 | examples | examples/features/io/process_exit_cleanup.jet | 15:5 | "the exit callback has no captured state" |
 | examples | examples/features/lowlevel/inline_asm.jet | 3:1 | "the operands are scalar registers and add does not access memory" |
 | examples | examples/features/lowlevel/inline_asm.jet | 8:5 | "call the audited register-only assembly contract" |

@@ -6192,7 +6192,7 @@ fn golden_stderr(stem: &str) -> String {
 }
 
 #[test]
-fn explicit_process_exit_cleanup_matches_interpreter_jit_and_aot() {
+fn explicit_exit_cleanup_matches_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
@@ -6206,6 +6206,10 @@ fn explicit_process_exit_cleanup_matches_interpreter_jit_and_aot() {
             assert_io_cli_terminal_time_three_way(
                 &example_path("io/process_exit_cleanup"),
                 "io/process_exit_cleanup",
+            );
+            assert_io_cli_terminal_time_three_way(
+                &example_path("io/os_stop_cleanup"),
+                "io/os_stop_cleanup",
             );
         })
         .expect("cleanup parity worker")
