@@ -212,32 +212,33 @@ pub fn jet_sentry_check(
     }
     let bytes = bytes.max(1);
     let alignment = alignment.max(1);
-    let code_detail = if start % alignment != 0 {
-        Some(("R0803", format!("address {start:#x} is not aligned to {alignment} bytes")))
-    } else {
-        let end = start.checked_add(bytes);
-        let records = allocations()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let live = end.is_some_and(|end| records.iter().rev().any(|allocation| {
-            allocation.live
-                && start >= allocation.start
-                && end <= allocation.start.saturating_add(allocation.len)
-        }));
-        if live {
-            None
+    let end = start.checked_add(bytes);
+    let records = allocations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let live = end.is_some_and(|end| records.iter().rev().any(|allocation| {
+        allocation.live
+            && start >= allocation.start
+            && end <= allocation.start.saturating_add(allocation.len)
+    }));
+    // Provenance classification precedes alignment: an untracked address is R0801.
+    let code_detail = if live {
+        if start % alignment != 0 {
+            Some(("R0803", format!("address {start:#x} is not aligned to {alignment} bytes")))
         } else {
-            let freed = records.iter().rev().any(|allocation| {
-                !allocation.live
-                    && start >= allocation.start
-                    && start < allocation.start.saturating_add(allocation.len)
-            });
-                Some(if freed {
-                    ("R0802", "the address belongs to quarantined storage".to_string())
-                } else {
-                    ("R0801", "no live allocation contains this address".to_string())
-                })
+            None
         }
+    } else {
+        let freed = records.iter().rev().any(|allocation| {
+            !allocation.live
+                && start >= allocation.start
+                && start < allocation.start.saturating_add(allocation.len)
+        });
+        Some(if freed {
+            ("R0802", "the address belongs to quarantined storage".to_string())
+        } else {
+            ("R0801", "no live allocation contains this address".to_string())
+        })
     }?;
     let name = gate_name(&gate);
     Some(JetSentryFault {

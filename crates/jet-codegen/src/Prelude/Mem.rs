@@ -184,32 +184,33 @@ mod jet_mem {
         let address = ptr as usize;
         let bytes = std::mem::size_of::<T>().max(1);
         let alignment = std::mem::align_of::<T>().max(1);
-        let code = if address % alignment != 0 {
-            Some(("R0803", format!("address {address:#x} is not aligned to {alignment} bytes")))
-        } else {
-            let end = address.checked_add(bytes);
-            let allocations = sentry_allocations()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let live = end.is_some_and(|end| allocations.iter().rev().any(|allocation| {
-                allocation.live
-                    && address >= allocation.start
-                    && end <= allocation.start.saturating_add(allocation.len)
-            }));
-            if live {
-                None
+        let end = address.checked_add(bytes);
+        let allocations = sentry_allocations()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let live = end.is_some_and(|end| allocations.iter().rev().any(|allocation| {
+            allocation.live
+                && address >= allocation.start
+                && end <= allocation.start.saturating_add(allocation.len)
+        }));
+        // Provenance classification precedes alignment: an untracked address is R0801.
+        let code = if live {
+            if address % alignment != 0 {
+                Some(("R0803", format!("address {address:#x} is not aligned to {alignment} bytes")))
             } else {
-                let freed = allocations.iter().rev().any(|allocation| {
-                    !allocation.live
-                        && address >= allocation.start
-                        && address < allocation.start.saturating_add(allocation.len)
-                });
-                Some(if freed {
-                    ("R0802", "the address belongs to quarantined storage".to_string())
-                } else {
-                    ("R0801", "no live allocation contains this address".to_string())
-                })
+                None
             }
+        } else {
+            let freed = allocations.iter().rev().any(|allocation| {
+                !allocation.live
+                    && address >= allocation.start
+                    && address < allocation.start.saturating_add(allocation.len)
+            });
+            Some(if freed {
+                ("R0802", "the address belongs to quarantined storage".to_string())
+            } else {
+                ("R0801", "no live allocation contains this address".to_string())
+            })
         };
         let Some((code, detail)) = code else { return };
         SENTRY_GATE.with(|gate| {
