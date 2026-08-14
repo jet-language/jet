@@ -352,6 +352,14 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
                 if let Some(body) = &marker.body {
                     visit_statements(source, body, ledger);
                 }
+                // D-BOUND-SINK1=A: checked text contracts are source code too.
+                // Walk both comptime expressions so an audited `.raw()` in a
+                // library-declared check or hole remains visible in the one
+                // precision-demotion ledger.
+                if let Some(text) = &marker.text {
+                    visit_expression(source, &text.check, ledger);
+                    visit_expression(source, &text.hole, ledger);
+                }
             }
             _ => {}
         }

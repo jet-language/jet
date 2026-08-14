@@ -388,6 +388,28 @@ fn strings() {
         """                                     // triple-quoted (S70)
 }
 
+// Typed-head bodies give backslashes to the head grammar (D-BOUND-RAW1=A).
+// `\n` stays literal here; ordinary strings keep the four-entry escape table.
+fn typed_head_bodies() {
+    path :: Path.{"C:\logs\app.txt"}
+    regex :: Regex.{"\d+{{2}}"}               // Regex still rejects holes
+}
+
+// Libraries declare checked text heads on the existing marker rail
+// (D-BOUND-SINK1=A). The sink takes the checked type; `.raw()` is the audited
+// escape for text that was checked elsewhere.
+marker Selector on [.Text] {
+    check @body
+    hole @value
+}
+fn accept_selector(selector: Selector) { }
+fn checked_text() {
+    value :: "cart"
+    selected :: Selector.{"#cart {value}"}
+    accept_selector(selected)
+    accept_selector(Selector.raw("already checked"))
+}
+
 
 // ============================================================================
 // CLOSURES

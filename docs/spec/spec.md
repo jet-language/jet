@@ -38,7 +38,10 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   literal words become argv items and each `{hole}` becomes exactly one argv
   item; neither word splitting, glob expansion, nor shell parsing touches a
   hole. Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited
-  escape. Bare `"…"` never elaborates into these types.
+  escape. Bare `"…"` never elaborates into these types. Libraries extend the
+  same rail with `marker Name on [.Text] { check … hole … }`: the check runs
+  at comptime, the hole expression encodes each value, and a sink accepts only
+  `Name` or audited `Name.raw(text)`.
 - Numbers (S67): decimal `Int` (64-bit signed, E0007 if too large) and `Float`
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
