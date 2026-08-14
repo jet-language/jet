@@ -1958,6 +1958,9 @@ fn run() ? {
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(wasm.contains("jet_journey_take"), "Wasm edge did not carry the shared journey:\n{wasm}");
     let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
 const { jet_main } = await import("./app.js");
 try {
   await jet_main();
