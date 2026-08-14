@@ -47,7 +47,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0302",
                         format!("`@build.settings.{key}` is undeclared"),
-                        "a setting must be declared with a type and default in the package manifest before it can be read",
+                        "a setting must be declared with a type and default in the package manifest before it can be read"
+                            .to_string(),
                         format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
                         Some(*span),
                     ));

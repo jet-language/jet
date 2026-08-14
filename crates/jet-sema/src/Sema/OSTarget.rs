@@ -232,7 +232,7 @@ fn fold_switch(
         diags.push(Diagnostic::error(
             "E0302",
             format!("`@build.settings.{key}` is undeclared"),
-            "a setting must be declared with a type and default before it can be read",
+            "a setting must be declared with a type and default before it can be read".to_string(),
             format!("add `{key}: Type = default` to the package `settings: .{{ … }}` block"),
             Some(subject.span()),
         ));
@@ -245,7 +245,7 @@ fn fold_switch(
             diags.push(Diagnostic::error(
                 "E0302",
                 format!("invalid arm for `@build.settings.{key}`"),
-                "typed settings dispatch compares one setting with a literal value",
+                "typed settings dispatch compares one setting with a literal value".to_string(),
                 format!("use a literal arm or compare `{key}` with a Bool, Int, Char, String, or enum value"),
                 Some(arm.span),
             ));
