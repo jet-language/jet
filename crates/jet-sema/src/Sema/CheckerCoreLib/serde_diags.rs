@@ -12,8 +12,6 @@ pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
         module,
         "core.files" | "core.watcher" | "core.term" | "core.net" | "core.net.tls" | "core.tasks"
             | "core.process" | "core.time" | "core.http" | "core.log"
-            // D-TERM1: terminal I/O requires an OS terminal device.
-            | "core.term"
             // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
             // filesystem I/O — same OS dependency as `core.files`.
             | "core.crypto.vault"
@@ -45,9 +43,6 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         }
         "core.log" => {
             "The log module writes to stderr (an OS resource). Use a bare-metal write routine or build without `--freestanding`."
-        }
-        "core.term" => {
-            "Terminal I/O requires an OS terminal device. Build without `--freestanding`."
         }
         _ => "Build without `--freestanding`, or replace this call with a core-level alternative.",
     }

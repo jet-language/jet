@@ -1719,21 +1719,18 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.text", "nfc" | "nfd" | "nfkc" | "nfkd" | "casefold" | "lower" | "upper") => {
+        ("core.text", "nfc" | "nfd" | "nfkc" | "nfkd" | "casefold") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
         ("core.text", "caseless_eq") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::Bool),
         )),
-        ("core.text", "graphemes" | "words" | "sentences" | "scalars" | "inspect") => Some((
+        ("core.text", "graphemes" | "words" | "sentences" | "inspect") => Some((
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.text", "scalar_count" | "byte_count") => {
-            Some((vec![(read, Type::String)], Some(Type::Int)))
-        }
-        ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii") => {
+        ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace") => {
             Some((vec![(read, Type::String)], Some(Type::Bool)))
         }
         ("core.text", "splitn" | "rsplitn") => Some((
