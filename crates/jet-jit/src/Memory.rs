@@ -272,14 +272,24 @@ fn allocator_state_mut(
     Ok(state)
 }
 
-fn allocator_store(
-    rt: &mut crate::JitRuntime,
-    handle: i64,
+/// Store one allocator value through the shared fallible-allocation seam.
+///
+/// The JIT owns only its handle table and the Arena growth bookkeeping. The
+/// fit decision, charge accounting, and typed failure remain in the Prelude
+/// function shared with AOT and TIR-eval.
+fn allocator_try_store(
+    state: &mut AllocatorState,
     value: i64,
-    requested_bytes: i64,
-) -> Result<i64, String> {
-    let state = allocator_state_mut(rt, handle)?;
-    let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+    requested: usize,
+    fail: bool,
+) -> Result<usize, jet_foundation::Outcome::AllocError> {
+    if fail {
+        return Err(jet_foundation::Outcome::jet_alloc_error(
+            requested,
+            state.allocator,
+        ));
+    }
+
     let overhead = if state.fixed {
         3 * std::mem::size_of::<usize>()
     } else {
@@ -297,6 +307,7 @@ fn allocator_store(
             state.capacity = next;
         }
     }
+
     let (_, next_used) = jet_foundation::Outcome::jet_try_alloc_value(
         value,
         state.used,
@@ -304,19 +315,30 @@ fn allocator_store(
         requested,
         state.allocator,
         overhead,
-    )
-    .map_err(|error| {
-        format!(
-            "{} allocation failed for {} bytes",
-            error.allocator, error.requested_bytes
-        )
-    })?;
+    )?;
     let index = state.slots.len();
     state.slots.push(AllocatorSlot {
         generation: state.generation,
         value,
     });
     state.used = next_used;
+    Ok(index)
+}
+
+fn allocator_store(
+    rt: &mut crate::JitRuntime,
+    handle: i64,
+    value: i64,
+    requested_bytes: i64,
+) -> Result<i64, String> {
+    let state = allocator_state_mut(rt, handle)?;
+    let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+    let index = allocator_try_store(state, value, requested, false).map_err(|error| {
+        format!(
+            "{} allocation failed for {} bytes",
+            error.allocator, error.requested_bytes
+        )
+    })?;
     Ok(pack_id(index, state.generation))
 }
 
@@ -483,49 +505,16 @@ extern "C" fn jet_jit_allocator_try_alloc(
                 rt.set_trap("allocator handle is closed or invalid");
                 return 0;
             }
-            let overhead = if state.fixed {
-                3 * std::mem::size_of::<usize>()
-            } else {
-                0
-            };
-            let result = if crate::fault_injection::jet_fault_should_fail_allocation() {
-                Err(jet_foundation::Outcome::jet_alloc_error(
-                    requested,
-                    state.allocator,
-                ))
-            } else {
-                if state.allocator == "Arena" {
-                    let needed = state
-                        .used
-                        .saturating_add(requested.saturating_add(overhead));
-                    while state.capacity < needed {
-                        let next = state.capacity.saturating_mul(2).max(needed);
-                        if next == state.capacity {
-                            break;
-                        }
-                        state.capacity = next;
-                    }
-                }
-                jet_foundation::Outcome::jet_try_alloc_value(
-                    value,
-                    state.used,
-                    state.capacity,
-                    requested,
-                    state.allocator,
-                    overhead,
-                )
-            };
-            if let Ok((_, next_used)) = &result {
-                state.slots.push(AllocatorSlot {
-                    generation: state.generation,
-                    value,
-                });
-                state.used = *next_used;
-            }
+            let result = allocator_try_store(
+                state,
+                value,
+                requested,
+                crate::fault_injection::jet_fault_should_fail_allocation(),
+            );
             (state.allocator, result)
         };
         match result {
-            Ok((value, _)) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+            Ok(_) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
             Err(error) => {
                 let record = rt.heap.alloc_record(2);
                 let allocator = rt.heap.alloc_string(allocator);
