@@ -50,12 +50,13 @@ fn compile_and_run(src: &str, tag: &str) -> Output {
 fn compile_and_run_with_scheduler_unwind(src: &str, tag: &str) -> Output {
     assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
     let compiled = compile(src);
+    let entry_init = "fn main() {\n    jet_std_env_init();";
     let rust = compiled.rust.replacen(
-        "    jet_runtime_boundary(|| __jet_run());",
-        "    jet_scheduler_task_panic_enter();\n    jet_runtime_boundary(|| __jet_run());",
+        entry_init,
+        "fn main() {\n    jet_std_env_init();\n    jet_scheduler_task_panic_enter();",
         1,
     );
-    assert_ne!(rust, compiled.rust, "scheduler unwind probe did not attach");
+    assert_ne!(rust, compiled.rust, "scheduler unwind probe did not attach to entry init");
     run_compiled(rust, tag)
 }
 
