@@ -3682,7 +3682,8 @@ fn run_program_with_structs_on_stack(
     };
     let mut scope = HashMap::new();
     let entry_args = match cli_dispatch {
-        Some(cli::Dispatch::Run(args)) | Some(cli::Dispatch::Direct { args, .. }) => args,
+        Some(cli::Dispatch::Run(args)) => vec![args],
+        Some(cli::Dispatch::Direct { args, .. }) => args,
         Some(cli::Dispatch::Invoke {
             receiver, args, ..
         }) => {

@@ -1302,7 +1302,6 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .unwrap_or_default();
             out.push_str(&format!(
                 "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {spec_init};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n{version_check}            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok({args_binding}__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
-                spec_name = spec_name,
                 decode_name = decode_name,
                 dispatch = dispatch,
                 args_binding = args_binding,
