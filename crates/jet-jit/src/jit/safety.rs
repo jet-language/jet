@@ -3075,25 +3075,36 @@ fn resident_safe_builtin_op(
             if *input_count == 0 {
                 return args.is_empty() && field_types.is_empty();
             }
-            if *input_count < 2 || field_types.len() != *input_count {
+            if field_types.len() != *input_count {
                 return false;
             }
             let Some(recv_elem) = jit_zip_sequence_elem_type(recv_ty) else {
                 return false;
             };
-            if !jit_zip_elem_type(&recv_elem)
-                || !args
-                    .iter()
-                    .take(input_args)
-                    .all(|arg| {
-                        jit_zip_sequence_elem_type(&arg.ty)
-                            .is_some_and(|elem| jit_zip_elem_type(&elem))
-                    })
+            if !jit_zip_elem_type(&recv_elem) {
+                return false;
+            }
+            if *input_count == 1 {
+                return jit_zip_field_type(&field_types[0])
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if !args
+                .iter()
+                .take(input_args)
+                .all(|arg| {
+                    jit_zip_sequence_elem_type(&arg.ty)
+                        .is_some_and(|elem| jit_zip_elem_type(&elem))
+                })
             {
                 return false;
             }
-            field_types.iter().all(jit_zip_field_type)
-                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+            if !args.iter().all(|arg| resident_safe_expr(arg, callees)) {
+                return false;
+            }
+            if !field_types.iter().all(jit_zip_field_type) {
+                return false;
+            }
+            true
         }
         TBuiltinOp::Unzip { .. } => args.is_empty(),
         TBuiltinOp::TryCollect => {

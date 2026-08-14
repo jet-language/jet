@@ -10456,8 +10456,13 @@ impl LowerCtx<'_, '_> {
         field_types: &[Type],
         args: &[TExpr],
     ) -> Result<Value, String> {
-        if flatten || input_count == 1 {
+        if flatten {
             return Err("jit zip family shape unsupported".to_string());
+        }
+        // D-ZIPPAD1: one input is the identity iterator. TIR normally lowers
+        // this shape to ListLazy, but keep the builtin path canonical too.
+        if input_count == 1 {
+            return Ok(recv_val);
         }
         let input_args = input_count.saturating_sub(1);
         let fill_args = match fill_mode {
