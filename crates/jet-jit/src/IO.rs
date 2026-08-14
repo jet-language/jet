@@ -12,6 +12,7 @@ use std::io::BufRead;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use crate::Marshal::{clone_string, result_err_msg, result_ok};
+use crate::runtime_host;
 
 pub(crate) mod term_prelude {
     include!("../../jet-codegen/src/Prelude/Term.rs");
@@ -172,7 +173,7 @@ fn write_prompt_with_sink(
     sink: &mut Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Result<(), String> {
     if term_prelude::jet_term_stdout_is_terminal() || sink.is_none() {
-        return crate::jit::runtime_host::write_jit_stdout(prompt, true);
+        return runtime_host::write_jit_stdout(prompt, true);
     }
     sink.as_deref_mut()
         .expect("ambient output sink disappeared")
@@ -277,7 +278,7 @@ extern "C" fn jet_jit_io_stdin() -> i64 {
 
 extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    match crate::jit::runtime_host::write_jit_stdout(&s, false) {
+    match runtime_host::write_jit_stdout(&s, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -286,7 +287,7 @@ extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
 extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
-    match crate::jit::runtime_host::write_jit_stdout(&text, false) {
+    match runtime_host::write_jit_stdout(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -302,14 +303,14 @@ extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
         out
     });
     let text = String::from_utf8_lossy(&bytes);
-    match crate::jit::runtime_host::write_jit_stdout(&text, false) {
+    match runtime_host::write_jit_stdout(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
 }
 
 extern "C" fn jet_jit_stdout_flush(_h: i64) -> i64 {
-    match crate::jit::runtime_host::write_jit_stdout("", true) {
+    match runtime_host::write_jit_stdout("", true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -321,7 +322,7 @@ extern "C" fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
 
 extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    match crate::jit::runtime_host::write_jit_stderr(&s, false) {
+    match runtime_host::write_jit_stderr(&s, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -330,7 +331,7 @@ extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
 extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
-    match crate::jit::runtime_host::write_jit_stderr(&text, false) {
+    match runtime_host::write_jit_stderr(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -346,14 +347,14 @@ extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
         out
     });
     let text = String::from_utf8_lossy(&bytes);
-    match crate::jit::runtime_host::write_jit_stderr(&text, false) {
+    match runtime_host::write_jit_stderr(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
 }
 
 extern "C" fn jet_jit_stderr_flush(_h: i64) -> i64 {
-    match crate::jit::runtime_host::write_jit_stderr("", true) {
+    match runtime_host::write_jit_stderr("", true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -395,7 +396,7 @@ extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
         term_prelude::jet_term_stdout_is_terminal(),
         &s,
     );
-    match crate::jit::runtime_host::write_jit_stdout(&frame, true) {
+    match runtime_host::write_jit_stdout(&frame, true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -506,7 +507,7 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
     };
     for text in texts {
         let frame = term_prelude::jet_term_progress_frame(tty, &text);
-        let _ = crate::jit::runtime_host::write_jit_stdout(&frame, true);
+        let _ = runtime_host::write_jit_stdout(&frame, true);
     }
 }
 
@@ -563,7 +564,7 @@ pub(crate) fn progress_exhaust_state(list: i64) {
         };
         for text in texts {
             let frame = term_prelude::jet_term_progress_frame(tty, &text);
-            let _ = crate::jit::runtime_host::write_jit_stdout(&frame, true);
+        let _ = runtime_host::write_jit_stdout(&frame, true);
         }
     }
     progress_finish_state(list);
@@ -937,7 +938,7 @@ pub(crate) fn progress_finish_state(list: i64) {
             term_prelude::jet_term_stdout_is_terminal(),
         );
         if !frame.is_empty() {
-            let _ = crate::jit::runtime_host::write_jit_stdout(frame, true);
+            let _ = runtime_host::write_jit_stdout(frame, true);
         }
     }
 }
@@ -1058,7 +1059,7 @@ extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
             result_ok(id as u64)
         }
-        Err(error) => crate::jit::runtime_host::result_err_terminal(error),
+        Err(error) => runtime_host::result_err_terminal(error),
     }
 }
 
