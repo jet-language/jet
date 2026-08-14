@@ -8321,6 +8321,36 @@ fn ledger_cross_check_holds() {
     }
 }
 
+#[test]
+fn serde_jit_parity_manifest_pins() {
+    let (compile_covered, gaps, run_gaps, _) = parse_jit_gap_manifest_full();
+    let gate = parse_corpus_gate_manifest();
+    for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
+        assert!(
+            gate.iter().any(|record| {
+                record.stem == stem && record.class == CorpusGateClass::ResidentJit
+            }),
+            "{stem} must remain a resident-JIT corpus regression"
+        );
+        assert!(
+            !gaps.iter().any(|row| {
+                row == stem || row.starts_with(&format!("{stem}:"))
+            }),
+            "{stem} must not return to the JIT compile-gap ledger"
+        );
+        assert!(
+            !run_gaps.iter().any(|row| {
+                row == stem || row.starts_with(&format!("{stem}:"))
+            }),
+            "{stem} must not return to the run-tier gap ledger"
+        );
+    }
+    assert!(
+        compile_covered.iter().any(|stem| stem == "serde/encoding_breadth"),
+        "encoding_breadth must remain compile-covered"
+    );
+}
+
 /// #1509 c4: negative control — the cross-check actually fires.
 ///
 /// A gate class alone must not trip it, and a parked stem must not trip it;

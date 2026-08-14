@@ -942,13 +942,31 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 continue;
             }
             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
+            let residual_type_params: std::collections::HashSet<String> = specialized
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect();
             // Subst already rewrote the binder; drop residual type params so the
             // mono body is admitted as a concrete JIT function.
             specialized.type_params.clear();
+            // Keep the source owner's generic identity visible while the structural
+            // gate and lowerer inspect the specialized body. Field types are concrete
+            // after substitution, but sema's resolved codec calls still name the
+            // owner's type parameter (for example `T.encode()`).
+            let previous_type_params = cx.current_type_params.borrow().clone();
+            let mut method_type_params = previous_type_params.clone();
+            method_type_params.extend(residual_type_params);
+            cx.current_type_params.replace(method_type_params);
+            let covered = match trait_name {
+                Some(trait_name) => tir_covers_trait_method(&specialized, name, cx, trait_name),
+                None => tir_covers_method(&specialized, name, cx),
+            };
+            if !covered {
+                cx.current_type_params.replace(previous_type_params);
+                continue;
+            }
             let mut lowered = if let Some(trait_name) = trait_name {
-                if !tir_covers_trait_method(&specialized, name, cx, trait_name) {
-                    continue;
-                }
                 // Bind `self` as `Wrap<Int>` so field reads substitute `T` → arg.
                 // Encode is an ordinary instance method; Decode stays on the static
                 // trait-method ABI (`tree` only, no receiver).
@@ -960,11 +978,9 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                     lower_trait_method(&specialized, name, cx, trait_name)
                 }
             } else {
-                if !tir_covers_method(&specialized, name, cx) {
-                    continue;
-                }
                 lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
             };
+            cx.current_type_params.replace(previous_type_params);
             lowered.name = key.clone();
             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
