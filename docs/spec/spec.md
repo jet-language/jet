@@ -833,6 +833,10 @@ impl Circle {
   A serde derive and a generic codec helper are the same engine with different
   entry points; `serde_derive_and_generic_share_one_engine` proves both the
   encoded bytes and decoded values.
+  Compiler-owned beginner derives, user `derive` bodies, and `b.generate` all
+  enter one typed item-template expansion before ordinary sema. A compiler
+  builder may provide reflected item data, but it does not get a second
+  expansion or codegen path.
   A user-defined derive may expand only when its provider or target type is
   entry-local; otherwise E2711 points at the derive marker.
 - **Accumulated validation (D-VALIDATE1, card #506):** a `validate { … }`
@@ -4130,10 +4134,11 @@ effective grant are checked before any probe or process runs.
 
 `b.generate(name) { … }` takes the same typed item block as a derive and
 materializes `.jet/generated/<package>/<name>.jet`. Action outputs ending in
-`.jet` follow the same path. The filled block enters ordinary sema before
-runtime codegen; malformed members use ordinary Jet diagnostics. The build-only
-entry and imported build entries are removed before codegen, so rustc never sees
-build handles.
+`.jet` follow the same path. Built-in derives, user derives, and this build
+entry all use one typed expansion before the filled block enters ordinary sema;
+malformed members use ordinary Jet diagnostics. The build-only entry and
+imported build entries are removed before codegen, so rustc never sees build
+handles.
 
 Generation is additive and has one owner per managed path. Generated modules
 are ordered in deterministic dependency rounds using ordinary quoted-file

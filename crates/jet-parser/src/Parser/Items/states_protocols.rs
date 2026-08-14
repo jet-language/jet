@@ -437,6 +437,35 @@ impl<'a> Parser<'a> {
             result
         }
 
+        /// D-META-CODE1=A / D-META-BODY1=A: append the one typed template
+        /// argument used by `b.generate`. Both expression parsers call this
+        /// helper so the build and derive surfaces cannot drift.
+        pub(crate) fn parse_generate_template_arg(
+            &mut self,
+            member: &str,
+            args: &mut Vec<crate::AST::CallArg>,
+        ) -> Result<(), Diagnostic> {
+            if member != "generate" || !matches!(self.peek().kind, TokKind::LBrace) {
+                return Ok(());
+            }
+            let open = self.bump().span;
+            let items = self.derive_body_items()?;
+            let end = self.toks[self.pos - 1].span.end;
+            let block_span = Span::new(open.start, end);
+            args.push(crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: crate::AST::Expr::Str(Vec::new(), block_span),
+                span: block_span,
+                flags: crate::AST::CallArgFlags {
+                    template_items: Some(items),
+                    ..Default::default()
+                },
+                label: None,
+                spread: false,
+            });
+            Ok(())
+        }
+
         fn derive_body_items_inner(&mut self) -> Result<Vec<crate::AST::DeriveBodyItem>, Diagnostic> {
             let mut body = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {

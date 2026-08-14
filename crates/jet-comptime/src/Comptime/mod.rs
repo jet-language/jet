@@ -1587,6 +1587,20 @@ pub fn expand_template_body(
     Ok(expanded)
 }
 
+/// D-ONCE-DERIVE1 / D-META-CODE1: compiler-owned item builders enter the same
+/// typed template expansion as user derives and `b.generate`. Builders supply
+/// AST items; this wrapper supplies the empty template scope and keeps the
+/// ordinary sema boundary shared.
+pub fn expand_generated_items(
+    items: Vec<crate::AST::Item>,
+) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+    let body = items
+        .into_iter()
+        .map(|item| crate::AST::DeriveBodyItem::Item(Box::new(item)))
+        .collect::<Vec<_>>();
+    expand_template_body(&body, &HashMap::new(), &HashMap::new(), Path::new("."))
+}
+
 /// Render expanded item templates through the ordinary Jet formatter before a
 /// build context stores the generated module. This is only the build module's
 /// materialization boundary; derive expansion itself never serializes and
@@ -1609,6 +1623,18 @@ pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
         rule_facts: Vec::new(),
     };
     jet_parser::Formatter::format_synthetic_program(&program)
+}
+
+/// Expand and format one typed item-template body. Both comptime hosts use
+/// this composition; only the BuildContext adapter stores the resulting source.
+pub fn format_template_body(
+    body: &[crate::AST::DeriveBodyItem],
+    initial_scope: &HashMap<String, CtValue>,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+) -> Result<String, Diagnostic> {
+    let items = expand_template_body(body, initial_scope, funcs, base_dir)?;
+    Ok(format_template_items(items))
 }
 
 fn expand_derive_items(

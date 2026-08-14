@@ -9906,14 +9906,11 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
 }
 
 // ── card #131 S1-bridge (D-SERDE2): hand codec dev-tier parity (R12) ──────────
-// A hand `impl T.Encode`/`impl T.Decode` round-trips under the native build (see
-// tests/corelib.rs::hand_written_encode_decode_round_trips). The dev interpreter
-// does not cover the json typed-decode path — and it doesn't for a DERIVED
-// `#[Codable]` either — so the honest behavior for BOTH is to stop at the E2201
-// pre-scan boundary and defer to native, never emit a divergent result. This test
-// pins that parity: the dev tier must not silently produce a wrong round trip.
+// A hand `impl T.Encode`/`impl T.Decode` uses the same typed TIR codec dispatch
+// as a derived codec. The dev tier must execute the round trip, not preserve the
+// retired E2201 coverage gap.
 #[test]
-fn hand_written_codec_dev_tier_stops_at_honest_boundary() {
+fn hand_written_codec_dev_tier_matches_native_shape() {
     let _guard = dev_diff_lock().lock().unwrap();
     const SRC: &str = r#"
 use core.encoding.json as json
@@ -9950,16 +9947,16 @@ fn run() {
     fs::write(&file, SRC).unwrap();
     let outcome = dev_iteration_with_timeout("hand_codec", file.to_str().unwrap(), true);
     match outcome {
-        RunOutcome::Problems(diags) => {
-            assert!(
-                diags.iter().any(|d| d.code == "E2201"),
-                "hand codec should stop at the E2201 honest boundary; got codes {:?}",
-                diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
-            );
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stdout, "{\"email\":\"a@b.com\"}\na@b.com\n");
+            assert!(stderr.is_empty(), "hand codec wrote stderr: {stderr}");
+            assert_eq!(exit_code, 0);
         }
-        RunOutcome::Ran { stdout, .. } => {
-            panic!("dev interpreter unexpectedly ran the hand codec (must defer to native): {stdout}");
-        }
+        RunOutcome::Problems(diags) => panic!("hand codec interpreter failed: {diags:?}"),
     }
     let _ = fs::remove_dir_all(&dir);
 }

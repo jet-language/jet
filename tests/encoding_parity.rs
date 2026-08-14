@@ -18,6 +18,8 @@ use jet_jit::{
 };
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -429,6 +431,27 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
 
         let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
         assert_eq!(interpreter, aot, "{stem} interpreter diverged from AOT");
+    }
+}
+
+#[test]
+fn serde_derive_examples_match_production_cli_tiers() {
+    for (stem, expected) in [
+        ("serde/codable_default", "web\n[80, 443]\nprod\n[8080]\n"),
+        (
+            "serde/hand_codec",
+            "{\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}\nada@lovelace.org\n",
+        ),
+        (
+            "serde/serde_derive",
+            "{\"id\":7,\"customer\":\"Ada\",\"items\":[\"pen\",\"ink\"]}\nBo\nrush\n",
+        ),
+        (
+            "serde/serde_generic",
+            "{\"value\":7}\n42\n{\"value\":\"hi\"}\n{\"raw\":9}\n3\n",
+        ),
+    ] {
+        tir_support::assert_example_cli_tiers_agree(stem, expected);
     }
 }
 

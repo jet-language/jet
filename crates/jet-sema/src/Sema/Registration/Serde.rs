@@ -7,12 +7,13 @@ use crate::AST::{
 
 /// D-SERDE2=A / I3: built-in codecs are ordinary Jet AST items. The builder
 /// below shares the same method/body representation as hand-written codecs;
-/// only the declaration data comes from the reflected struct or enum.
-pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, _diags: &mut Vec<Diagnostic>) {
+/// only the declaration data comes from the reflected struct or enum. The
+/// finished items enter the same typed template expander as user derives.
+pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     for item in items.iter_mut() {
         if let Item::CodeModule(module) = item {
             if let Some(body) = &mut module.body {
-                expand_builtin_serde_items(body, _diags);
+                expand_builtin_serde_items(body, diags);
             }
         }
     }
@@ -78,6 +79,13 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, _diags: &mut Vec
             _ => {}
         }
     }
+    let generated_items = match crate::Comptime::expand_generated_items(generated_items) {
+        Ok(items) => items,
+        Err(diagnostic) => {
+            diags.push(diagnostic);
+            return;
+        }
+    };
     items.extend(generated_items);
 }
 

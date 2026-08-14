@@ -5,11 +5,11 @@ use crate::AST::{
 };
 
 /// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests lower to the
-/// same checked item surface as user-authored code. The builder below creates
-/// AST items directly. No generated source is lexed again.
+/// same typed item-template engine as user-authored code. The builder supplies
+/// AST items; expansion and ordinary sema remain shared with user derives.
 pub(in super::super) fn expand_builtin_derive_items(
     items: &mut Vec<Item>,
-    _diags: &mut Vec<Diagnostic>,
+    diags: &mut Vec<Diagnostic>,
 ) {
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     let invalid_distinct_names: std::collections::HashSet<String> = items
@@ -59,6 +59,13 @@ pub(in super::super) fn expand_builtin_derive_items(
         }
     }
 
+    let generated = match crate::Comptime::expand_generated_items(generated) {
+        Ok(items) => items,
+        Err(diagnostic) => {
+            diags.push(diagnostic);
+            return;
+        }
+    };
     for item in generated {
         attach_generated_derive_item(items, item);
     }

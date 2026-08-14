@@ -6649,13 +6649,12 @@ impl<'a> EvalCtx<'a> {
                     .find_map(|arg| arg.template_items.as_deref())
                     .map(|items| {
                         let funcs = HashMap::new();
-                        let expanded = crate::Comptime::expand_template_body(
+                        crate::Comptime::format_template_body(
                             items,
                             scope,
                             &funcs,
                             &self.base_dir,
-                        )?;
-                        Ok::<_, Diagnostic>(crate::Comptime::format_template_items(expanded))
+                        )
                     })
                     .transpose()?;
                 let mut argv = Vec::with_capacity(args.len().saturating_sub(1));

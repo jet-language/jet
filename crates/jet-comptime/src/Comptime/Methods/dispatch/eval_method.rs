@@ -2110,13 +2110,12 @@ impl<'a> Interp<'a> {
             .iter()
             .find_map(|arg| arg.flags.template_items.as_deref())
             .map(|items| {
-                let expanded = crate::Comptime::expand_template_body(
+                crate::Comptime::format_template_body(
                     items,
                     scope,
                     self.funcs,
                     self.base_dir,
-                )?;
-                Ok::<_, Diagnostic>(crate::Comptime::format_template_items(expanded))
+                )
             })
             .transpose()?;
         let mut argv = Vec::new();
