@@ -263,6 +263,15 @@ pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
     }
 }
 
+/// Replace only a workspace-root prefix. The oracle keeps project-relative
+/// paths, while a tier may embed the canonical workspace path.
+fn normalize_workspace_root_paths(stderr: &str, root: &std::path::Path) -> String {
+    let root = root.display().to_string();
+    stderr
+        .replace(&format!("{root}/"), "")
+        .replace(&format!("{root}\\"), "")
+}
+
 /// Run an executable error example through debug AOT, default jet run, and
 /// the forced interpreter. The debug profile keeps the same journey text as
 /// the default JIT and interpreter, so the .err.out file is one byte oracle.
@@ -302,10 +311,11 @@ pub fn assert_example_cli_error_tiers_agree(
             .env("JET_CACHE_DIR", cache.join("cache"))
             .env("NO_COLOR", "1");
         let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let result = (
             output.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&output.stdout).into_owned(),
-            String::from_utf8_lossy(&output.stderr).into_owned(),
+            normalize_workspace_root_paths(&stderr, &root),
         );
         let _ = fs::remove_dir_all(&cache);
         assert_eq!(result.0, expected_exit_code, "{mode} exit code for {stem}");

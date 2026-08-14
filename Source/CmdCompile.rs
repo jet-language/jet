@@ -698,8 +698,8 @@ pub(crate) fn run_compile_cmd(
         print!("{}", rust_code);
     }
 
-    // D-EFFBUDGET1: zero-config, always-on effect summary on every build/run,
-    // plus opt-in whole-graph enforcement when `package.jet` declares `effects:`.
+    // D-EFFBUDGET1: zero-config effect summary on every build, plus opt-in
+    // whole-graph enforcement when `package.jet` declares `effects:`.
     // The front-end compile above already succeeded; this reruns the
     // check-only pass to pull the whole-program effect fixpoint
     // (`Sema::solve`) that ordinary compilation doesn't need to return.
@@ -727,9 +727,11 @@ pub(crate) fn run_compile_cmd(
                     }
                 }
             }
-            // Program stdout stays the program's (U7 / D-DEVMODE1); tool
-            // chatter goes to stderr.
-            eprintln!("{}", jet::EffectBudget::summary_line(&entries));
+            // Program stdout stays the program's (U7 / D-DEVMODE1). The
+            // effect summary is build-time tool output, not runtime stderr.
+            if cmd == "build" {
+                eprintln!("{}", jet::EffectBudget::summary_line(&entries));
+            }
             if let Some((root, manifest)) = package_manifest.as_ref() {
                 let configured_names = manifest
                     .effects_allow
