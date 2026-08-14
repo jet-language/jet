@@ -681,9 +681,6 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
     )
 }
 
-/// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
-/// `name` is not a blessed default (`release`/`debug`) or defined in `package.jet`'s
-/// `build { }` block. `defined` is the sorted list of profiles the user did define.
 /// E1258 (D-PLUGIN1=B, c81): a `target: sandbox` package's own code uses an
 /// effect — sandboxes are deny-by-default (the wasmtime host registers zero
 /// host imports), so any effect would fail to instantiate at load time.
@@ -712,23 +709,9 @@ pub fn e1259(detail: &str) -> Diagnostic {
     )
 }
 
-pub fn e1219(name: &str, defined: &[String]) -> Diagnostic {
-    let note = if defined.is_empty() {
-        "no profiles are defined in the `build { }` block of `package.jet`".to_string()
-    } else {
-        format!("defined profiles: {}", defined.join(", "))
-    };
-    Diagnostic::error(
-        "E1219",
-        format!("unknown build profile `{name}`"),
-        note,
-        format!(
-            "use `--release` for `--profile={}`, `--profile={}` for a debug build, `--profile={}` for CI, or add `{name}: Build.{{ optimize: full }}` to the `build {{ }}` block in `{}`",
-            Syntax::BUILD_PROFILE_RELEASE,
-            Syntax::BUILD_PROFILE_DEBUG,
-            Syntax::BUILD_PROFILE_CI,
-            Syntax::PACKAGE_FILE,
-        ),
-        None,
-    )
+/// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
+/// `name` is not a blessed default (`release`/`debug`) or defined in `package.jet`'s
+/// `build { }` block. The typed diagnostic row owns the rendered message.
+pub fn e1219(name: &str) -> Diagnostic {
+    Diagnostic::from_row("E1219", &[("name", name)], None)
 }

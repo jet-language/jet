@@ -230,10 +230,7 @@ pub(crate) fn resolve_named_profile(name: &str, source_file: &str, mode: OutputM
         n if n == jet::Syntax::BUILD_PROFILE_DEBUG => BuildProfile::Debug,
         n if n == jet::Syntax::BUILD_PROFILE_CI => BuildProfile::Ci,
         _ => {
-            let defined = load_pkg_profiles(source_file)
-                .map(|profiles| profiles.into_iter().map(|p| p.name).collect::<Vec<_>>())
-                .unwrap_or_default();
-            let diag = jet::Manifest::e1219(name, &defined);
+            let diag = jet::Manifest::e1219(name);
             if mode.json {
                 eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
             } else {

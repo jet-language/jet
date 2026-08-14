@@ -164,11 +164,20 @@ pub(crate) fn emit_cli_report(
     json: bool,
 ) {
     let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None);
+    emit_cli_value(diagnostic, json);
+}
+
+fn emit_cli_value(diagnostic: Diagnostic, json: bool) {
     if json {
         print!("{}", jet::render_all_json("", "", &[diagnostic]));
     } else {
         eprint!("{}", jet::render_all_colored("", "", &[diagnostic], false));
     }
+}
+
+pub(crate) fn emit_cli_row(code: &str, holes: &[(&str, &str)], json: bool) {
+    let diagnostic = jet::Diagnostics::Diagnostic::from_row(code, holes, None);
+    emit_cli_value(diagnostic, json);
 }
 
 macro_rules! cli_error {
@@ -2034,9 +2043,7 @@ fn main() {
         }
         // Teaching error: E0043 `jet install` -> `jet fetch`
         "install" => {
-            eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in package.jet");
+            emit_cli_row("E0043", &[], mode.json);
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
@@ -2542,9 +2549,7 @@ fn main() {
         }
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
-            eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in package.jet");
+            emit_cli_row("E0043", &[], mode.json);
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
