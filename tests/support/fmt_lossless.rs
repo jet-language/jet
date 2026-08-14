@@ -79,7 +79,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/impl_colon_separator.jet",
     "tests/ui/impure_no_reason.jet",
     "tests/ui/inline_range_nonliteral_bound.jet",
-    "tests/ui/inline_range_out_of_bounds.jet",
     "tests/ui/interp_debug_label_empty.jet",
     "tests/ui/interp_empty.jet",
     "tests/ui/interp_unclosed.jet",
