@@ -202,76 +202,6 @@ impl JetShow for JetKey {
 mod jet_term_unix {
     use std::io::Read;
 
-    // POSIX termios constants (POSIX.1-2008). We inline these rather than
-    // depending on `libc` (I6).
-    const TCSANOW: i32 = 0;
-    const ECHO: u32 = 0o0000010;
-    const ICANON: u32 = 0o0000002;
-    const VMIN: usize = 6;
-    const VTIME: usize = 5;
-
-    // Termios struct layout for Linux/macOS (glibc + Darwin agree on the fields
-    // that matter here; we only touch `c_lflag` and `c_cc`).
-    #[repr(C)]
-    struct Termios {
-        c_iflag: u32,
-        c_oflag: u32,
-        c_cflag: u32,
-        c_lflag: u32,
-        #[cfg(target_os = "linux")]
-        c_line: u8,
-        c_cc: [u8; 32],
-        #[cfg(target_os = "linux")]
-        c_ispeed: u32,
-        #[cfg(target_os = "linux")]
-        c_ospeed: u32,
-        // macOS pads the c_cc array to 20 bytes inside a struct that's 60 bytes
-        // total. We over-allocate to cover both layouts safely.
-        #[cfg(not(target_os = "linux"))]
-        _pad: [u8; 12],
-    }
-
-    extern "C" {
-        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
-    }
-
-    // A stack keeps nested `live` and secret-input regions honest.
-    std::thread_local! {
-        static SAVED: std::cell::RefCell<Vec<Termios>> = const { std::cell::RefCell::new(Vec::new()) };
-    }
-
-    pub fn enter(raw: bool) -> bool {
-        unsafe {
-            let mut t = std::mem::zeroed::<Termios>();
-            if tcgetattr(0, &mut t) != 0 {
-                return false;
-            }
-            let saved = std::mem::transmute_copy(&t);
-            t.c_lflag &= !ECHO;
-            if raw {
-                t.c_lflag &= !ICANON;
-                t.c_cc[VMIN] = 1;
-                t.c_cc[VTIME] = 0;
-            }
-            if tcsetattr(0, TCSANOW, &t) != 0 {
-                return false;
-            }
-            SAVED.with(|s| s.borrow_mut().push(saved));
-            true
-        }
-    }
-
-    pub fn leave() {
-        unsafe {
-            SAVED.with(|s| {
-                if let Some(saved) = s.borrow_mut().pop() {
-                    tcsetattr(0, TCSANOW, &saved);
-                }
-            });
-        }
-    }
-
     pub fn read_key() -> super::JetKey {
         use super::JetKey;
         let mut buf = [0u8; 6];
@@ -346,50 +276,6 @@ mod jet_term_unix {
 mod jet_term_windows {
     use std::io::Read;
 
-    extern "system" {
-        fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
-        fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
-        fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
-    }
-
-    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
-    const ENABLE_ECHO_INPUT: u32 = 0x0004;
-    const ENABLE_LINE_INPUT: u32 = 0x0002;
-
-    std::thread_local! {
-        static SAVED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
-    }
-
-    pub fn enter(raw: bool) -> bool {
-        unsafe {
-            let h = GetStdHandle(STD_INPUT_HANDLE);
-            let mut mode: u32 = 0;
-            if GetConsoleMode(h, &mut mode) == 0 {
-                return false;
-            }
-            let mut new_mode = mode & !ENABLE_ECHO_INPUT;
-            if raw {
-                new_mode &= !ENABLE_LINE_INPUT;
-            }
-            if SetConsoleMode(h, new_mode) == 0 {
-                return false;
-            }
-            SAVED.with(|s| s.borrow_mut().push(mode));
-            true
-        }
-    }
-
-    pub fn leave() {
-        unsafe {
-            let h = GetStdHandle(STD_INPUT_HANDLE);
-            SAVED.with(|s| {
-                if let Some(saved) = s.borrow_mut().pop() {
-                    SetConsoleMode(h, saved);
-                }
-            });
-        }
-    }
-
     pub fn read_key() -> super::JetKey {
         use super::JetKey;
         let mut buf = [0u8; 6];
@@ -428,33 +314,18 @@ mod jet_term_windows {
 /// Enter un-buffered, no-echo terminal input mode.
 /// Called at the top of every `live { … }` block.
 fn jet_term_enter() {
-    #[cfg(unix)]
-    let _ = jet_term_unix::enter(true);
-    #[cfg(windows)]
-    let _ = jet_term_windows::enter(true);
-    #[cfg(not(any(unix, windows)))]
-    {} // no-op on unsupported targets (freestanding blocks sema-rejected)
+    let _ = jet_term_mode_enter(true);
 }
 
 /// Disable terminal echo but keep canonical line editing for secret input.
 fn jet_term_enter_secret() -> bool {
-    #[cfg(unix)]
-    return jet_term_unix::enter(false);
-    #[cfg(windows)]
-    return jet_term_windows::enter(false);
-    #[cfg(not(any(unix, windows)))]
-    return false;
+    jet_term_mode_enter(false)
 }
 
 /// Restore the terminal to the state captured by the most recent `jet_term_enter`.
 /// Called by the scope guard that `live { … }` installs.
 fn jet_term_leave() {
-    #[cfg(unix)]
-    jet_term_unix::leave();
-    #[cfg(windows)]
-    jet_term_windows::leave();
-    #[cfg(not(any(unix, windows)))]
-    {}
+    jet_term_mode_leave();
 }
 
 /// Read one key event from stdin (blocking).

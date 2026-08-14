@@ -261,7 +261,7 @@ fn jet_std_io_args() -> Vec<String> {
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
 fn jet_std_io_confirm(prompt: &String) -> bool {
-    let shown = format!("{prompt} [y/N] ");
+    let shown = jet_term_confirm_prompt(prompt);
     matches!(
         jet_std_io_input(Some(&shown))
             .unwrap_or_default()
@@ -278,13 +278,10 @@ fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet
             jet_std::IOOperation::Read,
             Some("stdin".to_string()),
             None,
-            Some("choose needs at least one item".to_string()),
+            Some(jet_term_choose_empty_error().to_string()),
         )));
     }
-    println!("{prompt}");
-    for (index, item) in items.iter().enumerate() {
-        println!("  {}) {item}", index + 1);
-    }
+    print!("{}", jet_term_choose_menu(prompt, items));
     loop {
         let answer = jet_std_io_input(Some(&"> ".to_string()))?;
         if let Ok(index) = answer.trim().parse::<usize>() {
@@ -292,51 +289,56 @@ fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet
                 return Ok(item.clone());
             }
         }
-        println!("Enter a number from 1 to {}.", items.len());
+        print!("{}", jet_term_choose_invalid(items.len()));
     }
 }
 
-struct JetSecretTerminalGuard;
-impl Drop for JetSecretTerminalGuard {
-    fn drop(&mut self) {
-        jet_term_leave();
+fn jet_std_io_secret_error(error: JetTermSecretError) -> jet_std::IOError {
+    let message = error.message();
+    match error {
+        JetTermSecretError::NonTerminal => jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            None,
+            Some(message),
+        )),
+        JetTermSecretError::Echo => jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            message,
+        ),
+        JetTermSecretError::Flush(_) => jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            message,
+        ),
+        JetTermSecretError::Read(_) => jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            message,
+        ),
     }
 }
 
 fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> {
-    use std::io::{IsTerminal, Write};
-    if !std::io::stdin().is_terminal() {
-        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            None,
-            Some("secret input needs a terminal".to_string()),
-        )));
-    }
-    print!("{prompt}");
-    std::io::stdout()
-        .flush()
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Flush, Some("stdout".to_string()), e))?;
-    if !jet_term_enter_secret() {
-        println!();
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            "could not disable terminal echo",
-        ));
-    }
-    let guard = JetSecretTerminalGuard;
-    let mut secret = String::new();
-    let read = std::io::stdin()
-        .read_line(&mut secret)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e));
-    drop(guard);
-    println!();
-    read?;
-    while secret.ends_with('\n') || secret.ends_with('\r') {
-        secret.pop();
-    }
-    Ok(secret)
+    use std::io::Write;
+    jet_term_input_secret(
+        prompt,
+        |text| {
+            print!("{text}");
+            std::io::stdout()
+                .flush()
+                .map_err(|error| error.to_string())
+        },
+        || {
+            let mut secret = String::new();
+            std::io::stdin()
+                .read_line(&mut secret)
+                .map(|_| secret)
+                .map_err(|error| error.to_string())
+        },
+    )
+    .map_err(jet_std_io_secret_error)
 }
 
 fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
@@ -422,8 +424,7 @@ fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
     std::io::stdout().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
 }
 fn jet_std_io_stdout_is_tty(_s: &JetStdout) -> bool {
-    use std::io::IsTerminal;
-    std::io::stdout().is_terminal()
+    jet_term_stdout_is_terminal()
 }
 fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
     use std::io::Write;
@@ -446,72 +447,29 @@ fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
     std::io::stderr().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
 }
 fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
-    use std::io::IsTerminal;
-    std::io::stderr().is_terminal()
+    jet_term_stderr_is_terminal()
 }
 
-fn jet_env_int(name: &str) -> Option<i64> {
-    jet_std_env_get(&name.to_string())?.parse::<i64>().ok().filter(|n| *n > 0)
-}
-fn jet_terminal_size_from_stty() -> Option<(i64, i64)> {
-    let out = std::process::Command::new("stty").arg("size").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(out.stdout).ok()?;
-    let mut parts = text.split_whitespace();
-    let rows = parts.next()?.parse::<i64>().ok()?;
-    let cols = parts.next()?.parse::<i64>().ok()?;
-    (rows > 0 && cols > 0).then_some((cols, rows))
-}
 fn jet_std_io_terminal_width() -> i64 {
-    jet_env_int("COLUMNS")
-        .or_else(|| jet_terminal_size_from_stty().map(|(w, _)| w))
-        .unwrap_or(80)
+    jet_term_width(|name| jet_std_env_get(&name.to_string()))
 }
 fn jet_std_io_terminal_height() -> i64 {
-    jet_env_int("LINES")
-        .or_else(|| jet_terminal_size_from_stty().map(|(_, h)| h))
-        .unwrap_or(24)
-}
-fn jet_style_code(name: &str) -> Option<&'static str> {
-    match name {
-        "black" => Some("30"),
-        "red" => Some("31"),
-        "green" => Some("32"),
-        "yellow" => Some("33"),
-        "blue" => Some("34"),
-        "magenta" => Some("35"),
-        "cyan" => Some("36"),
-        "white" => Some("37"),
-        "bold" => Some("1"),
-        "dim" => Some("2"),
-        _ => None,
-    }
-}
-fn jet_style_env_enabled() -> bool {
-    jet_env_value_raw("NO_COLOR").is_none()
-        && jet_env_value_raw("TERM")
-            .and_then(|term| term.into_string().ok())
-            .map(|term| term != "dumb")
-            .unwrap_or(true)
+    jet_term_height(|name| jet_std_env_get(&name.to_string()))
 }
 fn jet_style_enabled() -> bool {
-    use std::io::IsTerminal;
-    jet_style_env_enabled() && std::io::stdout().is_terminal()
+    jet_term_style_enabled(
+        jet_env_value_raw("NO_COLOR").is_some(),
+        jet_env_value_raw("TERM")
+            .and_then(|term| term.into_string().ok())
+            .is_some_and(|term| term == "dumb"),
+        jet_term_stdout_is_terminal(),
+    )
 }
 fn jet_std_io_style(style: &String, text: &String) -> String {
-    if jet_style_enabled() {
-        jet_std_io_style_force(style, text)
-    } else {
-        text.clone()
-    }
+    jet_term_style(style, text, jet_style_enabled())
 }
 fn jet_std_io_style_force(style: &String, text: &String) -> String {
-    match jet_style_code(style.as_str()) {
-        Some(code) => format!("\x1b[{code}m{text}\x1b[0m"),
-        None => text.clone(),
-    }
+    jet_term_style_force(style, text)
 }
 
 struct JetProgressIter<T> {
@@ -616,27 +574,21 @@ fn jet_std_io_progress_list<T: 'static>(
 }
 
 fn jet_std_io_progress_emit(text: &str) -> Result<(), jet_std::IOError> {
-    use std::io::{IsTerminal, Write};
+    use std::io::Write;
     let mut out = std::io::stdout();
-    if out.is_terminal() {
-        out.write_all(b"\r")
-            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-    }
-    out.write_all(text.as_bytes())
+    let frame = jet_term_progress_frame(jet_term_stdout_is_terminal(), text);
+    out.write_all(frame.as_bytes())
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-    if !out.is_terminal() {
-        out.write_all(b"\n")
-            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-    }
     out.flush()
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
 }
 
 fn jet_std_io_progress_finish() -> Result<(), jet_std::IOError> {
-    use std::io::{IsTerminal, Write};
+    use std::io::Write;
     let mut out = std::io::stdout();
-    if out.is_terminal() {
-        out.write_all(b"\n")
+    let frame = jet_term_progress_finish(jet_term_stdout_is_terminal());
+    if !frame.is_empty() {
+        out.write_all(frame.as_bytes())
             .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
         out.flush()
             .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))?;

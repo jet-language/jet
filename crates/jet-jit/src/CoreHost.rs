@@ -545,8 +545,7 @@ fn jit_log_format_active() -> u8 {
     if explicit != 0 {
         return explicit;
     }
-    use std::io::IsTerminal;
-    if std::io::stderr().is_terminal() {
+    if crate::IO::term_prelude::jet_term_stderr_is_terminal() {
         2
     } else {
         1
@@ -1742,21 +1741,11 @@ extern "C" fn jet_jit_env_vars() -> i64 {
 }
 
 extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
-    use std::io::Write;
-    if has_prompt != 0 {
-        let p = clone_string(prompt);
-        print!("{p}");
-        if let Err(e) = std::io::stdout().flush() {
-            return result_err_msg(&format!("flush stdout: {e}"));
-        }
-    }
-    let mut s = String::new();
-    if let Err(e) = std::io::stdin().read_line(&mut s) {
-        return result_err_msg(&format!("read stdin: {e}"));
-    }
-    while s.ends_with('\n') || s.ends_with('\r') {
-        s.pop();
-    }
+    let prompt = (has_prompt != 0).then(|| clone_string(prompt));
+    let s = match super::IO::prompt_input(prompt.as_deref()) {
+        Ok(s) => s,
+        Err(error) => return result_err_msg(&error),
+    };
     let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
     result_ok(sid as u64)
 }

@@ -410,6 +410,46 @@ fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(f);
 }
 
+/// Route resident output through the terminal when the caller owns a TTY.
+/// Otherwise keep it in `JitRuntime` so the backend returns one ordered
+/// `ProgramOutput` buffer. This is an engine adapter; terminal framing stays
+/// in `Prelude/Term.rs`.
+pub(crate) fn write_jit_stdout(text: &str, flush: bool) -> Result<(), String> {
+    let terminal = crate::IO::term_prelude::jet_term_stdout_is_terminal();
+    let direct = terminal || Concurrency::active_runtime_ptr().is_none();
+    if direct {
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        out.write_all(text.as_bytes())
+            .map_err(|error| format!("write stdout: {error}"))?;
+        if flush || terminal {
+            out.flush()
+                .map_err(|error| format!("flush stdout: {error}"))?;
+        }
+    } else {
+        with_runtime_mut(|rt| rt.stdout.push_str(text));
+    }
+    Ok(())
+}
+
+pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
+    let terminal = crate::IO::term_prelude::jet_term_stderr_is_terminal();
+    let direct = terminal || Concurrency::active_runtime_ptr().is_none();
+    if direct {
+        use std::io::Write;
+        let mut out = std::io::stderr().lock();
+        out.write_all(text.as_bytes())
+            .map_err(|error| format!("write stderr: {error}"))?;
+        if flush || terminal {
+            out.flush()
+                .map_err(|error| format!("flush stderr: {error}"))?;
+        }
+    } else {
+        with_runtime_mut(|rt| rt.stderr.push_str(text));
+    }
+    Ok(())
+}
+
 fn with_runtime_trap<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(|rt| {
         if catch_unwind(AssertUnwindSafe(|| f(rt))).is_err() {
@@ -741,43 +781,27 @@ extern "C" fn jet_jit_intn_to_string(value: i64, signed: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_print_i64(v: i64) {
-    with_runtime_mut(|rt| {
-        rt.stdout.push_str(&v.to_string());
-        rt.stdout.push('\n');
-    });
+    let _ = write_jit_stdout(&format!("{v}\n"), false);
 }
 
 extern "C" fn jet_jit_print_f64(v: f64) {
-    with_runtime_trap(|rt| {
-        rt.stdout.push_str(&jet_rt::display_f64(v));
-        rt.stdout.push('\n');
-    });
+    let _ = write_jit_stdout(&format!("{}\n", jet_rt::display_f64(v)), false);
 }
 
 extern "C" fn jet_jit_print_bool(v: i8) {
-    with_runtime_mut(|rt| {
-        rt.stdout.push_str(if v == 0 { "false" } else { "true" });
-        rt.stdout.push('\n');
-    });
+    let _ = write_jit_stdout(if v == 0 { "false\n" } else { "true\n" }, false);
 }
 
 extern "C" fn jet_jit_print_char(v: i32) {
-    with_runtime_mut(|rt| {
-        match char::from_u32(v as u32) {
-            Some(ch) => rt.stdout.push(ch),
-            None => rt.stdout.push('?'),
-        }
-        rt.stdout.push('\n');
-    });
+    let ch = char::from_u32(v as u32).unwrap_or('?');
+    let _ = write_jit_stdout(&format!("{ch}\n"), false);
 }
 
 extern "C" fn jet_jit_print_str(id: i64) {
-    with_runtime_mut(|rt| {
-        if let Some(s) = rt.heap.get_string(id) {
-            rt.stdout.push_str(s);
-            rt.stdout.push('\n');
-        }
-    });
+    let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id));
+    if let Some(text) = text {
+        let _ = write_jit_stdout(&format!("{text}\n"), false);
+    }
 }
 
 extern "C" fn jet_jit_str_begin() -> i64 {
@@ -2291,6 +2315,55 @@ extern "C" fn jet_jit_service_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| service_adapter::show(rt, handle))
 }
 
+pub(crate) fn alloc_io_error_result(
+    rt: &mut JitRuntime,
+    variant: i64,
+    operation: i64,
+    resource: Option<&str>,
+    cause: &str,
+) -> i64 {
+    let context = rt.heap.alloc_record(4);
+    let _ = rt
+        .heap
+        .record_set_int(context, 0, operation);
+    let resource = resource
+        .map(|value| rt.heap.alloc_string(value.to_string()).wrapping_add(1))
+        .unwrap_or(0);
+    let _ = rt.heap.record_set_int(context, 1, resource);
+    let _ = rt.heap.record_set_int(context, 2, 0);
+    let cause = rt.heap.alloc_string(cause.to_string()).wrapping_add(1);
+    let _ = rt.heap.record_set_int(context, 3, cause);
+    alloc_jit_result(
+        rt,
+        false,
+        (context as u64).wrapping_shl(8) | variant as u64,
+    )
+}
+
+pub(crate) fn result_err_terminal(error: crate::IO::term_prelude::JetTermSecretError) -> i64 {
+    let cause = error.message();
+    let (variant_name, operation_name, resource) = match error {
+        crate::IO::term_prelude::JetTermSecretError::NonTerminal => {
+            ("InvalidInput", "Read", Some("stdin"))
+        }
+        crate::IO::term_prelude::JetTermSecretError::Echo => {
+            ("Other", "Read", Some("stdin"))
+        }
+        crate::IO::term_prelude::JetTermSecretError::Flush(_) => ("Other", "Flush", Some("stdout")),
+        crate::IO::term_prelude::JetTermSecretError::Read(_) => ("Other", "Read", Some("stdin")),
+    };
+    let variant = jet_foundation::Syntax::IO_ERROR_VARIANTS
+        .iter()
+        .position(|name| *name == variant_name)
+        .expect("Prelude IOError variants must be registered") as i64;
+    let operation = jet_foundation::Syntax::IO_OPERATION_VARIANTS
+        .iter()
+        .position(|name| *name == operation_name)
+        .expect("Prelude IOOperation variants must be registered") as i64;
+    Concurrency::with_runtime_mut(|rt| {
+        alloc_io_error_result(rt, variant, operation, resource, &cause)
+    })
+}
 pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue> {
     usize::try_from(handle)
         .ok()

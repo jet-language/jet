@@ -58,6 +58,11 @@ mod shared_protocol {
     include!("../../../Prelude/SharedProtocol.rs");
 }
 
+#[allow(dead_code)]
+pub(super) mod term_semantics {
+    include!("../../../Prelude/Term.rs");
+}
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -224,18 +229,18 @@ pub(super) fn progress_emit(
     sink: Option<&Arc<Mutex<DevSink>>>,
     text: &str,
 ) {
-    use std::io::IsTerminal;
-
-    let tty = std::io::stdout().is_terminal();
+    let tty = term_semantics::jet_term_stdout_is_terminal();
+    let frame = term_semantics::jet_term_progress_frame(tty, text);
+    if tty {
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(frame.as_bytes());
+        let _ = out.flush();
+        return;
+    }
     if let Some(sink) = sink {
         let mut sink = sink.lock().expect("evaluator sink poisoned");
-        if tty {
-            sink.stdout.push('\r');
-        }
-        sink.stdout.push_str(text);
-        if !tty {
-            sink.stdout.push('\n');
-        }
+        sink.stdout.push_str(&frame);
     }
 }
 

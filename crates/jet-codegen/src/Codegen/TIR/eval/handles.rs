@@ -1,11 +1,12 @@
 //! Exhaustive THandleOp dispatch (#777).
 use crate::AST::Type;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_mutating_with_type};
-use crate::Comptime::CtValue;
+use crate::Comptime::{CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
 use super::browser;
+use std::sync::{Arc, Mutex};
 
 // The shared Duration kernel is one file included per engine; this instance
 // only reads the error reason, so the unused arithmetic entry points stay.
@@ -462,21 +463,84 @@ fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue 
     }
 }
 
-pub(super) fn eval_handle(
-    op: &THandleOp,
-    recv: &mut CtValue,
-    args: &mut [CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    eval_handle_with_type(op, recv, args, span, None)
+fn stream_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match value {
+        CtValue::Bytes(bytes) => Ok(bytes.clone()),
+        CtValue::List(items) => items
+            .iter()
+            .map(|item| match item {
+                CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+                _ => Err(unsupported("stream.write_bytes expects bytes", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("stream.write_bytes expects bytes", span)),
+    }
 }
 
-pub(super) fn eval_handle_with_type(
+fn stream_write(
+    sink: Option<&Arc<Mutex<DevSink>>>,
+    to_stderr: bool,
+    text: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let terminal = if to_stderr {
+        super::term_semantics::jet_term_stderr_is_terminal()
+    } else {
+        super::term_semantics::jet_term_stdout_is_terminal()
+    };
+    if terminal {
+        use std::io::Write;
+        let result = if to_stderr {
+            std::io::stderr().lock().write_all(text.as_bytes())
+        } else {
+            std::io::stdout().lock().write_all(text.as_bytes())
+        };
+        result.map_err(|error| unsupported(&format!("write stream: {error}"), span))?;
+    } else {
+        let Some(sink) = sink else {
+            return Err(unsupported("stream output without a runtime sink", span));
+        };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        if to_stderr {
+            sink.stderr.push_str(text);
+        } else {
+            sink.stdout.push_str(text);
+        }
+    }
+    Ok(CtValue::Present(Box::new(CtValue::Unit)))
+}
+
+fn stream_flush(
+    sink: Option<&Arc<Mutex<DevSink>>>,
+    to_stderr: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let terminal = if to_stderr {
+        super::term_semantics::jet_term_stderr_is_terminal()
+    } else {
+        super::term_semantics::jet_term_stdout_is_terminal()
+    };
+    if terminal {
+        use std::io::Write;
+        let result = if to_stderr {
+            std::io::stderr().lock().flush()
+        } else {
+            std::io::stdout().lock().flush()
+        };
+        result.map_err(|error| unsupported(&format!("flush stream: {error}"), span))?;
+    } else if sink.is_none() {
+        return Err(unsupported("stream flush without a runtime sink", span));
+    }
+    Ok(CtValue::Present(Box::new(CtValue::Unit)))
+}
+
+pub(super) fn eval_handle_with_type_and_sink(
     op: &THandleOp,
     recv: &mut CtValue,
     args: &mut [CtValue],
     span: Span,
     resolved_ret: Option<&Type>,
+    sink: Option<&Arc<Mutex<DevSink>>>,
 ) -> Result<CtValue, Diagnostic> {
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
@@ -769,16 +833,52 @@ pub(super) fn eval_handle_with_type(
         THandleOp::CBORWriterFlush => Err(unsupported("handle `CBORWriterFlush`", span)),
         THandleOp::CBORWriterFinish => Err(unsupported("handle `CBORWriterFinish`", span)),
         THandleOp::StdinReadLine => Err(unsupported("handle `StdinReadLine`", span)),
-        THandleOp::StdoutWrite => Err(unsupported("handle `StdoutWrite`", span)),
-        THandleOp::StdoutWriteLine => Err(unsupported("handle `StdoutWriteLine`", span)),
-        THandleOp::StdoutWriteBytes => Err(unsupported("handle `StdoutWriteBytes`", span)),
-        THandleOp::StdoutFlush => Err(unsupported("handle `StdoutFlush`", span)),
-        THandleOp::StdoutIsTty => Err(unsupported("handle `StdoutIsTty`", span)),
-        THandleOp::StderrWrite => Err(unsupported("handle `StderrWrite`", span)),
-        THandleOp::StderrWriteLine => Err(unsupported("handle `StderrWriteLine`", span)),
-        THandleOp::StderrWriteBytes => Err(unsupported("handle `StderrWriteBytes`", span)),
-        THandleOp::StderrFlush => Err(unsupported("handle `StderrFlush`", span)),
-        THandleOp::StderrIsTty => Err(unsupported("handle `StderrIsTty`", span)),
+        THandleOp::StdoutWrite => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Err(unsupported("stream.write expects text", span));
+            };
+            stream_write(sink, false, text, span)
+        }
+        THandleOp::StdoutWriteLine => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Err(unsupported("stream.write_line expects text", span));
+            };
+            stream_write(sink, false, &format!("{text}\n"), span)
+        }
+        THandleOp::StdoutWriteBytes => {
+            let Some(value) = args.first() else {
+                return Err(unsupported("stream.write_bytes expects bytes", span));
+            };
+            let bytes = stream_bytes(value, span)?;
+            stream_write(sink, false, &String::from_utf8_lossy(&bytes), span)
+        }
+        THandleOp::StdoutFlush => stream_flush(sink, false, span),
+        THandleOp::StdoutIsTty => Ok(CtValue::Bool(
+            super::term_semantics::jet_term_stdout_is_terminal(),
+        )),
+        THandleOp::StderrWrite => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Err(unsupported("stream.write expects text", span));
+            };
+            stream_write(sink, true, text, span)
+        }
+        THandleOp::StderrWriteLine => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Err(unsupported("stream.write_line expects text", span));
+            };
+            stream_write(sink, true, &format!("{text}\n"), span)
+        }
+        THandleOp::StderrWriteBytes => {
+            let Some(value) = args.first() else {
+                return Err(unsupported("stream.write_bytes expects bytes", span));
+            };
+            let bytes = stream_bytes(value, span)?;
+            stream_write(sink, true, &String::from_utf8_lossy(&bytes), span)
+        }
+        THandleOp::StderrFlush => stream_flush(sink, true, span),
+        THandleOp::StderrIsTty => Ok(CtValue::Bool(
+            super::term_semantics::jet_term_stderr_is_terminal(),
+        )),
         THandleOp::StopwatchElapsedMillis => {
             let CtValue::Struct { type_name, fields } = recv else {
                 return Err(unsupported("StopwatchElapsedMillis receiver", span));

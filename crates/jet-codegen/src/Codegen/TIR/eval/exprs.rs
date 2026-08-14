@@ -18,7 +18,7 @@ use crate::Comptime::{
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
-use super::handles::eval_handle_with_type;
+use super::handles::eval_handle_with_type_and_sink;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
@@ -5457,12 +5457,13 @@ impl<'a> EvalCtx<'a> {
                         _ => {}
                     }
                 }
-                let mut result = eval_handle_with_type(
+                let mut result = eval_handle_with_type_and_sink(
                     op,
                     &mut r,
                     &mut argv,
                     self.span(),
                     Some(&expr.ty),
+                    self.sink.as_ref(),
                 )?;
                 let http_json = matches!(
                     op,
@@ -8435,6 +8436,24 @@ impl<'a> EvalCtx<'a> {
         let Some(sink) = self.sink.as_ref() else {
             return Err(unsupported("print at comptime", self.span()));
         };
+        let tty = if to_stderr {
+            super::term_semantics::jet_term_stderr_is_terminal()
+        } else {
+            super::term_semantics::jet_term_stdout_is_terminal()
+        };
+        if tty {
+            use std::io::Write;
+            if to_stderr {
+                let mut out = std::io::stderr().lock();
+                let _ = writeln!(out, "{text}");
+                let _ = out.flush();
+            } else {
+                let mut out = std::io::stdout().lock();
+                let _ = writeln!(out, "{text}");
+                let _ = out.flush();
+            }
+            return Ok(());
+        }
         let mut sink = sink.lock().expect("evaluator sink poisoned");
         if to_stderr {
             sink.stderr.push_str(text);

@@ -1,6 +1,6 @@
-//! `core.io` stdout/stderr/stdin + terminal hosts (#1219). Writes go to the
-//! resident `JitRuntime` capture buffers so ProgramOutput matches AOT under
-//! the process harness (real stdio would bypass capture).
+//! `core.io` stdout/stderr/stdin + terminal hosts (#1219). TTY writes use the
+//! real terminal; non-TTY writes use the resident capture buffers so
+//! ProgramOutput matches AOT under the process harness.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs
 
 use super::Concurrency;
@@ -8,10 +8,14 @@ use super::CoreHost::{jit_env_key_eq, jit_env_snapshot_raw};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::BufRead;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use crate::Marshal::{clone_string, result_err_msg, result_ok};
+
+pub(crate) mod term_prelude {
+    include!("../../jet-codegen/src/Prelude/Term.rs");
+}
 
 mod progress_semantics {
     #[allow(unused_imports)]
@@ -153,44 +157,28 @@ fn env_value(name: &str) -> Option<std::ffi::OsString> {
         .map(|(_, value)| value)
 }
 
-fn env_int(name: &str) -> Option<i64> {
-    env_value(name)?
-        .to_str()?
-        .parse::<i64>()
-        .ok()
-        .filter(|n| *n > 0)
-}
-
-fn style_code(name: &str) -> Option<&'static str> {
-    match name {
-        "black" => Some("30"),
-        "red" => Some("31"),
-        "green" => Some("32"),
-        "yellow" => Some("33"),
-        "blue" => Some("34"),
-        "magenta" => Some("35"),
-        "cyan" => Some("36"),
-        "white" => Some("37"),
-        "bold" => Some("1"),
-        "dim" => Some("2"),
-        _ => None,
-    }
-}
-
 fn style_enabled() -> bool {
-    env_value("NO_COLOR").is_none()
-        && env_value("TERM")
+    term_prelude::jet_term_style_enabled(
+        env_value("NO_COLOR").is_some(),
+        env_value("TERM")
             .and_then(|term| term.into_string().ok())
-            .map(|term| term != "dumb")
-            .unwrap_or(true)
-        && std::io::stdout().is_terminal()
+            .is_some_and(|term| term == "dumb"),
+        term_prelude::jet_term_stdout_is_terminal(),
+    )
 }
 
-fn write_prompt(prompt: &str) -> Result<(), String> {
-    print!("{prompt}");
-    std::io::stdout()
-        .flush()
-        .map_err(|error| format!("flush stdout: {error}"))
+fn write_prompt_with_sink(
+    prompt: &str,
+    sink: &mut Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Result<(), String> {
+    if term_prelude::jet_term_stdout_is_terminal() || sink.is_none() {
+        return crate::jit::runtime_host::write_jit_stdout(prompt, true);
+    }
+    sink.as_deref_mut()
+        .expect("ambient output sink disappeared")
+        .stdout
+        .push_str(prompt);
+    Ok(())
 }
 
 fn read_line() -> Result<String, String> {
@@ -198,15 +186,29 @@ fn read_line() -> Result<String, String> {
     std::io::stdin()
         .read_line(&mut line)
         .map_err(|error| format!("read stdin: {error}"))?;
-    while line.ends_with('\n') || line.ends_with('\r') {
-        line.pop();
-    }
+    term_prelude::jet_term_trim_line(&mut line);
     Ok(line)
 }
 
+pub(crate) fn prompt_input(prompt: Option<&str>) -> Result<String, String> {
+    let mut sink: Option<&mut jet_codegen::Comptime::DevSink> = None;
+    if let Some(prompt) = prompt {
+        write_prompt_with_sink(prompt, &mut sink)?;
+    }
+    read_line()
+}
+
 pub(crate) fn prompt_confirm(prompt: &str) -> bool {
-    let prompt = format!("{prompt} [y/N] ");
-    let answer = write_prompt(&prompt)
+    prompt_confirm_with_sink(prompt, None)
+}
+
+pub(crate) fn prompt_confirm_with_sink(
+    prompt: &str,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> bool {
+    let prompt = term_prelude::jet_term_confirm_prompt(prompt);
+    let mut sink = sink;
+    let answer = write_prompt_with_sink(&prompt, &mut sink)
         .and_then(|_| read_line())
         .unwrap_or_default();
     matches!(
@@ -216,166 +218,49 @@ pub(crate) fn prompt_confirm(prompt: &str) -> bool {
 }
 
 pub(crate) fn prompt_choose(prompt: &str, values: &[String]) -> Result<String, String> {
+    prompt_choose_with_sink(prompt, values, None)
+}
+
+pub(crate) fn prompt_choose_with_sink(
+    prompt: &str,
+    values: &[String],
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Result<String, String> {
     if values.is_empty() {
-        return Err("choose needs at least one item".to_string());
+        return Err(term_prelude::jet_term_choose_empty_error().to_string());
     }
-    println!("{prompt}");
-    for (index, item) in values.iter().enumerate() {
-        println!("  {}) {item}", index + 1);
-    }
+    let mut sink = sink;
+    write_prompt_with_sink(&term_prelude::jet_term_choose_menu(prompt, values), &mut sink)?;
     loop {
-        let answer = write_prompt("> ").and_then(|_| read_line())?;
+        let answer = write_prompt_with_sink("> ", &mut sink).and_then(|_| read_line())?;
         if let Ok(index) = answer.trim().parse::<usize>() {
             if let Some(item) = index.checked_sub(1).and_then(|index| values.get(index)) {
                 return Ok(item.clone());
             }
         }
-        println!("Enter a number from 1 to {}.", values.len());
+        write_prompt_with_sink(
+            &term_prelude::jet_term_choose_invalid(values.len()),
+            &mut sink,
+        )?;
     }
 }
 
-pub(crate) fn prompt_input_secret(prompt: &str) -> Result<String, String> {
-    if !std::io::stdin().is_terminal() {
-        return Err("secret input needs a terminal".to_string());
-    }
-    write_prompt(prompt)?;
-    if !terminal_mode::enter(false) {
-        println!();
-        return Err("could not disable terminal echo".to_string());
-    }
-    let guard = TerminalModeGuard;
-    let secret = read_line();
-    drop(guard);
-    println!();
-    secret
+pub(crate) fn prompt_input_secret(
+    prompt: &str,
+) -> Result<String, term_prelude::JetTermSecretError> {
+    prompt_input_secret_with_sink(prompt, None)
 }
 
-#[cfg(unix)]
-mod terminal_mode {
-    const TCSANOW: i32 = 0;
-    const ECHO: u32 = 0o0000010;
-    const ICANON: u32 = 0o0000002;
-    const VMIN: usize = 6;
-    const VTIME: usize = 5;
-
-    #[repr(C)]
-    struct Termios {
-        c_iflag: u32,
-        c_oflag: u32,
-        c_cflag: u32,
-        c_lflag: u32,
-        #[cfg(target_os = "linux")]
-        c_line: u8,
-        c_cc: [u8; 32],
-        #[cfg(target_os = "linux")]
-        c_ispeed: u32,
-        #[cfg(target_os = "linux")]
-        c_ospeed: u32,
-        #[cfg(not(target_os = "linux"))]
-        _pad: [u8; 12],
-    }
-
-    unsafe extern "C" {
-        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
-    }
-
-    std::thread_local! {
-        static SAVED: std::cell::RefCell<Vec<Termios>> = const { std::cell::RefCell::new(Vec::new()) };
-    }
-
-    pub fn enter(raw: bool) -> bool {
-        unsafe {
-            let mut mode = std::mem::zeroed::<Termios>();
-            if tcgetattr(0, &mut mode) != 0 {
-                return false;
-            }
-            let saved_mode = std::mem::transmute_copy(&mode);
-            mode.c_lflag &= !ECHO;
-            if raw {
-                mode.c_lflag &= !ICANON;
-                mode.c_cc[VMIN] = 1;
-                mode.c_cc[VTIME] = 0;
-            }
-            if tcsetattr(0, TCSANOW, &mode) != 0 {
-                return false;
-            }
-            SAVED.with(|saved| saved.borrow_mut().push(saved_mode));
-            true
-        }
-    }
-
-    pub fn leave() {
-        unsafe {
-            SAVED.with(|saved| {
-                if let Some(mode) = saved.borrow_mut().pop() {
-                    tcsetattr(0, TCSANOW, &mode);
-                }
-            });
-        }
-    }
-}
-
-#[cfg(windows)]
-mod terminal_mode {
-    unsafe extern "system" {
-        fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
-        fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
-        fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
-    }
-
-    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
-    const ENABLE_ECHO_INPUT: u32 = 0x0004;
-    const ENABLE_LINE_INPUT: u32 = 0x0002;
-
-    std::thread_local! {
-        static SAVED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
-    }
-
-    pub fn enter(raw: bool) -> bool {
-        unsafe {
-            let handle = GetStdHandle(STD_INPUT_HANDLE);
-            let mut mode = 0;
-            if GetConsoleMode(handle, &mut mode) == 0 {
-                return false;
-            }
-            let mut next = mode & !ENABLE_ECHO_INPUT;
-            if raw {
-                next &= !ENABLE_LINE_INPUT;
-            }
-            if SetConsoleMode(handle, next) == 0 {
-                return false;
-            }
-            SAVED.with(|saved| saved.borrow_mut().push(mode));
-            true
-        }
-    }
-
-    pub fn leave() {
-        unsafe {
-            let handle = GetStdHandle(STD_INPUT_HANDLE);
-            SAVED.with(|saved| {
-                if let Some(mode) = saved.borrow_mut().pop() {
-                    SetConsoleMode(handle, mode);
-                }
-            });
-        }
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-mod terminal_mode {
-    pub fn enter(_raw: bool) -> bool {
-        false
-    }
-    pub fn leave() {}
-}
-
-struct TerminalModeGuard;
-impl Drop for TerminalModeGuard {
-    fn drop(&mut self) {
-        terminal_mode::leave();
-    }
+pub(crate) fn prompt_input_secret_with_sink(
+    prompt: &str,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Result<String, term_prelude::JetTermSecretError> {
+    let mut sink = sink;
+    term_prelude::jet_term_input_secret(
+        prompt,
+        |text| write_prompt_with_sink(text, &mut sink),
+        read_line,
+    )
 }
 
 extern "C" fn jet_jit_io_stdout() -> i64 {
@@ -392,17 +277,19 @@ extern "C" fn jet_jit_io_stdin() -> i64 {
 
 extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    Concurrency::with_runtime_mut(|rt| rt.stdout.push_str(&s));
-    result_ok_unit()
+    match crate::jit::runtime_host::write_jit_stdout(&s, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stdout.push_str(&s);
-        rt.stdout.push('\n');
-    });
-    result_ok_unit()
+    let text = format!("{s}\n");
+    match crate::jit::runtime_host::write_jit_stdout(&text, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
@@ -414,33 +301,39 @@ extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
         }
         out
     });
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stdout.push_str(&String::from_utf8_lossy(&bytes));
-    });
-    result_ok_unit()
+    let text = String::from_utf8_lossy(&bytes);
+    match crate::jit::runtime_host::write_jit_stdout(&text, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stdout_flush(_h: i64) -> i64 {
-    result_ok_unit()
+    match crate::jit::runtime_host::write_jit_stdout("", true) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
-    i8::from(std::io::stdout().is_terminal())
+    i8::from(term_prelude::jet_term_stdout_is_terminal())
 }
 
 extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    Concurrency::with_runtime_mut(|rt| rt.stderr.push_str(&s));
-    result_ok_unit()
+    match crate::jit::runtime_host::write_jit_stderr(&s, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stderr.push_str(&s);
-        rt.stderr.push('\n');
-    });
-    result_ok_unit()
+    let text = format!("{s}\n");
+    match crate::jit::runtime_host::write_jit_stderr(&text, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
@@ -452,59 +345,60 @@ extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
         }
         out
     });
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stderr.push_str(&String::from_utf8_lossy(&bytes));
-    });
-    result_ok_unit()
+    let text = String::from_utf8_lossy(&bytes);
+    match crate::jit::runtime_host::write_jit_stderr(&text, false) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stderr_flush(_h: i64) -> i64 {
-    result_ok_unit()
+    match crate::jit::runtime_host::write_jit_stderr("", true) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 extern "C" fn jet_jit_stderr_is_tty(_h: i64) -> i8 {
-    i8::from(std::io::stderr().is_terminal())
+    i8::from(term_prelude::jet_term_stderr_is_terminal())
 }
 
 extern "C" fn jet_jit_terminal_width() -> i64 {
-    env_int("COLUMNS").unwrap_or(80)
+    term_prelude::jet_term_width(|name| {
+        env_value(name).and_then(|value| value.into_string().ok())
+    })
 }
 
 extern "C" fn jet_jit_terminal_height() -> i64 {
-    env_int("LINES").unwrap_or(24)
+    term_prelude::jet_term_height(|name| {
+        env_value(name).and_then(|value| value.into_string().ok())
+    })
 }
 
 extern "C" fn jet_jit_io_style(style: i64, text: i64) -> i64 {
     let style = clone_string(style);
     let text = clone_string(text);
-    let out = if style_enabled() {
-        match style_code(style.as_str()) {
-            Some(code) => format!("\x1b[{code}m{text}\x1b[0m"),
-            None => text,
-        }
-    } else {
-        text
-    };
+    let out = term_prelude::jet_term_style(&style, &text, style_enabled());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
 extern "C" fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
     let style = clone_string(style);
     let text = clone_string(text);
-    let out = match style_code(style.as_str()) {
-        Some(code) => format!("\x1b[{code}m{text}\x1b[0m"),
-        None => text,
-    };
+    let out = term_prelude::jet_term_style_force(&style, &text);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
 extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
     let s = clone_string(text);
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stdout.push_str(&s);
-        rt.stdout.push('\n');
-    });
-    result_ok_unit()
+    let frame = term_prelude::jet_term_progress_frame(
+        term_prelude::jet_term_stdout_is_terminal(),
+        &s,
+    );
+    match crate::jit::runtime_host::write_jit_stdout(&frame, true) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(&error),
+    }
 }
 
 fn jet_jit_io_progress_iter_with_total(
@@ -572,7 +466,7 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
     if requested == 0 {
         return;
     }
-    let tty = std::io::stdout().is_terminal();
+    let tty = term_prelude::jet_term_stdout_is_terminal();
     let Some(texts) = (|| {
         let mut states = progress_states()
             .lock()
@@ -610,17 +504,10 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
     })() else {
         return;
     };
-    Concurrency::with_runtime_mut(|rt| {
-        for text in texts {
-            if tty {
-                rt.stdout.push('\r');
-            }
-            rt.stdout.push_str(&text);
-            if !tty {
-                rt.stdout.push('\n');
-            }
-        }
-    });
+    for text in texts {
+        let frame = term_prelude::jet_term_progress_frame(tty, &text);
+        let _ = crate::jit::runtime_host::write_jit_stdout(&frame, true);
+    }
 }
 
 /// Finish a naturally exhausted JIT iterator. A stepped iterator can consume
@@ -647,7 +534,7 @@ pub(crate) fn progress_exhaust_state(list: i64) {
     if remaining != 0 {
         // A plan's tail is already a raw source-pull count. The direct-loop
         // form has no plan and uses the same argument as a raw count.
-        let tty = std::io::stdout().is_terminal();
+        let tty = term_prelude::jet_term_stdout_is_terminal();
         let Some(texts) = (|| {
             let mut states = progress_states()
                 .lock()
@@ -674,17 +561,10 @@ pub(crate) fn progress_exhaust_state(list: i64) {
         })() else {
             return;
         };
-        Concurrency::with_runtime_mut(|rt| {
-            for text in texts {
-                if tty {
-                    rt.stdout.push('\r');
-                }
-                rt.stdout.push_str(&text);
-                if !tty {
-                    rt.stdout.push('\n');
-                }
-            }
-        });
+        for text in texts {
+            let frame = term_prelude::jet_term_progress_frame(tty, &text);
+            let _ = crate::jit::runtime_host::write_jit_stdout(&frame, true);
+        }
     }
     progress_finish_state(list);
 }
@@ -1052,8 +932,13 @@ pub(crate) fn progress_finish_state(list: i64) {
     else {
         return;
     };
-    if state.displayed && std::io::stdout().is_terminal() {
-        Concurrency::with_runtime_mut(|rt| rt.stdout.push('\n'));
+    if state.displayed {
+        let frame = term_prelude::jet_term_progress_finish(
+            term_prelude::jet_term_stdout_is_terminal(),
+        );
+        if !frame.is_empty() {
+            let _ = crate::jit::runtime_host::write_jit_stdout(frame, true);
+        }
     }
 }
 
@@ -1173,7 +1058,7 @@ extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
             result_ok(id as u64)
         }
-        Err(error) => result_err(&error),
+        Err(error) => crate::jit::runtime_host::result_err_terminal(error),
     }
 }
 
@@ -1264,11 +1149,11 @@ extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_term_enter() {
-    let _ = terminal_mode::enter(true);
+    let _ = term_prelude::jet_term_mode_enter(true);
 }
 
 extern "C" fn jet_jit_term_leave() {
-    terminal_mode::leave();
+    term_prelude::jet_term_mode_leave();
 }
 
 host_fns! {
@@ -1361,6 +1246,3 @@ host_fns! {
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
 }
-
-
-

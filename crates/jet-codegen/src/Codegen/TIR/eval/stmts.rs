@@ -1166,11 +1166,13 @@ impl<'a> EvalCtx<'a> {
                         loop {
                             self.burn()?;
                             let mut args = [];
-                            let next = super::handles::eval_handle(
+                            let next = super::handles::eval_handle_with_type_and_sink(
                                 &op,
                                 &mut coll,
                                 &mut args,
                                 self.span(),
+                                None,
+                                self.sink.as_ref(),
                             )?;
                             let item = match next {
                                 CtValue::Present(value) => match *value {

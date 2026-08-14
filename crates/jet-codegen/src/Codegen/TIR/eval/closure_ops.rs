@@ -234,6 +234,19 @@ fn emit_progress_finish(
         count,
         raw,
     );
+    if *count != 0 {
+        let tty = super::term_semantics::jet_term_stdout_is_terminal();
+        let frame = super::term_semantics::jet_term_progress_finish(tty);
+        if tty {
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(frame.as_bytes());
+            let _ = out.flush();
+        } else if let Some(sink) = sink {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stdout.push_str(frame);
+        }
+    }
 }
 
 impl<'a> EvalCtx<'a> {

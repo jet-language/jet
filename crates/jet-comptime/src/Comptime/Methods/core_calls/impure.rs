@@ -58,12 +58,14 @@ pub fn apply_impure_core_call_with_type(
             return result;
         }
     }
-    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+    let mut sink = sink;
+    if let Some(result) = crate::Comptime::try_core_call_typed_with_sink(
         module,
         method,
         args.clone(),
         span,
         resolved_ret.cloned(),
+        sink.as_deref_mut(),
     ) {
         return result;
     }
@@ -273,8 +275,20 @@ pub fn apply_impure_core_call_with_type(
                     ));
                 }
                 if let Some(sink) = sink {
-                    sink.stdout.push_str(text);
-                    sink.stdout.push('\n');
+                    let tty = super::term_semantics::jet_term_stdout_is_terminal();
+                    let frame = super::term_semantics::jet_term_progress_frame(tty, text);
+                    if tty {
+                        use std::io::Write;
+                        let mut out = std::io::stdout().lock();
+                        out.write_all(frame.as_bytes()).map_err(|error| {
+                            unsupported(&format!("write stdout: {error}"), span)
+                        })?;
+                        out.flush().map_err(|error| {
+                            unsupported(&format!("flush stdout: {error}"), span)
+                        })?;
+                    } else {
+                        sink.stdout.push_str(&frame);
+                    }
                 }
                 return Ok(CtValue::Unit);
             }
@@ -329,8 +343,15 @@ pub fn apply_impure_core_call_with_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {
-                s.stdout.push_str(&text);
-                s.stdout.push('\n');
+                let frame = format!("{text}\n");
+                if super::term_semantics::jet_term_stdout_is_terminal() {
+                    use std::io::Write;
+                    let mut out = std::io::stdout().lock();
+                    let _ = out.write_all(frame.as_bytes());
+                    let _ = out.flush();
+                } else {
+                    s.stdout.push_str(&frame);
+                }
             }
             Ok(CtValue::Unit)
         }
@@ -341,8 +362,15 @@ pub fn apply_impure_core_call_with_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {
-                s.stderr.push_str(&text);
-                s.stderr.push('\n');
+                let frame = format!("{text}\n");
+                if super::term_semantics::jet_term_stderr_is_terminal() {
+                    use std::io::Write;
+                    let mut out = std::io::stderr().lock();
+                    let _ = out.write_all(frame.as_bytes());
+                    let _ = out.flush();
+                } else {
+                    s.stderr.push_str(&frame);
+                }
             }
             Ok(CtValue::Unit)
         }

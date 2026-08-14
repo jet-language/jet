@@ -104,6 +104,10 @@ mod progress_semantics {
     include!("../../../../jet-codegen/src/Prelude/Core/Progress.rs");
 }
 
+mod term_semantics {
+    include!("../../../../jet-codegen/src/Prelude/Term.rs");
+}
+
 mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }

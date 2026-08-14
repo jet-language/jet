@@ -1143,20 +1143,9 @@ fn raylib_color(args: &[CtValue], span: Span) -> EvalResult {
 fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
     let style = string_arg(args, 0, span)?;
     let text = string_arg(args, 1, span)?;
-    let code = match style {
-        "black" => Some("30"),
-        "red" => Some("31"),
-        "green" => Some("32"),
-        "yellow" => Some("33"),
-        "blue" => Some("34"),
-        "magenta" => Some("35"),
-        "cyan" => Some("36"),
-        "white" => Some("37"),
-        "bold" => Some("1"),
-        "dim" => Some("2"),
-        _ => None,
-    };
-    Ok(CtValue::Str(code.map_or_else(|| text.to_string(), |code| format!("\u{1b}[{code}m{text}\u{1b}[0m"))))
+    Ok(CtValue::Str(super::term_semantics::jet_term_style_force(
+        style, text,
+    )))
 }
 
 fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {

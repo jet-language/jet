@@ -9,9 +9,17 @@ use std::cell::Cell;
 
 use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Comptime::DevSink;
 
 pub type AmbientCoreCall =
-    fn(&str, &str, Vec<CtValue>, Span, Option<Type>) -> Option<Result<CtValue, Diagnostic>>;
+    fn(
+        &str,
+        &str,
+        Vec<CtValue>,
+        Span,
+        Option<Type>,
+        Option<&mut DevSink>,
+    ) -> Option<Result<CtValue, Diagnostic>>;
 pub type AmbientHandle =
     fn(&str, &mut CtValue, &mut [CtValue], Span) -> Option<Result<CtValue, Diagnostic>>;
 
@@ -60,9 +68,20 @@ pub fn try_core_call_typed(
     span: Span,
     resolved_ret: Option<Type>,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    try_core_call_typed_with_sink(module, method, args, span, resolved_ret, None)
+}
+
+pub fn try_core_call_typed_with_sink(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    resolved_ret: Option<Type>,
+    sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
     CORE_CALL
         .with(|slot| slot.get())
-        .and_then(|hook| hook(module, method, args, span, resolved_ret))
+        .and_then(|hook| hook(module, method, args, span, resolved_ret, sink))
 }
 
 pub fn try_handle(

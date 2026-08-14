@@ -192,6 +192,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Memo.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
+    include_str!("../Prelude/Term.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/NumericWiden.rs"),
     include_str!("../Prelude/Observe.rs"),
@@ -2488,6 +2489,7 @@ mod tests {
         let memo = std::fs::read_to_string(root.join("src/Prelude/Memo.rs")).unwrap();
         let shared_protocol =
             std::fs::read_to_string(root.join("src/Prelude/SharedProtocol.rs")).unwrap();
+        let term = std::fs::read_to_string(root.join("src/Prelude/Term.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
         let numeric_widen =
@@ -2540,6 +2542,7 @@ mod tests {
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
             ("src/Prelude/Memo.rs", memo.as_str()),
             ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
+            ("src/Prelude/Term.rs", term.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
@@ -2652,6 +2655,9 @@ mod tests {
         let control_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
             .unwrap();
+        let term_pos = production_codegen
+            .find("include_str!(\"../Prelude/Term.rs\")")
+            .unwrap();
         let observe_pos = production_codegen
             .find("include_str!(\"../Prelude/Observe.rs\")")
             .unwrap();
@@ -2694,7 +2700,8 @@ mod tests {
                 && byte_buffer_pos < iter_pos
                 && iter_pos < collections_pos
                 && collections_pos < memo_pos
-                && memo_pos < control_pos
+                && memo_pos < term_pos
+                && term_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
                 && exact_units_pos < structural_debug_pos
@@ -2736,6 +2743,7 @@ mod tests {
                 collections.as_str(),
                 memo.as_str(),
                 shared_protocol.as_str(),
+                term.as_str(),
                 runtime_control.as_str(),
                 numeric_widen.as_str(),
                 observe.as_str(),
@@ -2779,6 +2787,7 @@ mod tests {
             collections.as_str(),
             memo.as_str(),
             shared_protocol.as_str(),
+            term.as_str(),
             runtime_control.as_str(),
             numeric_widen.as_str(),
             observe.as_str(),
@@ -2791,10 +2800,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 420_583, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 426_020, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "a8355ab0b15c426b997d2ceb9ed058d51e7409480bb4a6b1e224cb4f4d1fec00",
+            "7bd5eb8a9c8e09afe9b4fc48e57049c1076f858bdcaf24ca07692d94c82e1a53",
             "split changed prelude bytes, order, or boundary newline"
         );
     }

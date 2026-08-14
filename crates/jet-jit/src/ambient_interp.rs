@@ -1137,7 +1137,12 @@ fn db_err(msg: impl Into<String>) -> CtValue {
     }
 }
 
-fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
+fn io_error_at(
+    kind: &str,
+    operation: &str,
+    resource: &str,
+    cause: impl Into<String>,
+) -> CtValue {
     CtValue::Enum {
         type_name: "IOError".to_string(),
         variant: kind.to_string(),
@@ -1150,13 +1155,13 @@ fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
                         "operation".to_string(),
                         CtValue::Enum {
                             type_name: "IOOperation".to_string(),
-                            variant: "Read".to_string(),
+                            variant: operation.to_string(),
                             args: vec![],
                         },
                     ),
                     (
                         "resource".to_string(),
-                        CtValue::Present(Box::new(CtValue::Str("stdin".to_string()))),
+                        CtValue::Present(Box::new(CtValue::Str(resource.to_string()))),
                     ),
                     ("os_code".to_string(), CtValue::absent(Type::Int)),
                     (
@@ -1166,6 +1171,28 @@ fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
                 ],
             },
         )],
+    }
+}
+
+fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
+    io_error_at(kind, "Read", "stdin", cause)
+}
+
+fn secret_io_error(error: IO::term_prelude::JetTermSecretError) -> CtValue {
+    let cause = error.message();
+    match error {
+        IO::term_prelude::JetTermSecretError::NonTerminal => {
+            io_error_at("InvalidInput", "Read", "stdin", cause)
+        }
+        IO::term_prelude::JetTermSecretError::Echo => {
+            io_error_at("Other", "Read", "stdin", cause)
+        }
+        IO::term_prelude::JetTermSecretError::Flush(_) => {
+            io_error_at("Other", "Flush", "stdout", cause)
+        }
+        IO::term_prelude::JetTermSecretError::Read(_) => {
+            io_error_at("Other", "Read", "stdin", cause)
+        }
     }
 }
 
@@ -2284,6 +2311,7 @@ pub fn ambient_core_call(
     args: Vec<CtValue>,
     span: Span,
     resolved_ret: Option<Type>,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if jet_foundation::Syntax::core_call(module, method).is_some() {
         if let Err(error) = jet_foundation::Syntax::core_call_projection(
@@ -2376,6 +2404,37 @@ pub fn ambient_core_call(
         }
     }
     match (module, method) {
+        ("core.io", "stdout") => Some(Ok(CtValue::Struct {
+            type_name: "Stdout".to_string(),
+            fields: vec![],
+        })),
+        ("core.io", "stderr") => Some(Ok(CtValue::Struct {
+            type_name: "Stderr".to_string(),
+            fields: vec![],
+        })),
+        ("core.io", "terminal_width") => Some(Ok(CtValue::Int(
+            IO::term_prelude::jet_term_width(|name| std::env::var(name).ok()),
+        ))),
+        ("core.io", "terminal_height") => Some(Ok(CtValue::Int(
+            IO::term_prelude::jet_term_height(|name| std::env::var(name).ok()),
+        ))),
+        ("core.io", "style") => {
+            let (Some(CtValue::Str(style)), Some(CtValue::Str(text))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("core.io.style arguments", span)));
+            };
+            let enabled = IO::term_prelude::jet_term_style_enabled(
+                std::env::var_os("NO_COLOR").is_some(),
+                std::env::var("TERM")
+                    .ok()
+                    .is_some_and(|term| term == "dumb"),
+                IO::term_prelude::jet_term_stdout_is_terminal(),
+            );
+            Some(Ok(CtValue::Str(IO::term_prelude::jet_term_style(
+                style, text, enabled,
+            ))))
+        }
         ("core.net", "socket_addr") => {
             let (Some(CtValue::Str(host)), Some(CtValue::Int(port))) =
                 (args.first(), args.get(1))
@@ -2702,7 +2761,7 @@ pub fn ambient_core_call(
             let Some(CtValue::Str(prompt)) = args.first() else {
                 return Some(Err(unsupported("core.io.confirm prompt", span)));
             };
-            Some(Ok(CtValue::Bool(IO::prompt_confirm(prompt))))
+            Some(Ok(CtValue::Bool(IO::prompt_confirm_with_sink(prompt, sink))))
         }
         ("core.io", "choose") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
@@ -2718,7 +2777,7 @@ pub fn ambient_core_call(
                 };
                 values.push(item.clone());
             }
-            Some(Ok(match IO::prompt_choose(prompt, &values) {
+            Some(Ok(match IO::prompt_choose_with_sink(prompt, &values, sink) {
                 Ok(item) => CtValue::Present(Box::new(CtValue::Str(item))),
                 Err(error) => CtValue::failed(Box::new(io_error("InvalidInput", error))),
             }))
@@ -2727,16 +2786,9 @@ pub fn ambient_core_call(
             let Some(CtValue::Str(prompt)) = args.first() else {
                 return Some(Err(unsupported("core.io.input_secret prompt", span)));
             };
-            Some(Ok(match IO::prompt_input_secret(prompt) {
+            Some(Ok(match IO::prompt_input_secret_with_sink(prompt, sink) {
                 Ok(secret) => CtValue::Present(Box::new(CtValue::Str(secret))),
-                Err(error) => {
-                    let kind = if error == "secret input needs a terminal" {
-                        "InvalidInput"
-                    } else {
-                        "Other"
-                    };
-                    CtValue::failed(Box::new(io_error(kind, error)))
-                }
+                Err(error) => CtValue::failed(Box::new(secret_io_error(error))),
             }))
         }
         ("core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
