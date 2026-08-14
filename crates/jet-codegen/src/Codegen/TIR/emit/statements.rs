@@ -771,6 +771,25 @@ fn emit_tir_stmt(
             } else {
                 v
             };
+            if let TPlace::Expr(place_expr) = place {
+                if let crate::Codegen::TIR::TExprKind::Deref(pointer) = &place_expr.kind {
+                    let pointer = emit_tir_expr(pointer, cx);
+                    let read = format!(
+                        "{}jet_mem::jet_sentry_read(({}), \"valid_ptr\")",
+                        cx.root_prefix, pointer
+                    );
+                    let next = match op {
+                        Some(op) => prelude_compound_call(op, &read, &v, &value.ty, &cx.file, *line)
+                            .unwrap_or_else(|| format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))),
+                        None => v,
+                    };
+                    out.push_str(&format!(
+                        "{}{}jet_mem::jet_sentry_write(({}), {}, \"valid_ptr\");\n",
+                        pad, cx.root_prefix, pointer, next
+                    ));
+                    return;
+                }
+            }
             // D-EXPSEM1 / D-FLOORDIV1: Rust has no `**=` and no `/%=`, so those
             // compounds read the place, call the one Prelude helper, and write
             // the result back.
@@ -1695,8 +1714,26 @@ fn emit_tir_stmt(
         // c109 Phase 18: an audited `#Unsafe { … }` region — `unsafe { … }`, byte-for-byte
         // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
         // emitted ONLY for a source `#Unsafe` gate.
-        TStmt::Unsafe(body) => {
+        TStmt::Unsafe { gate, body } => {
+            let gate_guard = format!(
+                "{}jet_mem::jet_sentry_scope({}, {:?}, {}, {:?})",
+                cx.root_prefix,
+                gate.enabled,
+                gate.file,
+                gate.line,
+                gate.reason,
+            );
             out.push_str(&format!("{}unsafe {{\n", pad));
+            out.push_str(&format!("{}    let _jet_sentry = {};\n", pad, gate_guard));
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        TStmt::SentryPolicy { enabled, body } => {
+            out.push_str(&format!("{}{{\n", pad));
+            out.push_str(&format!(
+                "{}    let _jet_sentry = {}jet_mem::jet_sentry_policy_scope({enabled});\n",
+                pad, cx.root_prefix
+            ));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }

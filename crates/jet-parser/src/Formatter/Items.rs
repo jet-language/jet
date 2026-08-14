@@ -703,7 +703,14 @@ impl<'a> Fmt<'a> {
         for (i, declaration) in declarations.iter().enumerate() {
             if i > 0 { self.write(", "); }
             self.write(declaration.key.name());
-            if let crate::Policy::PolicyValue::Limit(limit) = declaration.value { self.write(&format!("({limit})")); }
+            match declaration.value {
+                crate::Policy::PolicyValue::Limit(limit) => self.write(&format!("({limit})")),
+                crate::Policy::PolicyValue::On | crate::Policy::PolicyValue::Off => {
+                    self.write(": ");
+                    self.write(&declaration.value.display());
+                }
+                _ => {}
+            }
         }
         self.write(")");
     }

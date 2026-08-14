@@ -1,0 +1,12 @@
+// D-MEM-SENTRY1: default dev-tier sentries quarantine and poison an arena
+// allocation before a raw pointer can read it again.
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    #Unsafe("pointer is used only after arena reset to prove quarantine") {
+        stale :: *Int.{*arena.alloc(7)}
+        arena.reset()
+        print(stale.*)
+    }
+}

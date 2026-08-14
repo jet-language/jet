@@ -34,6 +34,7 @@ pub mod RegexSyntax;
 pub mod Registry;
 pub mod SHA256;
 pub mod MatchScan;
+pub mod MemSentry;
 /// One monotonic epoch for every in-process adapter. AOT embeds the same
 /// source once; JIT, TIR, and comptime call this Foundation module instead of
 /// creating textual copies of the state.

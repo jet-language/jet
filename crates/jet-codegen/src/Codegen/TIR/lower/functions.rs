@@ -18,6 +18,7 @@ use crate::Codegen::TIR::{
     TContract, TContractDisposition, TContractKind, TExpr, TExprKind, TStmt,
 };
 use crate::Codegen::TIR::TWebParamReconstruction;
+use crate::Codegen::TIR::TUnsafeGate;
 use crate::Syntax;
 use std::collections::HashMap;
 
@@ -32,6 +33,38 @@ fn line_at_byte_offset(src: &str, offset: usize) -> usize {
         .filter(|&&b| b == b'\n')
         .count()
         + 1
+}
+
+fn sentries_enabled_for_function(f: &Func, cx: &Cx) -> bool {
+    let declarations = cx
+        .policy_declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.key == crate::Policy::PolicyKey::Sentries
+                && (matches!(
+                    declaration.scope,
+                    crate::Policy::PolicyScope::Organization
+                        | crate::Policy::PolicyScope::Package
+                        | crate::Policy::PolicyScope::Module
+                ) || declaration.target == Some(f.span))
+        })
+        .cloned();
+    crate::Policy::resolve(crate::Policy::PolicyKey::Sentries, declarations)
+        .ok()
+        .flatten()
+        .is_none_or(|policy| policy.value == crate::Policy::PolicyValue::On)
+}
+
+fn unsafe_gate(f: &Func, cx: &Cx, enabled: bool) -> Option<TUnsafeGate> {
+    f.is_unsafe.then(|| {
+        let span = f.unsafe_span.unwrap_or(f.span);
+        TUnsafeGate {
+            file: cx.file.clone(),
+            line: cov_line(cx, span.start) as u32,
+            reason: f.unsafe_reason.clone().unwrap_or_default(),
+            enabled,
+        }
+    })
 }
 
 fn bind_resource_param(
@@ -134,6 +167,7 @@ pub(crate) fn lower_error_conv(
         is_main: false,
         line: cov_line(cx, conversion.from_span.start),
         is_unsafe: false,
+        unsafe_gate: None,
         is_pure: true,
         memo_bound: None,
         is_reactive: false,
@@ -161,6 +195,7 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty));
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
@@ -255,6 +290,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
         is_pure: f.is_pure,
         memo_bound: crate::AST::memo_bound_from_markers(&f.markers),
         is_reactive: f.is_reactive,
@@ -275,6 +311,7 @@ fn lower_contract_cond(
     cx: &Cx,
 ) -> TExpr {
     let mut env = LowerEnv::new(f.name.clone());
+    env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.gc_return = f.gc_return;
     for p in &f.params {
         let mut param_ty = if p.variadic {
@@ -751,6 +788,7 @@ pub(crate) fn lower_method_for_owner(
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
         is_pure: f.is_pure,
         memo_bound: None,
         is_reactive: f.is_reactive,
@@ -796,6 +834,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         _ => Type::Named(type_name.to_string()),
     };
     let mut env = LowerEnv::new(f.name.clone());
+    env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.clone();
     env.self_owner = Some(type_name.to_string());
@@ -919,6 +958,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         // (the dedicated trait-method emit reads it there); the top-level flag is unused
         // for this kind, but keep it consistent.
         is_unsafe: f.is_unsafe,
+        unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
         is_pure: f.is_pure,
         memo_bound: None,
         is_reactive: f.is_reactive,
@@ -1014,6 +1054,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         // Same for `#Inline`/`#Inline(Always)` — a delegation method is pure forwarding,
         // never parsed with an inline marker.
         is_unsafe: false,
+        unsafe_gate: None,
         is_pure: false,
         memo_bound: None,
         is_reactive: false,

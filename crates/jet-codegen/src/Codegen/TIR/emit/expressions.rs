@@ -2552,18 +2552,37 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 cx.rust_type(elem)
             )
         }
-        // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
-        // the enclosing `#Unsafe` region (sema-gated); this node adds no `unsafe`.
-        TExprKind::Deref(operand) => format!("(*({}))", emit_tir_expr(operand, cx)),
-        // D-CAP9: prefix `*x` raw-of → `(&({}) as *const _ as *mut _)`. The result
-        // is `*mut T` to match the canonical raw-pointer type (`Ptr<T>` lowers to
-        // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
-        // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
+        // D-CAP9 / D-MEM-SENTRY1: raw reads are checked by the memory Prelude.
+        // The enclosing `#Unsafe` remains the source of Rust unsafe.
+        TExprKind::Deref(operand) => format!(
+            "{}jet_mem::jet_sentry_read(({}), \"valid_ptr\")",
+            cx.root_prefix,
+            emit_tir_expr(operand, cx)
+        ),
+        // D-CAP9 / D-MEM-SENTRY1: prefix `*x` raw-of registers the allocation
+        // provenance in the memory Prelude. The result remains `*mut T` to
+        // match the canonical raw-pointer type (`Ptr<T>` lowers to `*mut`).
         TExprKind::RawOf(operand) => {
             if matches!(&operand.ty, Type::Apply { name, .. } if name == "Ptr") {
                 emit_tir_expr(operand, cx)
+            } else if matches!(
+                &operand.kind,
+                TExprKind::HandleMethod {
+                    op: THandleOp::AllocAlloc,
+                    ..
+                }
+            ) {
+                format!(
+                    "({}jet_mem::jet_sentry_address_of((({}) as *const _)) as usize as *mut _)",
+                    cx.root_prefix,
+                    emit_tir_expr(operand, cx),
+                )
             } else {
-                format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
+                format!(
+                    "({}jet_mem::jet_sentry_address_of((&({}) as *const _)) as usize as *mut _)",
+                    cx.root_prefix,
+                    emit_tir_expr(operand, cx),
+                )
             }
         }
         // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole

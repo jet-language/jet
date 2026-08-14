@@ -733,6 +733,40 @@ fn jet_runtime_caught_stop(message: &str) {
     eprint!("{}", report.rendered);
 }
 
+fn jet_sentry_runtime_stop(
+    code: &str,
+    file: &str,
+    line: u32,
+    gate: &str,
+    operation: &str,
+    obligation: &str,
+    detail: &str,
+) -> ! {
+    jet_test_record_stop(code);
+    jet_proof_record(2, 1, code, detail, file, line);
+    let report = jet_render_runtime_sentry(
+        match code {
+            "R0801" => "R0801",
+            "R0802" => "R0802",
+            "R0803" => "R0803",
+            _ => "R0801",
+        },
+        file,
+        line,
+        gate,
+        operation,
+        obligation,
+        detail,
+    );
+    if jet_runtime_should_unwind() {
+        jet_stream_record_failure_report(report.rendered.clone());
+        panic!("{}", report.rendered);
+    }
+    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+        rendered: report.rendered,
+    }));
+}
+
 fn jet_runtime_stop_with_context(
     code: &str,
     file: &str,

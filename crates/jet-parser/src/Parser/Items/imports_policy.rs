@@ -81,23 +81,38 @@ impl<'a> Parser<'a> {
             scope: crate::Policy::PolicyScope,
         ) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
             let marker_span = marker.span;
-            let arguments = self.bound_registered_rule_arguments(&marker)?;
-            let expressions = arguments.variadic().cloned().collect::<Vec<_>>();
+            self.bound_registered_rule_arguments(&marker)?;
+            let labels = marker.arg_labels.clone();
             let mut out = Vec::new();
-            for expr in expressions {
-                let (name, name_span, limit) = match expr {
-                    crate::AST::Expr::Ident(name, span) => (name, span, None),
-                    crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
-                        let argument = call.args.pop().unwrap();
-                        let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
-                            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
-                        };
-                        if argument.label.is_some() {
-                            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
+            for (index, expr) in marker.args.into_iter().enumerate() {
+                let label = labels.get(index).and_then(|label| label.as_ref()).map(|(name, _)| name.as_str());
+                let (name, name_span, limit, sentry_value) = if label == Some("sentries") {
+                    let value = match expr {
+                        crate::AST::Expr::EnumLit { type_name, variant, args, span, .. }
+                            if type_name.is_empty() && args.is_empty() => match variant.as_str() {
+                                "On" => crate::Policy::PolicyValue::On,
+                                "Off" => crate::Policy::PolicyValue::Off,
+                                _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, span)),
+                            },
+                        other => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, other.span())),
+                    };
+                    ("sentries".to_string(), marker_span, None, Some(value))
+                } else {
+                    let (name, name_span, limit) = match expr {
+                        crate::AST::Expr::Ident(name, span) => (name, span, None),
+                        crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
+                            let argument = call.args.pop().unwrap();
+                            let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
+                                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
+                            };
+                            if argument.label.is_some() {
+                                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
+                            }
+                            (call.name, call.name_span, Some(value))
                         }
-                        (call.name, call.name_span, Some(value))
-                    }
-                    other => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, other.span())),
+                        other => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, other.span())),
+                    };
+                    (name, name_span, limit, None)
                 };
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
@@ -105,19 +120,23 @@ impl<'a> Parser<'a> {
                         "E0355",
                         format!("`{name}` is not a scoped policy"),
                         if site_bound { "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them".to_string() } else { "the compiler owns the closed policy registry and its scope rules".to_string() },
-                        if site_bound { format!("use `#{name}` at its sound site") } else { "use `no_alloc`, `zero_rc`, or `arena_bounded(bytes)`".to_string() },
+                        if site_bound { format!("use `#{name}` at its sound site") } else { "use `no_alloc`, `zero_rc`, `arena_bounded(bytes)`, or `sentries: .Off`".to_string() },
                         Some(name_span),
                     ));
                 };
-                let value = match key {
-                    crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits => crate::Policy::PolicyValue::Enabled,
-                    crate::Policy::PolicyKey::ArenaBounded => {
+                let value = match (key, sentry_value) {
+                    (crate::Policy::PolicyKey::Sentries, Some(value)) => value,
+                    (crate::Policy::PolicyKey::Sentries, None) => return Err(Diagnostic::error("E0355", "`sentries` needs an explicit mode".to_string(), "sentry instrumentation is either on or off; it is not a boolean memory fact".to_string(), "write `sentries: .Off` or `sentries: .On`".to_string(), Some(name_span))),
+                    (crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, None) => crate::Policy::PolicyValue::Enabled,
+                    (crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, Some(_)) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
+                    (crate::Policy::PolicyKey::ArenaBounded, Some(_)) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
+                    (crate::Policy::PolicyKey::ArenaBounded, None) => {
                         let Some(n) = limit else { return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(name_span))); };
                         let value = n as u64;
                         if value == 0 { return Err(Diagnostic::error("E0355", format!("`{name}` needs a positive byte ceiling"), "zero cannot bound a usable memory region".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); }
                         crate::Policy::PolicyValue::Limit(value)
                     }
-                    crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: .{{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
+                    (crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic, _) => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: .{{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
                 };
                 out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: marker_span, target: None, source: "<source>".to_string() });
             }

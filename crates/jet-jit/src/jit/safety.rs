@@ -768,13 +768,12 @@ fn resident_safe_expr_work_item<'a>(
         | TExprKind::UnitConvert { arg, .. }
         | TExprKind::Drop(arg)
         | TExprKind::MaterializeView(arg)
-        | TExprKind::Deref(arg)
-        | TExprKind::RawOf(arg)
         | TExprKind::Present(arg)
         | TExprKind::Ok(arg)
         | TExprKind::Err(arg)
         | TExprKind::ResourceNew(arg)
         | TExprKind::Clone(arg) => Some((true, vec![arg])),
+        TExprKind::Deref(arg) | TExprKind::RawOf(arg) => Some((false, vec![arg])),
         TExprKind::Borrow { place, .. } => Some((true, vec![place])),
         TExprKind::Unary { op, operand } => Some((
             jit_value_type(&expr.ty) && matches!(op, UnOp::Neg | UnOp::Not),
@@ -1298,6 +1297,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 };
                 return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
+            if module == "core.mem" {
+                // D-MEM-SENTRY1: raw memory stays on canonical TIR so the
+                // Prelude witness owns gate state, provenance, quarantine,
+                // poison, and R08xx reporting. Cranelift only marshals safe
+                // values; it does not grow a second memory policy.
+                return false;
+            }
             if (module == "app" || module == "core.web")
                 && matches!(
                     method.as_str(),
@@ -1718,10 +1724,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         } => {
             resident_safe_expr(base, callees) && resident_safe_expr(index, callees)
         }
-        TExprKind::Drop(inner)
-        | TExprKind::MaterializeView(inner)
-        | TExprKind::Deref(inner)
-        | TExprKind::RawOf(inner) => resident_safe_expr(inner, callees),
+        TExprKind::Drop(inner) | TExprKind::MaterializeView(inner) => {
+            resident_safe_expr(inner, callees)
+        }
+        TExprKind::Deref(_) | TExprKind::RawOf(_) => false,
         TExprKind::EnumLit { payload, .. } => {
             jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
         }
@@ -3898,7 +3904,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         | TStmt::Region(body)
         | TStmt::Impure(body)
         | TStmt::Inline(body)
-        | TStmt::Unsafe(body)
+        | TStmt::Unsafe { body, .. }
+        | TStmt::SentryPolicy { body, .. }
         | TStmt::Shield { body }
         | TStmt::Transact { body, .. }
         | TStmt::Live { body } => {
@@ -4116,8 +4123,9 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
         TStmt::Inline(_) => "Inline",
         TStmt::Impure(_) => "Impure",
         TStmt::Region(_) => "Region",
+        TStmt::SentryPolicy { .. } => "SentryPolicy",
         TStmt::TaskGroup { .. } => "TaskGroup",
-        TStmt::Unsafe(_) => "Unsafe",
+        TStmt::Unsafe { .. } => "Unsafe",
         TStmt::SourceSpan(_) => "SourceSpan",
         _ => "Other",
     }
@@ -4133,7 +4141,8 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
             | TStmt::Impure(body)
             | TStmt::Region(body)
             | TStmt::TaskGroup { body, .. }
-            | TStmt::Unsafe(body) => {
+            | TStmt::Unsafe { body, .. }
+            | TStmt::SentryPolicy { body, .. } => {
                 if let Some(inner) = first_unsafe_stmt_detail(body, callees) {
                     return Some(format!("{}[{i}]>{inner}", stmt_kind_tag(s)));
                 }
@@ -4321,7 +4330,8 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::Region(body)
             | TStmt::Impure(body)
             | TStmt::Inline(body)
-            | TStmt::Unsafe(body)
+            | TStmt::Unsafe { body, .. }
+            | TStmt::SentryPolicy { body, .. }
             | TStmt::Shield { body }
             | TStmt::DebugOnly(body) => count_spawn_sites_stmts(body, n),
             TStmt::Reactive { .. } => {
@@ -4563,7 +4573,8 @@ pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
             | TStmt::Region(body)
             | TStmt::Impure(body)
             | TStmt::Inline(body)
-            | TStmt::Unsafe(body)
+            | TStmt::Unsafe { body, .. }
+            | TStmt::SentryPolicy { body, .. }
             | TStmt::Shield { body }
             | TStmt::DebugOnly(body)
             | TStmt::Layout { body, .. } => find_stmts(body),

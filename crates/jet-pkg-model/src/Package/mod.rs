@@ -222,7 +222,7 @@ pub struct PackageFacts {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackagePolicy {
     /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
-    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`).
+    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `sentries`).
     pub memory: Vec<crate::Policy::PolicyDeclaration>,
     /// D-AUTODERIVE1=E: absent means the safe beginner default, enabled.
     pub auto_derive: Option<bool>,

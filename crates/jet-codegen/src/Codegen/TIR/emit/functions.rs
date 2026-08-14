@@ -27,6 +27,15 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
+fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    let Some(gate) = tir.unsafe_gate.as_ref() else { return };
+    let pad = "    ".repeat(indent);
+    out.push_str(&format!(
+        "{pad}let _jet_sentry = {}jet_mem::jet_sentry_scope({}, {:?}, {}, {:?});\n",
+        cx.root_prefix, gate.enabled, gate.file, gate.line, gate.reason,
+    ));
+}
+
 /// Emit a covered function from its TIR, reusing the same pure formatting helpers
 /// as `emit_func` so the output is byte-identical to the AST path (golden parity).
 /// The only difference is that every decision is *read off the TIR* rather than
@@ -286,6 +295,7 @@ fn memo_key_expr(tir: &TFunc, cx: &Cx) -> String {
 
 fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     emit_stack_guard(tir, cx, out, indent);
+    emit_sentry_gate(tir, cx, out, indent);
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
         out.push_str(&format!(
@@ -497,6 +507,7 @@ pub(crate) fn emit_tir_method(
         ret = ret_clause,
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
+    emit_sentry_gate(tir, cx, out, indent + 1);
     // D-COV1: probe at the method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
@@ -607,6 +618,7 @@ pub(crate) fn emit_tir_trait_method(
         ret = ret_clause,
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
+    emit_sentry_gate(tir, cx, out, indent + 1);
     // D-COV1: probe at the trait-method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
@@ -638,6 +650,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
                 "{pad}fn jet_encode(&self) -> jet_std::DataTree {{\n"
             ));
             emit_stack_guard(tir, cx, out, indent + 1);
+            emit_sentry_gate(tir, cx, out, indent + 1);
             if cx.coverage {
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }
@@ -661,6 +674,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
                 "{pad}fn jet_decode({tree}: &jet_std::DataTree) -> {ret} {{\n"
             ));
             emit_stack_guard(tir, cx, out, indent + 1);
+            emit_sentry_gate(tir, cx, out, indent + 1);
             if cx.coverage {
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }

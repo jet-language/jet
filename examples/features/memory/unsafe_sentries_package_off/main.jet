@@ -1,0 +1,11 @@
+// D-MEM-SENTRY1: package policy mirrors source policy and disables only the
+// runtime witness for this package.
+use core.mem
+
+fn run() {
+    cell :: 42
+    #Unsafe("the local cell is live for this package-policy proof") {
+        pointer :: *Int.{*cell}
+        print(pointer.*)
+    }
+}

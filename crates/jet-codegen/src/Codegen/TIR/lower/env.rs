@@ -73,6 +73,9 @@ pub(crate) struct LowerEnv {
     /// Set when a synthesized FFI undo hook is emitted in a bare transaction,
     /// so the transaction gets a runtime handle even without user snapshots.
     pub(super) txn_undo_needed: Option<Rc<Cell<bool>>>,
+    /// D-MEM-SENTRY1: lexical instrumentation policy. Static obligations are
+    /// independent; this fact only controls runtime observation.
+    pub(super) sentries_enabled: bool,
 }
 
 impl LowerEnv {
@@ -95,6 +98,7 @@ impl LowerEnv {
             binder_refs: HashMap::new(),
             txn_handle: None,
             txn_undo_needed: None,
+            sentries_enabled: true,
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).

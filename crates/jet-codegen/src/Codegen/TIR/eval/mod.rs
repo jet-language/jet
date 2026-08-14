@@ -934,6 +934,13 @@ pub(super) struct EvalCtx<'a> {
     #[allow(dead_code)]
     pub(super) core_imports: &'a HashMap<String, String>,
     pub(super) globals: HashMap<String, CtValue>,
+    /// Runtime-only address identities minted by `core.mem.address_of`. The
+    /// Foundation sentry kernel owns their provenance; this map only lets the
+    /// CtValue carrier recover the source place after `Ptr.from_addr`.
+    pub(super) sentry_places: HashMap<usize, String>,
+    /// Synthetic allocator identities used only by the TIR evaluator. The
+    /// Foundation sentry kernel still owns their live/dead state.
+    pub(super) next_sentry_allocator: usize,
     #[allow(dead_code)]
     pub(super) gates: jet_foundation::Policy::GateSet,
     #[allow(dead_code)]
@@ -1539,6 +1546,8 @@ impl<'a> EvalCtx<'a> {
             sink: config.sink,
             core_imports: config.core_imports,
             globals: config.globals,
+            sentry_places: HashMap::new(),
+            next_sentry_allocator: 1,
             gates: config.gates,
             impure_depth: config.impure_depth,
             runtime_execution: config.runtime_execution,
@@ -2447,6 +2456,14 @@ impl<'a> EvalCtx<'a> {
         let previous_fn = std::mem::replace(&mut self.current_fn, func.name.clone());
         let guard_mark = self.scope_guards.len();
         self.local_cells.enter_frame();
+        let _sentry = func.unsafe_gate.as_ref().map(|gate| {
+            jet_foundation::MemSentry::jet_sentry_scope(
+                gate.enabled,
+                &gate.file,
+                gate.line,
+                &gate.reason,
+            )
+        });
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name.as_str());
             let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
@@ -3439,6 +3456,7 @@ fn run_program_with_structs_on_stack(
     cli_args: Option<CtValue>,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
+    jet_foundation::MemSentry::jet_sentry_reset();
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
@@ -3472,6 +3490,8 @@ fn run_program_with_structs_on_stack(
         sink: Some(shared_sink.clone()),
         core_imports,
         globals,
+        sentry_places: HashMap::new(),
+        next_sentry_allocator: 1,
         gates,
         // Whole-program runtime/deopt carries RunTime explicitly.  Comptime
         // purity still uses eval_expr/eval_block with build-time defaults.
@@ -3552,6 +3572,7 @@ pub fn run_named_func_with_memos(
     memos: MemoState,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
+    jet_foundation::MemSentry::jet_sentry_reset();
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let func = funcs.get(name).copied().ok_or_else(|| {
@@ -3574,6 +3595,8 @@ pub fn run_named_func_with_memos(
         sink: Some(shared_sink.clone()),
         core_imports: &core_imports,
         globals: HashMap::new(),
+        sentry_places: HashMap::new(),
+        next_sentry_allocator: 1,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         // Runtime deopt is not comptime: open Tier-2 ambient I/O so `jet run`
         // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
@@ -3803,6 +3826,8 @@ fn eval_expr_hook(
         sink,
         core_imports,
         globals: globals.clone(),
+        sentry_places: HashMap::new(),
+        next_sentry_allocator: 1,
         gates,
         impure_depth,
         runtime_execution: false,
@@ -3926,6 +3951,8 @@ fn eval_block_hook(
         sink,
         core_imports,
         globals: globals.clone(),
+        sentry_places: HashMap::new(),
+        next_sentry_allocator: 1,
         gates,
         impure_depth,
         runtime_execution: false,

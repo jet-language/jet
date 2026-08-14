@@ -35,6 +35,96 @@ fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
+/// D-MEM-SENTRY1: the ambient tier is a CtValue adapter only. Raw memory is
+/// normally deopted to canonical TIR before it reaches this function; keeping
+/// this narrow bridge here means a future ambient caller still invokes the
+/// Foundation Prelude kernel instead of growing engine-side sentry policy.
+pub(crate) mod mem_sentry_prelude {
+    use super::{unsupported, CtValue, Diagnostic, Span, Type};
+
+    fn layout(ty: Option<&Type>) -> (usize, usize) {
+        match ty {
+            Some(Type::Bool) => (1, 1),
+            Some(Type::Char) | Some(Type::Float32) => (4, 4),
+            Some(Type::Int) | Some(Type::Float) => (8, 8),
+            Some(Type::IntN { bits, .. }) => {
+                let bytes = ((*bits as usize).saturating_add(7) / 8).max(1);
+                (bytes, bytes.min(8))
+            }
+            _ => (1, 1),
+        }
+    }
+
+    fn address(fields: &[(String, CtValue)]) -> Option<usize> {
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("address", CtValue::Int(value)) if *value >= 0 => usize::try_from(*value).ok(),
+            _ => None,
+        })
+    }
+
+    fn name(fields: &[(String, CtValue)]) -> Option<String> {
+        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+            ("name", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn ambient_core_call(
+        method: &str,
+        args: &[CtValue],
+        span: Span,
+        resolved_ret: Option<&Type>,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        if !matches!(method, "volatile_read" | "volatile_write") {
+            return None;
+        }
+        let Some(CtValue::Struct { type_name, fields }) = args.first() else {
+            return None;
+        };
+        if type_name != "__JetRawLocal" {
+            return None;
+        }
+        let Some(address) = address(fields) else {
+            return Some(Err(unsupported("raw pointer address", span)));
+        };
+        let (bytes, alignment) = layout(resolved_ret);
+        if let Some(fault) = jet_foundation::MemSentry::jet_sentry_check(
+            address,
+            bytes,
+            alignment,
+            method,
+            "valid_ptr",
+        ) {
+            let report = jet_foundation::Outcome::jet_render_runtime_sentry(
+                fault.code,
+                &fault.file,
+                fault.line,
+                &fault.gate,
+                &fault.operation,
+                &fault.obligation,
+                &fault.detail,
+            );
+            return Some(Err(jet_codegen::Sema::Diagnostics::render_registered(
+                report.code,
+                report.what,
+                report.why,
+                report.fix,
+                Some(span),
+            )));
+        }
+        match method {
+            "volatile_read" => {
+                let value = fields.iter().find_map(|(field, value)| {
+                    (field == "value").then(|| value.clone())
+                });
+                value.or_else(|| name(fields).map(|_| CtValue::Unit)).map(Ok)
+            }
+            "volatile_write" => Some(Ok(CtValue::Unit)),
+            _ => None,
+        }
+    }
+}
+
 // The interpreter only owns CtValue handles. Process policy and lifecycle
 // semantics stay in the exact Prelude fragments used by AOT; this module
 // supplies the native values and logical-environment hooks those fragments
@@ -2208,6 +2298,16 @@ pub fn ambient_core_call(
                 ),
                 span,
             )));
+        }
+    }
+    if module == "core.mem" {
+        if let Some(result) = mem_sentry_prelude::ambient_core_call(
+            method,
+            &args,
+            span,
+            resolved_ret.as_ref(),
+        ) {
+            return Some(result);
         }
     }
     if module == "core.email" {

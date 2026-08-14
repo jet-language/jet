@@ -445,7 +445,10 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
             arms.iter().all(|(_, _, body)| web_stmts_guarantee_return(body))
                 && web_stmts_guarantee_return(else_body)
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+        TIR::TStmt::Inline(body)
+        | TIR::TStmt::Region(body)
+        | TIR::TStmt::SentryPolicy { body, .. }
+        | TIR::TStmt::Impure(body) => {
             web_stmts_guarantee_return(body)
         }
         _ => false,
@@ -684,7 +687,10 @@ fn web_wasm_stmts_supported(
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+        TIR::TStmt::Inline(body)
+        | TIR::TStmt::Region(body)
+        | TIR::TStmt::SentryPolicy { body, .. }
+        | TIR::TStmt::Impure(body) => {
             web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
         _ => false,
@@ -998,7 +1004,10 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
                 && web_expr_supported(index)
                 && web_expr_supported(value)
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+        TIR::TStmt::Inline(body)
+        | TIR::TStmt::Region(body)
+        | TIR::TStmt::SentryPolicy { body, .. }
+        | TIR::TStmt::Impure(body) => {
             web_stmts_supported(body)
         }
         _ => false,
@@ -1057,7 +1066,10 @@ fn web_stmts_safe_in_js_iife(stmts: &[TIR::TStmt]) -> bool {
                 .all(|(_, _, body)| web_stmts_safe_in_js_iife(body))
                 && web_stmts_safe_in_js_iife(else_body)
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+        TIR::TStmt::Inline(body)
+        | TIR::TStmt::Region(body)
+        | TIR::TStmt::SentryPolicy { body, .. }
+        | TIR::TStmt::Impure(body) => {
             web_stmts_safe_in_js_iife(body)
         }
         _ => true,
@@ -2048,6 +2060,7 @@ fn web_stmts_use_uninit(stmts: &[TIR::TStmt]) -> bool {
         | TIR::TStmt::While { body, .. }
         | TIR::TStmt::Inline(body)
         | TIR::TStmt::Region(body)
+        | TIR::TStmt::SentryPolicy { body, .. }
         | TIR::TStmt::Impure(body) => web_stmts_use_uninit(body),
         TIR::TStmt::CountedLoop {
             init, step, body, ..
@@ -3353,6 +3366,7 @@ fn emit_wasm_body(
             }
             TIR::TStmt::Inline(body)
             | TIR::TStmt::Region(body)
+            | TIR::TStmt::SentryPolicy { body, .. }
             | TIR::TStmt::Impure(body) => {
                 emit_wasm_body(body, out, indent, funcs, file_prefix, reconstructions)?
             }
@@ -5061,6 +5075,7 @@ fn emit_tir_js_body(
             }
             TIR::TStmt::Inline(inner)
             | TIR::TStmt::Region(inner)
+            | TIR::TStmt::SentryPolicy { body: inner, .. }
             | TIR::TStmt::Impure(inner) => {
                 emit_tir_js_body(inner, out, funcs, file_prefix, indent)?
             }

@@ -517,6 +517,9 @@ renumbered, and no new `W` code may be allocated.
 | E3010 | runtime | an arithmetic or bounds operation has no valid result |
 | E3011 | runtime | a `#Todo` hole was reached at runtime |
 | E3012 | runtime | call depth exceeded Jet's safe runtime limit |
+| R0801 | runtime | a raw access used an address outside the allocation provenance tracked by its active `#Unsafe` gate (D-MEM-SENTRY1) |
+| R0802 | runtime | a raw access used storage after the allocator quarantined and poisoned it (D-MEM-SENTRY1) |
+| R0803 | runtime | a raw access used an address with an alignment the allocation cannot satisfy (D-MEM-SENTRY1) |
 | E3101 | sema  | low-level memory operation used outside an `#Unsafe("…")` block (D-LL1/D-UNSAFE2) |
 | E3102 | sema  | low-level memory vocabulary used without `use core.mem` (D-LL1/D-UNSAFE2) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
@@ -1393,6 +1396,9 @@ span is embedded in the message (Jet file + line + function name).
 | E3010 | `{msg}` — with Jet file and line. | The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data. | Check the operands or bounds before the operation, or use a checked operation that returns an outcome. |
 | E3011 | `#Todo at {file}:{line} — expected {type}`. | This code is deliberately incomplete and reached a running program. | Implement this code before running the program. |
 | E3012 | `stack overflow in {fn}` — with Jet file, line, and source context. | The call stack kept growing without reaching a safe return. | End the recursion or make progress toward a base case. |
+| R0801 | `raw {operation} outside {gate}'s storage`. | The pointer is outside the allocation provenance tracked by the active `#Unsafe` gate. Sentry evidence is a runtime witness; it never replaces a required static unsafe obligation. | Bound the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
+| R0802 | `use of freed storage in {gate}`. | The allocation was quarantined and poisoned before this raw operation. | Do not use the pointer after release, and satisfy obligation `{obligation}`. |
+| R0803 | `misaligned raw {operation} in {gate}`. | The pointer alignment does not satisfy the tracked allocation provenance. | Align the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
 
 ## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
 

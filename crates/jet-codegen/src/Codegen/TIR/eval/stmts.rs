@@ -951,10 +951,22 @@ impl<'a> EvalCtx<'a> {
                 self.impure_depth = previous;
                 result
             }
-            TStmt::Inline(body)
-            | TStmt::DebugOnly(body)
-            | TStmt::Unsafe(body)
-            | TStmt::Region(body) => self.exec_stmts(body, scope),
+            TStmt::Inline(body) | TStmt::DebugOnly(body) | TStmt::Region(body) => {
+                self.exec_stmts(body, scope)
+            }
+            TStmt::Unsafe { gate, body } => {
+                let _sentry = jet_foundation::MemSentry::jet_sentry_scope(
+                    gate.enabled,
+                    &gate.file,
+                    gate.line,
+                    &gate.reason,
+                );
+                self.exec_stmts(body, scope)
+            }
+            TStmt::SentryPolicy { enabled, body } => {
+                let _sentry = jet_foundation::MemSentry::jet_sentry_policy_scope(*enabled);
+                self.exec_stmts(body, scope)
+            }
             TStmt::LineMarker(_) => Ok(Flow::Normal),
             TStmt::SourceSpan(span) => {
                 self.current_span = *span;

@@ -659,7 +659,8 @@ fn analyze_result_option_stmts(
             }
             TStmt::Inline(body)
             | TStmt::DebugOnly(body)
-            | TStmt::Unsafe(body)
+            | TStmt::Unsafe { body, .. }
+            | TStmt::SentryPolicy { body, .. }
             | TStmt::Impure(body)
             | TStmt::Region(body) => {
                 returns_result_option |=

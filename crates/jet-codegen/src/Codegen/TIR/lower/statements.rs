@@ -38,6 +38,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
@@ -2988,11 +2989,20 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
-        Stmt::Unsafe { body, .. } => {
+        Stmt::Unsafe { audit, body, span, .. } => {
             let scoped = clone_env(env);
+            let gate = TUnsafeGate {
+                file: cx.file.clone(),
+                line: crate::Diagnostics::span_line_col(&cx.src, span.start).0,
+                reason: audit.clone().unwrap_or_default(),
+                enabled: env.sentries_enabled,
+            };
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Unsafe(lowered.pop().expect("unsafe body was deferred")),
+                move |mut lowered| TStmt::Unsafe {
+                    gate,
+                    body: lowered.pop().expect("unsafe body was deferred"),
+                },
             );
         }
         // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
@@ -3074,11 +3084,23 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 |mut lowered| TStmt::Region(lowered.pop().expect("region body was deferred")),
             );
         }
-        Stmt::Policy { body, .. } => {
-            let scoped = clone_env(env);
+        Stmt::Policy { declarations, body, .. } => {
+            let mut scoped = clone_env(env);
+            let sentry_mode = declarations
+                .iter()
+                .find(|declaration| declaration.key == crate::Policy::PolicyKey::Sentries)
+                .map(|declaration| declaration.value == crate::Policy::PolicyValue::On);
+            if sentry_mode == Some(false) {
+                scoped.sentries_enabled = false;
+            }
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],
-                |mut lowered| TStmt::Region(lowered.pop().expect("policy body was deferred")),
+                move |mut lowered| {
+                    let body = lowered.pop().expect("policy body was deferred");
+                    sentry_mode.map_or(TStmt::Region(body), |enabled| {
+                        TStmt::SentryPolicy { enabled, body }
+                    })
+                },
             );
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one

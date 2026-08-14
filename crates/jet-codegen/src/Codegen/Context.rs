@@ -272,6 +272,8 @@ pub(crate) struct Cx {
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
+    /// D-MEM-SENTRY1: module/package policy facts carried into TIR lowering.
+    pub(crate) policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// c148: struct name → its declared type-parameter names. Populated in
     /// `build_cx_items` from `StructDef.type_params`. Lets `struct_is_generic` and
     /// field-type checks recognize multi-char type params (`Kind`, `Elem`, …).
@@ -3056,6 +3058,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
+    cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
     cx.core_archive_source = bundle
         .modules
         .iter()
@@ -3510,6 +3513,7 @@ pub(crate) fn build_cx_items(
         iterable_hooks: HashMap::new(),
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
+        policy_declarations: Vec::new(),
         struct_type_params: HashMap::new(),
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),

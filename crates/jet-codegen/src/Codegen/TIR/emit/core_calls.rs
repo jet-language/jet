@@ -629,27 +629,18 @@ pub(crate) fn emit_tir_core_call(
     // setup). Each is exactly one of those; see the arm itself for which.
     match (module, method) {
         ("jet.unit", "magnitude") => format!("({}).to_string()", arg(0)),
-        // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
-        // TIR core-call emission. `address_of` is an inert address cast (no `unsafe`);
-        // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
-        // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
-        // E3101), already lowered to a Rust `unsafe` context.
+        // c109 Phase 18 / D-MEM-SENTRY1: low-level pointer ops route through
+        // the vetted memory Prelude. The surrounding `#Unsafe` still supplies
+        // the Rust unsafe context; engines do not own sentry policy.
         ("core.mem", "address_of") => {
             let place = arg(0);
-            let mutable = args.first().is_some_and(|expr| {
-                matches!(&expr.kind, TExprKind::Local(local) if local.mutable)
-            });
-            if mutable {
-                format!("(&mut ({place}) as *mut _ as usize as i64)")
-            } else {
-                format!("(&({place}) as *const _ as usize as i64)")
-            }
+            format!("{}jet_mem::jet_sentry_address_of((&({place}) as *const _))", cx.root_prefix)
         }
         ("core.mem", "volatile_read") => {
-            format!("std::ptr::read_volatile({})", arg(0))
+            format!("{}jet_mem::jet_sentry_volatile_read(({}), \"valid_ptr\")", cx.root_prefix, arg(0))
         }
         ("core.mem", "volatile_write") => {
-            format!("std::ptr::write_volatile({}, {})", arg(0), arg(1))
+            format!("{}jet_mem::jet_sentry_volatile_write(({}), {}, \"valid_ptr\")", cx.root_prefix, arg(0), arg(1))
         }
         
         ("core.tasks", "channel") => {

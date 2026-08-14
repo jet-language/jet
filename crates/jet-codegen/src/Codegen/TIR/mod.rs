@@ -2028,6 +2028,16 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
 // TIR types. Every node carries the facts codegen needs, pre-resolved (totality).
 // ---------------------------------------------------------------------------
 
+/// Runtime sentry metadata for one source-level `#Unsafe` gate. The metadata
+/// is data in TIR; each engine only marshals it into the shared Prelude sentry.
+#[derive(Clone, Debug)]
+pub struct TUnsafeGate {
+    pub file: String,
+    pub line: u32,
+    pub reason: String,
+    pub enabled: bool,
+}
+
 /// A lowered top-level function. `params` are already mangled to their Rust
 /// names and carry their resolved Jet `Type`; `ret` is the resolved return type.
 pub struct TFunc {
@@ -2072,6 +2082,8 @@ pub struct TFunc {
     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
     pub is_unsafe: bool,
+    /// Function-level `#Unsafe("reason") fn` sentry scope, if present.
+    pub unsafe_gate: Option<TUnsafeGate>,
     /// D-CABI-CALLBACK1: named pure, monomorphic top-level functions expose a
     /// stable C-convention symbol; sema alone decides whether it may cross C.
     pub is_pure: bool,
@@ -2919,7 +2931,16 @@ pub enum TStmt {
     /// dumb — sema validated the audit). I1: this TIR node exists ONLY for a source
     /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
     /// Body bindings use the `unsafe` block's child lexical env.
-    Unsafe(Vec<TStmt>),
+    Unsafe {
+        gate: TUnsafeGate,
+        body: Vec<TStmt>,
+    },
+    /// D-MEM-SENTRY1: a source/package sentry policy scope. It changes only
+    /// the Prelude gate bit and preserves the enclosing gate provenance.
+    SentryPolicy {
+        enabled: bool,
+        body: Vec<TStmt>,
+    },
     /// D-CTEFFECT1: an explicit `#Impure("reason") { … }` policy gate.
     /// AOT/JIT execute a plain lexical block; comptime evaluation raises its
     /// impurity depth only while evaluating this body.

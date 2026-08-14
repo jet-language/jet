@@ -13,11 +13,11 @@ impl PolicyScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits }
+pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Sentries }
 
 impl PolicyKey {
-    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units" } }
-    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), _ => None } }
+    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Sentries => "sentries" } }
+    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "sentries" => Some(Self::Sentries), _ => None } }
     pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
 }
 
@@ -34,6 +34,8 @@ pub enum PolicyValue {
     Track,
     Skip,
     Allow,
+    On,
+    Off,
 }
 
 impl PolicyValue {
@@ -43,6 +45,7 @@ impl PolicyValue {
         Self::GateOnly => ".GateOnly".into(), Self::Obligations => ".Obligations".into(),
         Self::Relaxed => ".Relaxed".into(), Self::PerSite => ".PerSite".into(),
         Self::Track => ".Track".into(), Self::Skip => ".Skip".into(), Self::Allow => ".Allow".into(),
+        Self::On => ".On".into(), Self::Off => ".Off".into(),
     } }
 }
 
@@ -299,6 +302,7 @@ pub const POLICY_RULES: &[PolicyRule] = &[
     PolicyRule { key: PolicyKey::Nondeterministic, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::ScopedGc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Override },
     PolicyRule { key: PolicyKey::ExplicitUnits, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Sentries, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
 ];
 
 pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[PolicyKey::Unsafe, PolicyKey::Impure, PolicyKey::Nondeterministic];
@@ -351,6 +355,9 @@ fn resolve_policy(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyD
             let widens = match (key, outer, declaration.value) {
                 (PolicyKey::ArenaBounded, PolicyValue::Limit(a), PolicyValue::Limit(b)) => b > a,
                 (PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
+                (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
+                (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
+                (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::Off) => false,
                 (PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic, outer, inner) => gate_widens(outer, inner),
                 _ => true,
             };
@@ -566,6 +573,8 @@ fn gate_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
         (Default | GateOnly | Relaxed, Track | Obligations) => false,
         (Default | GateOnly | Relaxed, Default | GateOnly | Relaxed | Skip) => false,
         (Track, Track) | (Skip, Skip) => false,
+        (On, On | Off) | (Off, Off) => false,
+        (Off, On) => true,
         _ => true,
     }
 }
@@ -574,6 +583,7 @@ pub fn default_gate_value(key: PolicyKey) -> PolicyValue {
     match key {
         PolicyKey::Unsafe => PolicyValue::Default,
         PolicyKey::Impure | PolicyKey::Nondeterministic => PolicyValue::GateOnly,
+        PolicyKey::Sentries => PolicyValue::On,
         _ => PolicyValue::Enabled,
     }
 }
@@ -582,6 +592,11 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
     let raw = raw.trim();
     match key {
         PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
+        PolicyKey::Sentries => match raw {
+            ".On" => Ok(PolicyValue::On),
+            ".Off" => Ok(PolicyValue::Off),
+            _ => Err("`sentries` must be `.On` or `.Off`".to_string()),
+        },
         PolicyKey::ArenaBounded => raw.parse::<u64>().ok().filter(|n| *n > 0).map(PolicyValue::Limit).ok_or_else(|| format!("`{}` needs a positive byte limit", key.name())),
         key if key.is_audited_gate() => match raw {
             ".Forbid" => Ok(PolicyValue::Forbid),
@@ -894,6 +909,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
             "unsafe",
             "gc",
             "explicit_units",
+            "sentries",
         ],
         "State" => &[],
         "TaintKind" => crate::Syntax::BUILTIN_TAGS,
@@ -1104,6 +1120,28 @@ impl RuleSignature {
                         parameter_index: Some(parameter_index),
                         ty: self.params[parameter_index].ty,
                     })
+                })
+                .collect();
+        }
+        if marker.name == crate::Syntax::MARKER_POLICY {
+            return marker
+                .arg_labels
+                .iter()
+                .enumerate()
+                .map(|(source_index, label)| {
+                    if let Some((name, _)) = label {
+                        (name == "sentries").then_some(RuleArgumentBinding {
+                            source_index,
+                            parameter_index: None,
+                            ty: self.variadic?,
+                        })
+                    } else {
+                        Some(RuleArgumentBinding {
+                            source_index,
+                            parameter_index: None,
+                            ty: self.variadic?,
+                        })
+                    }
                 })
                 .collect();
         }

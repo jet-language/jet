@@ -159,21 +159,27 @@ cell :: 1337
         out.rust
     );
     assert!(
-        out.rust.contains("return std::ptr::read_volatile(__jet_p);"),
-        "volatile_read not byte-exact:\n{}",
+        out.rust
+            .contains("return jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\");"),
+        "volatile_read sentry wrapper missing:\n{}",
         out.rust
     );
-    // `mem.address_of(cell)` → the inert address cast (no `unsafe`).
+    // `mem.address_of(cell)` → the sentry-backed address identity (no `unsafe`).
     assert!(
         out.rust
-            .contains("let __jet_addr: i64 = (&(__jet_cell) as *const _ as usize as i64);"),
-        "address_of not byte-exact:\n{}",
+            .contains("let __jet_addr: i64 = jet_mem::jet_sentry_address_of((&(__jet_cell) as *const _));"),
+        "address_of sentry wrapper missing:\n{}",
         out.rust
     );
     // `#Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
     assert!(
         out.rust.contains("    unsafe {\n"),
         "unsafe block not emitted:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("jet_mem::jet_sentry_scope(true"),
+        "unsafe block must carry its sentry gate:\n{}",
         out.rust
     );
     // Reason string emits nothing — "safe: cell is live" must not appear in generated Rust.
@@ -233,8 +239,8 @@ fn run() {
     );
     assert!(
         out.rust
-            .contains("std::ptr::write_volatile(__jet_p, __jet_value);"),
-        "volatile_write not byte-exact:\n{}",
+            .contains("jet_mem::jet_sentry_volatile_write((__jet_p), __jet_value, \"valid_ptr\");"),
+        "volatile_write sentry wrapper missing:\n{}",
         out.rust
     );
     let _ = fs::remove_dir_all(&dir);

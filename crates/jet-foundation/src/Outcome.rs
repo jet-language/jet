@@ -477,3 +477,54 @@ pub fn jet_render_runtime_stop(
         exit_code: 70,
     }
 }
+
+/// D-MEM-SENTRY1: shared wording for a runtime memory witness. The source
+/// location and gate facts come from the engine; report copy and exit policy
+/// stay in the Foundation Prelude for AOT, JIT, and TIR.
+pub fn jet_render_runtime_sentry(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    gate: &str,
+    operation: &str,
+    obligation: &str,
+    detail: &str,
+) -> JetRuntimeDiagnostic {
+    let gate = if gate.is_empty() { "this unsafe gate" } else { gate };
+    let (what, why, fix) = match code {
+        "R0801" => (
+            format!("raw {operation} outside `{gate}`'s storage"),
+            format!("the pointer is outside allocation provenance tracked for `{gate}` ({detail})"),
+            format!("bound the raw {operation} before it reaches storage — obligation `{obligation}` was not met on this run"),
+        ),
+        "R0802" => (
+            format!("use of freed storage in `{gate}`"),
+            format!("the allocation was quarantined and poisoned before this {operation} ({detail})"),
+            format!("do not use the pointer after release — obligation `{obligation}` was not met on this run"),
+        ),
+        "R0803" => (
+            format!("misaligned raw {operation} in `{gate}`"),
+            format!("the pointer alignment does not satisfy the allocation provenance ({detail})"),
+            format!("align the raw {operation} before access — obligation `{obligation}` was not met on this run"),
+        ),
+        _ => (
+            format!("raw {operation} violated `{gate}`'s sentry"),
+            detail.to_string(),
+            format!("satisfy obligation `{obligation}` before the raw access"),
+        ),
+    };
+    let mut rendered = format!("Runtime fault [{code}]: {what}\n");
+    if !file.is_empty() {
+        rendered.push_str(&format!("  --> {file}:{line}, in #Unsafe gate {file}:{line}\n"));
+    }
+    rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
+    JetRuntimeDiagnostic {
+        code,
+        source: "runtime",
+        what,
+        why,
+        fix,
+        rendered,
+        exit_code: 70,
+    }
+}

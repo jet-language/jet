@@ -1,0 +1,13 @@
+// D-MEM-SENTRY1: source policy can turn off only the runtime witness. The
+// lexical #Unsafe gate and its static obligations remain required.
+use core.mem
+
+fn run() {
+    cell :: 41
+    #Unsafe("the local cell is live for this raw read") {
+        #Policy(sentries: .Off) {
+            pointer :: *Int.{*cell}
+            print(pointer.*)
+        }
+    }
+}

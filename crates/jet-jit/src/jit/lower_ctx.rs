@@ -5647,7 +5647,9 @@ impl LowerCtx<'_, '_> {
                 }
                 self.task_groups.pop();
             }
-            TStmt::Region(body) | TStmt::Impure(body) => {
+            TStmt::Region(body)
+            | TStmt::SentryPolicy { body, .. }
+            | TStmt::Impure(body) => {
                 self.lower_stmts_scoped(body)?;
             }
             TStmt::DebugOnly(body) => {
@@ -5832,7 +5834,7 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TStmt::Inline(stmts) => self.lower_stmts_scoped(stmts)?,
-            TStmt::Unsafe(body) => {
+            TStmt::Unsafe { body, .. } => {
                 self.unsafe_depth += 1;
                 self.lower_stmts_scoped(body)?;
                 self.unsafe_depth -= 1;

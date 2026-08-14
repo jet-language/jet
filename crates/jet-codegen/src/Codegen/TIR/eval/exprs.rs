@@ -513,6 +513,68 @@ pub fn stable_place_address(key: &str) -> i64 {
     }
 }
 
+fn sentry_layout(ty: &Type) -> (usize, usize) {
+    match ty {
+        Type::Bool => (1, 1),
+        Type::Char => (4, 4),
+        Type::Int | Type::Float => (8, 8),
+        Type::Float32 => (4, 4),
+        Type::IntN { bits, .. } => {
+            let bytes = ((*bits as usize).saturating_add(7) / 8).max(1);
+            (bytes, bytes.min(8))
+        }
+        Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => sentry_layout(inner),
+        Type::FixedList { elem, len, .. } => {
+            let (bytes, alignment) = sentry_layout(elem);
+            (bytes.saturating_mul(*len as usize).max(1), alignment)
+        }
+        Type::Tuple(fields) => {
+            let mut bytes = 0usize;
+            let mut alignment = 1usize;
+            for (_, field) in fields {
+                let (field_bytes, field_alignment) = sentry_layout(field);
+                bytes = bytes.saturating_add(field_bytes);
+                alignment = alignment.max(field_alignment);
+            }
+            (bytes.max(1), alignment)
+        }
+        _ => (1, 1),
+    }
+}
+
+fn raw_pointer_address(fields: &[(String, CtValue)]) -> Option<usize> {
+    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        ("address", CtValue::Int(address)) if *address >= 0 => usize::try_from(*address).ok(),
+        _ => None,
+    })
+}
+
+fn raw_pointer_name(fields: &[(String, CtValue)]) -> Option<String> {
+    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        ("name", CtValue::Str(name)) => Some(name.clone()),
+        _ => None,
+    })
+}
+
+fn raw_pointer_value(fields: &[(String, CtValue)]) -> Option<CtValue> {
+    fields.iter().find_map(|(field, value)| {
+        (field == "value").then(|| value.clone())
+    })
+}
+
+fn sentry_allocator_owner(value: &CtValue) -> Option<usize> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetTirAllocator" {
+        return None;
+    }
+    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        ("sentry_id", CtValue::Int(owner)) if *owner > 0 => usize::try_from(*owner).ok(),
+        _ => None,
+    })
+}
+
 /// TIR-eval representation of the erased `SQL = (String, Vec<String>)`
 /// runtime value. The AOT emitter uses a Rust tuple; keeping named fields in
 /// the evaluator makes the same representation inspectable without adding a
@@ -3703,6 +3765,62 @@ impl<'a> EvalCtx<'a> {
         )
     }
 
+    fn runtime_sentry_failure(
+        &mut self,
+        fault: jet_foundation::MemSentry::JetSentryFault,
+    ) -> Diagnostic {
+        let report = jet_foundation::Outcome::jet_render_runtime_sentry(
+            fault.code,
+            &fault.file,
+            fault.line,
+            &fault.gate,
+            &fault.operation,
+            &fault.obligation,
+            &fault.detail,
+        );
+        if let Some(sink) = self.sink.as_ref() {
+            let mut sink = sink.lock().expect("evaluator sink poisoned");
+            sink.stderr.push_str(&report.rendered);
+            sink.exit_code = Some(report.exit_code);
+            Diagnostic::soft_exit(
+                "70".to_string(),
+                format!("runtime sentry stop {}", report.code),
+                Some(self.span()),
+            )
+        } else {
+            crate::Sema::Diagnostics::render_registered(
+                report.code,
+                report.what,
+                report.why,
+                report.fix,
+                Some(self.span()),
+            )
+        }
+    }
+
+    fn check_runtime_sentry(
+        &mut self,
+        address: usize,
+        ty: &Type,
+        operation: &str,
+        obligation: &str,
+    ) -> Result<(), Diagnostic> {
+        if !self.runtime_execution || !cfg!(not(jet_release)) {
+            return Ok(());
+        }
+        let (bytes, alignment) = sentry_layout(ty);
+        if let Some(fault) = jet_foundation::MemSentry::jet_sentry_check(
+            address,
+            bytes,
+            alignment,
+            operation,
+            obligation,
+        ) {
+            return Err(self.runtime_sentry_failure(fault));
+        }
+        Ok(())
+    }
+
     fn eval_list_lit_expr(
         &mut self,
         expr: &'a TExpr,
@@ -3780,9 +3898,9 @@ impl<'a> EvalCtx<'a> {
         if module == "core.services" {
             return self.eval_core_services_call(method, args, source_span, scope);
         }
-        // D-PIN1 / S58: `mem.address_of(place)` is an inert address cast.
-        // AOT lowers to the same stable non-zero identity contract; the
-        // evaluator only mints it during real execution.
+        // D-PIN1 / S58: `mem.address_of(place)` returns the stable address
+        // identity and records its allocation provenance in the sentry
+        // kernel before `Ptr.from_addr` carries it onward.
         if module == "core.mem" && method == "address_of" && args.len() == 1 {
             if !self.runtime_execution {
                 return Err(unsupported(
@@ -3791,7 +3909,13 @@ impl<'a> EvalCtx<'a> {
                 ));
             }
             let key = tir_place_address_key(&args[0]);
-            return Ok(CtValue::Int(stable_place_address(&key)));
+            let address = stable_place_address(&key) as usize;
+            let (bytes, _) = sentry_layout(&args[0].ty);
+            jet_foundation::MemSentry::jet_sentry_register_allocation(address, bytes);
+            if let Some(local) = super::raw_place_local(&args[0]) {
+                self.sentry_places.insert(address, local.name.clone());
+            }
+            return Ok(CtValue::Int(address as i64));
         }
         if module == "core.tasks" && method == "channel" {
             if !self.runtime_execution {
@@ -3823,16 +3947,12 @@ impl<'a> EvalCtx<'a> {
             if type_name != "__JetRawLocal" {
                 return Err(unsupported("raw pointer target", self.span()));
             }
-            let name = fields.iter().find_map(|(field, value)| {
-                match (field.as_str(), value) {
-                    ("name", CtValue::Str(name)) => Some(name.clone()),
-                    _ => None,
-                }
-            });
-            let Some(name) = name else {
-                return Err(unsupported("raw pointer local", self.span()));
-            };
-            scope.insert(name, value);
+            let address = raw_pointer_address(&fields)
+                .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
+            self.check_runtime_sentry(address, &args[1].ty, "volatile_write", "valid_ptr")?;
+            if let Some(name) = raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned()) {
+                scope.insert(name, value);
+            }
             return Ok(CtValue::Unit);
         }
         if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
@@ -3843,14 +3963,16 @@ impl<'a> EvalCtx<'a> {
             if type_name != "__JetRawLocal" {
                 return Err(unsupported("raw pointer target", self.span()));
             }
-            let name = fields.iter().find_map(|(field, value)| {
-                match (field.as_str(), value) {
-                    ("name", CtValue::Str(name)) => Some(name.as_str()),
-                    _ => None,
-                }
-            });
+            let address = raw_pointer_address(&fields)
+                .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
+            self.check_runtime_sentry(address, &expr.ty, "volatile_read", "valid_ptr")?;
+            if let Some(value) = raw_pointer_value(&fields) {
+                return Ok(value);
+            }
+            let name = raw_pointer_name(&fields)
+                .or_else(|| self.sentry_places.get(&address).cloned());
             return name
-                .and_then(|name| scope.get(name).cloned())
+                .and_then(|name| scope.get(&name).cloned())
                 .ok_or_else(|| unsupported("raw pointer local", self.span()));
         }
         let mut argv = Vec::with_capacity(args.len());
@@ -5162,6 +5284,11 @@ impl<'a> EvalCtx<'a> {
                 if let crate::Codegen::TIR::THandleOp::RegexMethod { method, .. } = op {
                     if method == "replace_all_with" {
                         return self.eval_regex_replace_all_with(&r, &argv);
+                    }
+                }
+                if matches!(op, crate::Codegen::TIR::THandleOp::AllocReset) {
+                    if let Some(owner) = sentry_allocator_owner(&r) {
+                        jet_foundation::MemSentry::jet_sentry_quarantine_owner(owner);
                     }
                 }
                 if matches!(
@@ -7051,7 +7178,22 @@ impl<'a> EvalCtx<'a> {
                     CtValue::Int(next)
                 })
             }
-            TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
+            TExprKind::PtrFromAddr { addr, .. } => {
+                let address = self.eval_expr_child(addr, scope)?;
+                let CtValue::Int(address) = address else {
+                    return Err(unsupported("raw pointer address", self.span()));
+                };
+                let address = usize::try_from(address)
+                    .map_err(|_| unsupported("raw pointer address", self.span()))?;
+                let mut fields = vec![("address".to_string(), CtValue::Int(address as i64))];
+                if let Some(name) = self.sentry_places.get(&address).cloned() {
+                    fields.push(("name".to_string(), CtValue::Str(name)));
+                }
+                Ok(CtValue::Struct {
+                    type_name: "__JetRawLocal".to_string(),
+                    fields,
+                })
+            }
             TExprKind::Deref(inner) => {
                 let pointer = self.eval_expr_child(inner, scope)?;
                 let CtValue::Struct { type_name, fields } = pointer else {
@@ -7060,16 +7202,15 @@ impl<'a> EvalCtx<'a> {
                 if type_name != "__JetRawLocal" {
                     return Err(unsupported("raw pointer target", self.span()));
                 }
-                if let Some(value) = fields.iter().find_map(|(field, value)| {
-                    (field == "value").then(|| value.clone())
-                }) {
+                let address = raw_pointer_address(&fields)
+                    .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
+                self.check_runtime_sentry(address, &expr.ty, "read", "valid_ptr")?;
+                if let Some(value) = raw_pointer_value(&fields) {
                     return Ok(value);
                 }
-                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-                    ("name", CtValue::Str(name)) => Some(name.as_str()),
-                    _ => None,
-                });
-                name.and_then(|name| scope.get(name).cloned())
+                let name = raw_pointer_name(&fields)
+                    .or_else(|| self.sentry_places.get(&address).cloned());
+                name.and_then(|name| scope.get(&name).cloned())
                     .ok_or_else(|| unsupported("raw pointer local", self.span()))
             }
             TExprKind::RawOf(inner) => {
@@ -7080,21 +7221,53 @@ impl<'a> EvalCtx<'a> {
                 ) {
                     return self.eval_expr_child(inner, scope);
                 }
+                let key = tir_place_address_key(inner);
+                let address = stable_place_address(&key) as usize;
+                let (bytes, _) = sentry_layout(&inner.ty);
+                let owner = match &inner.kind {
+                    TExprKind::HandleMethod {
+                        op: crate::Codegen::TIR::THandleOp::AllocAlloc,
+                        recv,
+                        ..
+                    } => sentry_allocator_owner(&self.eval_expr_child(recv, scope)?),
+                    _ => None,
+                };
+                if let Some(owner) = owner {
+                    jet_foundation::MemSentry::jet_sentry_register_owned_allocation(
+                        owner, address, bytes,
+                    );
+                } else {
+                    jet_foundation::MemSentry::jet_sentry_register_allocation(address, bytes);
+                }
                 let local = super::raw_place_local(inner);
                 let fields = if let Some(local) = local {
-                    vec![("name".to_string(), CtValue::Str(local.name.clone()))]
+                    self.sentry_places.insert(address, local.name.clone());
+                    vec![
+                        ("address".to_string(), CtValue::Int(address as i64)),
+                        ("name".to_string(), CtValue::Str(local.name.clone())),
+                    ]
                 } else {
-                    vec![("value".to_string(), self.eval_expr_child(inner, scope)?)]
+                    vec![
+                        ("address".to_string(), CtValue::Int(address as i64)),
+                        ("value".to_string(), self.eval_expr_child(inner, scope)?),
+                    ]
                 };
                 Ok(CtValue::Struct {
                     type_name: "__JetRawLocal".to_string(),
                     fields,
                 })
             }
-            TExprKind::AllocNew { ctor } => Ok(CtValue::Struct {
-                type_name: "__JetTirAllocator".to_string(),
-                fields: vec![("ctor".to_string(), CtValue::Str(ctor.clone()))],
-            }),
+            TExprKind::AllocNew { ctor } => {
+                let owner = self.next_sentry_allocator;
+                self.next_sentry_allocator = self.next_sentry_allocator.saturating_add(1);
+                Ok(CtValue::Struct {
+                    type_name: "__JetTirAllocator".to_string(),
+                    fields: vec![
+                        ("ctor".to_string(), CtValue::Str(ctor.clone())),
+                        ("sentry_id".to_string(), CtValue::Int(owner as i64)),
+                    ],
+                })
+            }
             TExprKind::JSONLit { variant, arg } => {
                 let payload = match arg {
                     Some(inner) if variant == "Object" => {
@@ -7867,10 +8040,11 @@ impl<'a> EvalCtx<'a> {
                 if type_name != "__JetRawLocal" {
                     return Err(unsupported("raw pointer target", self.span()));
                 }
-                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-                    ("name", CtValue::Str(name)) => Some(name.clone()),
-                    _ => None,
-                });
+                let address = raw_pointer_address(&fields)
+                    .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
+                self.check_runtime_sentry(address, &place.ty, "write", "valid_ptr")?;
+                let name = raw_pointer_name(&fields)
+                    .or_else(|| self.sentry_places.get(&address).cloned());
                 let Some(name) = name else {
                     return Err(unsupported("raw pointer local", self.span()));
                 };

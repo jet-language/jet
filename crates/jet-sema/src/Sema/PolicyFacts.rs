@@ -104,6 +104,7 @@ pub fn collect_policy_facts_from_program(program: &Program) -> PolicyFactGraph {
             crate::Policy::PolicyKey::NoAlloc
                 | crate::Policy::PolicyKey::ZeroRc
                 | crate::Policy::PolicyKey::ArenaBounded
+                | crate::Policy::PolicyKey::Sentries
         ) {
             graph.record(
                 PolicyDomain::Memory,
