@@ -321,6 +321,11 @@ impl<'a> Checker<'a> {
         // display spelling instead of widening through `Int`.
         let erased = source.erased_inline_ranges();
         if &erased != source {
+            self.require_knowledge_gate(
+                KnowledgePlane::Range,
+                KnowledgeGate::BoundedArithmetic,
+                expr.span(),
+            );
             if &erased == target {
                 return;
             }
@@ -1273,13 +1278,11 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 if self.registry.distinct_range(distinct_name).is_some() {
-                    if !self.knowledge_gate_allows(KnowledgePlane::Range) {
-                        self.diags.push(crate::Sema::knowledge_loss_diagnostic(
-                            crate::Sema::KnowledgePlane::Range,
-                            KnowledgeGate::BoundedArithmetic.spelling(),
-                            span,
-                        ));
-                    }
+                    self.require_knowledge_gate(
+                        KnowledgePlane::Range,
+                        KnowledgeGate::BoundedArithmetic,
+                        span,
+                    );
                     let base = self
                         .registry
                         .distinct_base(distinct_name)

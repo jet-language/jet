@@ -2227,6 +2227,11 @@ impl<'a> Checker<'a> {
                 match op {
                     UnOp::Neg => {
                         if let Type::InlineRange { base, .. } = &t {
+                            self.require_knowledge_gate(
+                                crate::Sema::KnowledgePlane::Range,
+                                crate::Sema::KnowledgeGate::BoundedArithmetic,
+                                *span,
+                            );
                             Some(base.as_ref().erased_inline_ranges())
                         } else if t.is_float()
                             || matches!(t, Type::Int | Type::IntN { signed: true, .. })
@@ -2259,6 +2264,11 @@ impl<'a> Checker<'a> {
                     // back unchanged.
                     UnOp::Not => {
                         if let Type::InlineRange { base, .. } = &t {
+                            self.require_knowledge_gate(
+                                crate::Sema::KnowledgePlane::Range,
+                                crate::Sema::KnowledgeGate::BoundedArithmetic,
+                                *span,
+                            );
                             Some(base.as_ref().erased_inline_ranges())
                         } else if t == Type::Bool || t.is_integer() {
                             Some(t)

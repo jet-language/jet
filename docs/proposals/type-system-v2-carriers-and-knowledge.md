@@ -259,8 +259,10 @@ One refinement story: `Severity :: distinct Int(0..10)`. The `#Invariant("...")`
 the prover is interval-only today, so the string spelling provably adds nothing but a parser.
 Sized widths sit here too (above) for *checking and conversion*: the same interval facts drive
 containment widening and fit errors. Their *arithmetic* contracts do not change: a `distinct`
-refinement widens to its base carrier exactly as ratified (D-RANGETYPE1), while the sized widths
-keep trap-on-overflow plus `wrapping`/`saturating`/`checked`, exactly as D-INTBIG1 reaffirmed.
+refinement reaches its base carrier only at the written bounded gate required by
+D-TYPE2-EXACT1; an ungated operation is rejected by sema. Sized widths keep
+trap-on-overflow plus `wrapping`/`saturating`/`checked`, exactly as D-INTBIG1
+reaffirmed.
 Arithmetic folds intervals — `[0,10] + [0,10] = [0,20]` — which is how the widening result and
 the index proofs (D-OOBPROOF1) fall out of one prover.
 

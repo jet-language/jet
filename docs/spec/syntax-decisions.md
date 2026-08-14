@@ -778,8 +778,10 @@ types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
 provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
 is fallible (`Severity.from_int(raw)?`, else E0136); an empty/reversed range is E0137;
-arithmetic widens to the base type. The constraint bounds are integer literals,
-not Range values; accepting a runtime value here would make the declaration
+arithmetic reaches the base type only at a written bounded gate
+(`wrapping(…)`, `saturating(…)`, or `checked(…)`); an ungated operation is
+rejected by the knowledge law. The constraint bounds are integer literals, not
+Range values; accepting a runtime value here would make the declaration
 value-dependent (D-RANGE-VALUE1=A).
 
 **D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181; amended by

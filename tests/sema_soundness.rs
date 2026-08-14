@@ -44,6 +44,32 @@ fn run() {
         "E0156",
     );
 
+    // Range: a proof attached to an inline carrier cannot be erased by an
+    // otherwise lossless-looking parameter boundary.
+    rejects(
+        r#"
+fn accept_int(value: Int) {}
+
+fn run() {
+    bounded :: Int(0..10).from_int(4)
+    accept_int(bounded)
+}
+"#,
+        "E0156",
+    );
+
+    // Range: unary arithmetic also leaves the proven interval.
+    rejects(
+        r#"
+fn run() {
+    bounded :: Int(0..10).from_int(4)
+    negated :: -bounded
+    print(negated)
+}
+"#,
+        "E0156",
+    );
+
     // The other knowledge planes retain their existing sema-owned gates.
     rejects(include_str!("ui/quantity_implicit_rounding.jet"), "E0127");
     rejects(include_str!("ui/typestate_wrong_state.jet"), "E0150");

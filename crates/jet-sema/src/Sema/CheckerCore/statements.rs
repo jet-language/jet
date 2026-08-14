@@ -1668,7 +1668,12 @@ impl<'a> Checker<'a> {
                                 // D-NUMJOIN1=A: a numeric item widens into the
                                 // item type the loop is already building.
                                 if got != want && got.numeric_widening_to(&want).is_some() {
-                                    // accepted: the item widens losslessly
+                                    // Keep the same sema widening path used by
+                                    // calls, returns, and ordinary lists. It
+                                    // gates range erasure before the item is
+                                    // stored in the collected carrier.
+                                    let source = got.clone();
+                                    self.widen_numeric_expr(e, &source, &want);
                                 } else if got != want {
                                     self.diags.push(Diagnostic::error(
                                         "E0074",

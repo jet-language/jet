@@ -1636,6 +1636,21 @@ impl<'a> Checker<'a> {
             .is_some_and(|gate| KnowledgeLoss::allows_gate(plane, gate))
     }
 
+    /// Apply the one knowledge law at a sema boundary. Callers identify the
+    /// existing written operation that can make the move explicit; this
+    /// method owns the shared diagnostic and keeps codegen out of the policy.
+    pub(crate) fn require_knowledge_gate(
+        &mut self,
+        plane: KnowledgePlane,
+        gate: KnowledgeGate,
+        span: Span,
+    ) {
+        if !self.knowledge_gate_allows(plane) {
+            self.diags
+                .push(KnowledgeLoss::diagnostic(plane, gate.spelling(), span));
+        }
+    }
+
     pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
         for arg in args {
             for (name, _, ty) in &arg.flags.binder_refs {

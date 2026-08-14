@@ -144,6 +144,12 @@ impl<'a> Checker<'a> {
                     for elem in &elems {
                         if elem != fill && fill.numeric_widening_to(elem).is_none() {
                             self.zip_type_error(format!("common zip fill `{}` does not fit column `{}`", fill.name(), elem.name()), span);
+                        } else if elem != fill && matches!(fill, Type::InlineRange { .. }) {
+                            self.require_knowledge_gate(
+                                crate::Sema::KnowledgePlane::Range,
+                                crate::Sema::KnowledgeGate::BoundedArithmetic,
+                                span,
+                            );
                         }
                     }
                 }
@@ -162,6 +168,12 @@ impl<'a> Checker<'a> {
                         }
                         if **fill != *elem && fill.numeric_widening_to(elem).is_none() {
                             self.zip_type_error(format!("fill `{name}` does not fit column {}", index + 1), span);
+                        } else if **fill != *elem && matches!(fill, Type::InlineRange { .. }) {
+                            self.require_knowledge_gate(
+                                crate::Sema::KnowledgePlane::Range,
+                                crate::Sema::KnowledgeGate::BoundedArithmetic,
+                                span,
+                            );
                         }
                     }
                 } else if fills_ty.is_some() {

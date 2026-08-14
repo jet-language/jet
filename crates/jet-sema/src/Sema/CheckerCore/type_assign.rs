@@ -7,7 +7,7 @@ use crate::Sema::CheckerCoreLib::{
     phantom_fact_menu_diag, retired_acronym_spelling_diag,
 };
 use crate::Sema::Bundle::fn_types_compatible;
-use crate::Sema::Checker;
+use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane};
 use crate::Sema::Diagnostics::{
     edit_distance, option_used_where_plain_expected, result_used_where_plain_expected,
     soft_public_use, type_fix_hint, undeclared_value_tag,
@@ -686,12 +686,18 @@ impl<'a> Checker<'a> {
                 }
                 return false;
             }
-            // D-TYPE2-SPELL1=A: an inline range is proof attached to its carrier.
-            // Its stored value is already an `Int`, so an exact carrier boundary
-            // needs no runtime conversion or second range check.
+            // D-TYPE2-EXACT1: an inline range is proof attached to its carrier.
+            // Reaching the carrier boundary erases that proof, so it is still
+            // a knowledge loss even though the runtime representation is the
+            // same integer.
             if matches!(got, Type::InlineRange { .. })
                 && got.erased_inline_ranges() == *want
             {
+                self.require_knowledge_gate(
+                    KnowledgePlane::Range,
+                    KnowledgeGate::BoundedArithmetic,
+                    span,
+                );
                 return true;
             }
             if let (
