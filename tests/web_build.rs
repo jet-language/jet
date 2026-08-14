@@ -2621,7 +2621,7 @@ fn web_grouped_use_list_wasm_bridge_roundtrip() {
 use core.math.[abs, min]
 
 #WasmExport
-fn compute() => Int {
+pub fn compute() => Int {
     return abs(-8) + min(9, 4)
 }
 
