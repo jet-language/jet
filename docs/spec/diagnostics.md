@@ -254,7 +254,7 @@ renumbered, and no new `W` code may be allocated.
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
-| E0120 | sema  | moving/returning a parameter without the move-capability marker `^` |
+| E0120 | sema  | non-cloneable or explicitly-protected read value used in an owning destination |
 | E0121 | sema  | value used after it was given away        |
 | E0123 | sema/runtime | loop stride must be a positive Int (D-LOOP-ADVANCE2) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
