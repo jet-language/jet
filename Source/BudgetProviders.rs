@@ -288,6 +288,7 @@ fn compile_descriptor(root: &Path, mode: &str, target: &str, profile: &str, patc
         return Err("compile workload has an unsupported mode, empty target, or empty profile".into());
     }
     if target != "cli" { return Err(format!("compile workload target `{target}` is unsupported by the resident fixture compiler")); }
+    validate_compile_profile(root, profile)?;
     if mode == "Edit" && patch.is_none() { return Err("CompileProbe Edit workload has no patch path".into()); }
     if mode != "Edit" && patch.is_some() { return Err("only an Edit workload may name a patch path".into()); }
     let patch_sha256 = match patch {
@@ -302,6 +303,24 @@ fn compile_descriptor(root: &Path, mode: &str, target: &str, profile: &str, patc
         None => sha256_hex(&[]),
     };
     Ok(CompileDescriptor { source_tree_sha256: source_tree_digest(root)?, patch_sha256 })
+}
+
+fn validate_compile_profile(root: &Path, profile: &str) -> Result<(), String> {
+    if matches!(profile, "dev" | "release" | "debug" | "ci" | "small") {
+        return Ok(());
+    }
+    let manifest = root.join("package.jet");
+    let raw = std::fs::read_to_string(&manifest).map_err(|_| {
+        format!("compile workload profile `{profile}` is unsupported by the resident fixture compiler")
+    })?;
+    let facts = crate::Package::PackageFacts::parse(&raw, manifest.display().to_string()).map_err(|_| {
+        format!("compile workload profile `{profile}` is unsupported by the resident fixture compiler")
+    })?;
+    if facts.build_profiles.iter().any(|candidate| candidate.name == profile) {
+        Ok(())
+    } else {
+        Err(format!("compile workload profile `{profile}` is unsupported by the resident fixture compiler"))
+    }
 }
 
 fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation) -> Result<Vec<ProviderEvent>, ProviderFailure> {
@@ -867,6 +886,14 @@ mod tests {
         let CanonicalJson::Object(mut fields)=workload else{panic!("workload object")};fields.insert("source_tree_sha256".into(),CanonicalJson::String("0".repeat(64)));
         let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:"1".repeat(64),provider_hash:"2".repeat(64),context_hash:"3".repeat(64),specs:vec![ProviderSpec{budget_hash:"4".repeat(64),metric:"CompileTime(P95)".into()}],workload:CanonicalJson::Object(fields),policy:CanonicalJson::Null};
         let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let failure=compiler_latency_provider(&request,&cancellation).unwrap_err();assert_eq!(failure.class,FailureClass::Incompatible);
+        let _=std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn compiler_probe_rejects_unsupported_profile_before_execution(){
+        let root=temporary("compile-profile");std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.jet"),"name: \"profile\"\nversion: \"0.1.0\"\n").unwrap();std::fs::write(root.join("src/run.jet"),"fn run() {}\n").unwrap();
+        let error=compiler_probe_workload(&root,&root.join("src/run.jet"),"Clean","cli","unsupported",None).unwrap_err();
+        assert!(error.contains("profile `unsupported` is unsupported"),"{error}");
         let _=std::fs::remove_dir_all(root);
     }
     #[cfg(target_os="linux")]fn assert_last_group_gone(){extern "C"{fn kill(pid:i32,signal:i32)->i32;}let group=LAST_ISOLATED_GROUP.load(Ordering::SeqCst)as i32;let deadline=Instant::now()+Duration::from_millis(100);while unsafe{kill(-group,0)}==0&&Instant::now()<deadline{std::thread::yield_now()}assert_ne!(unsafe{kill(-group,0)},0,"isolated provider process group survived timeout");}

@@ -37,10 +37,12 @@ Every candidate records source-tree and patch identities, cache scenario,
 compiler/Core digests, target, profile, backend, linker, host, one fixed
 warmup, twenty samples, elapsed variance, workload bytes, edit bytes, and
 resident-compiler phase totals. Missing or changed inputs, unsupported targets,
-incompatible identities, partial timing artifacts, provider crashes, and
-deadlines are unavailable evidence or operation failures; they never become a
-pass. Ordinary projects do not measure anything until they declare a compile
-budget.
+incompatible identities, partial timing artifacts, unsupported profiles,
+provider crashes, and deadlines are unavailable evidence or operation failures;
+they never become a pass. The resident fixture accepts the built-in `dev`,
+`release`, `debug`, `ci`, and `small` profiles plus profiles declared in the
+project's `package.jet`; unknown profiles reject before measurement. Ordinary
+projects do not measure anything until they declare a compile budget.
 
 Value families: Duration suffixes ns/us/ms/s; Bytes suffixes B/KiB/MiB/GiB; Percent suffix pct; Count is a nonnegative integer; Rate is Rate.{ count: Int, per: Duration }. These suffixes are reserved in Syntax.rs. Source quantities normalize exactly to unsigned integer ns, bytes, count, or rate rational. Overflow, fractional bytes/counts, negative values, NaN/infinity, and runtime expressions are rejected.
 
