@@ -625,6 +625,15 @@ fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
                     path.display(),
                     notif
                 );
+                for expect in &step.expect_contains {
+                    assert!(
+                        notif.contains(expect.as_str()),
+                        "[{}] expected {:?} in notification, got:\n{}",
+                        path.display(),
+                        expect,
+                        notif
+                    );
+                }
             }
         } else if let Some(raw) = &step.send_raw {
             send_msg(&mut stdin, raw);

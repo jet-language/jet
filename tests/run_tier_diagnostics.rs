@@ -171,3 +171,73 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
         "AOT text drifted from the UI snapshot"
     );
 }
+
+#[test]
+fn e0999_row_fix_matches_aot_run_and_interpreter() {
+    std::thread::Builder::new()
+        .name("e0999-tier-parity".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(e0999_row_fix_matches_aot_run_and_interpreter_inner)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
+    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui/single_bracket_marker.jet");
+    let path = file.to_string_lossy().into_owned();
+    let src = fs::read_to_string(&file).unwrap();
+    let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+
+    let aot = jet::compile_with_path(&src, &path)
+        .expect_err("AOT front end must reject a bare marker with brackets");
+    let run = match run_jit_once(&path) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("default jet run must reject E0999: {other:?}"),
+    };
+    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("interpreter gate must reject E0999: {other:?}"),
+    };
+
+    let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+        diags
+            .iter()
+            .map(|diag| {
+                (
+                    diag.code.clone(),
+                    diag.what.clone(),
+                    diag.why.clone(),
+                    diag.fix.clone(),
+                    diag.span,
+                    diag.edit.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = shape(&aot);
+    let expected_report = jet::render_all_json(&path, &src, &aot);
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].0, "E0999");
+    assert_eq!(expected[0].5.as_ref().map(|edit| edit.new_text.as_str()), Some("#Codable"));
+
+    for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+        assert_eq!(shape(&diags), expected, "{tier} diagnostic or recovery data drifted from AOT");
+        assert_eq!(
+            jet::render_all_json(&path, &src, &diags),
+            expected_report,
+            "{tier} structured report drifted from AOT"
+        );
+        assert_eq!(
+            jet::render_diagnostics("tests/ui/single_bracket_marker.jet", &src, &diags),
+            snapshot,
+            "{tier} text drifted from the UI snapshot"
+        );
+    }
+    assert_eq!(
+        jet::render_diagnostics("tests/ui/single_bracket_marker.jet", &src, &aot),
+        snapshot,
+        "AOT text drifted from the UI snapshot"
+    );
+}
