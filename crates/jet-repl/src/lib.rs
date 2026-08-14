@@ -1360,7 +1360,26 @@ fn looks_like_item(text: &str) -> bool {
 }
 
 pub(crate) fn is_item_input(text: &str) -> bool {
-    looks_like_item(normalize_repl_input(text).trim())
+    let normalized = normalize_repl_input(text);
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() || looks_like_import(trimmed) {
+        return false;
+    }
+    if looks_like_item(trimmed) {
+        return true;
+    }
+
+    // Notebook cells share the parser's complete item plane. Keep the REPL's
+    // fast keyword classifier above, but let declarations such as `@name ::`
+    // and marker-owned items join the file-wide notebook set without growing a
+    // second list of declaration spellings here.
+    let (tokens, lex_diags) = crate::Lexer::lex(trimmed);
+    if !lex_diags.is_empty() {
+        return false;
+    }
+    crate::Parser::parse(&tokens)
+        .map(|program| !program.items.is_empty() && program.script_body.is_empty())
+        .unwrap_or(false)
 }
 
 /// D-CTCORE1: project accepted Core aliases from sema's name ledger. The
@@ -3405,6 +3424,13 @@ mod tests {
         };
         assert_eq!(check_src, "s :: \"\";");
         assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
+    }
+
+    #[test]
+    fn notebook_item_classifier_uses_the_parser_item_plane() {
+        assert!(is_item_input("@answer :: 42"));
+        assert!(is_item_input("#Test(\"answer\") { require(true) }"));
+        assert!(!is_item_input("answer :: 42"));
     }
 
     #[test]

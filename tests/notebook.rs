@@ -18,6 +18,19 @@ use std::time::{Duration, Instant};
 fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
     let mut kernel = Kernel::open(None, "entry-order-test")
         .expect("open entry-order notebook kernel");
+    let comptime_reader = kernel
+        .notebook
+        .add_cell(
+            CellKind::Jet,
+            "fn comptime_reader() => Int { return @future_answer }",
+        )
+        .id
+        .clone();
+    let comptime_answer = kernel
+        .notebook
+        .add_cell(CellKind::Jet, "@future_answer :: 42")
+        .id
+        .clone();
     let caller = kernel
         .notebook
         .add_cell(
@@ -50,6 +63,17 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .id
         .clone();
 
+    assert!(
+        kernel
+            .execute_cell(ClientKind::FirstParty, &comptime_reader)
+            .unwrap()
+            .ok(),
+        "function cells must see later comptime declarations"
+    );
+    assert!(kernel
+        .execute_cell(ClientKind::FirstParty, &comptime_answer)
+        .unwrap()
+        .ok());
     assert!(
         kernel
             .execute_cell(ClientKind::FirstParty, &caller)
