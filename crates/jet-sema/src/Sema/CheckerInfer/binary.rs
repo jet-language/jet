@@ -138,7 +138,11 @@ impl<'a> Checker<'a> {
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
                 (Expr::Int(value, span, width, raw), Type::InlineRange { base, lo, hi }) => {
                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
-                    if negated < i128::from(*lo) || negated > i128::from(*hi) {
+                    if !super::exact_integer_fits(
+                        &negated,
+                        i128::from(*lo),
+                        i128::from(*hi),
+                    ) {
                         self.diags.push(Diagnostic::error(
                             "E0135",
                             format!(

@@ -2112,7 +2112,11 @@ impl<'a> Checker<'a> {
                     ) = (inner.as_mut(), self.expected_type.clone())
                     {
                         let value = super::exact_integer_literal(*n, raw.as_deref()).neg();
-                        if value < i128::from(lo) || value > i128::from(hi) {
+                        if !super::exact_integer_fits(
+                            &value,
+                            i128::from(lo),
+                            i128::from(hi),
+                        ) {
                             self.diags.push(Diagnostic::error(
                                 "E0135",
                                 format!(
