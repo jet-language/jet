@@ -412,7 +412,7 @@ fn validate_web_func_tir(
     diags: &mut Vec<WebTirUnsupported>,
 ) {
     *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
-    let covered = f.pre.is_empty() && f.post.is_empty() && TIR::tir_covers(f, cx);
+    let covered = TIR::tir_covers(f, cx);
     if covered {
         let tir = TIR::lower_web_func(f, cx);
         let supported = if !require_web_emit {
@@ -477,6 +477,7 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
         | TIR::TStmt::Impure(body) => {
             web_stmts_guarantee_return(body)
         }
+        TIR::TStmt::ContractScope { body, .. } => web_stmts_guarantee_return(body),
         _ => false,
     })
 }
@@ -643,6 +644,40 @@ fn web_wasm_stmts_supported(
         TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, file_prefix, reconstructions),
         TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, file_prefix, reconstructions),
+        TIR::TStmt::Contract { contract } => {
+            contract.disposition != TIR::TContractDisposition::Check
+                || (web_wasm_expr_supported(
+                    &contract.condition,
+                    bundle,
+                    file_prefix,
+                    reconstructions,
+                )
+                    && web_wasm_expr_supported(
+                        &contract.message,
+                        bundle,
+                        file_prefix,
+                        reconstructions,
+                    ))
+        }
+        TIR::TStmt::ContractScope {
+            pre, body, post, ..
+        } => {
+            pre.iter().chain(post).all(|contract| {
+                contract.disposition != TIR::TContractDisposition::Check
+                    || (web_wasm_expr_supported(
+                        &contract.condition,
+                        bundle,
+                        file_prefix,
+                        reconstructions,
+                    )
+                        && web_wasm_expr_supported(
+                            &contract.message,
+                            bundle,
+                            file_prefix,
+                            reconstructions,
+                        ))
+            }) && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
         TIR::TStmt::If { cond, then_body, else_body, .. } => {
             web_wasm_if_cond_supported(cond, bundle, file_prefix, reconstructions)
                 && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
@@ -803,6 +838,7 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::FloatLit(_)
         | TIR::TExprKind::BoolLit(_)
         | TIR::TExprKind::Local(_) => true,
+        TIR::TExprKind::Todo { .. } => true,
         TIR::TExprKind::CtLit(crate::AST::CtValue::Int(_)
         | crate::AST::CtValue::BigInt(_)) => true,
         TIR::TExprKind::InlineBlock(stmts) => {
@@ -1115,6 +1151,20 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
         TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
+        TIR::TStmt::Contract { contract } => {
+            contract.disposition != TIR::TContractDisposition::Check
+                || (web_expr_supported(&contract.condition)
+                    && web_expr_supported(&contract.message))
+        }
+        TIR::TStmt::ContractScope {
+            pre, body, post, ..
+        } => {
+            pre.iter().chain(post).all(|contract| {
+                contract.disposition != TIR::TContractDisposition::Check
+                    || (web_expr_supported(&contract.condition)
+                        && web_expr_supported(&contract.message))
+            }) && web_stmts_supported(body)
+        }
         TIR::TStmt::If { cond, then_body, else_body, .. } => {
             web_if_cond_supported(cond)
                 && web_stmts_supported(then_body)
@@ -1265,6 +1315,9 @@ fn web_stmts_safe_in_js_iife(stmts: &[TIR::TStmt]) -> bool {
                 .all(|(_, _, body)| web_stmts_safe_in_js_iife(body))
                 && web_stmts_safe_in_js_iife(else_body)
         }
+        // A contract scope owns its own return-capturing IIFE when it has
+        // postconditions, so returns inside it cannot cross this boundary.
+        TIR::TStmt::ContractScope { .. } => true,
         TIR::TStmt::Inline(body)
         | TIR::TStmt::Region(body)
         | TIR::TStmt::SentryPolicy { body, .. }
@@ -1373,6 +1426,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     match &expr.kind {
         E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_)
         | E::Unit | E::DefaultLit | E::CtLit(_) | E::Uninit => true,
+        E::Todo { .. } => true,
         E::InlineBlock(stmts) => web_inline_block_supported(stmts),
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
@@ -1995,6 +2049,56 @@ fn json_quote(s: &str) -> String {
         }
     }
     out.push('"');
+    out
+}
+
+/// D-FAIL-BREACH1: the JS frame consumes the same active runtime rows and
+/// Prelude renderer as the native report. The generated object is data, not a
+/// second hand-maintained code-to-copy table in the JavaScript adapter.
+fn js_runtime_stop_metadata() -> String {
+    let default_report = jet_foundation::Outcome::jet_render_runtime_stop(
+        "__JET_RUNTIME_STOP_DEFAULT__",
+        "",
+        0,
+        "",
+        "",
+        1,
+        1,
+        "__JET_RUNTIME_MESSAGE__",
+        "",
+    );
+    let mut out = format!(
+        "const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ what: {}, why: {}, fix: {} }});\n\
+         const JET_RUNTIME_STOP_METADATA = Object.freeze({{\n",
+        json_quote(&default_report.what),
+        json_quote(&default_report.why),
+        json_quote(&default_report.fix),
+    );
+    for row in jet_foundation::Registry::diagnostic_rows().iter().filter(|row| {
+        row.moment == jet_foundation::Diagnostics::ReportMoment::Run
+            && row.status == jet_foundation::Registry::DiagnosticStatus::Active
+            && row.code.starts_with("E30")
+    }) {
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            row.code,
+            "",
+            0,
+            "",
+            "",
+            1,
+            1,
+            "__JET_RUNTIME_MESSAGE__",
+            "",
+        );
+        out.push_str(&format!(
+            "  {}: Object.freeze({{ what: {}, why: {}, fix: {} }}),\n",
+            json_quote(row.code),
+            json_quote(&report.what),
+            json_quote(&report.why),
+            json_quote(&report.fix),
+        ));
+    }
+    out.push_str("});\n\n");
     out
 }
 
@@ -2637,6 +2741,7 @@ fn web_stmts_use_uninit(stmts: &[TIR::TStmt]) -> bool {
         | TIR::TStmt::Region(body)
         | TIR::TStmt::SentryPolicy { body, .. }
         | TIR::TStmt::Impure(body) => web_stmts_use_uninit(body),
+        TIR::TStmt::ContractScope { body, .. } => web_stmts_use_uninit(body),
         TIR::TStmt::CountedLoop {
             init, step, body, ..
         } => {
@@ -3800,6 +3905,90 @@ fn emit_wasm_if(
     Ok(())
 }
 
+fn emit_wasm_contract_check(
+    contract: &TIR::TContract,
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
+    if contract.disposition != TIR::TContractDisposition::Check {
+        return Ok(());
+    }
+    let pad = "    ".repeat(indent);
+    let ok = mangle_generated("contract_ok");
+    let cond = wasm_emit_expr(
+        &contract.condition,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    let msg = wasm_emit_expr(
+        &contract.message,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    out.push_str(&format!(
+        "{pad}{{ let {ok} = jet_contract_check({cond}); if !{ok} {{ jet_contract_fail({file}, {line}, {keyword}, &({msg})); }} }}\n",
+        file = format!("{:?}", contract.file),
+        line = contract.line,
+        keyword = format!("{:?}", web_contract_keyword(contract.kind)),
+    ));
+    Ok(())
+}
+
+fn emit_wasm_contract_scope(
+    pre: &[TIR::TContract],
+    body: &[TIR::TStmt],
+    post: &[TIR::TContract],
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
+    for contract in pre {
+        emit_wasm_contract_check(
+            contract,
+            out,
+            indent,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+    }
+    if post.is_empty() {
+        emit_wasm_body(body, out, indent, funcs, file_prefix, reconstructions)?;
+        return Ok(());
+    }
+    let pad = "    ".repeat(indent);
+    let result = mangle_generated("result");
+    out.push_str(&format!("{pad}let {result} = (|| {{\n"));
+    emit_wasm_body(
+        body,
+        out,
+        indent + 1,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    out.push_str(&format!("{pad}}})();\n"));
+    for contract in post {
+        emit_wasm_contract_check(
+            contract,
+            out,
+            indent,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+    }
+    out.push_str(&format!("{pad}{result}\n"));
+    Ok(())
+}
+
 fn emit_wasm_body(
     body: &[TIR::TStmt],
     out: &mut String,
@@ -3860,6 +4049,30 @@ fn emit_wasm_body(
                         match op { Some(op) => binop(op).ok_or(())?, None => "" }
                     )),
                 }
+            }
+            TIR::TStmt::Contract { contract } => {
+                emit_wasm_contract_check(
+                    contract,
+                    out,
+                    indent,
+                    funcs,
+                    file_prefix,
+                    reconstructions,
+                )?;
+            }
+            TIR::TStmt::ContractScope {
+                pre, body, post, ..
+            } => {
+                emit_wasm_contract_scope(
+                    pre,
+                    body,
+                    post,
+                    out,
+                    indent,
+                    funcs,
+                    file_prefix,
+                    reconstructions,
+                )?;
             }
             TIR::TStmt::If {
                 cond,
@@ -4428,6 +4641,12 @@ fn wasm_emit_expr(
         TIR::TExprKind::InlineBlock(stmts) => {
             wasm_emit_inline_block(stmts, funcs, file_prefix, reconstructions)?
         }
+        TIR::TExprKind::Todo { line, expected_type } => format!(
+            "jet_todo_stop({}, {}, {:?})",
+            mangle_generated("source_file"),
+            line,
+            expected_type,
+        ),
         TIR::TExprKind::IntLit(n, _) if matches!(&expr.ty, Type::Int) => {
             format!("JetWasmInt::from_i64({n})")
         }
@@ -5200,6 +5419,7 @@ fn emit_js_app(
     out.push_str("const JET_EDGE_TARGET = \"web\";\n");
     out.push_str(JS_POWER_PRELUDE);
     out.push_str(JS_EXECUTION_PRELUDE);
+    out.push_str(&js_runtime_stop_metadata());
     let mut handlers = Vec::new();
     let exports: Vec<&FuncWeb> = funcs
         .iter()
@@ -5958,6 +6178,73 @@ fn emit_js_if_value(
     Ok(())
 }
 
+fn web_contract_keyword(kind: TIR::TContractKind) -> &'static str {
+    match kind {
+        TIR::TContractKind::Pre => "Pre",
+        TIR::TContractKind::Post => "Post",
+    }
+}
+
+fn emit_js_contract_check(
+    contract: &TIR::TContract,
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
+    if contract.disposition != TIR::TContractDisposition::Check {
+        return Ok(());
+    }
+    let pad = "  ".repeat(indent);
+    let ok = mangle_generated("contract_ok");
+    let cond = tir_js_expr(&contract.condition, funcs, file_prefix)?;
+    let msg = tir_js_expr(&contract.message, funcs, file_prefix)?;
+    out.push_str(&format!(
+        "{pad}{{ const {ok} = jet_contract_check({cond}); if (!{ok}) {{ jet_contract_fail({file}, {line}, {keyword}, {msg}); }} }}\n",
+        file = json_quote(&contract.file),
+        line = contract.line,
+        keyword = json_quote(web_contract_keyword(contract.kind)),
+    ));
+    Ok(())
+}
+
+fn emit_js_contract_scope(
+    pre: &[TIR::TContract],
+    body: &[TIR::TStmt],
+    post: &[TIR::TContract],
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
+    for contract in pre {
+        emit_js_contract_check(contract, out, funcs, file_prefix, indent)?;
+    }
+    if post.is_empty() {
+        emit_tir_js_body(body, out, funcs, file_prefix, indent)?;
+        return Ok(());
+    }
+
+    let mut nested = String::new();
+    emit_tir_js_body(body, &mut nested, funcs, file_prefix, indent + 1)?;
+    let pad = "  ".repeat(indent);
+    let result = mangle_generated("result");
+    if nested.contains("await bridge_") {
+        out.push_str(&format!(
+            "{pad}const {result} = await (async () => {{\n"
+        ));
+    } else {
+        out.push_str(&format!("{pad}const {result} = (() => {{\n"));
+    }
+    out.push_str(&nested);
+    out.push_str(&format!("{pad}}})();\n"));
+    for contract in post {
+        emit_js_contract_check(contract, out, funcs, file_prefix, indent)?;
+    }
+    out.push_str(&format!("{pad}return {result};\n"));
+    Ok(())
+}
+
 fn emit_tir_js_body(
     body: &[TIR::TStmt],
     out: &mut String,
@@ -6039,6 +6326,22 @@ fn emit_tir_js_body_inner(
                     };
                     out.push_str(&format!("{pad}{target} {assign} {v};\n"));
                 }
+            }
+            TIR::TStmt::Contract { contract } => {
+                emit_js_contract_check(contract, out, funcs, file_prefix, indent)?;
+            }
+            TIR::TStmt::ContractScope {
+                pre, body, post, ..
+            } => {
+                emit_js_contract_scope(
+                    pre,
+                    body,
+                    post,
+                    out,
+                    funcs,
+                    file_prefix,
+                    indent,
+                )?;
             }
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
@@ -6571,6 +6874,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
         E::InlineBlock(stmts) => tir_js_inline_block(stmts, funcs, file_prefix)?,
+        E::Todo { line, expected_type } => format!(
+            "jet_todo_stop({}, {}, {})",
+            mangle_generated("source_file"),
+            line,
+            json_quote(expected_type),
+        ),
         // Whole numbers are JS BigInt on this tier (I9 / #1485): a plain
         // numeric literal is only exact to 2^53.
         E::IntLit(n, _) => format!("{n}n"),
@@ -7496,8 +7805,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "            if let Some(failure) = payload.downcast_ref::<JetWasmRuntimeFailure>() {\n",
     "                jet_wasm_store_runtime_error(&failure.error, &failure.frame);\n",
     "            } else {\n",
-    "                let error = jet_err(\"wasm host call failed\".to_string(), Ok(\"E3001\".to_string()), Err(JetAbsent));\n",
-    "                jet_wasm_store_runtime_error(&error, \"Stop [E3001]: wasm host call failed\\n\");\n",
+    "                // Unknown panic has no Jet provenance; preserve the host/compiler defect.\n",
+    "                std::panic::resume_unwind(payload);\n",
     "            }\n",
     "            T::default()\n",
     "        }\n",
@@ -7533,6 +7842,16 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     // first, so `T?` and `T ? E` mean one thing on the web tier too.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
     "\n",
+    include_str!("../Prelude/Core/Contracts.rs"),
+    "\n",
+    "fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {\n",
+    "    jet_runtime_stop(\"E3011\", file, line, &jet_todo_message(file, line, expected_type))\n",
+    "}\n\n",
+    "fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {\n",
+    "    let report = jet_contract_report(clause_kw, msg, file, line);\n",
+    "    let error = jet_err(report.what.clone(), Ok(\"E3005\".to_string()), Err(JetAbsent));\n",
+    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
+    "}\n\n",
     include_str!("../Prelude/Core/TaskWasm.rs"),
     "\n",
     include_str!("../Prelude/Core/Option.rs"),

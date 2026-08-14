@@ -126,26 +126,11 @@ function jet_map_get(base, key, file, line) {
 }
 
 function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals) {
-  let what = message;
-  let why = "the program reached a registered runtime stop";
-  let fix = "handle the condition at the reported source location";
-  if (code === "E3001") {
-    what = `panic: ${message}`;
-    why = "the program reached a panic stop and cannot continue";
-    fix = "check the source location and handle the failing condition";
-  } else if (code === "E3005") {
-    why = "a runtime contract condition evaluated false";
-    fix = "satisfy the contract or update it";
-  } else if (code === "E3010") {
-    why = "the operation has no valid result for these operands";
-    fix = "check the operands before the operation, or use a checked operation";
-  } else if (code === "E3011") {
-    why = "a #Todo hole was reached at runtime";
-    fix = "implement this code before running it";
-  } else if (code === "E3012") {
-    why = "the call stack exceeded Jet's safe runtime limit";
-    fix = "end the recursion or make progress toward a base case";
-  }
+  const policy = JET_RUNTIME_STOP_METADATA[code] ?? JET_RUNTIME_STOP_DEFAULT;
+  const substitute = (template) => template.split("__JET_RUNTIME_MESSAGE__").join(String(message));
+  const what = substitute(policy.what);
+  const why = policy.why;
+  const fix = policy.fix;
 
   let rendered = `Stop [${code}]: ${what}\n`;
   if (file) {
@@ -166,4 +151,16 @@ function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, ca
 function jet_runtime_stop(code, file, line, message, fn_name = "", source_line = "", locals = "") {
   const frame = jet_runtime_stop_report(code, file, line, fn_name, source_line, 1, 1, message, locals);
   throw jet_web_edge_error({ schema: "jet.err/v1", message, code, cause: null }, { frame });
+}
+
+function jet_todo_stop(file, line, expected_type) {
+  jet_runtime_stop("E3011", file, line, `#Todo at ${file}:${line} — expected ${expected_type}`);
+}
+
+function jet_contract_check(condition) {
+  return condition;
+}
+
+function jet_contract_fail(file, line, clause_kw, message) {
+  jet_runtime_stop("E3005", file, line, `#${clause_kw} contract failed: ${message}`);
 }

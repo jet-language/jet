@@ -1579,6 +1579,150 @@ fn run() {
 }
 
 #[test]
+fn web_todo_runs_through_shared_stop_on_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web Todo stop test (need rustc + node)");
+        return;
+    }
+    let cases = [
+        (
+            "todo_js",
+            r#"#Target(JS)
+fn missing() => Int {
+    return #Todo
+}
+
+fn run() {
+    print(missing())
+}
+"#,
+            "tests/fixtures/web_todo_js.jet",
+        ),
+        (
+            "todo_wasm",
+            r#"#Target(Wasm)
+fn missing() => Int {
+    return #Todo
+}
+
+fn run() {
+    print(missing())
+}
+"#,
+            "tests/fixtures/web_todo_wasm.jet",
+        ),
+    ];
+    let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  if (error?.name !== "JetError") throw error;
+  console.log("code=" + error.code);
+  console.log(error.frame);
+}
+"#;
+    for (stem, source, shown) in cases {
+        let dir = build_web_fixture(stem, source, shown);
+        let stdout = run_node_harness(&dir, "todo_harness.mjs", harness);
+        assert!(stdout.contains("code=E3011"), "{stem}:\n{stdout}");
+        assert!(
+            stdout.contains(&format!(
+                "Stop [E3011]: #Todo at {shown}:3 — expected Int"
+            )),
+            "{stem} lost the canonical Todo frame:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("Why: a #Todo hole was reached at runtime")
+                && stdout.contains("Fix: implement this code before running it"),
+            "{stem} lost the canonical Todo why/fix:\n{stdout}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn web_contracts_execute_with_canonical_e3005_on_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web contract stop test (need rustc + node)");
+        return;
+    }
+    let cases = [
+        (
+            "contract_js",
+            r#"#Target(JS)
+#[Pre(value > 0, "positive"), Post(result > value, "grows")]
+fn checked(value: Int) => Int {
+    return value
+}
+
+fn run() {
+    print(checked(0))
+}
+"#,
+            "tests/fixtures/web_contract_js.jet",
+            "Pre",
+            "positive",
+        ),
+        (
+            "contract_wasm",
+            r#"#Target(Wasm)
+#[Pre(value > 0, "positive"), Post(result > value, "grows")]
+fn checked(value: Int) => Int {
+    return value
+}
+
+fn run() {
+    print(checked(1))
+}
+"#,
+            "tests/fixtures/web_contract_wasm.jet",
+            "Post",
+            "grows",
+        ),
+    ];
+    let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  if (error?.name !== "JetError") throw error;
+  console.log("code=" + error.code);
+  console.log(error.frame);
+}
+"#;
+    for (stem, source, shown, clause, message) in cases {
+        let dir = build_web_fixture(stem, source, shown);
+        let stdout = run_node_harness(&dir, "contract_harness.mjs", harness);
+        assert!(stdout.contains("code=E3005"), "{stem}:\n{stdout}");
+        assert!(
+            stdout.contains(&format!(
+                "Stop [E3005]: #{clause} contract failed: {message}"
+            )),
+            "{stem} lost the contract frame:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("--> {shown}:2")),
+            "{stem} lost the contract source location:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("Why: a runtime contract condition evaluated false")
+                && stdout.contains("Fix: satisfy the contract or update it"),
+            "{stem} lost the canonical contract why/fix:\n{stdout}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn web_edge_preserves_one_error_wire_across_js_and_wasm() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web failure-edge parity test (need rustc + node)");
