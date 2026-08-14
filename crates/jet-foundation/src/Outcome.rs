@@ -101,8 +101,16 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
 // journey vocabulary and collapse only consecutive duplicate hops.
 const JET_JOURNEY_DIAGNOSTIC_CODE: &str = "E3002";
 
+#[derive(PartialEq, Eq)]
+struct JourneyFrame {
+    diagnostic_code: &'static str,
+    fn_name: String,
+    file: String,
+    line: u32,
+}
+
 thread_local! {
-    static JET_JOURNEY_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
+    static JET_JOURNEY_LAST: std::cell::RefCell<Option<JourneyFrame>> =
         const { std::cell::RefCell::new(None) };
     static JET_JOURNEY_FRAMES: std::cell::RefCell<String> = const {
         std::cell::RefCell::new(String::new())
@@ -135,12 +143,12 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(
     fn_name: &str,
     note: F,
 ) -> Option<String> {
-    debug_assert_eq!(
-        crate::Registry::diagnostic(JET_JOURNEY_DIAGNOSTIC_CODE).map(|row| row.code),
-        Some(JET_JOURNEY_DIAGNOSTIC_CODE),
-        "journey frames must remain registered as E3002",
-    );
-    let site = (fn_name.to_string(), file.to_string(), line);
+    let site = JourneyFrame {
+        diagnostic_code: JET_JOURNEY_DIAGNOSTIC_CODE,
+        fn_name: fn_name.to_string(),
+        file: file.to_string(),
+        line,
+    };
     let fresh = JET_JOURNEY_LAST.with(|last| {
         let mut slot = last.borrow_mut();
         if slot.as_ref() == Some(&site) {
@@ -159,7 +167,16 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(
     } else {
         format!(": {note}")
     };
-    let frame = format!("error propagated from: {fn_name} ({file}:{line}) via ?{suffix}\n");
+    let frame = JET_JOURNEY_LAST.with(|last| {
+        let state = last.borrow();
+        let site = state
+            .as_ref()
+            .expect("fresh journey frame must remain stored");
+        format!(
+            "error propagated from: {} ({}:{}) via ?{suffix}\n",
+            site.fn_name, site.file, site.line
+        )
+    });
     JET_JOURNEY_FRAMES.with(|frames| frames.borrow_mut().push_str(&frame));
     Some(frame)
 }
