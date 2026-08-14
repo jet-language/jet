@@ -773,17 +773,17 @@ fn map_builtin_methods() {
     let src = r#"
 fn run() {
     probe := [String: Int].{ "k": 41 }
-    print(probe.add(\"k\", 5) ?? 0)
-    print(probe.add(\"new\", 9) ?? -99)
+    print(probe.add("k", 5) ?? 0)
+    print(probe.add("new", 9) ?? -99)
     m := [String: Int].{}
-    print(m.add(\"banana\", 3) ?? 0)
-    print(m.add(\"apple\", 5) ?? 0)
-    print(m.add(\"apple\", 7) ?? 0)
-    print(m.add_new(\"apple\", 9))
-    print(m.add_new(\"cherry\", 11))
+    print(m.add("banana", 3) ?? 0)
+    print(m.add("apple", 5) ?? 0)
+    print(m.add("apple", 7) ?? 0)
+    print(m.add_new("apple", 9))
+    print(m.add_new("cherry", 11))
     print(m.len())
-    print(m.has_key(\"apple\"))
-    v := m.get(\"apple\")
+    print(m.has_key("apple"))
+    v := m.get("apple")
     print(v ?? 0)
     ks := m.keys()
     print(ks.len())
