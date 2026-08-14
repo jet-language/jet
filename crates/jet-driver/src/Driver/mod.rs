@@ -1422,15 +1422,28 @@ pub fn seed_build_facts_with_contributions(
                     ),
                 );
         }
-        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
+        // Validate every profile before selecting one. An inactive profile is
+        // still package input and must not hide an undeclared or ill-typed key.
+        for profile_def in &facts.build_profiles {
             for (key, raw) in &profile_def.settings {
                 let Some(declaration) = facts.settings.get(key) else {
                     return Err(vec![undeclared_setting_diagnostic(
                         key,
-                        &format!("the profile contribution names no declaration in `package.jet`"),
+                        "the profile contribution names no declaration in `package.jet`",
                         &facts.origin,
                     )]);
                 };
+                parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
+                    vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+                })?;
+            }
+        }
+        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
+            for (key, raw) in &profile_def.settings {
+                let declaration = facts
+                    .settings
+                    .get(key)
+                    .expect("profile settings were validated before contribution");
                 let value = parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
                     vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
                 })?;
