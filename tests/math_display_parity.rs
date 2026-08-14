@@ -3,6 +3,9 @@ use std::process::{Command, Output};
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 const SOURCE: &str = r#"fn run() {
     print(Vec2(1.0, 2.0))
     print(Vec3(1.0, 2.0, 3.0))
@@ -58,4 +61,24 @@ fn builtin_math_family_has_named_field_parity_on_both_lenses() {
     assert_eq!(String::from_utf8(run.stdout).unwrap(), EXPECTED);
 
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn measured_values_propagate_first_order_uncertainty() {
+    let source = r#"
+use core.science.measurement as measurement
+
+fn run() {
+    gravity :: measurement.from(9.8, 0.1)
+    time :: measurement.from(2.0, 0.05)
+    squared_time :: time.mul(time)
+    height :: measurement.from(0.5, 0.0).mul(gravity).mul(squared_time)
+    print(height)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "measurement_first_order_uncertainty",
+        source,
+        "19.6 ± 0.7212489168102787\n",
+    );
 }

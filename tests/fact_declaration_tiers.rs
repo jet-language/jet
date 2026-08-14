@@ -8,7 +8,7 @@ mod common;
 use std::fs;
 use std::process::Command;
 
-use jet::AST::Item;
+use jet::AST::{Item, KnowledgeFact, Measure, Type};
 use jet_foundation::Registry;
 
 const SOURCE: &str = r#"
@@ -188,6 +188,59 @@ fn repl_accepts_the_fixture() {
     assert!(
         transcript.contains("fact declaration"),
         "REPL rejected or lost the declaration-only item:\n{transcript}"
+    );
+}
+
+#[test]
+fn measure_rows_share_one_registry_and_all_tiers() {
+    let plane = Registry::type_plane("Measure");
+    let fixed = Type::FixedList {
+        elem: Box::new(Type::Int),
+        len: 4,
+        len_expr: None,
+    };
+    let matrix = Type::compute_shape_type("Matrix", &[2, 3]);
+    let lanes = Type::Named("F32x4".to_string());
+
+    assert!(Registry::row(plane).is_some(), "measure plane must be registered");
+    assert!(fixed.knowledge_vector().facts(plane).any(|fact| matches!(
+        fact,
+        KnowledgeFact::Measure(Measure::Literal { kind, value })
+            if kind == "length" && *value == 4
+    )));
+    assert!(matrix.knowledge_vector().facts(plane).any(|fact| matches!(
+        fact,
+        KnowledgeFact::Measure(Measure::Literal { kind, value })
+            if kind == "shape" && *value == 2
+    )));
+    assert!(lanes.knowledge_vector().facts(plane).any(|fact| matches!(
+        fact,
+        KnowledgeFact::Measure(Measure::Literal { kind, value })
+            if kind == "lane" && *value == 4
+    )));
+
+    let source = r#"
+use core.compute as compute
+
+fn vec_rank(value: Vec<3>) => Int {
+    return compute.rank(value)
+}
+
+fn matrix_rank(value: Matrix<2, 3>) => Int {
+    return compute.rank(value)
+}
+
+fn run() {
+    vector :: compute.vec(3, 1.0) ?? panic("vector")
+    matrix :: compute.matrix(2, 3, 2.0) ?? panic("matrix")
+    print("vector:{vec_rank(vector)}")
+    print("matrix:{matrix_rank(matrix)}")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "measure_rows_share_one_registry",
+        source,
+        "vector:1\nmatrix:2\n",
     );
 }
 

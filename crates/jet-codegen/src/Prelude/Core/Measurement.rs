@@ -1,7 +1,9 @@
 // D-HONESTNUM1=A: one Float measurement arithmetic kernel for every tier.
 
 pub(crate) fn jet_measurement_kernel_new(value: f64, uncertainty: f64) -> (f64, f64) {
-    (value, uncertainty)
+    // D-TYPE2-UNCERT1=A: uncertainty is a magnitude. Exact values enter this
+    // grade with zero uncertainty; all results keep the same invariant.
+    (value, uncertainty.abs())
 }
 
 pub(crate) fn jet_measurement_kernel_add(left: (f64, f64), right: (f64, f64)) -> (f64, f64) {
