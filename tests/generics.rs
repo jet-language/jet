@@ -280,8 +280,8 @@ module with_baz<T> { pub struct Baz { value: T } }
 module foo :: with_bar_baz<Int>
 module foo_bar :: with_baz<Int>
 fn run() {
-    first :: M3FooBarBaz.{ value: 1 }
-    second :: M3Foo3BarBaz.{ value: 2 }
+    first :: foo.BarBaz.{ value: 1 }
+    second :: foo_bar.Baz.{ value: 2 }
     print(first.value + second.value)
 }
 "#;

@@ -1295,6 +1295,26 @@ fn populate_name_ledger(
         let state = &states[module_idx];
         for item in &module.items {
             declare_item_names(ledger, module_idx, &module.alias, item);
+            if let Item::CodeModule(instance) = item {
+                if instance.instance_identity.is_some() {
+                    for (internal, display) in GenericModules::instance_display_paths(instance) {
+                        ledger.record_display_path(
+                            module_idx,
+                            format!("{}.{}", module.alias, internal),
+                            display,
+                        );
+                    }
+                    for (internal, display) in
+                        GenericModules::top_level_instance_display_paths(instance, &module.items)
+                    {
+                        ledger.record_display_path(
+                            module_idx,
+                            format!("{}.{}", module.alias, internal),
+                            display,
+                        );
+                    }
+                }
+            }
         }
         for import in &module.imports {
             let import_alias = import.import_alias();

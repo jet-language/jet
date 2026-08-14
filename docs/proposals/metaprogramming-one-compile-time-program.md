@@ -408,14 +408,7 @@ The four checks from `D-MARK-FORM1=A` — vocabulary, site, signature, duplicate
 
 ### S5 — Generic modules stop leaking mangled names (D-META-MODNAME1=A)
 
-Today, from `examples/features/modules/generic_modules.jet`:
-
-```jet
-module three_ints :: fixed_buffer<Int>(3)
-buffer :: M5Three4IntsBuffer.{items: fixed}     // a real line in a shipped example
-```
-
-Settled:
+The shipped form is:
 
 ```jet
 module three_ints :: fixed_buffer<Int>(3)

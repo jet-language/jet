@@ -51,6 +51,19 @@ mod generic_module_tests {
     }
 
     #[test]
+    fn generic_module_retired_equals_alias_teaches_coloncolon() {
+        let src = "module cache<K>(capacity: Int) { fn size() => Int :: capacity }\nmodule old = cache<Int>(64)";
+        let (tokens, lex) = Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("retired equals alias spelling");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0003"
+                && diagnostic.what.contains("::")
+                && diagnostic.fix.contains("module old :: Target")
+        }), "{diagnostics:?}");
+    }
+
+    #[test]
     fn generic_module_retains_symbolic_fixed_length_and_nested_modules() {
         let src = "module buffer<T>(capacity: Int) { struct Data { items: [T#capacity] } module stats { fn size() => Int { return capacity } } }";
         let (tokens, lex) = Lexer::lex(src);

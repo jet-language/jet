@@ -129,15 +129,20 @@ module forward :: equivalent
 module different_type :: boxed<String>(3)
 module different_value :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_first(value: M5FirstBox) => M5FirstBox { return ~value }
-fn accepts_projection(value: M10EquivalentBox) => M5FirstBox { return ~value }
-fn accepts_chain(value: M7ForwardBox) => M5FirstBox { return ~value }
+fn accepts_first(value: first.Box) => first.Box { return ~value }
+fn accepts_projection(value: equivalent.Box) => first.Box { return ~value }
+fn accepts_chain(value: forward.Box) => first.Box { return ~value }
 fn accepts_surface(value: first.Box) => first.Box { return ~value }
 fn accepts_forward_surface(value: forward.Box) => first.Box { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    assert_eq!(
+        bundle.name_ledger.display_path(0, "M5FirstBox", Some(0)),
+        Some("first.Box".to_string()),
+        "generic nominal names stay internal to diagnostics and tooling",
+    );
     let items = &bundle.modules[0].items;
     let modules: Vec<&str> = items.iter().filter_map(|item| match item {
         Item::CodeModule(module) => Some(module.name.as_str()),
@@ -224,7 +229,7 @@ use templates.[boxed, other]
 module second :: boxed<Int>(3)
 module different_arg :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_projection(value: M6SecondBox) => M5FirstBox { return ~value }
+fn accepts_projection(value: second.Box) => first.Box { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[

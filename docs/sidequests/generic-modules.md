@@ -42,9 +42,8 @@ are evaluated and normalized, bounds and cycles are checked, definition-site
 scope is retained, imported templates work, and equivalent applications share
 one applicative instance. Instance identity reaches TIR/codegen, build-cache
 inputs, semindex, and LSP symbols; digest/full-key collisions stop as E0859/ICE
-before codegen. Exported nominal names encode each alias segment with its Unicode
-character count, so distinct aliases stay distinct while obeying type casing
-(`three_ints.Buffer` becomes `M5Three4IntsBuffer`).
+before codegen. Exported nominal names remain distinct internally, while source
+reaches them through the instance path (`three_ints.Buffer`).
 
 The card remains open for its final executable acceptance matrix and remaining
 documentation/example closure. Later cache/toolchain criteria must be verified

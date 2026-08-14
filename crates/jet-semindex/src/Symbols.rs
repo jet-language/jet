@@ -434,7 +434,25 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
             owner.as_deref(),
             Some((def.def_span.start, def.def_span.end)),
         );
-        let (kind, signature) = semantic_shape(&def.name, &def.kind, owner.as_deref());
+        let module_idx = bundle
+            .modules
+            .iter()
+            .position(|module| module.display == def.module_path || module.alias == def.module_path)
+            .unwrap_or(bundle.entry);
+        let display_type = |name: &str| {
+            bundle
+                .name_ledger
+                .display_path(module_idx, name, Some(module_idx))
+                .unwrap_or_else(|| name.to_string())
+        };
+        let display_name = display_type(&def.name);
+        let display_owner = owner.as_deref().map(|name| display_type(name));
+        let (kind, signature) = semantic_shape(
+            &display_name,
+            &def.kind,
+            display_owner.as_deref(),
+            &display_type,
+        );
         let mut docs = sources
             .get(def.module_path.as_str())
             .map(|source| source_docs(source, def.def_span.start))
@@ -882,6 +900,7 @@ fn semantic_shape(
     name: &str,
     kind: &SymKind,
     owner: Option<&str>,
+    display_type: &dyn Fn(&str) -> String,
 ) -> (SemanticSymbolKind, String) {
     match kind {
         SymKind::Module => (SemanticSymbolKind::Module, format!("module {name}")),
@@ -894,12 +913,21 @@ fn semantic_shape(
             effect_via,
             ..
         } => {
-            let params = function_parameter_parts(
+            let mut parameter_parts = function_parameter_parts(
                 params,
                 param_contract,
                 param_variadic,
-            )
-            .join(", ");
+            );
+            for part in &mut parameter_parts {
+                for (_, ty) in params {
+                    let raw = ty.name();
+                    let displayed = display_type(&raw);
+                    if raw != displayed {
+                        *part = part.replace(&raw, &displayed);
+                    }
+                }
+            }
+            let params = parameter_parts.join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
             let arrow = if let Some((param, _)) = effect_via {
                 format!(" =[via {param}]=>")
@@ -909,7 +937,10 @@ fn semantic_shape(
                     |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
                 )
             };
-            let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
+            let result = ret
+                .as_ref()
+                .map(|ty| format!(" {}", display_type(&ty.name())))
+                .unwrap_or_default();
             (SemanticSymbolKind::Function, format!("{prefix}({params}){arrow}{result}"))
         }
         SymKind::Struct { fields, .. } => (
@@ -918,7 +949,7 @@ fn semantic_shape(
                 "struct {name} {{ {} }}",
                 fields
                     .iter()
-                    .map(|(name, ty)| format!("{name}: {}", ty.name()))
+                    .map(|(name, ty)| format!("{name}: {}", display_type(&ty.name())))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -937,15 +968,18 @@ fn semantic_shape(
         ),
         SymKind::Field { ty, parent } => (
             SemanticSymbolKind::Member,
-            format!("{parent}.{name}: {}", ty.name()),
+            format!("{parent}.{name}: {}", display_type(&ty.name())),
         ),
         SymKind::Local { mutable: _, ty } => {
-            let ty = ty.as_ref().map(|ty| ty.name()).unwrap_or_else(|| "value".to_string());
+            let ty = ty
+                .as_ref()
+                .map(|ty| display_type(&ty.name()))
+                .unwrap_or_else(|| "value".to_string());
             (SemanticSymbolKind::Local, format!("{name}: {ty}"))
         }
         SymKind::Param { ty } => (
             SemanticSymbolKind::Parameter,
-            format!("{name}: {}", ty.name()),
+            format!("{name}: {}", display_type(&ty.name())),
         ),
     }
 }

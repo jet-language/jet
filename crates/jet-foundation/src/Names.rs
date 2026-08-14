@@ -70,6 +70,10 @@ pub struct NameLedger {
     imports: HashMap<(usize, Span), usize>,
     modules: HashMap<usize, NameModule>,
     declarations: HashMap<(usize, String), NameDeclaration>,
+    /// Source-facing paths for compiler-owned declarations. Generated
+    /// generic-instance names remain semantic keys, but diagnostics and
+    /// tooling project them back to the instance member path.
+    display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
     references: HashMap<(String, usize, usize), NameReference>,
 }
@@ -144,7 +148,29 @@ impl NameLedger {
     }
 
     pub fn declaration_path(&self, module: usize, name: &str) -> Option<&str> {
-        self.declaration(module, name).map(|declaration| declaration.path.as_str())
+        self.declaration(module, name)
+            .map(|declaration| declaration.path.as_str())
+    }
+
+    fn display_declaration_path(&self, module: usize, name: &str) -> Option<String> {
+        let declaration = self.declaration(module, name)?;
+        self.display_paths
+            .get(&(module, declaration.path.clone()))
+            .cloned()
+            .or_else(|| Some(declaration.path.clone()))
+    }
+
+    /// Record the source-facing path for one compiler-owned declaration path.
+    /// The semantic declaration key stays unchanged for registration and
+    /// codegen; only presentation consumers use this projection.
+    pub fn record_display_path(
+        &mut self,
+        module: usize,
+        internal_path: impl Into<String>,
+        display_path: impl Into<String>,
+    ) {
+        self.display_paths
+            .insert((module, internal_path.into()), display_path.into());
     }
 
     fn declaration_at(&self, module: usize, start: usize, end: usize) -> Option<&NameDeclaration> {
@@ -187,9 +213,9 @@ impl NameLedger {
             .map(|declaration| declaration.path.clone())
     }
 
-    /// Resolve one source-facing name to the canonical typeable path recorded
-    /// by sema. All reflection, diagnostics, and tooling projections use this
-    /// lookup; none rebuilds a path from a display string.
+    /// Resolve one semantic name to the canonical path recorded by sema.
+    /// User-facing diagnostics and tooling use `display_path`, which applies
+    /// compiler-owned presentation projections without changing this key.
     pub fn canonical_path(&self, module: usize, name: &str) -> Option<String> {
         if let Some(path) = self.declaration_path(module, name) {
             return Some(path.to_string());
@@ -225,7 +251,9 @@ impl NameLedger {
             if declaration.name == leaf
                 && self.visible(from_module, declaration.module, leaf)
             {
-                paths.insert(declaration.path.clone());
+                if let Some(path) = self.display_declaration_path(declaration.module, &declaration.name) {
+                    paths.insert(path);
+                }
             }
         }
         for alias in self.aliases.values() {
@@ -239,9 +267,8 @@ impl NameLedger {
                         .target
                         .rsplit_once('.')
                         .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-                    self.declaration_path(module, target_leaf)
+                    self.display_declaration_path(module, target_leaf)
                 })
-                .map(str::to_string)
                 .or_else(|| alias.target.contains('.').then(|| alias.target.clone()));
             if let Some(path) = path {
                 paths.insert(path);
@@ -249,13 +276,21 @@ impl NameLedger {
         }
 
         let resolved_path = resolved_module
-            .and_then(|module| self.declaration_path(module, leaf))
-            .map(str::to_string)
+            .and_then(|module| self.display_declaration_path(module, leaf))
+            .or_else(|| self.display_declaration_path(from_module, leaf))
             .or_else(|| self.canonical_path(from_module, name));
         let resolved_path = resolved_path.or_else(|| paths.iter().next().cloned())?;
+        let has_display_projection = self.declarations.values().any(|declaration| {
+            declaration.name == leaf
+                && self.visible(from_module, declaration.module, leaf)
+                && self
+                    .display_paths
+                    .contains_key(&(declaration.module, declaration.path.clone()))
+        });
         if paths.len() <= 1
             && !name.contains('.')
             && !name.starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
+            && !has_display_projection
         {
             Some(leaf.to_string())
         } else {
@@ -277,7 +312,9 @@ impl NameLedger {
         resolved_module: Option<usize>,
     ) -> Option<String> {
         let declaration = self.declaration_at(from_module, start, end)?;
-        let canonical = declaration.path.clone();
+        let canonical = self
+            .display_declaration_path(from_module, &declaration.name)
+            .unwrap_or_else(|| declaration.path.clone());
         if let Some(owner) = owner {
             return self
                 .display_path(from_module, owner, resolved_module)
@@ -447,6 +484,7 @@ impl NameLedger {
     pub fn clear_sema_facts(&mut self) {
         self.modules.clear();
         self.declarations.clear();
+        self.display_paths.clear();
         self.aliases.clear();
         self.references.clear();
     }

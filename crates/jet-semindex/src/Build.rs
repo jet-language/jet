@@ -182,6 +182,7 @@ impl SymbolDB {
                 }
             }
         }
+        project_generated_presentation(self, bundle);
         let defs = convert_defs(&self.defs, &self.view_provenance, &self.members, bundle);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
@@ -270,6 +271,52 @@ impl SymbolDB {
             .iter()
             .filter(|h| h.module_path == path)
             .collect()
+    }
+}
+
+fn project_generated_presentation(db: &mut SymbolDB, bundle: &ProgramBundle) {
+    for hover in &mut db.hover {
+        project_text(bundle, &hover.module_path, &mut hover.text);
+    }
+    for inlay in &mut db.inlay {
+        project_text(bundle, &inlay.module_path, &mut inlay.label);
+    }
+    for member in &mut db.members {
+        project_text(bundle, &member.module_path, &mut member.signature);
+    }
+}
+
+fn module_index(bundle: &ProgramBundle, module_path: &str) -> Option<usize> {
+    bundle
+        .modules
+        .iter()
+        .position(|module| module.display == module_path || module.alias == module_path)
+}
+
+fn project_text(bundle: &ProgramBundle, module_path: &str, text: &mut String) {
+    let Some(module_idx) = module_index(bundle, module_path) else {
+        return;
+    };
+    let mut replacements: Vec<(String, String)> = bundle
+        .name_ledger
+        .canonical_paths(module_idx)
+        .into_iter()
+        .filter_map(|(name, _)| {
+            if name.contains('.') {
+                return None;
+            }
+            let display = bundle
+                .name_ledger
+                .display_path(module_idx, &name, Some(module_idx))?;
+            let display_leaf = display
+                .rsplit_once('.')
+                .map_or(display.as_str(), |(_, leaf)| leaf);
+            (display != name && display_leaf != name).then_some((name, display))
+        })
+        .collect();
+    replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    for (internal, display) in replacements {
+        *text = text.replace(&internal, &display);
     }
 }
 

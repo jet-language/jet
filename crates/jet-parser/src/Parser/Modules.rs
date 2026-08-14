@@ -638,6 +638,9 @@ impl<'a> Parser<'a> {
             // D-CONF-GENSPELL1=A: `module alias :: module_name<types>(values)` —
             // module alias.
             TokKind::ColonColon => true,
+            // Keep the retired alias spelling on the code-module diagnostic
+            // path so it gets the canonical `::` teaching message.
+            TokKind::Eq => true,
             TokKind::LBrace => {
                 // Peek inside the `{` at scan+1
                 let inside = &self.toks[(scan + 1).min(self.toks.len() - 1)];

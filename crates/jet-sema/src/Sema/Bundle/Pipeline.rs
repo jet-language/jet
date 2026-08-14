@@ -423,6 +423,31 @@ fn check_bundle_opts_for_output_inner(
             }
             let module_alias = bundle.modules[consumer].alias.clone();
             declare_item_names(&mut name_ledger, consumer, &module_alias, item);
+            let generated_name = match item {
+                Item::Struct(definition) => Some(definition.name.as_str()),
+                Item::Enum(definition) => Some(definition.name.as_str()),
+                _ => None,
+            };
+            if let Some(generated_name) = generated_name {
+                if let Some(display) = bundle.modules[*owner].items.iter().find_map(|item| {
+                    let Item::CodeModule(instance) = item else { return None };
+                    if instance.instance_identity.is_none() {
+                        return None;
+                    }
+                    GenericModules::top_level_instance_display_paths(
+                        instance,
+                        &bundle.modules[*owner].items,
+                    )
+                    .into_iter()
+                    .find_map(|(internal, display)| (internal == generated_name).then_some(display))
+                }) {
+                    name_ledger.record_display_path(
+                        consumer,
+                        format!("{}.{}", module_alias, generated_name),
+                        display,
+                    );
+                }
+            }
         }
     }
 

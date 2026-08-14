@@ -110,6 +110,209 @@ fn module_value_name(alias: &str, name: &str) -> String {
     format!("{}_{}", alias.trim_end_matches('_'), name.trim_start_matches('_'))
 }
 
+/// Return the source-facing paths for declarations inside one expanded
+/// instance. The AST keeps compiler-owned nominal/value names for registration
+/// and codegen; the name ledger records these projections for diagnostics and
+/// tooling. This is the one place that knows how generic-module specialization
+/// turns a source member into its internal name.
+pub(super) fn instance_display_paths(module: &CodeModule) -> Vec<(String, String)> {
+    let mut paths = vec![(module.name.clone(), module.name.clone())];
+    let Some(body) = &module.body else {
+        return paths;
+    };
+    collect_instance_display_paths(
+        &module.name,
+        &module.name,
+        &module.name,
+        body,
+        &mut paths,
+    );
+    paths
+}
+
+/// Return projections for the declarations that expansion places beside the
+/// instance module in the containing module item list.
+pub(super) fn top_level_instance_display_paths(
+    instance: &CodeModule,
+    items: &[Item],
+) -> Vec<(String, String)> {
+    let type_prefix = module_type_prefix(&instance.name);
+    let value_prefix = format!("{}_", instance.name.trim_end_matches('_'));
+    let selected: Vec<Item> = items
+        .iter()
+        .filter(|item| match item {
+            Item::Struct(definition) => definition.name.starts_with(&type_prefix),
+            Item::Enum(definition) => definition.name.starts_with(&type_prefix),
+            Item::Trait(definition) => definition.name.starts_with(&type_prefix),
+            Item::Tag(definition) => definition.name.starts_with(&type_prefix),
+            Item::Const(definition) => definition.name.starts_with(&value_prefix),
+            Item::Impl(implementation) => implementation.type_name.starts_with(&type_prefix),
+            Item::CodeModule(child) => child.name.starts_with(&value_prefix),
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    let mut paths = Vec::new();
+    collect_instance_display_paths(
+        &instance.name,
+        "",
+        &instance.name,
+        &selected,
+        &mut paths,
+    );
+    paths
+}
+
+fn join_member_path(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}.{name}")
+    }
+}
+
+fn collect_instance_display_paths(
+    scope_name: &str,
+    internal_module_path: &str,
+    display_module_path: &str,
+    body: &[Item],
+    paths: &mut Vec<(String, String)>,
+) {
+    let add = |paths: &mut Vec<(String, String)>, internal: String, display: String| {
+        paths.push((internal, display));
+    };
+    let add_method = |paths: &mut Vec<(String, String)>, internal_owner: &str, display_owner: &str, name: &str| {
+        add(
+            paths,
+            format!("{internal_owner}.{name}"),
+            format!("{display_owner}.{name}"),
+        );
+    };
+
+    for item in body {
+        match item {
+            Item::Struct(definition) => {
+                let display_name = definition
+                    .name
+                    .strip_prefix(module_type_prefix(scope_name))
+                    .unwrap_or(&definition.name);
+                let internal = join_member_path(internal_module_path, &definition.name);
+                let display = format!("{display_module_path}.{display_name}");
+                add(paths, internal.clone(), display.clone());
+                for field in &definition.fields {
+                    add(
+                        paths,
+                        format!("{internal}.{}", field.name),
+                        format!("{display}.{}", field.name),
+                    );
+                }
+                for method in &definition.methods {
+                    add_method(paths, &internal, &display, &method.name);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        add_method(paths, &internal, &display, &method.name);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                let display_name = definition
+                    .name
+                    .strip_prefix(module_type_prefix(scope_name))
+                    .unwrap_or(&definition.name);
+                let internal = join_member_path(internal_module_path, &definition.name);
+                let display = format!("{display_module_path}.{display_name}");
+                add(paths, internal.clone(), display.clone());
+                for variant in &definition.variants {
+                    add(
+                        paths,
+                        format!("{internal}.{}", variant.name),
+                        format!("{display}.{}", variant.name),
+                    );
+                }
+                for method in &definition.methods {
+                    add_method(paths, &internal, &display, &method.name);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        add_method(paths, &internal, &display, &method.name);
+                    }
+                }
+            }
+            Item::Trait(definition) => {
+                let display_name = definition
+                    .name
+                    .strip_prefix(module_type_prefix(scope_name))
+                    .unwrap_or(&definition.name);
+                let internal = join_member_path(internal_module_path, &definition.name);
+                let display = format!("{display_module_path}.{display_name}");
+                add(paths, internal.clone(), display.clone());
+                for method in &definition.methods {
+                    add_method(paths, &internal, &display, &method.name);
+                }
+            }
+            Item::Tag(definition) => {
+                let display_name = definition
+                    .name
+                    .strip_prefix(module_type_prefix(scope_name))
+                    .unwrap_or(&definition.name);
+                add(
+                    paths,
+                    join_member_path(internal_module_path, &definition.name),
+                    format!("{display_module_path}.{display_name}"),
+                );
+            }
+            Item::Const(definition) => {
+                let display_name = definition
+                    .name
+                    .strip_prefix(&format!("{}_", scope_name.trim_end_matches('_')))
+                    .unwrap_or(&definition.name);
+                add(
+                    paths,
+                    join_member_path(internal_module_path, &definition.name),
+                    format!("{display_module_path}.{display_name}"),
+                );
+            }
+            Item::Func(function) => add(
+                paths,
+                join_member_path(internal_module_path, &function.name),
+                format!("{display_module_path}.{}", function.name),
+            ),
+            Item::Impl(implementation) => {
+                let internal = join_member_path(internal_module_path, &implementation.type_name);
+                let display_name = implementation
+                    .type_name
+                    .strip_prefix(module_type_prefix(scope_name))
+                    .unwrap_or(&implementation.type_name);
+                let display = format!("{display_module_path}.{display_name}");
+                add(paths, internal.clone(), display.clone());
+                for method in &implementation.methods {
+                    add_method(paths, &internal, &display, &method.name);
+                }
+            }
+            Item::CodeModule(child) => {
+                let display_name = child
+                    .name
+                    .strip_prefix(&format!("{}_", scope_name.trim_end_matches('_')))
+                    .unwrap_or(&child.name);
+                let internal = join_member_path(internal_module_path, &child.name);
+                let display = format!("{display_module_path}.{display_name}");
+                add(paths, internal.clone(), display.clone());
+                if let Some(body) = &child.body {
+                    collect_instance_display_paths(
+                        &child.name,
+                        &internal,
+                        &display,
+                        body,
+                        paths,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
     _values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
     let mut result = source.clone();
