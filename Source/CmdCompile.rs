@@ -2564,13 +2564,46 @@ fn collect_stmts_implicit_copy_spans(
 ) {
     for statement in statements {
         let mut statement = statement.clone();
-        statement.for_each_expr_mut(|expr| {
-            if let jet::AST::Expr::Copy(inner, copy_span) = expr {
-                if *copy_span == inner.span() {
-                    spans.push(*copy_span);
-                }
+        statement.for_each_expr_mut(|expr| collect_copy_span(expr, spans));
+    }
+}
+
+fn collect_expr_implicit_copy_spans(
+    expression: &jet::AST::Expr,
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    let mut expression = expression.clone();
+    expression.for_each_expr_mut(|expr| collect_copy_span(expr, spans));
+}
+
+fn collect_copy_span(
+    expression: &mut jet::AST::Expr,
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    if let jet::AST::Expr::Copy(inner, copy_span) = expression {
+        if *copy_span == inner.span() {
+            spans.push(*copy_span);
+        }
+    }
+}
+
+fn collect_derive_body_implicit_copy_spans(
+    body: &[jet::AST::DeriveBodyItem],
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    for body_item in body {
+        match body_item {
+            jet::AST::DeriveBodyItem::Item(item) => {
+                collect_item_implicit_copy_spans(item, spans);
             }
-        });
+            jet::AST::DeriveBodyItem::Stmt(statement) => {
+                collect_stmts_implicit_copy_spans(std::slice::from_ref(statement), spans);
+            }
+            jet::AST::DeriveBodyItem::Loop { source, body, .. } => {
+                collect_expr_implicit_copy_spans(source, spans);
+                collect_derive_body_implicit_copy_spans(body, spans);
+            }
+        }
     }
 }
 
@@ -2627,20 +2660,16 @@ fn collect_item_implicit_copy_spans(
                 collect_item_implicit_copy_spans(item, spans);
             }
         }
+        Item::UserDerive(definition) => {
+            collect_derive_body_implicit_copy_spans(&definition.body, spans);
+        }
         Item::MarkerDecl(definition) => {
             if let Some(body) = &definition.body {
-                collect_stmts_implicit_copy_spans(body, spans);
+                collect_derive_body_implicit_copy_spans(body, spans);
             }
             if let Some(text) = &definition.text {
                 for expression in [&text.check, &text.hole] {
-                    let mut expression = expression.clone();
-                    expression.for_each_expr_mut(|expr| {
-                        if let jet::AST::Expr::Copy(inner, copy_span) = expr {
-                            if *copy_span == inner.span() {
-                                spans.push(*copy_span);
-                            }
-                        }
-                    });
+                    collect_expr_implicit_copy_spans(expression, spans);
                 }
             }
         }
