@@ -54,10 +54,17 @@ impl<'a> Checker<'a> {
                 } else {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
-                Some(Some(result_ty(
-                    Type::Named("ServiceReceipt".to_string()),
-                    Type::Named("ServiceError".to_string()),
-                )))
+                if method == "commit" {
+                    Some(Some(result_ty(
+                        Type::Named("Unit".to_string()),
+                        Type::Named("ServiceError".to_string()),
+                    )))
+                } else {
+                    Some(Some(result_ty(
+                        Type::Named("ServiceReceipt".to_string()),
+                        Type::Named("ServiceError".to_string()),
+                    )))
+                }
             }
             "retain" => {
                 if args.len() != 1 {

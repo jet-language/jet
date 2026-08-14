@@ -1759,8 +1759,8 @@ pub(crate) fn core_key_variants(
 }
 
 /// D-SERVICE-AUTHORITY1: durable delivery receipts are a closed sum. The
-/// receipt, not a Boolean, tells callers whether the message was accepted,
-/// replayed, retained, dead-lettered, rejected, or unavailable.
+/// receipt, not a Boolean, tells callers whether the message was enqueued,
+/// executed, retained, dead-lettered, rejected, or unavailable.
 pub(crate) fn core_service_receipt_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
@@ -1772,8 +1772,8 @@ pub(crate) fn core_service_receipt_variants(
     let zero = Span::new(0, 0);
     Some(
         [
-            ("Accepted", VariantPayload::Single(Type::String, zero)),
-            ("Duplicate", VariantPayload::Single(Type::String, zero)),
+            ("Enqueued", VariantPayload::Single(Type::String, zero)),
+            ("Executed", VariantPayload::Single(Type::String, zero)),
             (
                 "Retained",
                 VariantPayload::Named(vec![

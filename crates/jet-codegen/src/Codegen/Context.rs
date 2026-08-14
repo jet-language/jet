@@ -3355,8 +3355,8 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     if cx.core_imports.values().any(|module| module == "core.services") {
         let zero = Span::new(0, 0);
         let variants = vec![
-            ("Accepted".to_string(), VariantPayload::Single(Type::String, zero)),
-            ("Duplicate".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Enqueued".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Executed".to_string(), VariantPayload::Single(Type::String, zero)),
             (
                 "Retained".to_string(),
                 VariantPayload::Named(vec![

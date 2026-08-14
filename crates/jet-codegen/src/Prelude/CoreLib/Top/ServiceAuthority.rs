@@ -1,11 +1,11 @@
 // D-SERVICE-AUTHORITY1: one durable authority for AOT and ambient execution.
 // The log is append-only, length/hex framed, and fsync'd after every commit.
-// A process-wide lock closes the read/append race between runtime instances.
+// Process and filesystem locks close read/append and same-operation races.
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const SERVICE_AUTH_MAX_STORE: usize = 4096;
 const SERVICE_AUTH_MAX_KEY: usize = 1024;
@@ -15,6 +15,8 @@ const SERVICE_AUTH_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const SERVICE_AUTH_MAX_PENDING: usize = 100_000;
 const SERVICE_AUTHORITY_TOKEN_PREFIX: &str = "sa-";
 const SERVICE_AUTHORITY_TOKEN_BYTES: usize = 32;
+const SERVICE_AUTH_LOCK_TIMEOUT_MS: i64 = 30_000;
+const SERVICE_AUTH_LOCK_STALE_MS: i64 = 120_000;
 
 #[derive(Clone, Debug)]
 pub struct JetServiceRuntime {
@@ -24,8 +26,8 @@ pub struct JetServiceRuntime {
 
 #[derive(Clone, Debug)]
 pub enum JetServiceReceipt {
-    Accepted(String),
-    Duplicate(String),
+    Enqueued(String),
+    Executed(String),
     Retained { id: String, until: i64 },
     DeadLettered(String),
     Rejected(String),
@@ -122,6 +124,88 @@ fn service_authority_now() -> i64 {
 
 fn service_authority_error(message: impl Into<String>) -> JetServiceError {
     JetServiceError::Unavailable(message.into())
+}
+
+struct ServiceAuthorityFileLock {
+    path: PathBuf,
+}
+
+impl Drop for ServiceAuthorityFileLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn service_authority_file_lock(
+    store: &str,
+    suffix: &str,
+) -> Result<ServiceAuthorityFileLock, JetServiceError> {
+    service_authority_validate_store_path(store)?;
+    let path = PathBuf::from(format!("{store}.{suffix}.lock"));
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            service_authority_error(format!("could not create service lock directory: {error}"))
+        })?;
+    }
+    let started = service_authority_now();
+    loop {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(mut file) => {
+                let marker = service_authority_now().to_string();
+                file.write_all(marker.as_bytes()).map_err(|error| {
+                    service_authority_error(format!("could not initialize service lock: {error}"))
+                })?;
+                file.sync_all().map_err(|error| {
+                    service_authority_error(format!("could not commit service lock: {error}"))
+                })?;
+                return Ok(ServiceAuthorityFileLock { path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let now = service_authority_now();
+                let stale = std::fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age >= Duration::from_millis(SERVICE_AUTH_LOCK_STALE_MS as u64));
+                if stale {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                if now.saturating_sub(started) >= SERVICE_AUTH_LOCK_TIMEOUT_MS {
+                    return Err(service_authority_error(
+                        "service authority lock remained held beyond its recovery budget",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => {
+                return Err(service_authority_error(format!(
+                    "could not create service authority lock: {error}"
+                )))
+            }
+        }
+    }
+}
+
+fn service_authority_operation_lock(
+    runtime: &JetServiceRuntime,
+    operation: &str,
+) -> Result<ServiceAuthorityFileLock, JetServiceError> {
+    let mut input = Vec::new();
+    let store = service_authority_store_identity(&runtime.store);
+    for field in [store.as_bytes(), operation.as_bytes()] {
+        input.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        input.extend_from_slice(field);
+    }
+    let digest = jet_sha256_raw(&input);
+    service_authority_file_lock(&runtime.store, &format!("op-{}", service_authority_hex(&digest)))
 }
 
 fn service_authority_validate_text(
@@ -256,16 +340,15 @@ fn service_authority_validate_opaque_token(value: &str) -> Result<(), JetService
     Ok(())
 }
 
-fn service_endpoint_key(authority: &str, worker: &str) -> String {
-    format!("{authority}\u{1f}{worker}")
+fn service_endpoint_key(authority: &str, worker: &str, generation: i64) -> String {
+    format!("{authority}\u{1f}{worker}\u{1f}{generation}")
 }
 
 fn service_pending_key(store: &str, endpoint: &JetServiceEndpoint) -> String {
     format!(
-        "{}\u{1e}{}\u{1d}{}",
+        "{}\u{1e}{}",
         service_authority_store_identity(store),
-        service_endpoint_key(&endpoint.authority, &endpoint.worker),
-        endpoint.generation
+        service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation),
     )
 }
 
@@ -325,7 +408,7 @@ fn service_authority_register(
     started: bool,
 ) -> Result<(), JetServiceError> {
     service_authority_validate_endpoint(endpoint)?;
-    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let mut registry = service_endpoint_registry()
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
@@ -361,7 +444,7 @@ pub fn jet_services_authority_update(
     started: bool,
 ) -> Result<(), JetServiceError> {
     service_authority_validate_endpoint(endpoint)?;
-    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let mut registry = service_endpoint_registry()
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
@@ -386,11 +469,12 @@ fn service_authority_current_endpoint(
     entry: &ServiceAuthorityEntry,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
     let store = service_authority_store_identity(&runtime.store);
-    let (exact, candidates, exact_stopped, newer_generation) = {
+    let (exact, newer_exact, candidates, exact_stopped, newer_generation) = {
         let registry = service_endpoint_registry()
             .lock()
             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
         let mut exact = None;
+        let mut newer_exact = None;
         let mut candidates = Vec::new();
         let mut exact_stopped = false;
         let mut newer_generation = false;
@@ -400,9 +484,6 @@ fn service_authority_current_endpoint(
             }
             if state.generation > entry.generation {
                 newer_generation = true;
-            }
-            if state.generation != entry.generation {
-                continue;
             }
             let candidate = (
                 state.authority.clone(),
@@ -417,19 +498,34 @@ fn service_authority_current_endpoint(
                     }),
             );
             if state.authority == entry.authority {
-                if state.started {
+                if state.generation == entry.generation && state.started {
                     exact = Some(candidate);
-                } else {
+                } else if state.generation == entry.generation {
                     exact_stopped = true;
+                } else if state.generation > entry.generation && state.started {
+                    if newer_exact
+                        .as_ref()
+                        .is_none_or(|current| current.3 < state.generation)
+                    {
+                        newer_exact = Some(candidate);
+                    }
                 }
-            } else if state.started {
+            } else if state.generation == entry.generation && state.started {
                 candidates.push(candidate);
             }
         }
-        (exact, candidates, exact_stopped, newer_generation)
+        (
+            exact,
+            newer_exact,
+            candidates,
+            exact_stopped,
+            newer_generation,
+        )
     };
     let selected = if let Some(exact) = exact {
         exact
+    } else if let Some(newer_exact) = newer_exact {
+        newer_exact
     } else {
         let bound: Vec<_> = candidates
             .iter()
@@ -477,7 +573,7 @@ pub fn jet_services_authority_validate(
     endpoint: &JetServiceEndpoint,
 ) -> Result<(), JetServiceError> {
     service_authority_validate_endpoint(endpoint)?;
-    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let registry = service_endpoint_registry()
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
@@ -508,7 +604,7 @@ fn service_authority_bound_store(
     endpoint: &JetServiceEndpoint,
 ) -> Result<Option<String>, JetServiceError> {
     jet_services_authority_validate(endpoint)?;
-    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let registry = service_endpoint_registry()
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
@@ -533,7 +629,7 @@ fn service_authority_bind_store(
     service_authority_validate_runtime(runtime)?;
     jet_services_authority_validate(endpoint)?;
     let store = service_authority_store_identity(&runtime.store);
-    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker);
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let mut registry = service_endpoint_registry()
         .lock()
         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
@@ -643,6 +739,7 @@ pub fn jet_services_authority_enqueue(
 pub fn jet_services_authority_take_pending(
     endpoint: &JetServiceEndpoint,
     capacity: i64,
+    skip_ids: &[String],
 ) -> Result<Vec<(String, String, String)>, JetServiceError> {
     jet_services_authority_validate(endpoint)?;
     if capacity <= 0 {
@@ -673,11 +770,12 @@ pub fn jet_services_authority_take_pending(
         if entry.authority.is_empty()
             || entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
-            || entry.generation != endpoint.generation
+            || !service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
             || entry.dead
-            || entry.delivered_to_worker
+            || (entry.delivered_to_worker && entry.delivered)
             || entry.retained_until.is_some()
             || service_authority_entry_expired(entry, service_authority_now())
+            || skip_ids.iter().any(|id| id == &entry.id)
         {
             continue;
         }
@@ -694,8 +792,18 @@ pub fn jet_services_authority_take_pending(
         }
         queue.push((entry.id.clone(), entry.message.clone(), store.clone()));
     }
-    let count = queue.len().min(capacity as usize);
-    Ok(queue.drain(..count).collect())
+    let count = capacity as usize;
+    let mut selected = Vec::new();
+    let mut retained = Vec::with_capacity(queue.len());
+    for entry in queue.drain(..) {
+        if selected.len() < count && !skip_ids.iter().any(|id| id == &entry.0) {
+            selected.push(entry);
+        } else {
+            retained.push(entry);
+        }
+    }
+    *queue = retained;
+    Ok(selected)
 }
 
 /// Put undelivered authority records back at the head of the queue after a
@@ -757,7 +865,7 @@ pub fn jet_services_authority_requeue_pending(
         if authority_entry.authority.is_empty()
             || authority_entry.tree != endpoint.tree
             || authority_entry.worker != endpoint.worker
-            || authority_entry.generation != endpoint.generation
+            || !service_authority_entry_routes_to_endpoint(&runtime, authority_entry, endpoint)
             || authority_entry.message != message
         {
             return Err(JetServiceError::Revoked(
@@ -813,6 +921,7 @@ pub fn jet_services_authority_mark_delivered(
         retention_ms: 0,
     };
     service_authority_validate_runtime(&runtime)?;
+    let _operation_lock = service_authority_operation_lock(&runtime, id)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
@@ -839,18 +948,78 @@ pub fn jet_services_authority_mark_delivered(
     Ok(())
 }
 
+pub fn jet_services_authority_has_uncommitted(
+    endpoint: &JetServiceEndpoint,
+) -> Result<bool, JetServiceError> {
+    service_authority_validate_endpoint(endpoint)?;
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let store = {
+        let registry = service_endpoint_registry()
+            .lock()
+            .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+        let state = registry.get(&key).ok_or_else(|| {
+            JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+        })?;
+        if state.tree != endpoint.tree || state.worker != endpoint.worker {
+            return Err(JetServiceError::Revoked(
+                "service endpoint authority does not match its tree".to_string(),
+            ));
+        }
+        state
+            .store
+            .as_ref()
+            .and_then(|(store, generation)| {
+                (*generation == endpoint.generation).then(|| store.clone())
+            })
+    };
+    let Some(store) = store else {
+        return Ok(false);
+    };
+    let runtime = JetServiceRuntime {
+        store,
+        retention_ms: 0,
+    };
+    let entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+    Ok(entries.iter().any(|entry| {
+        entry.authority == endpoint.authority
+            && entry.tree == endpoint.tree
+            && entry.worker == endpoint.worker
+            && entry.generation == endpoint.generation
+            && entry.delivered_to_worker
+            && !entry.delivered
+            && !entry.dead
+    }))
+}
+
 fn service_authority_enqueue_entry(
     runtime: &JetServiceRuntime,
     entry: &ServiceAuthorityEntry,
 ) -> Result<(), JetServiceError> {
     let endpoint = service_authority_current_endpoint(runtime, entry)?;
-    if endpoint.generation != entry.generation {
-        return Err(JetServiceError::Stale(format!(
-            "service receipt generation {} is no longer current (current generation {})",
-            entry.generation, endpoint.generation
-        )));
+    if endpoint.tree != entry.tree || endpoint.worker != entry.worker {
+        return Err(JetServiceError::Revoked(
+            "service receipt endpoint no longer names its worker".to_string(),
+        ));
     }
     jet_services_authority_enqueue(runtime, &endpoint, &entry.id, &entry.message)
+}
+
+fn service_authority_entry_routes_to_endpoint(
+    runtime: &JetServiceRuntime,
+    entry: &ServiceAuthorityEntry,
+    endpoint: &JetServiceEndpoint,
+) -> bool {
+    if entry.authority != endpoint.authority
+        || entry.tree != endpoint.tree
+        || entry.worker != endpoint.worker
+    {
+        return false;
+    }
+    if entry.generation == endpoint.generation {
+        return true;
+    }
+    service_authority_current_endpoint(runtime, entry)
+        .is_ok_and(|current| &current == endpoint)
 }
 
 fn service_authority_hex(bytes: &[u8]) -> String {
@@ -921,6 +1090,7 @@ fn service_authority_read(
     runtime: &JetServiceRuntime,
 ) -> Result<Vec<(char, Vec<String>)>, JetServiceError> {
     service_authority_validate_store_path(&runtime.store)?;
+    let _file_lock = service_authority_file_lock(&runtime.store, "store")?;
     let mut file = match OpenOptions::new().read(true).open(&runtime.store) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -967,6 +1137,7 @@ fn service_authority_append(
     fields: &[String],
 ) -> Result<(), JetServiceError> {
     service_authority_validate_store_path(&runtime.store)?;
+    let _file_lock = service_authority_file_lock(&runtime.store, "store")?;
     let record = service_authority_record(op, fields);
     let mut options = OpenOptions::new();
     options.create(true).append(true);
@@ -1082,28 +1253,6 @@ fn service_authority_entries(
                     });
                 }
             }
-            ('S', [id, key, tree, worker, generation, message, _created, expires]) => {
-                let generation = generation.parse::<i64>().map_err(|_| {
-                    service_authority_error("service send generation is malformed")
-                })?;
-                let expires = expires
-                    .parse::<i64>()
-                    .map_err(|_| service_authority_error("service send expiry is malformed"))?;
-                entries.push(ServiceAuthorityEntry {
-                    id: id.clone(),
-                    key: key.clone(),
-                    tree: tree.clone(),
-                    worker: worker.clone(),
-                    authority: String::new(),
-                    generation,
-                    message: message.clone(),
-                    expires,
-                    retained_until: None,
-                    delivered_to_worker: false,
-                    delivered: false,
-                    dead: false,
-                });
-            }
             ('K', [id, until]) => {
                 let until = until
                     .parse::<i64>()
@@ -1191,6 +1340,7 @@ pub fn jet_services_runtime_send(
     service_authority_bind_store(runtime, endpoint)?;
     service_authority_validate_text(key, "idempotency key", SERVICE_AUTH_MAX_KEY, false)?;
     service_authority_validate_text(message, "service message", SERVICE_AUTH_MAX_MESSAGE, true)?;
+    let _operation_lock = service_authority_operation_lock(runtime, key)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
@@ -1205,14 +1355,15 @@ pub fn jet_services_runtime_send(
             && !entry.authority.is_empty()
             && entry.tree == endpoint.tree
             && entry.worker == endpoint.worker
-            && entry.generation == endpoint.generation
     }) {
-        if entry.tree != endpoint.tree
+        if entry.authority != endpoint.authority
+            || entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
             || entry.message.as_str() != message.as_str()
         {
             return Ok(JetServiceReceipt::Rejected(
-                "idempotency key was already used for a different delivery".to_string(),
+                "idempotency key was already used by another service authority or delivery"
+                    .to_string(),
             ));
         }
         if entry.dead {
@@ -1230,7 +1381,10 @@ pub fn jet_services_runtime_send(
             if !entry.delivered {
                 service_authority_enqueue_entry(runtime, entry)?;
             }
-            return Ok(JetServiceReceipt::Duplicate(entry.id.clone()));
+            if entry.delivered {
+                return Ok(JetServiceReceipt::Executed(entry.id.clone()));
+            }
+            return Ok(JetServiceReceipt::Enqueued(entry.id.clone()));
         }
         return Ok(JetServiceReceipt::DeadLettered(entry.id.clone()));
     }
@@ -1252,7 +1406,7 @@ pub fn jet_services_runtime_send(
         ],
     )?;
     jet_services_authority_enqueue(runtime, endpoint, &id, message)?;
-    Ok(JetServiceReceipt::Accepted(id))
+    Ok(JetServiceReceipt::Enqueued(id))
 }
 
 pub fn jet_services_runtime_retry(
@@ -1261,6 +1415,7 @@ pub fn jet_services_runtime_retry(
 ) -> Result<JetServiceReceipt, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+    let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
@@ -1294,7 +1449,11 @@ pub fn jet_services_runtime_retry(
     if !entry.delivered {
         service_authority_enqueue_entry(runtime, entry)?;
     }
-    Ok(JetServiceReceipt::Duplicate(id.clone()))
+    if entry.delivered {
+        Ok(JetServiceReceipt::Executed(id.clone()))
+    } else {
+        Ok(JetServiceReceipt::Enqueued(id.clone()))
+    }
 }
 
 pub fn jet_services_runtime_dead_letter(
@@ -1303,6 +1462,7 @@ pub fn jet_services_runtime_dead_letter(
 ) -> Result<JetServiceReceipt, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+    let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
@@ -1330,6 +1490,7 @@ pub fn jet_services_runtime_retain(
 ) -> Result<JetServiceReceipt, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+    let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
@@ -1364,6 +1525,7 @@ pub fn jet_services_runtime_commit(
 ) -> Result<(), JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+    let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;

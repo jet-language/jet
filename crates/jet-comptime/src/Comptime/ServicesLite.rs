@@ -192,10 +192,13 @@ fn mailbox_to_ct(m: &JetServiceMailbox) -> CtValue {
         fields: vec![
             ("endpoint".to_string(), endpoint_to_ct(&m.endpoint)),
             ("capacity".to_string(), CtValue::Int(m.capacity)),
-            ("depth".to_string(), CtValue::Int(m.depth)),
+            (
+                "depth".to_string(),
+                CtValue::Int(m.channel.depth() as i64),
+            ),
             (
                 "messages".to_string(),
-                CtValue::List(m.messages.iter().cloned().map(CtValue::Str).collect()),
+                CtValue::List(m.channel.snapshot().into_iter().map(CtValue::Str).collect()),
             ),
         ],
     }
@@ -235,12 +238,11 @@ fn ct_to_mailbox(v: &CtValue, span: Span) -> Result<JetServiceMailbox, Diagnosti
         _ => return Err(unsupported("mailbox depth", span)),
     };
     let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
-    let mut mailbox = jet_services_new_mailbox(endpoint, capacity, messages)
+    let mailbox = jet_services_new_mailbox(endpoint, capacity, messages)
         .map_err(|_| unsupported("ServiceMailbox channel", span))?;
-    if depth < 0 || mailbox.depth != depth {
+    if depth < 0 || mailbox.channel.depth() as i64 != depth {
         return Err(unsupported("mailbox depth", span));
     }
-    mailbox.depth = depth;
     Ok(mailbox)
 }
 
@@ -271,6 +273,10 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("worker field", span))
     };
+    let running = match field("running")? {
+        CtValue::Bool(b) => *b,
+        _ => return Err(unsupported("worker running state", span)),
+    };
     Ok(JetServiceWorker {
         name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "worker name", span)?,
         endpoint: ct_to_endpoint(field("endpoint")?, span)?,
@@ -279,10 +285,14 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
             CtValue::Int(n) => *n,
             _ => return Err(unsupported("worker restarts", span)),
         },
-        running: match field("running")? {
-            CtValue::Bool(b) => *b,
-            _ => return Err(unsupported("worker running state", span)),
-        },
+        running,
+        task: std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
+            if running {
+                JetServiceSupervisorStatus::Running
+            } else {
+                JetServiceSupervisorStatus::Stopped
+            },
+        ))),
     })
 }
 
@@ -868,6 +878,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         partitioned,
         workflows,
         task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
+        supervisor_tasks: Vec::new(),
         chaos_fails: match field("chaos_fails")? {
             CtValue::Int(n) => *n,
             _ => return Err(unsupported("service chaos counter", span)),
@@ -882,6 +893,18 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         .map_err(|error| unsupported(&error.jet_show(), span))?;
     for worker in &tree.workers {
         jet_services_authority_hydrate(&worker.endpoint, tree.started && worker.running)
+            .map_err(|error| unsupported(&error.jet_show(), span))?;
+        if tree.started && worker.running {
+            jet_services_bind_delivery_endpoint(
+                &tree.delivery,
+                tree.state_authority.as_ref(),
+                &worker.endpoint,
+            )
+            .map_err(|error| unsupported(&error.jet_show(), span))?;
+        }
+    }
+    if tree.started {
+        jet_services_build_runtime_groups(&mut tree)
             .map_err(|error| unsupported(&error.jet_show(), span))?;
     }
     Ok(tree)
@@ -909,14 +932,14 @@ fn map_err(err: JetServiceError) -> CtValue {
 
 fn receipt_to_ct(receipt: JetServiceReceipt) -> CtValue {
     match receipt {
-        JetServiceReceipt::Accepted(id) => CtValue::Enum {
+        JetServiceReceipt::Enqueued(id) => CtValue::Enum {
             type_name: "ServiceReceipt".to_string(),
-            variant: "Accepted".to_string(),
+            variant: "Enqueued".to_string(),
             args: vec![(None, CtValue::Str(id))],
         },
-        JetServiceReceipt::Duplicate(id) => CtValue::Enum {
+        JetServiceReceipt::Executed(id) => CtValue::Enum {
             type_name: "ServiceReceipt".to_string(),
-            variant: "Duplicate".to_string(),
+            variant: "Executed".to_string(),
             args: vec![(None, CtValue::Str(id))],
         },
         JetServiceReceipt::Retained { id, until } => CtValue::Enum {

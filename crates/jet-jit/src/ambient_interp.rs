@@ -1441,14 +1441,14 @@ fn service_endpoint_value(value: &CtValue) -> Option<service_prelude::JetService
 
 fn service_receipt_value(receipt: service_prelude::JetServiceReceipt) -> CtValue {
     match receipt {
-        service_prelude::JetServiceReceipt::Accepted(id) => CtValue::Enum {
+        service_prelude::JetServiceReceipt::Enqueued(id) => CtValue::Enum {
             type_name: "ServiceReceipt".to_string(),
-            variant: "Accepted".to_string(),
+            variant: "Enqueued".to_string(),
             args: vec![(None, CtValue::Str(id))],
         },
-        service_prelude::JetServiceReceipt::Duplicate(id) => CtValue::Enum {
+        service_prelude::JetServiceReceipt::Executed(id) => CtValue::Enum {
             type_name: "ServiceReceipt".to_string(),
-            variant: "Duplicate".to_string(),
+            variant: "Executed".to_string(),
             args: vec![(None, CtValue::Str(id))],
         },
         service_prelude::JetServiceReceipt::Retained { id, until } => CtValue::Enum {

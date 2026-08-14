@@ -2020,8 +2020,8 @@ mod service_adapter {
     fn enum_discriminant(type_name: &str, variant: &str) -> Option<i64> {
         let variants: &[&str] = match type_name {
             "ServiceReceipt" => &[
-                "Accepted",
-                "Duplicate",
+                "Enqueued",
+                "Executed",
                 "Retained",
                 "DeadLettered",
                 "Rejected",

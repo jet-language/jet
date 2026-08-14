@@ -263,7 +263,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "AOT send process did not return a receipt id");
     assert_eq!(
         run_restart_default_process(&dir, &aot_store, "recover", Some(id)),
-        "duplicate\norder\n"
+        "enqueued\norder\n"
     );
 }
 

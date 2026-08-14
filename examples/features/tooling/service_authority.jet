@@ -5,8 +5,8 @@ use core.time as time
 
 fn receipt_id(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(id) -> { return id }
-        .Duplicate(id) -> { return id }
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
         .Retained(id, _) -> { return id }
         .DeadLettered(id) -> { return id }
     }
@@ -15,8 +15,8 @@ fn receipt_id(receipt: ServiceReceipt) => String {
 
 fn receipt_kind(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(_) -> { return "accepted" }
-        .Duplicate(_) -> { return "duplicate" }
+        .Enqueued(_) -> { return "enqueued" }
+        .Executed(_) -> { return "executed" }
         .Retained(_, _) -> { return "retained" }
         .DeadLettered(_) -> { return "dead" }
         .Rejected(_) -> { return "rejected" }
@@ -37,7 +37,7 @@ fn run() {
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(first)
     if id == "" { panic("missing receipt id") }
-    print("first:accepted")
+    print("first:enqueued")
     recovered := services.runtime(store, retention: retention)
     recovered_duplicate :: recovered.retry(id) ?? panic("recover")
     print("recovered:{receipt_kind(recovered_duplicate)}")

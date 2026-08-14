@@ -840,7 +840,7 @@ impl<'a> JitMeta<'a> {
         if enum_name == "ServiceReceipt" {
             return Some(match variant {
                 "Retained" => SERVICE_RECEIPT_RETAINED_PAYLOAD.as_slice(),
-                "Accepted" | "Duplicate" | "DeadLettered" | "Rejected" | "Unavailable" => {
+                "Enqueued" | "Executed" | "DeadLettered" | "Rejected" | "Unavailable" => {
                     HOOK_STR_PAYLOAD.as_slice()
                 }
                 _ => EMPTY_PAYLOAD.as_slice(),

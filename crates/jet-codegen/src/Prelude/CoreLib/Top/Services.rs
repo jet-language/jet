@@ -1,4 +1,4 @@
-// ── D-SERVICE1=D (#444): sema-known structured service tree over taskgroups ─
+// ── D-SERVICE1=D (#444): sema-known structured service tree over supervisor groups ─
 // Beginner topology: named tree → workers with typed mailboxes → OneForOne
 // restart policy. Delivery is at-most-once with Full under capacity (D-SERVICE-
 // DELIVERY1). Engines marshal into these Prelude symbols only (I9).
@@ -16,6 +16,7 @@ const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
 const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
 const MAX_SERVICE_MESSAGES: usize = 100_000;
+const MAX_SERVICE_RESTARTS: i64 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetServiceRestart {
@@ -30,32 +31,227 @@ enum JetServiceDelivery {
     DurableAtLeastOnce,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JetServiceSupervisorStatus {
+    Starting,
+    Running,
+    Failed,
+    Cancelling,
+    Stopped,
+    Escalated,
+    Partitioned,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JetServiceSupervisorOutcome {
+    Completed,
+    Cancelled,
+    DeadlineBlown,
+    Panicked(String),
+    Escalated(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetServiceSupervisorState {
+    status: JetServiceSupervisorStatus,
+    outcome: Option<JetServiceSupervisorOutcome>,
+    joined: bool,
+}
+
+#[derive(Clone, Debug)]
+struct JetServiceSupervisorTask {
+    state: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    child: std::sync::Arc<
+        JetTaskGroupRuntime<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
+    >,
+}
+
+impl JetServiceSupervisorState {
+    fn new(status: JetServiceSupervisorStatus) -> Self {
+        Self {
+            status,
+            outcome: None,
+            joined: false,
+        }
+    }
+}
+
+fn jet_services_task_start(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.status = JetServiceSupervisorStatus::Running;
+    state.outcome = None;
+    state.joined = false;
+    Ok(())
+}
+
+fn jet_services_task_fail(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    reason: String,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.status = JetServiceSupervisorStatus::Failed;
+    state.outcome = Some(JetServiceSupervisorOutcome::Panicked(reason));
+    Ok(())
+}
+
+fn jet_services_task_restart(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.status = JetServiceSupervisorStatus::Running;
+    state.outcome = None;
+    state.joined = false;
+    Ok(())
+}
+
+fn jet_services_task_escalate(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    reason: String,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.status = JetServiceSupervisorStatus::Escalated;
+    state.outcome = Some(JetServiceSupervisorOutcome::Escalated(reason));
+    Ok(())
+}
+
+fn jet_services_cancel_task(task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
+    if let Ok(mut state) = task.lock() {
+        if !state.joined && state.status != JetServiceSupervisorStatus::Escalated {
+            state.status = JetServiceSupervisorStatus::Cancelling;
+            state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+        }
+    }
+}
+
+fn jet_services_join_task(task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
+    if let Ok(mut state) = task.lock() {
+        if state.status != JetServiceSupervisorStatus::Escalated {
+            state.status = JetServiceSupervisorStatus::Stopped;
+            if state.outcome.is_none() {
+                state.outcome = Some(JetServiceSupervisorOutcome::Completed);
+            }
+        }
+        state.joined = true;
+    }
+}
+
+fn jet_services_cancel_supervisor(task: &JetServiceSupervisorTask) {
+    jet_services_cancel_task(&task.state);
+}
+
+fn jet_services_join_supervisor(task: JetServiceSupervisorTask) {
+    task.child
+        .close_with_cancel(jet_services_cancel_task, jet_services_join_task);
+    jet_services_join_task(task.state);
+}
+
+enum JetServiceChannelError<T> {
+    Full(T),
+    Empty,
+    Closed,
+}
+
+/// One bounded mailbox queue. The queue is the channel state; no second Vec
+/// mirrors it. `snapshot` exists only at the CtValue marshalling boundary.
+struct JetServiceChannel<T> {
+    capacity: usize,
+    values: std::sync::Mutex<std::collections::VecDeque<T>>,
+    closed: std::sync::atomic::AtomicBool,
+    wake: std::sync::Condvar,
+}
+
+impl<T> JetServiceChannel<T> {
+    fn new(capacity: usize, values: impl IntoIterator<Item = T>) -> Result<Self, ()> {
+        if capacity == 0 {
+            return Err(());
+        }
+        let values = values.into_iter().collect::<std::collections::VecDeque<_>>();
+        if values.len() > capacity {
+            return Err(());
+        }
+        Ok(Self {
+            capacity,
+            values: std::sync::Mutex::new(values),
+            closed: std::sync::atomic::AtomicBool::new(false),
+            wake: std::sync::Condvar::new(),
+        })
+    }
+
+    fn try_send(&self, value: T) -> Result<(), JetServiceChannelError<T>> {
+        let mut values = self.values.lock().unwrap();
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(JetServiceChannelError::Closed);
+        }
+        if values.len() >= self.capacity {
+            return Err(JetServiceChannelError::Full(value));
+        }
+        values.push_back(value);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    fn try_recv(&self) -> Result<T, JetServiceChannelError<T>> {
+        let mut values = self.values.lock().unwrap();
+        if let Some(value) = values.pop_front() {
+            return Ok(value);
+        }
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            Err(JetServiceChannelError::Closed)
+        } else {
+            Err(JetServiceChannelError::Empty)
+        }
+    }
+
+    fn snapshot(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.values.lock().unwrap().iter().cloned().collect()
+    }
+
+    fn depth(&self) -> usize {
+        self.values.lock().unwrap().len()
+    }
+
+    fn clear(&self) {
+        self.values.lock().unwrap().clear();
+    }
+
+    fn close(&self) {
+        let _values = self.values.lock().unwrap();
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.wake.notify_all();
+    }
+}
+
 struct JetServiceMailbox {
     endpoint: JetServiceEndpoint,
     capacity: i64,
-    depth: i64,
-    messages: Vec<String>,
-    sender: std::sync::mpsc::SyncSender<String>,
-    receiver: std::sync::mpsc::Receiver<String>,
+    channel: JetServiceChannel<String>,
 }
 
 impl Clone for JetServiceMailbox {
     fn clone(&self) -> Self {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(
-            usize::try_from(self.capacity.max(1)).unwrap_or(1),
-        );
-        for message in &self.messages {
-            sender
-                .try_send(message.clone())
-                .expect("validated service mailbox must fit its bounded channel");
-        }
+        let messages = self.channel.snapshot();
         Self {
             endpoint: self.endpoint.clone(),
             capacity: self.capacity,
-            depth: self.depth,
-            messages: self.messages.clone(),
-            sender,
-            receiver,
+            channel: JetServiceChannel::new(
+                usize::try_from(self.capacity.max(1)).unwrap_or(1),
+                messages,
+            )
+            .expect("validated service mailbox must fit its bounded channel"),
         }
     }
 }
@@ -66,8 +262,8 @@ impl std::fmt::Debug for JetServiceMailbox {
             .debug_struct("JetServiceMailbox")
             .field("endpoint", &self.endpoint)
             .field("capacity", &self.capacity)
-            .field("depth", &self.depth)
-            .field("messages", &self.messages)
+            .field("depth", &self.channel.depth())
+            .field("messages", &self.channel.snapshot())
             .finish()
     }
 }
@@ -80,27 +276,18 @@ fn jet_services_new_mailbox(
     let channel_capacity = usize::try_from(capacity).map_err(|_| {
         JetServiceError::Policy("mailbox capacity is outside the platform range".to_string())
     })?;
-    let (sender, receiver) = std::sync::mpsc::sync_channel(channel_capacity);
     if messages.len() > channel_capacity {
         return Err(JetServiceError::Policy(
             "mailbox messages exceed the bounded channel capacity".to_string(),
         ));
     }
-    for message in &messages {
-        sender.try_send(message.clone()).map_err(|_| {
-            JetServiceError::Policy("mailbox channel could not restore its queued messages".to_string())
-        })?;
-    }
-    let depth = i64::try_from(messages.len()).map_err(|_| {
-        JetServiceError::Policy("mailbox depth is outside the platform range".to_string())
+    let channel = JetServiceChannel::new(channel_capacity, messages).map_err(|_| {
+        JetServiceError::Policy("mailbox channel could not restore its queued messages".to_string())
     })?;
     Ok(JetServiceMailbox {
         endpoint,
         capacity,
-        depth,
-        messages,
-        sender,
-        receiver,
+        channel,
     })
 }
 
@@ -111,6 +298,7 @@ struct JetServiceWorker {
     mailbox: JetServiceMailbox,
     restarts: i64,
     running: bool,
+    task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
 }
 
 #[derive(Clone, Debug)]
@@ -188,7 +376,11 @@ struct JetServiceTree {
     draining: Vec<String>,
     partitioned: Vec<String>,
     workflows: Vec<JetServiceWorkflow>,
-    task_group: std::sync::Arc<JetTaskGroupRuntime<String>>,
+    /// Root supervisor owns one child group per declared service group. The
+    /// handles are joined on stop/drop; worker state lives behind the same
+    /// Arc held by the worker record and supervisor group.
+    task_group: std::sync::Arc<JetTaskGroupRuntime<JetServiceSupervisorTask>>,
+    supervisor_tasks: Vec<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
     chaos_fails: i64,
     previous_generation: i64,
     last_upgrade: Option<JetServiceUpgradeReceipt>,
@@ -281,8 +473,8 @@ impl JetShow for JetServiceRuntime {
 impl JetShow for JetServiceReceipt {
     fn jet_show(&self) -> String {
         match self {
-            JetServiceReceipt::Accepted(id) => format!("Accepted({id})"),
-            JetServiceReceipt::Duplicate(id) => format!("Duplicate({id})"),
+            JetServiceReceipt::Enqueued(id) => format!("Enqueued({id})"),
+            JetServiceReceipt::Executed(id) => format!("Executed({id})"),
             JetServiceReceipt::Retained { id, until } => format!("Retained({id}, {until})"),
             JetServiceReceipt::DeadLettered(id) => format!("DeadLettered({id})"),
             JetServiceReceipt::Rejected(reason) => format!("Rejected({reason})"),
@@ -321,6 +513,15 @@ impl JetShow for JetServiceTree {
     }
 }
 
+impl Drop for JetServiceTree {
+    fn drop(&mut self) {
+        jet_services_close_runtime_groups(self);
+        for worker in &self.workers {
+            worker.mailbox.channel.close();
+        }
+    }
+}
+
 fn jet_services_tree(name: String) -> JetServiceTree {
     JetServiceTree {
         authority: String::new(),
@@ -343,6 +544,7 @@ fn jet_services_tree(name: String) -> JetServiceTree {
         partitioned: Vec::new(),
         workflows: Vec::new(),
         task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
+        supervisor_tasks: Vec::new(),
         chaos_fails: 0,
         previous_generation: 0,
         last_upgrade: None,
@@ -540,6 +742,9 @@ fn jet_services_worker(
         mailbox,
         restarts: 0,
         running: false,
+        task: std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
+            JetServiceSupervisorStatus::Stopped,
+        ))),
     });
     Ok(endpoint)
 }
@@ -576,6 +781,15 @@ fn jet_services_group(
             )));
         }
     }
+    if workers.iter().any(|worker| {
+        tree.groups
+            .iter()
+            .any(|group| group.workers.iter().any(|member| member == worker))
+    }) {
+        return Err(JetServiceError::Policy(
+            "a worker can belong to only one service supervisor group".to_string(),
+        ));
+    }
     if workers
         .iter()
         .enumerate()
@@ -590,6 +804,62 @@ fn jet_services_group(
         restart: tree.restart.clone(),
         workers,
     });
+    Ok(())
+}
+
+fn jet_services_build_runtime_groups(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+    let group = std::sync::Arc::new(JetTaskGroupRuntime::new());
+    let mut supervisor_tasks = Vec::new();
+    let mut assigned = vec![false; tree.workers.len()];
+    for definition in tree.groups.clone() {
+        let child = std::sync::Arc::new(JetTaskGroupRuntime::new());
+        let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
+            JetServiceSupervisorStatus::Starting,
+        )));
+        for worker_name in definition.workers {
+            let index = tree
+                .workers
+                .iter()
+                .position(|worker| worker.name == worker_name)
+                .ok_or_else(|| JetServiceError::Unknown(format!("worker `{worker_name}` disappeared")))?;
+            assigned[index] = true;
+            child.register(tree.workers[index].task.clone());
+        }
+        group.register(JetServiceSupervisorTask {
+            state: supervisor.clone(),
+            child: child.clone(),
+        });
+        jet_services_task_start(&supervisor)?;
+        supervisor_tasks.push(supervisor);
+    }
+    // Workers without an explicit lexical group still have a supervisor
+    // boundary. This keeps every task handle owned and joined on close.
+    let mut ungrouped: Option<
+        std::sync::Arc<
+            JetTaskGroupRuntime<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
+        >,
+    > = None;
+    for (index, worker) in tree.workers.iter().enumerate() {
+        if assigned[index] {
+            continue;
+        }
+        let child = ungrouped
+            .get_or_insert_with(|| std::sync::Arc::new(JetTaskGroupRuntime::new()));
+        child.register(worker.task.clone());
+    }
+    if let Some(child) = ungrouped {
+        let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
+            JetServiceSupervisorStatus::Starting,
+        )));
+        group.register(JetServiceSupervisorTask {
+            state: supervisor.clone(),
+            child: child.clone(),
+        });
+        jet_services_task_start(&supervisor)?;
+        supervisor_tasks.push(supervisor);
+    }
+    tree.task_group = group;
+    tree.supervisor_tasks = supervisor_tasks;
     Ok(())
 }
 
@@ -680,20 +950,59 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
         }
         tree.workflows = durable_workflows;
     }
-    let group = std::sync::Arc::new(JetTaskGroupRuntime::new());
-    let mut activated = Vec::with_capacity(tree.workers.len());
+    // A stopped tree owns closed channels. Reopen each mailbox from its one
+    // durable queue before publishing the new supervisor generation.
+    let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     for worker in &mut tree.workers {
-        worker.running = !tree.partitioned.iter().any(|name| name == &worker.name);
-        group.register(worker.name.clone());
-        let result = match jet_services_authority_update(&worker.endpoint, worker.running) {
+        let messages = if preserve_mailboxes {
+            worker.mailbox.channel.snapshot()
+        } else {
+            Vec::new()
+        };
+        worker.mailbox = jet_services_new_mailbox(
+            worker.mailbox.endpoint.clone(),
+            worker.mailbox.capacity,
+            messages,
+        )?;
+        jet_services_task_start(&worker.task)?;
+    }
+
+    jet_services_build_runtime_groups(tree)?;
+    let mut activated = Vec::with_capacity(tree.workers.len());
+    for index in 0..tree.workers.len() {
+        let running = !tree
+            .partitioned
+            .iter()
+            .any(|name| name == &tree.workers[index].name);
+        tree.workers[index].running = running;
+        if !running {
+            if let Ok(mut state) = tree.workers[index].task.lock() {
+                state.status = JetServiceSupervisorStatus::Partitioned;
+                state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+            }
+        }
+        let endpoint = tree.workers[index].endpoint.clone();
+        let result = match jet_services_authority_update(&endpoint, running) {
             Ok(()) => Ok(()),
             Err(JetServiceError::Partitioned(_)) | Err(JetServiceError::Unavailable(_)) => {
-                service_authority_register(&worker.endpoint, worker.running)
+                service_authority_register(&endpoint, running)
             }
             Err(error) => Err(error),
-        };
+        }
+        .and_then(|()| {
+            if running {
+                jet_services_bind_delivery_endpoint(
+                    &tree.delivery,
+                    tree.state_authority.as_ref(),
+                    &endpoint,
+                )
+            } else {
+                Ok(())
+            }
+        });
         if let Err(error) = result {
             let mut rollback_error = None;
+            let _ = jet_services_authority_update(&endpoint, false);
             for endpoint in &activated {
                 if let Err(error) = jet_services_authority_update(endpoint, false) {
                     rollback_error = Some(error);
@@ -703,6 +1012,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             for worker in &mut tree.workers {
                 worker.running = false;
             }
+            jet_services_close_runtime_groups(tree);
             return Err(match rollback_error {
                 Some(rollback_error) => JetServiceError::Policy(format!(
                     "{}; service authority activation rollback failed: {}",
@@ -712,28 +1022,37 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
                 None => error,
             });
         }
-        activated.push(worker.endpoint.clone());
+        activated.push(endpoint);
     }
-    tree.task_group = group;
     tree.started = true;
     Ok(())
 }
 
-fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
-    let group = std::mem::replace(
+fn jet_services_close_runtime_groups(tree: &mut JetServiceTree) {
+    let root = std::mem::replace(
         &mut tree.task_group,
         std::sync::Arc::new(JetTaskGroupRuntime::new()),
     );
-    group.close_with(|_| {});
+    root.close_with_cancel(jet_services_cancel_supervisor, jet_services_join_supervisor);
+    tree.supervisor_tasks.clear();
+    for worker in &tree.workers {
+        jet_services_join_task(worker.task.clone());
+    }
+}
+
+fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+    jet_services_close_runtime_groups(tree);
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
+    let mut first_error = None;
     for worker in &mut tree.workers {
         worker.running = false;
-        jet_services_authority_update(&worker.endpoint, false)?;
-        if !preserve_mailboxes {
-            while worker.mailbox.receiver.try_recv().is_ok() {}
-            worker.mailbox.messages.clear();
+        if let Err(error) = jet_services_authority_update(&worker.endpoint, false) {
+            first_error.get_or_insert(error);
         }
-        worker.mailbox.depth = worker.mailbox.messages.len() as i64;
+        if !preserve_mailboxes {
+            worker.mailbox.channel.clear();
+        }
+        worker.mailbox.channel.close();
     }
     if tree.state_adapter == JetServiceStateAdapter::Empty {
         // Empty means a restart starts with no state.  Snapshot and EventLog
@@ -748,34 +1067,59 @@ fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
         tree.workflows.clear();
     }
     tree.started = false;
-    Ok(())
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 fn jet_services_restart_worker(worker: &mut JetServiceWorker, preserve_mailbox: bool) {
     worker.restarts = worker.restarts.saturating_add(1);
     worker.running = true;
-    if !preserve_mailbox {
-        while worker.mailbox.receiver.try_recv().is_ok() {}
-        worker.mailbox.messages.clear();
-    }
-    worker.mailbox.depth = worker.mailbox.messages.len() as i64;
+    let messages = if preserve_mailbox {
+        worker.mailbox.channel.snapshot()
+    } else {
+        Vec::new()
+    };
+    worker.mailbox.channel.close();
+    worker.mailbox = jet_services_new_mailbox(
+        worker.mailbox.endpoint.clone(),
+        worker.mailbox.capacity,
+        messages,
+    )
+    .expect("validated service mailbox must restart with its bounded queue");
+    let _ = jet_services_task_restart(&worker.task);
+}
+
+fn jet_services_generation_is_pinned(tree: &JetServiceTree, worker: &str, generation: i64) -> bool {
+    tree.last_upgrade.as_ref().is_some_and(|receipt| {
+        receipt.to_generation == tree.generation
+            && receipt.from_generation == generation
+            && receipt.pinned_shards.iter().any(|name| name == worker)
+    })
+}
+
+fn jet_services_worker_generation_allowed(tree: &JetServiceTree, worker: &JetServiceWorker) -> bool {
+    worker.endpoint.generation == tree.generation
+        || jet_services_generation_is_pinned(tree, &worker.name, worker.endpoint.generation)
+}
+
+fn jet_services_endpoint_generation_allowed(
+    tree: &JetServiceTree,
+    endpoint: &JetServiceEndpoint,
+) -> bool {
+    endpoint.generation == tree.generation
+        || jet_services_generation_is_pinned(tree, &endpoint.worker, endpoint.generation)
 }
 
 fn jet_services_validate_endpoint(
     tree: &JetServiceTree,
     endpoint: &JetServiceEndpoint,
 ) -> Result<(), JetServiceError> {
-    jet_services_authority_validate(endpoint)?;
     if endpoint.authority != tree.authority || endpoint.tree != tree.name {
         return Err(JetServiceError::Revoked(format!(
             "service endpoint {}/{} is not issued by this authority",
             endpoint.tree, endpoint.worker
-        )));
-    }
-    if endpoint.generation != tree.generation {
-        return Err(JetServiceError::Stale(format!(
-            "service endpoint {}/{}@g{} is stale (current generation {})",
-            endpoint.tree, endpoint.worker, endpoint.generation, tree.generation
         )));
     }
     if tree.partitioned.iter().any(|name| name == &endpoint.worker) {
@@ -784,6 +1128,13 @@ fn jet_services_validate_endpoint(
             endpoint.tree, endpoint.worker
         )));
     }
+    if !jet_services_endpoint_generation_allowed(tree, endpoint) {
+        return Err(JetServiceError::Stale(format!(
+            "service endpoint {}/{}@g{} is stale (current generation {})",
+            endpoint.tree, endpoint.worker, endpoint.generation, tree.generation
+        )));
+    }
+    jet_services_authority_validate(endpoint)?;
     Ok(())
 }
 
@@ -814,29 +1165,35 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
                 && worker.endpoint.tree == tree.name
                 && worker.endpoint.authority == tree.authority
                 && worker.endpoint.generation == generation
+                && jet_services_worker_generation_allowed(tree, worker)
+        })
+    };
+    let worker_name_exists = |name: &str| {
+        tree.workers.iter().any(|worker| {
+            worker.name == name
+                && worker.endpoint.tree == tree.name
+                && worker.endpoint.authority == tree.authority
         })
     };
     let mut worker_names = Vec::with_capacity(tree.workers.len());
     for worker in &tree.workers {
+        let messages = worker.mailbox.channel.snapshot();
+        let depth = messages.len();
         if worker.name.trim().is_empty()
             || worker.name.chars().any(char::is_control)
             || worker.name.len() > MAX_SERVICE_NAME
             || worker.endpoint.tree != tree.name
             || worker.endpoint.worker != worker.name
             || worker.endpoint.authority != tree.authority
-            || worker.endpoint.generation != tree.generation
+            || !jet_services_worker_generation_allowed(tree, worker)
             || worker.restarts < 0
             || (tree.partitioned.iter().any(|name| name == &worker.name) && worker.running)
             || worker.mailbox.endpoint != worker.endpoint
             || worker.mailbox.capacity <= 0
             || worker.mailbox.capacity > MAX_SERVICE_CAPACITY
-            || worker.mailbox.depth < 0
-            || worker.mailbox.depth as usize != worker.mailbox.messages.len()
-            || worker.mailbox.messages.len() > MAX_SERVICE_MESSAGES
-            || worker.mailbox.messages.len() > worker.mailbox.capacity as usize
-            || worker
-                .mailbox
-                .messages
+            || depth > MAX_SERVICE_MESSAGES
+            || depth > worker.mailbox.capacity as usize
+            || messages
                 .iter()
                 .any(|message| {
                     message.len() > MAX_SERVICE_MESSAGE || message.chars().any(char::is_control)
@@ -857,7 +1214,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
         name.trim().is_empty()
             || name.chars().any(char::is_control)
             || name.len() > MAX_SERVICE_NAME
-            || !worker_exists(name, tree.generation)
+            || !worker_name_exists(name)
     }) || tree.partitioned.iter().enumerate().any(|(index, name)| {
         tree.partitioned[..index].iter().any(|seen| seen == name)
     }) {
@@ -866,6 +1223,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
         ));
     }
     let mut group_names = Vec::with_capacity(tree.groups.len());
+    let mut grouped_workers = Vec::new();
     for group in &tree.groups {
         if group.name.trim().is_empty()
             || group.name.chars().any(char::is_control)
@@ -875,12 +1233,16 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             || group
                 .workers
                 .iter()
-                .any(|name| !worker_exists(name, tree.generation))
+                .any(|name| !worker_name_exists(name))
             || group
                 .workers
                 .iter()
                 .enumerate()
                 .any(|(index, name)| group.workers[..index].iter().any(|seen| seen == name))
+            || group
+                .workers
+                .iter()
+                .any(|name| grouped_workers.iter().any(|seen| seen == name))
             || group_names.iter().any(|seen| seen == &group.name)
         {
             return Err(JetServiceError::Policy(
@@ -888,6 +1250,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             ));
         }
         group_names.push(group.name.clone());
+        grouped_workers.extend(group.workers.iter().cloned());
     }
     match (&tree.state_adapter, &tree.state_authority) {
         (JetServiceStateAdapter::Empty, None) => {
@@ -959,7 +1322,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             || message.chars().any(char::is_control)
             || endpoint.tree != tree.name
             || endpoint.authority != tree.authority
-            || endpoint.generation != tree.generation
+            || !jet_services_endpoint_generation_allowed(tree, endpoint)
             || !worker_exists(&endpoint.worker, endpoint.generation)
             || idempotency_keys.iter().any(|seen| seen == key)
         {
@@ -987,7 +1350,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             || name.len() > MAX_SERVICE_NAME
             || endpoint.tree != tree.name
             || endpoint.authority != tree.authority
-            || endpoint.generation != tree.generation
+            || !jet_services_endpoint_generation_allowed(tree, endpoint)
             || !worker_exists(&endpoint.worker, endpoint.generation)
             || signature.len() != 64
             || !signature.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
@@ -1004,10 +1367,39 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
         || tree
             .draining
             .iter()
-            .any(|name| !worker_exists(name, tree.generation))
+            .any(|name| !worker_name_exists(name))
     {
         return Err(JetServiceError::Policy(
             "service draining state is invalid".to_string(),
+        ));
+    }
+    if let Some(receipt) = &tree.last_upgrade {
+        if receipt.from_generation != tree.previous_generation
+            || receipt.to_generation != tree.generation
+            || receipt.from_generation < 1
+            || receipt.to_generation <= receipt.from_generation
+            || receipt.pinned_shards.len() > tree.workers.len()
+            || receipt
+                .pinned_shards
+                .iter()
+                .any(|name| !worker_name_exists(name))
+            || receipt.pinned_shards.iter().enumerate().any(|(index, name)| {
+                receipt.pinned_shards[..index]
+                    .iter()
+                    .any(|seen| seen == name)
+            })
+            || tree.workers.iter().any(|worker| {
+                receipt.pinned_shards.iter().any(|name| name == &worker.name)
+                    && worker.endpoint.generation != receipt.from_generation
+            })
+        {
+            return Err(JetServiceError::Policy(
+                "service upgrade receipt or pinned shard state is invalid".to_string(),
+            ));
+        }
+    } else if tree.previous_generation != 0 {
+        return Err(JetServiceError::Policy(
+            "service tree has a previous generation without an upgrade receipt".to_string(),
         ));
     }
     let mut workflow_ids = Vec::new();
@@ -1055,6 +1447,7 @@ fn jet_services_find_worker_mut<'a>(
         .find(|w| {
             w.name == endpoint.worker
                 && w.endpoint.tree == endpoint.tree
+                && w.endpoint.authority == endpoint.authority
                 && w.endpoint.generation == endpoint.generation
         })
         .ok_or_else(|| {
@@ -1075,7 +1468,7 @@ fn jet_services_send(
             "service tree is not started".to_string(),
         ));
     }
-    jet_services_authority_validate(endpoint)?;
+    jet_services_validate_endpoint(tree, endpoint)?;
     if message.len() > MAX_SERVICE_MESSAGE || message.chars().any(char::is_control) {
         return Err(JetServiceError::Policy(
             "service message exceeds the 1 MiB limit".to_string(),
@@ -1089,37 +1482,42 @@ fn jet_services_send(
             worker.name
         )));
     }
-    if worker.mailbox.capacity > 0 && worker.mailbox.depth >= worker.mailbox.capacity {
+    if worker.mailbox.capacity > 0
+        && worker.mailbox.channel.depth() as i64 >= worker.mailbox.capacity
+    {
         return Err(JetServiceError::Full(format!(
             "mailbox for `{}` is full (capacity {})",
             worker.name, worker.mailbox.capacity
         )));
     }
-    match worker.mailbox.sender.try_send(message.clone()) {
+    match worker.mailbox.channel.try_send(message) {
         Ok(()) => {}
-        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+        Err(JetServiceChannelError::Full(_)) => {
             return Err(JetServiceError::Full(format!(
                 "mailbox for `{}` is full (capacity {})",
                 worker.name, worker.mailbox.capacity
             )));
         }
-        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+        Err(JetServiceChannelError::Closed) => {
             return Err(JetServiceError::NotStarted(format!(
                 "mailbox for `{}` is closed",
                 worker.name
             )));
         }
+        Err(JetServiceChannelError::Empty) => unreachable!("send cannot return an empty channel error"),
     }
-    worker.mailbox.messages.push(message);
-    worker.mailbox.depth = worker.mailbox.messages.len() as i64;
     Ok(())
 }
 
-fn jet_services_rebuild_mailbox(worker: &mut JetServiceWorker) -> Result<(), JetServiceError> {
+fn jet_services_restore_mailbox(
+    worker: &mut JetServiceWorker,
+    messages: Vec<String>,
+) -> Result<(), JetServiceError> {
+    worker.mailbox.channel.close();
     worker.mailbox = jet_services_new_mailbox(
         worker.mailbox.endpoint.clone(),
         worker.mailbox.capacity,
-        worker.mailbox.messages.clone(),
+        messages,
     )?;
     Ok(())
 }
@@ -1133,16 +1531,24 @@ fn jet_services_receive(
             "service tree is not started".to_string(),
         ));
     }
-    jet_services_authority_validate(endpoint)?;
+    jet_services_validate_endpoint(tree, endpoint)?;
     let draining = tree.draining.iter().any(|name| name == &endpoint.worker);
     if !draining {
         let available = tree
             .workers
             .iter()
-            .find(|worker| worker.endpoint == *endpoint)
+            .find(|worker| {
+                worker.name == endpoint.worker
+                    && worker.endpoint.tree == endpoint.tree
+                    && worker.endpoint.authority == endpoint.authority
+                    && worker.endpoint.generation == endpoint.generation
+            })
             .map(|worker| {
                 if worker.running {
-                    worker.mailbox.capacity.saturating_sub(worker.mailbox.depth)
+                    worker
+                        .mailbox
+                        .capacity
+                        .saturating_sub(worker.mailbox.channel.depth() as i64)
                 } else {
                     0
                 }
@@ -1154,25 +1560,47 @@ fn jet_services_receive(
                 ))
             })?;
         if available > 0 {
-            let pending = jet_services_authority_take_pending(endpoint, available)?;
+            let local_delivery_ids = if tree.delivery == JetServiceDelivery::DurableAtLeastOnce {
+                tree.state_authority
+                    .as_ref()
+                    .map(|authority| {
+                        jet_services_local_delivery_ids(
+                            tree,
+                            endpoint,
+                            &jet_services_delivery_store(&authority.store),
+                        )
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let pending = jet_services_authority_take_pending(
+                endpoint,
+                available,
+                &local_delivery_ids,
+            )?;
             if !pending.is_empty() {
                 let worker = jet_services_find_worker_mut(tree, endpoint)?;
                 let mut remaining = pending.clone();
                 for (id, message, store) in pending {
-                    if let Err(error) = worker.mailbox.sender.try_send(message.clone()) {
+                    let before = worker.mailbox.channel.snapshot();
+                    if let Err(error) = worker.mailbox.channel.try_send(message.clone()) {
                         let delivery_error = match error {
-                            std::sync::mpsc::TrySendError::Full(_) => JetServiceError::Policy(
+                            JetServiceChannelError::Full(_) => JetServiceError::Policy(
                                 "service authority delivery exceeded mailbox capacity".to_string(),
                             ),
-                            std::sync::mpsc::TrySendError::Disconnected(_) => {
+                            JetServiceChannelError::Closed => {
                                 JetServiceError::NotStarted(
                                     "service authority worker mailbox is closed".to_string(),
                                 )
                             }
+                            JetServiceChannelError::Empty => unreachable!(
+                                "send cannot return an empty channel error"
+                            ),
                         };
                         let rollback = jet_services_authority_requeue_pending(endpoint, remaining.clone());
                         if let Err(rollback_error) = rollback {
-                            let mailbox = jet_services_rebuild_mailbox(&mut *worker);
+                            let mailbox = jet_services_restore_mailbox(&mut *worker, before);
                             return Err(match mailbox {
                                 Ok(()) => JetServiceError::Policy(format!(
                                     "{}; authority rollback failed: {}; unmarked receipts remain recoverable from the authority log",
@@ -1187,7 +1615,7 @@ fn jet_services_receive(
                                 )),
                             });
                         }
-                        jet_services_rebuild_mailbox(&mut *worker).map_err(|rollback_error| {
+                        jet_services_restore_mailbox(&mut *worker, before).map_err(|rollback_error| {
                             JetServiceError::Policy(format!(
                                 "{}; mailbox rollback failed: {}",
                                 delivery_error.jet_show(),
@@ -1196,29 +1624,14 @@ fn jet_services_receive(
                         })?;
                         return Err(delivery_error);
                     }
-                    worker.mailbox.messages.push(message.clone());
                     if let Err(error) = jet_services_authority_mark_delivered(&store, &id) {
-                        // The mailbox now owns this message. Restore the
-                        // whole uncommitted suffix before removing it locally.
+                        // The mailbox now owns this message, but its durable
+                        // delivery marker failed. Restore the pre-send queue;
+                        // the authority suffix remains recoverable.
                         let rollback =
                             jet_services_authority_requeue_pending(endpoint, remaining.clone());
                         if let Err(rollback_error) = rollback {
-                            let Some(last) = worker.mailbox.messages.pop() else {
-                                return Err(JetServiceError::Policy(format!(
-                                    "{}; authority rollback failed: {}; mailbox lost the partially delivered message",
-                                    error.jet_show(),
-                                    rollback_error.jet_show()
-                                )));
-                            };
-                            if last != message {
-                                worker.mailbox.messages.push(last);
-                                return Err(JetServiceError::Policy(format!(
-                                    "{}; authority rollback failed: {}; mailbox order changed during rollback",
-                                    error.jet_show(),
-                                    rollback_error.jet_show()
-                                )));
-                            }
-                            let mailbox = jet_services_rebuild_mailbox(&mut *worker);
+                            let mailbox = jet_services_restore_mailbox(&mut *worker, before);
                             return Err(match mailbox {
                                 Ok(()) => JetServiceError::Policy(format!(
                                     "{}; authority rollback failed: {}; unmarked receipts remain recoverable from the authority log",
@@ -1233,20 +1646,7 @@ fn jet_services_receive(
                                 )),
                             });
                         }
-                        let Some(last) = worker.mailbox.messages.pop() else {
-                            return Err(JetServiceError::Policy(
-                                "service mailbox lost the partially delivered message during rollback"
-                                    .to_string(),
-                            ));
-                        };
-                        if last != message {
-                            worker.mailbox.messages.push(last);
-                            return Err(JetServiceError::Policy(
-                                "service mailbox order changed during partial delivery rollback"
-                                    .to_string(),
-                            ));
-                        }
-                        jet_services_rebuild_mailbox(&mut *worker).map_err(|rollback_error| {
+                        jet_services_restore_mailbox(&mut *worker, before).map_err(|rollback_error| {
                             JetServiceError::Policy(format!(
                                 "{}; mailbox rollback failed: {}",
                                 error.jet_show(),
@@ -1257,52 +1657,46 @@ fn jet_services_receive(
                     }
                     remaining.remove(0);
                 }
-                worker.mailbox.depth = worker.mailbox.messages.len() as i64;
             }
         }
     }
     let (message, should_stop) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
-        if !worker.running && (!draining || worker.mailbox.messages.is_empty()) {
+        if !worker.running && (!draining || worker.mailbox.channel.depth() == 0) {
             return Err(JetServiceError::NotStarted(format!(
                 "worker `{}` is not running",
                 worker.name
             )));
         }
-        let message = match worker.mailbox.receiver.try_recv() {
+        let message = match worker.mailbox.channel.try_recv() {
             Ok(message) => message,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            Err(JetServiceChannelError::Empty) => {
                 return Err(JetServiceError::Ambiguous(format!(
                     "mailbox for `{}` is empty",
                     worker.name
                 )));
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err(JetServiceChannelError::Closed) => {
                 return Err(JetServiceError::NotStarted(format!(
                     "mailbox for `{}` is closed",
                     worker.name
                 )));
             }
+            Err(JetServiceChannelError::Full(_)) => unreachable!("receive cannot return a full channel error"),
         };
-        let mirrored = worker.mailbox.messages.first().cloned().ok_or_else(|| {
-            JetServiceError::Policy("mailbox channel and durable mirror diverged".to_string())
-        })?;
-        if mirrored != message {
-            return Err(JetServiceError::Policy(
-                "mailbox channel and durable mirror diverged".to_string(),
-            ));
-        }
-        worker.mailbox.messages.remove(0);
-        worker.mailbox.depth = worker.mailbox.messages.len() as i64;
-        let should_stop = worker.mailbox.messages.is_empty();
+        let should_stop = worker.mailbox.channel.depth() == 0;
         (message, should_stop)
     };
     if draining && should_stop {
-        let worker = jet_services_find_worker_mut(tree, endpoint)?;
-        let worker_endpoint = worker.endpoint.clone();
-        jet_services_authority_update(&worker_endpoint, false)?;
-        worker.running = false;
-        tree.draining.retain(|name| name != &endpoint.worker);
+        if jet_services_generation_is_pinned(tree, &endpoint.worker, endpoint.generation) {
+            jet_services_promote_worker_generation(tree, &endpoint.worker)?;
+        } else {
+            let worker = jet_services_find_worker_mut(tree, endpoint)?;
+            let worker_endpoint = worker.endpoint.clone();
+            jet_services_authority_update(&worker_endpoint, false)?;
+            worker.running = false;
+            tree.draining.retain(|name| name != &endpoint.worker);
+        }
     }
     Ok(message)
 }
@@ -1315,13 +1709,51 @@ fn jet_services_mailbox_depth(
     tree.workers
         .iter()
         .find(|w| w.name == endpoint.worker && w.endpoint.tree == endpoint.tree)
-        .map(|w| w.mailbox.depth)
+        .map(|w| w.mailbox.channel.depth() as i64)
         .ok_or_else(|| {
             JetServiceError::Unknown(format!(
                 "endpoint {}/{} is not in this tree",
                 endpoint.tree, endpoint.worker
             ))
         })
+}
+
+fn jet_services_local_delivery_ids(
+    tree: &JetServiceTree,
+    endpoint: &JetServiceEndpoint,
+    store: &str,
+) -> Vec<String> {
+    let Some(worker) = tree.workers.iter().find(|worker| {
+        worker.name == endpoint.worker
+            && worker.endpoint.tree == endpoint.tree
+            && worker.endpoint.authority == endpoint.authority
+            && worker.endpoint.generation == endpoint.generation
+    }) else {
+        return Vec::new();
+    };
+    let messages = worker.mailbox.channel.snapshot();
+    let runtime = JetServiceRuntime {
+        store: store.to_string(),
+        retention_ms: 0,
+    };
+    tree.idempotency_seen
+        .iter()
+        .filter_map(|(key, recorded_endpoint, message)| {
+            if recorded_endpoint.tree != endpoint.tree
+                || recorded_endpoint.worker != endpoint.worker
+                || recorded_endpoint.authority != endpoint.authority
+                || !messages.iter().any(|queued| queued == message)
+            {
+                return None;
+            }
+            Some(service_authority_id(
+                &runtime,
+                recorded_endpoint,
+                message,
+                key,
+            ))
+        })
+        .collect()
 }
 
 fn jet_services_fail_worker(
@@ -1334,34 +1766,134 @@ fn jet_services_fail_worker(
         ));
     }
     jet_services_validate_endpoint(tree, endpoint)?;
-    let restart = tree.restart.clone();
+    let restart = tree
+        .groups
+        .iter()
+        .find(|group| group.workers.iter().any(|name| name == &endpoint.worker))
+        .map(|group| group.restart.clone())
+        .unwrap_or_else(|| tree.restart.clone());
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     let worker_name = endpoint.worker.clone();
+    let start = tree
+        .workers
+        .iter()
+        .position(|worker| worker.name == worker_name)
+        .ok_or_else(|| {
+            JetServiceError::Unknown(format!(
+                "endpoint {}/{} is not in this tree",
+                endpoint.tree, endpoint.worker
+            ))
+        })?;
+    let supervisor_index = tree
+        .groups
+        .iter()
+        .position(|group| group.workers.iter().any(|name| name == &worker_name))
+        .unwrap_or(tree.groups.len());
+    let scope = if let Some(group) = tree
+        .groups
+        .iter()
+        .find(|group| group.workers.iter().any(|name| name == &worker_name))
+    {
+        group
+            .workers
+            .iter()
+            .filter_map(|name| tree.workers.iter().position(|worker| &worker.name == name))
+            .collect::<Vec<_>>()
+    } else {
+        tree.workers
+            .iter()
+            .enumerate()
+            .filter(|(_, worker)| {
+                !tree
+                    .groups
+                    .iter()
+                    .any(|group| group.workers.iter().any(|name| name == &worker.name))
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    };
+    let start_in_scope = scope.iter().position(|index| *index == start).unwrap_or(0);
+    let mut target_indices = Vec::new();
     match restart {
-        JetServiceRestart::OneForOne => {
-            let worker = jet_services_find_worker_mut(tree, endpoint)?;
-            jet_services_restart_worker(worker, preserve_mailboxes);
-        }
-        JetServiceRestart::OneForAll => {
-            for worker in &mut tree.workers {
-                jet_services_restart_worker(worker, preserve_mailboxes);
-            }
-        }
+        JetServiceRestart::OneForOne => target_indices.push(start),
+        JetServiceRestart::OneForAll => target_indices.extend(scope.iter().copied()),
         JetServiceRestart::RestForOne => {
-            let start = tree
-                .workers
-                .iter()
-                .position(|w| w.name == worker_name)
-                .ok_or_else(|| {
-                    JetServiceError::Unknown(format!(
-                        "endpoint {}/{} is not in this tree",
-                        endpoint.tree, endpoint.worker
-                    ))
-            })?;
-            for worker in tree.workers.iter_mut().skip(start) {
-                jet_services_restart_worker(worker, preserve_mailboxes);
-            }
+            target_indices.extend(scope.iter().skip(start_in_scope).copied())
         }
+    }
+    for index in &target_indices {
+        let worker = &tree.workers[*index];
+        if worker.restarts >= MAX_SERVICE_RESTARTS {
+            let reason = format!(
+                "worker `{}` exceeded the restart budget of {}",
+                worker.name, MAX_SERVICE_RESTARTS
+            );
+            for worker in &tree.workers {
+                let _ = jet_services_task_escalate(&worker.task, reason.clone());
+            }
+            for supervisor in &tree.supervisor_tasks {
+                let _ = jet_services_task_escalate(supervisor, reason.clone());
+            }
+            for worker in &mut tree.workers {
+                worker.running = false;
+                let _ = jet_services_authority_update(&worker.endpoint, false)
+                    .or_else(|_| service_authority_register(&worker.endpoint, false));
+            }
+            jet_services_close_runtime_groups(tree);
+            tree.started = false;
+            return Err(JetServiceError::Unavailable(reason));
+        }
+    }
+    let desired_running = tree
+        .workers
+        .iter()
+        .enumerate()
+        .map(|(index, worker)| {
+            if target_indices.iter().any(|target| *target == index) {
+                !tree.partitioned.iter().any(|name| name == &worker.name)
+            } else {
+                worker.running
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut authority_updated = Vec::new();
+    for (index, worker) in tree.workers.iter().enumerate() {
+        if let Err(error) = jet_services_authority_update(&worker.endpoint, desired_running[index]) {
+            let mut rollback_error = None;
+            for rollback_index in authority_updated.into_iter().rev() {
+                if let Err(error) = jet_services_authority_update(
+                    &tree.workers[rollback_index].endpoint,
+                    tree.workers[rollback_index].running,
+                ) {
+                    rollback_error.get_or_insert(error);
+                }
+            }
+            return Err(match rollback_error {
+                Some(rollback_error) => JetServiceError::Policy(format!(
+                    "{}; service failure authority rollback failed: {}",
+                    error.jet_show(),
+                    rollback_error.jet_show()
+                )),
+                None => error,
+            });
+        }
+        authority_updated.push(index);
+    }
+    let _ = jet_services_task_fail(
+        &tree.workers[start].task,
+        format!("worker `{worker_name}` failed under supervisor"),
+    );
+    if let Some(supervisor) = tree.supervisor_tasks.get(supervisor_index) {
+        let _ = jet_services_task_fail(
+            supervisor,
+            format!("supervisor restarted worker `{worker_name}`"),
+        );
+    }
+    for index in target_indices {
+        jet_services_restart_worker(&mut tree.workers[index], preserve_mailboxes);
+    }
+    if let Some(supervisor) = tree.supervisor_tasks.get(supervisor_index) {
+        let _ = jet_services_task_restart(supervisor);
     }
     // A partition is an authority decision, not a transient worker flag.
     // Restart policy may revive a crashed worker, but it must not silently
@@ -1369,10 +1901,11 @@ fn jet_services_fail_worker(
     for worker in &mut tree.workers {
         if tree.partitioned.iter().any(|name| name == &worker.name) {
             worker.running = false;
+            if let Ok(mut state) = worker.task.lock() {
+                state.status = JetServiceSupervisorStatus::Partitioned;
+                state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+            }
         }
-    }
-    for worker in &tree.workers {
-        jet_services_authority_update(&worker.endpoint, worker.running)?;
     }
     Ok(())
 }
@@ -1462,8 +1995,26 @@ fn jet_services_send_durable(
         ));
     }
     jet_services_validate_endpoint(tree, endpoint)?;
+    let local_id = service_authority_id(&runtime, endpoint, &message, &idempotency_key);
+    if jet_services_local_delivery_ids(tree, endpoint, &runtime.store)
+        .iter()
+        .any(|id| id == &local_id)
+    {
+        return Ok(());
+    }
     match jet_services_runtime_send(&runtime, endpoint, &message, &idempotency_key)? {
-        JetServiceReceipt::Accepted(id) => {
+        JetServiceReceipt::Enqueued(id) => {
+            let before = tree
+                .workers
+                .iter()
+                .find(|worker| worker.name == endpoint.worker)
+                .map(|worker| worker.mailbox.channel.snapshot())
+                .ok_or_else(|| {
+                    JetServiceError::Unknown(format!(
+                        "endpoint {}/{} is not in this tree",
+                        endpoint.tree, endpoint.worker
+                    ))
+                })?;
             if let Err(error) = jet_services_send(tree, endpoint, message.clone()) {
                 if let JetServiceError::Full(_) = error {
                     let _ = jet_services_runtime_dead_letter(&runtime, &id);
@@ -1472,6 +2023,27 @@ fn jet_services_send_durable(
                     }
                 }
                 return Err(error);
+            }
+            if let Err(error) = jet_services_authority_mark_delivered(&runtime.store, &id) {
+                let rollback = tree
+                    .workers
+                    .iter_mut()
+                    .find(|worker| worker.name == endpoint.worker)
+                    .ok_or_else(|| {
+                        JetServiceError::Unknown(format!(
+                            "endpoint {}/{} disappeared during durable delivery",
+                            endpoint.tree, endpoint.worker
+                        ))
+                    })
+                    .and_then(|worker| jet_services_restore_mailbox(worker, before));
+                return Err(match rollback {
+                    Ok(()) => error,
+                    Err(rollback_error) => JetServiceError::Policy(format!(
+                        "{}; mailbox rollback failed: {}",
+                        error.jet_show(),
+                        rollback_error.jet_show()
+                    )),
+                });
             }
             if tree.idempotency_seen.len() < MAX_SERVICE_IDEMPOTENCY
                 && !tree
@@ -1484,7 +2056,7 @@ fn jet_services_send_durable(
             }
             Ok(())
         }
-        JetServiceReceipt::Duplicate(_) => Ok(()),
+        JetServiceReceipt::Executed(_) => Ok(()),
         JetServiceReceipt::Retained { .. } => Ok(()),
         JetServiceReceipt::DeadLettered(id) => {
             if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
@@ -1808,7 +2380,7 @@ fn jet_services_state_decode(
     Ok(records)
 }
 
-fn jet_services_state_store_read(
+fn jet_services_state_store_read_unlocked(
     authority: &JetServiceStateAuthority,
     adapter: &JetServiceStateAdapter,
 ) -> Result<Vec<String>, JetServiceError> {
@@ -1835,6 +2407,14 @@ fn jet_services_state_store_read(
     jet_services_state_decode(authority, adapter, &bytes)
 }
 
+fn jet_services_state_store_read(
+    authority: &JetServiceStateAuthority,
+    adapter: &JetServiceStateAdapter,
+) -> Result<Vec<String>, JetServiceError> {
+    let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+    jet_services_state_store_read_unlocked(authority, adapter)
+}
+
 fn jet_services_state_store_load(
     authority: &JetServiceStateAuthority,
     adapter: &JetServiceStateAdapter,
@@ -1845,7 +2425,7 @@ fn jet_services_state_store_load(
     jet_services_state_store_read(authority, adapter)
 }
 
-fn jet_services_state_store_write(
+fn jet_services_state_store_write_unlocked(
     authority: &JetServiceStateAuthority,
     adapter: &JetServiceStateAdapter,
     records: &[String],
@@ -1899,6 +2479,15 @@ fn jet_services_state_store_write(
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+fn jet_services_state_store_write(
+    authority: &JetServiceStateAuthority,
+    adapter: &JetServiceStateAdapter,
+    records: &[String],
+) -> Result<(), JetServiceError> {
+    let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+    jet_services_state_store_write_unlocked(authority, adapter, records)
 }
 
 fn jet_services_state_validate_path(path: &std::path::Path) -> Result<(), JetServiceError> {
@@ -1975,7 +2564,8 @@ fn jet_services_state_store_append(
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
-    let records = jet_services_state_store_read(authority, &adapter)?;
+    let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+    let records = jet_services_state_store_read_unlocked(authority, &adapter)?;
     if records.len() >= MAX_SERVICE_STATE_RECORDS {
         return Err(JetServiceError::Policy(
             "event-log record limit exceeded".to_string(),
@@ -1983,7 +2573,7 @@ fn jet_services_state_store_append(
     }
     let path = std::path::Path::new(&authority.store);
     if !path.exists() {
-        return jet_services_state_store_write(authority, &adapter, &[record.to_string()]);
+        return jet_services_state_store_write_unlocked(authority, &adapter, &[record.to_string()]);
     }
     let frame = jet_services_state_frame(record);
     let current_size = path.metadata().map_err(|error| {
@@ -2144,6 +2734,26 @@ fn jet_services_replay_events(tree: &JetServiceTree) -> String {
 /// both without the typed state read failing on the other's records.
 fn jet_services_delivery_store(state_store: &str) -> String {
     format!("{state_store}.delivery")
+}
+
+fn jet_services_bind_delivery_endpoint(
+    delivery: &JetServiceDelivery,
+    state_authority: Option<&JetServiceStateAuthority>,
+    endpoint: &JetServiceEndpoint,
+) -> Result<(), JetServiceError> {
+    if *delivery != JetServiceDelivery::DurableAtLeastOnce {
+        return Ok(());
+    }
+    let authority = state_authority.ok_or_else(|| {
+        JetServiceError::Policy(
+            "durable service delivery needs its injected authority".to_string(),
+        )
+    })?;
+    let runtime = JetServiceRuntime {
+        store: jet_services_delivery_store(&authority.store),
+        retention_ms: 0,
+    };
+    service_authority_bind_store(&runtime, endpoint).map(|_| ())
 }
 
 fn jet_services_workflow_authority(
@@ -2515,14 +3125,14 @@ fn jet_services_workflow_apply(
 /// drifted from the store is reported instead of extended.  The extra read
 /// costs one more pass over a store the append already re-reads.
 ///
-/// The guard is the same process-wide lock the rest of this store uses, so it
-/// orders writers inside one process.  Two processes appending to one store
-/// concurrently are still unordered.
+/// The workflow file lock orders writers across processes. The state append
+/// below also takes the shared process lock before it publishes the record.
 fn jet_services_workflow_append(
     tree: &mut JetServiceTree,
     payload: String,
 ) -> Result<(), JetServiceError> {
     let authority = jet_services_workflow_authority(tree)?;
+    let _workflow_lock = service_authority_file_lock(&authority.store, "workflow")?;
     let mut applied = jet_services_workflow_replay(&authority)?;
     if applied != tree.workflows {
         return Err(jet_services_state_error(
@@ -2856,7 +3466,7 @@ fn jet_services_directory_resolve(
             "directory has no entry `{name}`"
         )));
     };
-    if endpoint.generation != tree.generation {
+    if !jet_services_endpoint_generation_allowed(tree, endpoint) {
         return Err(JetServiceError::Stale(format!(
             "directory entry `{name}` is from generation {}",
             endpoint.generation
@@ -2875,7 +3485,13 @@ fn jet_services_directory_resolve(
     if !tree
         .workers
         .iter()
-        .any(|worker| worker.running && worker.endpoint == *endpoint)
+        .any(|worker| {
+            worker.running
+                && worker.name == endpoint.worker
+                && worker.endpoint.tree == endpoint.tree
+                && worker.endpoint.authority == endpoint.authority
+                && worker.endpoint.generation == endpoint.generation
+        })
     {
         return Err(JetServiceError::Expired(format!(
             "directory entry `{name}` no longer names a running worker"
@@ -2937,9 +3553,13 @@ fn jet_services_drain_worker(
     };
     if !tree.draining.iter().any(|n| n == &name) {
         if let Ok(worker) = jet_services_find_worker_mut(tree, endpoint) {
-            if worker.mailbox.messages.is_empty() {
+            if worker.mailbox.channel.depth() == 0 {
+                let worker_endpoint = worker.endpoint.clone();
                 worker.running = false;
-                jet_services_authority_update(&worker.endpoint, false)?;
+                if let Err(error) = jet_services_authority_update(&worker_endpoint, false) {
+                    worker.running = true;
+                    return Err(error);
+                }
                 tree.draining.push(name);
                 return Ok(());
             }
@@ -2958,25 +3578,50 @@ fn jet_services_partition_worker(
             "service tree is not started".to_string(),
         ));
     }
-    let name = {
+    let (name, was_running) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
+        let was_running = worker.running;
         worker.running = false;
-        worker.name.clone()
+        (worker.name.clone(), was_running)
     };
-    if !tree.partitioned.iter().any(|existing| existing == &name) {
+    let added_partition = if !tree.partitioned.iter().any(|existing| existing == &name) {
         if tree.partitioned.len() >= MAX_SERVICE_WORKERS {
+            if let Some(worker) = tree
+                .workers
+                .iter_mut()
+                .find(|worker| worker.name == endpoint.worker)
+            {
+                worker.running = was_running;
+            }
             return Err(JetServiceError::Policy(
                 "service partition limit exceeded".to_string(),
             ));
         }
         tree.partitioned.push(name);
-    }
+        true
+    } else {
+        false
+    };
     let worker = tree
         .workers
         .iter()
         .find(|worker| worker.name == endpoint.worker)
         .ok_or_else(|| JetServiceError::Unknown("partitioned worker disappeared".to_string()))?;
-    jet_services_authority_update(&worker.endpoint, false)
+    let worker_endpoint = worker.endpoint.clone();
+    if let Err(error) = jet_services_authority_update(&worker_endpoint, false) {
+        if added_partition {
+            tree.partitioned.retain(|existing| existing != &endpoint.worker);
+        }
+        if let Some(worker) = tree
+            .workers
+            .iter_mut()
+            .find(|worker| worker.name == endpoint.worker)
+        {
+            worker.running = was_running;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn jet_services_reconcile_worker(
@@ -3002,14 +3647,44 @@ fn jet_services_reconcile_worker(
             endpoint.worker
         )));
     };
-    tree.partitioned.remove(index);
-    let worker = tree
-        .workers
-        .iter_mut()
-        .find(|worker| worker.endpoint == *endpoint)
-        .ok_or_else(|| JetServiceError::Unknown("reconciled worker disappeared".to_string()))?;
-    worker.running = true;
-    jet_services_authority_update(&worker.endpoint, true)
+    let (old_generation, worker_endpoint) = {
+        let worker = tree
+            .workers
+            .iter_mut()
+            .find(|worker| {
+                worker.name == endpoint.worker
+                    && worker.endpoint.tree == endpoint.tree
+                    && worker.endpoint.authority == endpoint.authority
+                    && worker.endpoint.generation == endpoint.generation
+            })
+            .ok_or_else(|| JetServiceError::Unknown("reconciled worker disappeared".to_string()))?;
+        worker.running = true;
+        (worker.endpoint.generation, worker.endpoint.clone())
+    };
+    let partitioned_name = tree.partitioned.remove(index);
+    let result = if old_generation != tree.generation {
+        match jet_services_promote_worker_generation(tree, &endpoint.worker) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(JetServiceError::Unavailable(
+                "partitioned worker has uncommitted durable delivery".to_string(),
+            )),
+            Err(error) => Err(error),
+        }
+    } else {
+        jet_services_authority_update(&worker_endpoint, true)
+    };
+    if let Err(error) = result {
+        tree.partitioned.insert(index, partitioned_name);
+        if let Some(worker) = tree
+            .workers
+            .iter_mut()
+            .find(|worker| worker.name == endpoint.worker)
+        {
+            worker.running = false;
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn jet_services_prepare_rollback(
@@ -3051,6 +3726,13 @@ fn jet_services_restore_rollback(
         store: receipt.rollback_store.clone(),
         ..authority.clone()
     };
+    let _rollback_lock = service_authority_file_lock(&receipt.rollback_store, "rollback")?;
+    let rollback_path = std::path::Path::new(&receipt.rollback_store);
+    if !rollback_path.is_file() {
+        return Err(jet_services_state_error(
+            "service rollback store is missing or not a regular file",
+        ));
+    }
     let records = jet_services_state_store_load(&rollback_authority, &tree.state_adapter)?;
     jet_services_state_store_write(authority, &tree.state_adapter, &records)?;
     match tree.state_adapter {
@@ -3063,44 +3745,203 @@ fn jet_services_restore_rollback(
     })
 }
 
+fn jet_services_promote_worker_generation(
+    tree: &mut JetServiceTree,
+    worker_name: &str,
+) -> Result<bool, JetServiceError> {
+    let (old_endpoint, new_endpoint, running) = {
+        let worker = tree
+            .workers
+            .iter()
+            .find(|worker| worker.name == worker_name)
+            .ok_or_else(|| JetServiceError::Unknown(format!("worker `{worker_name}` disappeared")))?;
+        let mut new_endpoint = worker.endpoint.clone();
+        new_endpoint.generation = tree.generation;
+        (
+            worker.endpoint.clone(),
+            new_endpoint,
+            !tree.partitioned.iter().any(|name| name == worker_name),
+        )
+    };
+    if tree.delivery == JetServiceDelivery::DurableAtLeastOnce
+        && tree.state_authority.is_some()
+        && service_authority_has_uncommitted(&old_endpoint)?
+    {
+        return Ok(false);
+    }
+    service_authority_register(&new_endpoint, running)?;
+    if running {
+        if let Err(error) = jet_services_bind_delivery_endpoint(
+            &tree.delivery,
+            tree.state_authority.as_ref(),
+            &new_endpoint,
+        ) {
+            let _ = jet_services_authority_update(&new_endpoint, false);
+            return Err(error);
+        }
+    }
+    if let Err(error) = jet_services_authority_update(&old_endpoint, false) {
+        let _ = jet_services_authority_update(&new_endpoint, false);
+        return Err(error);
+    }
+    let promoted_endpoint = {
+        let worker = tree
+            .workers
+            .iter_mut()
+            .find(|worker| worker.name == worker_name)
+            .ok_or_else(|| JetServiceError::Unknown(format!("worker `{worker_name}` disappeared")))?;
+        worker.endpoint = new_endpoint.clone();
+        worker.mailbox.endpoint = new_endpoint;
+        worker.running = running;
+        worker.endpoint.clone()
+    };
+    let tree_name = tree.name.clone();
+    let directory_key = tree.directory_key.clone();
+    for (name, endpoint, signature) in &mut tree.directory {
+        if endpoint.worker == worker_name {
+            *endpoint = promoted_endpoint.clone();
+            *signature = jet_services_directory_signature_parts(
+                &tree_name,
+                &directory_key,
+                name,
+                endpoint,
+            );
+        }
+    }
+    for (_, endpoint, _) in &mut tree.idempotency_seen {
+        if endpoint.worker == worker_name {
+            endpoint.generation = tree.generation;
+        }
+    }
+    if let Some(receipt) = tree.last_upgrade.as_mut() {
+        receipt.pinned_shards.retain(|name| name != worker_name);
+    }
+    tree.draining.retain(|name| name != worker_name);
+    Ok(true)
+}
+
+fn jet_services_restore_handoff_authority(
+    tree: &JetServiceTree,
+    old_endpoints: &[JetServiceEndpoint],
+    next_endpoints: &[JetServiceEndpoint],
+    running: &[bool],
+    pinned_shards: &[String],
+) -> Result<(), JetServiceError> {
+    let mut first_error = None;
+    for (index, old_endpoint) in old_endpoints.iter().enumerate() {
+        if pinned_shards.iter().any(|name| name == &old_endpoint.worker) {
+            continue;
+        }
+        let _ = jet_services_authority_update(&next_endpoints[index], false);
+        if let Err(error) = service_authority_register(old_endpoint, running[index]) {
+            first_error.get_or_insert(error);
+            continue;
+        }
+        if running[index] {
+            if let Err(error) = jet_services_bind_delivery_endpoint(
+                &tree.delivery,
+                tree.state_authority.as_ref(),
+                old_endpoint,
+            ) {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
 fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
-    for worker in &tree.workers {
-        if tree.draining.iter().any(|name| name == &worker.name)
-            && !worker.mailbox.messages.is_empty()
-        {
-            return Err(JetServiceError::Policy(format!(
-                "cannot hand off shard `{}` with {} queued message(s)",
-                worker.name,
-                worker.mailbox.messages.len()
-            )));
+    let pinned_before_handoff = tree
+        .last_upgrade
+        .as_ref()
+        .map(|receipt| receipt.pinned_shards.clone())
+        .unwrap_or_else(|| tree.draining.clone());
+    for worker_name in pinned_before_handoff {
+        let can_promote = tree
+            .workers
+            .iter()
+            .find(|worker| worker.name == worker_name)
+            .is_some_and(|worker| {
+                !tree.partitioned.iter().any(|name| name == &worker.name)
+                    && worker.mailbox.channel.depth() == 0
+                    && jet_services_generation_is_pinned(
+                        tree,
+                        &worker.name,
+                        worker.endpoint.generation,
+                    )
+            });
+        if can_promote {
+            let _ = jet_services_promote_worker_generation(tree, &worker_name)?;
         }
     }
-    let (rollback_store, rollback_available, migration) = jet_services_prepare_rollback(tree)?;
+    if tree
+        .last_upgrade
+        .as_ref()
+        .is_some_and(|receipt| !receipt.pinned_shards.is_empty())
+    {
+        return Err(JetServiceError::Policy(
+            "cannot start another handoff while pinned shards are draining".to_string(),
+        ));
+    }
     let from_generation = tree.generation;
     let to_generation = tree
         .generation
         .checked_add(1)
         .ok_or_else(|| JetServiceError::Policy("service generation exhausted".to_string()))?;
-    tree.previous_generation = from_generation;
-    tree.generation = to_generation;
-    for worker in &mut tree.workers {
-        if tree.draining.iter().any(|name| name == &worker.name)
-            && !tree.partitioned.iter().any(|name| name == &worker.name)
+    let mut pinned_shards = Vec::new();
+    for worker in &tree.workers {
+        let has_uncommitted = tree.delivery == JetServiceDelivery::DurableAtLeastOnce
+            && tree.state_authority.is_some()
+            && service_authority_has_uncommitted(&worker.endpoint)?;
+        if tree.partitioned.iter().any(|name| name == &worker.name)
+            || (tree.draining.iter().any(|name| name == &worker.name)
+                && worker.mailbox.channel.depth() > 0)
+            || has_uncommitted
         {
-            worker.running = true;
+            pinned_shards.push(worker.name.clone());
         }
-        worker.endpoint.generation = tree.generation;
-        worker.mailbox.endpoint.generation = tree.generation;
+    }
+    let (rollback_store, rollback_available, migration) = jet_services_prepare_rollback(tree)?;
+    let old_endpoints = tree
+        .workers
+        .iter()
+        .map(|worker| worker.endpoint.clone())
+        .collect::<Vec<_>>();
+    let running = tree
+        .workers
+        .iter()
+        .map(|worker| worker.running)
+        .collect::<Vec<_>>();
+    let mut next_running = running.clone();
+    for (index, worker) in tree.workers.iter().enumerate() {
+        if !pinned_shards.iter().any(|name| name == &worker.name)
+            && tree.draining.iter().any(|name| name == &worker.name)
+        {
+            next_running[index] = true;
+        }
+    }
+    let mut next_endpoints = old_endpoints.clone();
+    for (index, endpoint) in next_endpoints.iter_mut().enumerate() {
+        if !pinned_shards.iter().any(|name| name == &tree.workers[index].name) {
+            endpoint.generation = to_generation;
+        }
     }
     let tree_name = tree.name.clone();
     let directory_key = tree.directory_key.clone();
-    for (name, endpoint, signature) in &mut tree.directory {
-        endpoint.generation = tree.generation;
+    let mut next_directory = tree.directory.clone();
+    for (name, endpoint, signature) in &mut next_directory {
+        if pinned_shards.iter().any(|pinned| pinned == &endpoint.worker) {
+            continue;
+        }
+        endpoint.generation = to_generation;
         *signature = jet_services_directory_signature_parts(
             &tree_name,
             &directory_key,
@@ -3108,25 +3949,92 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
             endpoint,
         );
     }
-    // Durable delivery keys identify the logical operation, not the worker
-    // incarnation.  Rebind their recorded endpoint with the generation so a
-    // post-handoff retry remains idempotent and the state validator never
-    // accepts a stale endpoint hidden inside durable state.
-    for (_, endpoint, _) in &mut tree.idempotency_seen {
-        endpoint.generation = tree.generation;
+    let mut next_idempotency = tree.idempotency_seen.clone();
+    for (_, endpoint, _) in &mut next_idempotency {
+        if !pinned_shards.iter().any(|name| name == &endpoint.worker) {
+            endpoint.generation = to_generation;
+        }
     }
     for worker in &tree.workers {
-        jet_services_authority_update(&worker.endpoint, worker.running)?;
+        if !pinned_shards.iter().any(|name| name == &worker.name) {
+            if let Err(error) = jet_services_authority_update(&worker.endpoint, false) {
+                let rollback = jet_services_restore_handoff_authority(
+                    tree,
+                    &old_endpoints,
+                    &next_endpoints,
+                    &running,
+                    &pinned_shards,
+                );
+                return Err(match rollback {
+                    Ok(()) => error,
+                    Err(rollback_error) => JetServiceError::Policy(format!(
+                        "{}; handoff authority rollback failed: {}",
+                        error.jet_show(),
+                        rollback_error.jet_show()
+                    )),
+                });
+            }
+        }
     }
+    for (index, worker) in tree.workers.iter().enumerate() {
+        if pinned_shards.iter().any(|name| name == &worker.name) {
+            continue;
+        }
+        let endpoint = &next_endpoints[index];
+        let result = service_authority_register(endpoint, next_running[index]).and_then(|()| {
+            if next_running[index] {
+                jet_services_bind_delivery_endpoint(
+                    &tree.delivery,
+                    tree.state_authority.as_ref(),
+                    endpoint,
+                )
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = result {
+            let rollback = jet_services_restore_handoff_authority(
+                tree,
+                &old_endpoints,
+                &next_endpoints,
+                &running,
+                &pinned_shards,
+            );
+            return Err(match rollback {
+                Ok(()) => error,
+                Err(rollback_error) => JetServiceError::Policy(format!(
+                    "{}; handoff authority rollback failed: {}",
+                    error.jet_show(),
+                    rollback_error.jet_show()
+                )),
+            });
+        }
+    }
+    tree.previous_generation = from_generation;
+    tree.generation = to_generation;
+    for (index, worker) in tree.workers.iter_mut().enumerate() {
+        if pinned_shards.iter().any(|name| name == &worker.name) {
+            if tree.partitioned.iter().any(|name| name == &worker.name) {
+                worker.running = false;
+            }
+            continue;
+        }
+        worker.running = next_running[index];
+        worker.endpoint = next_endpoints[index].clone();
+        worker.mailbox.endpoint = next_endpoints[index].clone();
+    }
+    tree.directory = next_directory;
+    tree.idempotency_seen = next_idempotency;
     tree.last_upgrade = Some(JetServiceUpgradeReceipt {
         from_generation,
         to_generation,
         migration,
         rollback_store,
         rollback_available,
-        pinned_shards: Vec::new(),
+        pinned_shards: pinned_shards.clone(),
     });
-    tree.draining.clear();
+    tree.draining
+        .retain(|name| pinned_shards.iter().any(|pinned| pinned == name));
     Ok(tree.generation)
 }
 
@@ -3136,6 +4044,37 @@ fn jet_services_upgrade_receipt(
     tree.last_upgrade.clone().ok_or_else(|| {
         JetServiceError::Policy("service tree has no completed generation handoff".to_string())
     })
+}
+
+fn jet_services_restore_rollback_authority(
+    tree: &JetServiceTree,
+    current_endpoints: &[JetServiceEndpoint],
+    rollback_endpoints: &[JetServiceEndpoint],
+    running: &[bool],
+) -> Result<(), JetServiceError> {
+    let mut first_error = None;
+    for endpoint in rollback_endpoints {
+        let _ = jet_services_authority_update(endpoint, false);
+    }
+    for (index, endpoint) in current_endpoints.iter().enumerate() {
+        if let Err(error) = service_authority_register(endpoint, running[index]) {
+            first_error.get_or_insert(error);
+            continue;
+        }
+        if running[index] {
+            if let Err(error) = jet_services_bind_delivery_endpoint(
+                &tree.delivery,
+                tree.state_authority.as_ref(),
+                endpoint,
+            ) {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
@@ -3165,12 +4104,92 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
                 .to_string(),
         ));
     }
-    jet_services_restore_rollback(tree, &receipt)?;
-    tree.generation = tree.previous_generation;
+    let current_endpoints = tree
+        .workers
+        .iter()
+        .map(|worker| worker.endpoint.clone())
+        .collect::<Vec<_>>();
+    let rollback_endpoints = current_endpoints
+        .iter()
+        .map(|endpoint| {
+            let mut rollback_endpoint = endpoint.clone();
+            rollback_endpoint.generation = receipt.from_generation;
+            rollback_endpoint
+        })
+        .collect::<Vec<_>>();
+    let running = tree
+        .workers
+        .iter()
+        .map(|worker| worker.running)
+        .collect::<Vec<_>>();
+    for endpoint in &current_endpoints {
+        if let Err(error) = jet_services_authority_update(endpoint, false) {
+            let rollback = jet_services_restore_rollback_authority(
+                tree,
+                &current_endpoints,
+                &rollback_endpoints,
+                &running,
+            );
+            return Err(match rollback {
+                Ok(()) => error,
+                Err(rollback_error) => JetServiceError::Policy(format!(
+                    "{}; rollback authority recovery failed: {}",
+                    error.jet_show(),
+                    rollback_error.jet_show()
+                )),
+            });
+        }
+    }
+    for (index, endpoint) in rollback_endpoints.iter().enumerate() {
+        let result = service_authority_register(endpoint, running[index]).and_then(|()| {
+            if running[index] {
+                jet_services_bind_delivery_endpoint(
+                    &tree.delivery,
+                    tree.state_authority.as_ref(),
+                    endpoint,
+                )
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = result {
+            let rollback = jet_services_restore_rollback_authority(
+                tree,
+                &current_endpoints,
+                &rollback_endpoints,
+                &running,
+            );
+            return Err(match rollback {
+                Ok(()) => error,
+                Err(rollback_error) => JetServiceError::Policy(format!(
+                    "{}; rollback authority recovery failed: {}",
+                    error.jet_show(),
+                    rollback_error.jet_show()
+                )),
+            });
+        }
+    }
+    if let Err(error) = jet_services_restore_rollback(tree, &receipt) {
+        let rollback = jet_services_restore_rollback_authority(
+            tree,
+            &current_endpoints,
+            &rollback_endpoints,
+            &running,
+        );
+        return Err(match rollback {
+            Ok(()) => error,
+            Err(rollback_error) => JetServiceError::Policy(format!(
+                "{}; rollback authority recovery failed: {}",
+                error.jet_show(),
+                rollback_error.jet_show()
+            )),
+        });
+    }
+    tree.generation = receipt.from_generation;
     tree.previous_generation = 0;
-    for worker in &mut tree.workers {
-        worker.endpoint.generation = tree.generation;
-        worker.mailbox.endpoint.generation = tree.generation;
+    for (index, worker) in tree.workers.iter_mut().enumerate() {
+        worker.endpoint = rollback_endpoints[index].clone();
+        worker.mailbox.endpoint = rollback_endpoints[index].clone();
     }
     let tree_name = tree.name.clone();
     let directory_key = tree.directory_key.clone();
@@ -3186,9 +4205,7 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
     for (_, endpoint, _) in &mut tree.idempotency_seen {
         endpoint.generation = tree.generation;
     }
-    for worker in &tree.workers {
-        jet_services_authority_update(&worker.endpoint, worker.running)?;
-    }
+    tree.draining.clear();
     tree.last_upgrade = None;
     Ok(tree.generation)
 }
@@ -3203,6 +4220,17 @@ fn jet_services_chaos_fail(tree: &mut JetServiceTree) -> Result<i64, JetServiceE
         .chaos_fails
         .checked_add(1)
         .ok_or_else(|| JetServiceError::Policy("chaos failure counter exhausted".to_string()))?;
+    let endpoint = tree
+        .workers
+        .iter()
+        .find(|worker| worker.running)
+        .map(|worker| worker.endpoint.clone())
+        .ok_or_else(|| {
+            JetServiceError::Partitioned(
+                "chaos failure has no reachable service worker".to_string(),
+            )
+        })?;
+    jet_services_fail_worker(tree, &endpoint)?;
     Ok(tree.chaos_fails)
 }
 
@@ -3216,7 +4244,9 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         tree.event_log.len(),
         tree.chaos_fails,
         tree.draining.len(),
-        tree.partitioned.len()
-        ,tree.last_upgrade.as_ref().is_some_and(|receipt| receipt.rollback_available)
+        tree.partitioned.len(),
+        tree.last_upgrade
+            .as_ref()
+            .is_some_and(|receipt| receipt.rollback_available)
     )
 }
