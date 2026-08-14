@@ -1558,18 +1558,71 @@ enum EntryError {
     Rust,
 }
 
+/// Check the existing codegen capabilities for the Rust shape that entry
+/// reporting will receive. Native composites use their Prelude JetShow
+/// blanket implementations; nominal leaves use the existing printable set.
+fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => jet_showable_type(cx, inner),
+        Type::Result { ok, err } => {
+            jet_showable_type(cx, ok) && jet_showable_type(cx, err)
+        }
+        Type::Map { key, value, .. } => {
+            jet_showable_type(cx, key) && jet_showable_type(cx, value)
+        }
+        Type::Union(members) => members.iter().all(|member| jet_showable_type(cx, member)),
+        Type::Named(name) => {
+            name == "str"
+                || cx.has_auto_printable_type(name)
+                || cx.is_distinct_type_name(name)
+        }
+        Type::Apply { name, args } => {
+            let native_composite = matches!(
+                name.as_str(),
+                crate::Syntax::TYPE_SET
+                    | crate::Syntax::TYPE_RANK
+                    | crate::Syntax::TYPE_PRIORITY_QUEUE
+                    | crate::Syntax::TYPE_QUEUE
+                    | crate::Syntax::TYPE_LRU
+                    | crate::Syntax::EXPIRING_VALUE_TYPE
+                    | "Loadable"
+                    | "View"
+            );
+            (native_composite || cx.has_auto_printable_type(name))
+                && args.iter().all(|arg| jet_showable_type(cx, arg))
+        }
+        Type::TraitObject(_)
+        | Type::Tuple(_)
+        | Type::Shared(_)
+        | Type::Fn { .. }
+        | Type::ComputeDim(_) => false,
+    }
+}
+
 fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
     let Type::Result { err, .. } = ty else {
         return None;
     };
     let uses_jet_display = match err.as_ref() {
-        Type::Named(name) => {
-            cx.auto_printable.contains(name) || cx.has_display_type(name)
-        }
+        Type::Named(name) | Type::Apply { name, .. } => cx.has_display_type(name),
         _ => false,
     };
     Some(if uses_jet_display {
         EntryError::Jet
+    } else if jet_showable_type(cx, err) {
+        EntryError::JetShow
     } else {
         EntryError::Rust
     })

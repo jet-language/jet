@@ -865,6 +865,13 @@ impl Cx {
                 .is_some_and(|canonical| self.display_types.contains(&canonical))
     }
 
+    pub(crate) fn has_auto_printable_type(&self, name: &str) -> bool {
+        self.auto_printable.contains(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.auto_printable.contains(&canonical))
+    }
+
     pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
         self.distinct_types.contains_key(name)
             || self

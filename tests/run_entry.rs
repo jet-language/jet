@@ -182,6 +182,24 @@ fn run() {
 }
 
 #[test]
+fn structural_entry_error_uses_jet_show_report() {
+    let source = r#"
+fn run() ? [String] {
+    return Err([String].{"boom"})
+}
+"#;
+    let out = jet::compile(source).expect("a structural entry error should compile");
+    let main = out.rust.rfind("\nfn main()").expect("generated main");
+    let entry = &out.rust[main..];
+    assert!(
+        entry.contains("jet_entry_error_text_show(&")
+            && !entry.contains("jet_entry_error_text_jet(&")
+            && !entry.contains("jet_entry_error_text(&"),
+        "structural entry errors must use JetShow:\n{entry}"
+    );
+}
+
+#[test]
 fn script_entry_uses_the_same_front_end_for_check_and_build() {
     let dir = common::unique_tmp("jet_script_check_build");
     std::fs::create_dir_all(&dir).unwrap();
