@@ -132,6 +132,12 @@ snapshots):
 - `#Shared` pins the synchronized form (today every reactive box already uses
   that form). Crossing sites are recorded for the upgrade report.
 
+These boundary guarantees do not imply deadlock freedom. See the [Deadlock stance](spec.md#deadlock-stance)
+for the narrow `#Transact` lock-order guarantee and the non-guarantee for
+arbitrary task and channel wait cycles. The M:N scheduler parks tasks at
+`tasks.channel` waits; `task` and `task.group` handles define join duties. These
+mechanisms do not detect arbitrary wait cycles.
+
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
 vetted runtime internal must also uphold its boundary contract.
 

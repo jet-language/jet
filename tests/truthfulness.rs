@@ -1342,6 +1342,60 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
     );
 }
 
+#[test]
+fn concurrency_spec_states_deadlock_stance() {
+    let root = root();
+    let spec = fs::read_to_string(root.join("docs/spec/spec.md"))
+        .expect("language spec is readable");
+    let architecture = fs::read_to_string(root.join("docs/spec/architecture.md"))
+        .expect("architecture spec is readable");
+    let heading = "### Deadlock stance";
+
+    assert_eq!(
+        spec.matches(heading).count(),
+        1,
+        "spec must have one Deadlock section"
+    );
+    let stance = spec
+        .split_once(heading)
+        .and_then(|(_, rest)| rest.split_once("\n## ").map(|(section, _)| section))
+        .expect("Deadlock section must have a body before the next top-level section");
+
+    assert_eq!(
+        stance.matches("**Guarantee.**").count(),
+        1,
+        "Deadlock section must have one guarantee"
+    );
+    assert_eq!(
+        stance.matches("**Non-guarantee.**").count(),
+        1,
+        "Deadlock section must have one non-guarantee"
+    );
+    assert!(stance.contains("Jet guarantees deadlock-free lock acquisition"));
+    assert!(stance.contains("Jet does not guarantee deadlock freedom"));
+    assert!(stance.contains("does not detect arbitrary deadlocks at runtime"));
+
+    for link in [
+        "[task and scheduler rules](#e2-m1--concurrency-tasks-and-channels-verified-2026-08-06)",
+        "[channel buffering](#bounded-buffering-law)",
+        "[concurrency boundary safety](architecture.md#concurrency-boundary-safety-status)",
+    ] {
+        assert!(stance.contains(link), "Deadlock section must link `{link}`");
+    }
+
+    assert_eq!(
+        architecture.matches("[Deadlock stance](spec.md#deadlock-stance)").count(),
+        1,
+        "architecture must link the canonical Deadlock section"
+    );
+    for mechanism in ["M:N scheduler", "`task`", "`task.group`", "`tasks.channel`"] {
+        assert!(
+            architecture.contains(mechanism),
+            "architecture must name concurrency mechanism `{mechanism}`"
+        );
+    }
+}
+
 fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

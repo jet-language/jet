@@ -2483,6 +2483,30 @@ report `panic: a task panicked` instead of exiting the whole process early.
 Scale tests: `scheduler_spawn_10000_tasks` in CI; `scheduler_spawn_100000_tasks_bench`
 is `#[ignore]` for local 100k stress.
 
+### Deadlock stance
+
+**Guarantee.** Jet guarantees deadlock-free lock acquisition for one narrow path:
+`#Transact` collects touched `Shared<T>` handles and acquires their locks in stable
+order before commit. This removes lock-order cycles inside transaction commit.
+
+**Non-guarantee.** Jet does not guarantee deadlock freedom for arbitrary
+structured-concurrency programs, and it does not detect arbitrary deadlocks at
+runtime. `task`, `task.group`, join duties, and `tasks.channel` define ownership,
+lifetime, and wait behavior; they do not prove progress. Two tasks can wait for
+each other through bounded channels, or a task can wait for a result that no task
+sends.
+
+The M:N scheduler parks tasks at channel, timer, and I/O wait points. It wakes a
+task when the relevant source, cancellation, or deadline changes, but it does not
+build or check a global wait-for graph. A `#Context` deadline or explicit
+cancellation can bound a wait; neither makes a deadlock successful. The
+`#Transact` guarantee does not extend to arbitrary lock or guard use, channels,
+task joins, or I/O.
+
+See [task and scheduler rules](#e2-m1--concurrency-tasks-and-channels-verified-2026-08-06),
+[channel buffering](#bounded-buffering-law), and
+[concurrency boundary safety](architecture.md#concurrency-boundary-safety-status).
+
 ## Modules — `module name { … }` (U3, unified-ecosystem §4–5; parser, Stage 1a)
 
 A module is a named, composable top-level declaration that contributes typed
