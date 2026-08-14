@@ -4077,7 +4077,17 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             stmt,
             ..
         } => {
-            *replace_all
+            let resident_string_field_compound = matches!(
+                stmt.as_ref(),
+                TStmt::Assign {
+                    place,
+                    op: Some(BinOp::Add),
+                    value,
+                    ..
+                } if structured_record_field_place(place)
+                    && matches!(&value.ty, Type::String)
+            );
+            (*replace_all || resident_string_field_compound)
                 && index_temp
                     .as_ref()
                     .is_none_or(|(_, e)| resident_safe_expr(e, callees))

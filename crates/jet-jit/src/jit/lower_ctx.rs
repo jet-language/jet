@@ -4128,7 +4128,9 @@ impl LowerCtx<'_, '_> {
                             .meta
                             .struct_field_index(&type_name, field)
                             .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
-                        let field_ty = value.ty.clone();
+                        let field_ty = self
+                            .concrete_struct_field_ty(&record_ty, field)
+                            .unwrap_or_else(|| value.ty.clone());
                         let rhs = self.lower_assignment_value(value, *clone_value)?;
                         let assigned = if let Some(op) = op {
                             let current =
@@ -5748,7 +5750,17 @@ impl LowerCtx<'_, '_> {
                     self.vars.insert(temp.clone(), var);
                     self.var_tys.insert(temp.clone(), value.ty.clone());
                 }
-                if !*replace_all {
+                let resident_string_field_compound = matches!(
+                    stmt.as_ref(),
+                    TStmt::Assign {
+                        place,
+                        op: Some(BinOp::Add),
+                        value,
+                        ..
+                    } if structured_record_field_place(place).is_some()
+                        && matches!(&value.ty, Type::String)
+                );
+                if !*replace_all && !resident_string_field_compound {
                     return Err("jit automatic GC slot edit unsupported".to_string());
                 }
                 match stmt.as_ref() {
