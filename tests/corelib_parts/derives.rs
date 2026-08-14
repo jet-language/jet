@@ -919,6 +919,21 @@ fn run() {
         }
         other => panic!("generic user derive did not run in default dev: {other:?}"),
     }
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                exit_code,
+                0,
+                "generic user derive failed in the TIR interpreter: {stderr}"
+            );
+            assert_eq!(stdout, "7\nBox\n");
+        }
+        other => panic!("generic user derive did not run in the TIR interpreter: {other:?}"),
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 

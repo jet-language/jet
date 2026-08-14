@@ -51,6 +51,7 @@ module.exports = grammar({
     [$.extern_fn, $.function_def],
     [$.extern_fn],
     [$.module_path, $.module_def],
+    [$._marker, $.marked_expr],
   ],
 
   // S6-R: source has no visible semicolons (the lexer inserts synthetic ones).
@@ -116,6 +117,7 @@ module.exports = grammar({
       choice(
         $.test_block,
         $.bench_block,
+        $.derive_stmt,
         $.function_def,
         $.struct_def,
         $.enum_def,
@@ -303,7 +305,7 @@ module.exports = grammar({
         repeat(choice($._marker, $._lower_marker)),
         optional("pub"),
         "fn",
-        field("name", choice($.identifier, $.type_identifier)),
+        field("name", choice($.identifier, $.type_identifier, $.compiler_fact)),
         optional($.type_params),
         $.param_list,
         optional(choice(
@@ -334,7 +336,6 @@ module.exports = grammar({
         repeat(
           choice(
             $.struct_field,
-            $.derive_stmt,
             $.function_def,
             $.trait_impl_block,
           ),
@@ -353,7 +354,43 @@ module.exports = grammar({
         choice(seq("=>", field("body", choice($.block, $._expr))), optional(",")),
       ),
 
-    derive_stmt: ($) => seq("derive", commaSep1($.type_identifier)),
+    // D-META-CODE1=A / D-META-BODY1=A: the canonical provider definition.
+    // Its body is a typed Jet item/statement block; `@loop` repeats that same
+    // grammar for compile-time field-driven member generation.
+    derive_stmt: ($) =>
+      seq(
+        "derive",
+        field("type_param", $.type_identifier),
+        ".",
+        field("trait_name", $.type_identifier),
+        $.derive_body,
+      ),
+
+    derive_body: ($) =>
+      seq(
+        "{",
+        repeat(
+          choice(
+            $.function_def,
+            $.impl_block,
+            $.struct_def,
+            $.enum_def,
+            $.derive_loop,
+            $._stmt,
+          ),
+        ),
+        "}",
+      ),
+
+    derive_loop: ($) =>
+      seq(
+        "@",
+        "loop",
+        field("var", $.identifier),
+        ",",
+        field("source", $._expr),
+        $.derive_body,
+      ),
 
     // ── Enum definition (S30) ──────────────────────────────────────────────
     enum_def: ($) =>
@@ -367,7 +404,6 @@ module.exports = grammar({
         repeat(
           choice(
             $.enum_variant,
-            $.derive_stmt,
             $.function_def,
             $.trait_impl_block,
           ),
@@ -428,7 +464,7 @@ module.exports = grammar({
         // Conversion impl `impl FromErr => ToErr { return … }` — body is a block.
         seq(
           "impl",
-          field("type", choice($.type_identifier, $.generic_type)),
+          field("type", choice($.type_identifier, $.generic_type, $.compiler_fact)),
           "=>",
           field("into", choice($.type_identifier, $.generic_type)),
           $.block,
@@ -436,7 +472,7 @@ module.exports = grammar({
         // Inherent / trait / delegation impl — body is method definitions.
         seq(
           "impl",
-          field("type", choice($.type_identifier, $.generic_type)),
+          field("type", choice($.type_identifier, $.generic_type, $.compiler_fact)),
           optional(
             seq(
               ".",
@@ -595,6 +631,7 @@ module.exports = grammar({
         $.union_type,
         $.primitive_type,
         $.generic_type,
+        $.compiler_fact,
         $.type_identifier,
         $.option_type,
         $.fallible_type,

@@ -370,16 +370,12 @@ fn run() {}
     )
     .expect_err("a function-site rule must run its checked body");
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E2710"),
-        "expected the function rule wrapper: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0927"),
+        "expected the registered function-rule diagnostic: {diagnostics:?}"
     );
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.cause.iter().any(|code| code == "E0927")),
-        "expected the registered function-rule cause: {diagnostics:?}"
+        diagnostics.iter().all(|diagnostic| diagnostic.code == "E0927"),
+        "the rule must surface its registered diagnostic directly: {diagnostics:?}"
     );
 }
 
@@ -413,7 +409,8 @@ impl Person {
         .expect("collision diagnostic");
     assert!(collision.what.contains("generated member"), "{collision:?}");
     let detail = collision.detail.as_deref().unwrap_or("");
-    assert!(detail.contains("generated rule"), "{collision:?}");
+    assert!(detail.contains("generated member"), "{collision:?}");
+    assert!(detail.contains("from rule"), "{collision:?}");
     assert!(detail.contains("existing member"), "{collision:?}");
 }
 
@@ -440,12 +437,12 @@ fn run() {}
     )
     .expect_err("a rule rejection must stop compilation");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2710"),
-        "expected the registered rule-body wrapper: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0927"),
+        "expected the registered rule diagnostic: {diagnostics:?}"
     );
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.cause.iter().any(|code| code == "E0927")),
-        "expected E0927 as the causal registered diagnostic: {diagnostics:?}"
+        diagnostics.iter().all(|diagnostic| diagnostic.code == "E0927"),
+        "the rule must surface its registered diagnostic directly: {diagnostics:?}"
     );
 }
 

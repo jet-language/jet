@@ -3045,7 +3045,7 @@ mod project_part_tests {
             Some(Span::new(0, 1)),
         );
         let dependent = Diagnostic::error(
-            "E2710",
+            "E0957",
             "dependent expansion failed".into(),
             "the dependent expansion ran the root".into(),
             "fix the root construct".into(),

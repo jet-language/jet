@@ -135,6 +135,7 @@ fn derive_member_collision(
     type_name: &str,
     method: &crate::AST::Func,
     existing_site: &str,
+    existing_span: Span,
 ) -> Diagnostic {
     Diagnostic::error(
         "E0105",
@@ -155,6 +156,16 @@ fn derive_member_collision(
         ),
         Some(method.name_span),
     )
+    .with_detail(format!(
+        "generated member `{}` from `derive T.{}` at span {}..{}\n{} at span {}..{}",
+        method.name,
+        derive_name,
+        method.name_span.start,
+        method.name_span.end,
+        existing_site,
+        existing_span.start,
+        existing_span.end,
+    ))
 }
 
 fn validate_foreign_imports(bundle: &ProgramBundle) -> Vec<Diagnostic> {
@@ -833,20 +844,27 @@ fn check_bundle_opts_for_output_inner(
                 let mut new_items: Vec<Item> = Vec::new();
 
                 for s in &struct_infos {
-                    let mut existing_member_sites: HashMap<String, String> = HashMap::new();
+                    let mut existing_member_sites: HashMap<String, (String, Span)> =
+                        HashMap::new();
                     for item in &module.items {
                         match item {
                             Item::Struct(candidate) if candidate.name == s.name => {
                                 for field in &candidate.fields {
                                     existing_member_sites.insert(
                                         field.name.clone(),
-                                        format!("existing field `{}.{}`", s.name, field.name),
+                                        (
+                                            format!("existing field `{}.{}`", s.name, field.name),
+                                            field.name_span,
+                                        ),
                                     );
                                 }
                                 for method in &candidate.methods {
                                     existing_member_sites.insert(
                                         method.name.clone(),
-                                        format!("existing method `{}.{}`", s.name, method.name),
+                                        (
+                                            format!("existing method `{}.{}`", s.name, method.name),
+                                            method.name_span,
+                                        ),
                                     );
                                 }
                             }
@@ -854,14 +872,18 @@ fn check_bundle_opts_for_output_inner(
                                 for method in &candidate.methods {
                                     existing_member_sites.insert(
                                         method.name.clone(),
-                                        format!("existing method `{}.{}`", s.name, method.name),
+                                        (
+                                            format!("existing method `{}.{}`", s.name, method.name),
+                                            method.name_span,
+                                        ),
                                     );
                                 }
                             }
                             _ => {}
                         }
                     }
-                    let mut generated_method_spans: HashMap<String, Span> = HashMap::new();
+                    let mut generated_method_spans: HashMap<String, (String, Span)> =
+                        HashMap::new();
                     for (derive_name, _derive_span) in &s.derives {
                         // Prefer an entry-local provider, then one beside the target.
                         // Remaining imported/imported pairs violate the orphan law:
@@ -939,7 +961,7 @@ fn check_bundle_opts_for_output_inner(
                                     for item in expanded {
                                         match item {
                                             Item::Func(function) => {
-                                                if let Some(existing_site) =
+                                                if let Some((existing_site, existing_span)) =
                                                     existing_member_sites.get(&function.name)
                                                 {
                                                     diags.push(derive_member_collision(
@@ -947,26 +969,29 @@ fn check_bundle_opts_for_output_inner(
                                                         &s.name,
                                                         &function,
                                                         existing_site,
+                                                        *existing_span,
                                                     ));
                                                     continue;
                                                 }
-                                                if let Some(_generated_span) = generated_method_spans
-                                                    .get(&function.name)
+                                                if let Some((generated_derive, generated_span)) =
+                                                    generated_method_spans.get(&function.name)
                                                 {
+                                                    let existing_site = format!(
+                                                        "generated member `{}` from `derive T.{}`",
+                                                        function.name, generated_derive
+                                                    );
                                                     diags.push(derive_member_collision(
                                                         derive_name,
                                                         &s.name,
                                                         &function,
-                                                        &format!(
-                                                            "another generated method `{}`",
-                                                            function.name
-                                                        ),
+                                                        &existing_site,
+                                                        *generated_span,
                                                     ));
                                                     continue;
                                                 }
                                                 generated_method_spans.insert(
                                                     function.name.clone(),
-                                                    function.name_span,
+                                                    (derive_name.clone(), function.name_span),
                                                 );
                                                 methods.push(function)
                                             }
@@ -1140,10 +1165,13 @@ fn check_bundle_opts_for_output_inner(
                                         Some(method.name_span),
                                     )
                                     .with_detail(format!(
-                                        "generated rule `{}` at span {}..{}\nexisting member at span {}..{}",
+                                        "generated member `{}` from rule `{}` at span {}..{}\nexisting member `{}.{}` at span {}..{}",
+                                        method.name,
                                         declaration.name,
-                                        marker.span.start,
-                                        marker.span.end,
+                                        method.name_span.start,
+                                        method.name_span.end,
+                                        accepted.type_name,
+                                        method.name,
                                         existing.start,
                                         existing.end,
                                     )),
