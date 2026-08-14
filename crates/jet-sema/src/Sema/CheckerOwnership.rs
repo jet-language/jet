@@ -2376,12 +2376,11 @@ impl<'a> Checker<'a> {
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
         // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
         // may mutate its root or any projected place.
-        if action != "be moved"
-            && !action.contains("moved")
-            && let Some(freeze_site) = self.frozen_for(&changed.owner.name)
-        {
-            self.report_frozen_write(&changed.owner.name, freeze_site, action, span);
-            return;
+        if action != "be moved" && !action.contains("moved") {
+            if let Some(freeze_site) = self.frozen_for(&changed.owner.name) {
+                self.report_frozen_write(&changed.owner.name, freeze_site, action, span);
+                return;
+            }
         }
         // A task group loan outlives the borrow binding's last lexical use: the
         // child still holds it until the group joins. Check that first — the
