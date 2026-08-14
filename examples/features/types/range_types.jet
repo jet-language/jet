@@ -4,6 +4,14 @@
 // validate" as a type.
 #Numeric Severity :: distinct Int(0..10)
 
+struct Brightness {
+    level: Int(0..100)
+}
+
+fn set_brightness(level: Int(0..100)) => Int(0..100) :: level
+
+fn checked_inline(raw: Int) => Int(0..100) ? String :: Int(0..100).from_int(raw)
+
 fn checked(raw: Int) => Severity ? String :: Severity.from_int(raw)
 
 fn sum(band: Range) => Int {
@@ -13,6 +21,15 @@ fn sum(band: Range) => Int {
 }
 
 fn run() {
+    inline_value :: set_brightness(42)
+    print("{inline_value}")
+    inline_binding: Int(0..100) = 12
+    print("{inline_binding}")
+    brightness :: Brightness.{ level: 55 }
+    print("{brightness.level}")
+    runtime_inline :: checked_inline(3) ?? Int(0..100).from_int(0)
+    print("{runtime_inline}")
+
     // Checked at compile time — always in range.
     sev :: Severity.from_int(7)
     print("{sev.raw()}")

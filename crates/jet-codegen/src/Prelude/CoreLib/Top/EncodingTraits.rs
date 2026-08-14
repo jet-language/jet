@@ -167,6 +167,108 @@ impl __jet_Decode for i64 {
         jet_std::decode_int(t)
     }
 }
+
+// D-TYPE2-SPELL1: inline ranges are transparent in the Rust carrier, so a
+// generic container decoder cannot see the interval through `T = i64`. Typed
+// DataTree decode emits these Prelude-owned walks whenever a range appears
+// below a list, option, fixed list, or string-keyed map.
+fn jet_decode_inline_range(
+    t: &jet_std::DataTree,
+    lo: i64,
+    hi: i64,
+) -> Result<i64, Vec<jet_std::FieldError>> {
+    let value = <i64 as __jet_Decode>::jet_decode(t)?;
+    jet_inline_range_from_int(value, lo, hi).map_err(jet_std::FieldError::one)
+}
+
+fn jet_decode_inline_range_list<T, F>(
+    t: &jet_std::DataTree,
+    mut decode: F,
+) -> Result<Vec<T>, Vec<jet_std::FieldError>>
+where
+    F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+{
+    let jet_std::DataTree::Array(items) = t else {
+        return Err(jet_std::FieldError::one(format!(
+            "expected a list, found {}",
+            jet_std::datatree_kind_for(t)
+        )));
+    };
+    let mut out = Vec::with_capacity(items.len());
+    let mut errors = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        match decode(item) {
+            Ok(value) => out.push(value),
+            Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                &format!("[{index}]"),
+                error,
+            )),
+        }
+    }
+    if errors.is_empty() {
+        Ok(out)
+    } else {
+        Err(errors)
+    }
+}
+
+fn jet_decode_inline_range_fixed<T, F, const N: usize>(
+    t: &jet_std::DataTree,
+    decode: F,
+) -> Result<[T; N], Vec<jet_std::FieldError>>
+where
+    F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+{
+    let values = jet_decode_inline_range_list(t, decode)?;
+    let found = values.len();
+    values.try_into().map_err(|_| {
+        jet_std::FieldError::one(format!(
+            "expected a fixed list of length {N}, found {found}"
+        ))
+    })
+}
+
+fn jet_decode_inline_range_option<T, F>(
+    t: &jet_std::DataTree,
+    mut decode: F,
+) -> Result<JetOutcome<T, JetAbsent>, Vec<jet_std::FieldError>>
+where
+    F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+{
+    match t {
+        jet_std::DataTree::Null => Ok(Err(JetAbsent)),
+        other => Ok(Ok(decode(other)?)),
+    }
+}
+
+fn jet_decode_inline_range_map<V, F>(
+    t: &jet_std::DataTree,
+    mut decode: F,
+) -> Result<JetMap<String, V>, Vec<jet_std::FieldError>>
+where
+    F: FnMut(&jet_std::DataTree) -> Result<V, Vec<jet_std::FieldError>>,
+{
+    let jet_std::DataTree::Object(entries) = t else {
+        return Err(jet_std::FieldError::one(format!(
+            "expected an object, found {}",
+            jet_std::datatree_kind_for(t)
+        )));
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    let mut errors = Vec::new();
+    for (key, value) in entries {
+        match decode(value) {
+            Ok(value) => out.push((key.clone(), value)),
+            Err(error) => errors.extend(jet_std::FieldError::under_errors(key, error)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(out.into_iter().collect())
+    } else {
+        Err(errors)
+    }
+}
+
 impl __jet_Decode for f64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_float(t)

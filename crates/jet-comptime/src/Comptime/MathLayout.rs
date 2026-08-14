@@ -12,6 +12,7 @@ pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
     match ty {
         Type::Int => Some((true, 64)),
         Type::IntN { signed, bits } => Some((*signed, *bits)),
+        Type::InlineRange { base, .. } => integer_type_layout(base),
         Type::Named(name) => match name.as_str() {
             "I8" => Some((true, 8)),
             "I16" => Some((true, 16)),

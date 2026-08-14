@@ -1352,6 +1352,7 @@ impl LowerCtx<'_, '_> {
                 let disc = self.datatree_disc("Int")?;
                 self.pack_datatree_enum(disc, Some((val, &Type::Int)))
             }
+            Type::InlineRange { base, .. } => self.lower_serde_encode_value(val, base),
             Type::Bool => {
                 let wide = self.b.ins().uextend(types::I64, val);
                 let disc = self.datatree_disc("Bool")?;
@@ -1596,6 +1597,15 @@ impl LowerCtx<'_, '_> {
             let len = self.b.ins().iconst(types::I64, len);
             return Ok(self.call_host(self.host.encoding.decode_fixed_len, &[decoded, len]));
         }
+        if let Type::InlineRange { base, lo, hi } = target {
+            let decoded = self.lower_datatree_decode(tree, base)?;
+            let lo_value = self.b.ins().iconst(types::I64, *lo);
+            let hi_value = self.b.ins().iconst(types::I64, *hi);
+            return Ok(self.call_host(
+                self.host.encoding.decode_inline_range,
+                &[decoded, lo_value, hi_value],
+            ));
+        }
         if let Type::Named(name) = target {
             if let Some((lo, hi)) = self.meta.distinct_range(name) {
                 let base = self
@@ -1640,6 +1650,7 @@ impl LowerCtx<'_, '_> {
                             member,
                             Type::Int
                                 | Type::IntN { .. }
+                                | Type::InlineRange { .. }
                                 | Type::String
                                 | Type::Bool
                                 | Type::Float
@@ -1654,7 +1665,7 @@ impl LowerCtx<'_, '_> {
                 for (index, member) in members.iter().enumerate() {
                     let member_variant = match member {
                         Type::Bool => "Bool",
-                        Type::Int | Type::IntN { .. } => "Int",
+                        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => "Int",
                         Type::Float | Type::Float32 => "Float",
                         Type::String => "Text",
                         _ => unreachable!(),
@@ -6575,6 +6586,7 @@ impl LowerCtx<'_, '_> {
                     &field_ty,
                     Type::Int
                         | Type::IntN { .. }
+                        | Type::InlineRange { .. }
                         | Type::Float
                         | Type::Float32
                         | Type::Bool
@@ -7351,12 +7363,12 @@ impl LowerCtx<'_, '_> {
             match ty {
                 Type::String => "String".into(),
                 Type::Float | Type::Float32 => "Float".into(),
-                Type::Int | Type::IntN { .. } => "Int".into(),
+                Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => "Int".into(),
                 Type::Bool => "Bool".into(),
                 Type::Named(n) => n.clone(),
                 Type::Apply { name, args } if args.len() == 1 => {
                     format!("{name}<{}>", match &args[0] {
-                        Type::Int | Type::IntN { .. } => "Int".into(),
+                        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => "Int".into(),
                         Type::String => "String".into(),
                         Type::Float | Type::Float32 => "Float".into(),
                         Type::Bool => "Bool".into(),
@@ -8310,6 +8322,7 @@ impl LowerCtx<'_, '_> {
         match &ty {
             Type::Tagged { inner, .. } => self.lower_jet_show_value(value, inner, uses_result),
             Type::Quantity { base, .. } => self.lower_jet_show_value(value, base, uses_result),
+            Type::InlineRange { base, .. } => self.lower_jet_show_value(value, base, uses_result),
             Type::String => Ok(value),
             Type::Int => {
                 Ok(self.call_host(self.host.num.int_to_string, &[value]))
@@ -20212,6 +20225,16 @@ impl LowerCtx<'_, '_> {
             TNumericOp::FloatNarrow { .. } => {
                 Ok(self.call_host(self.host.numeric_float_narrow, &[value]))
             }
+            TNumericOp::InlineRange { lo, hi, fallible } => {
+                let lo = self.b.ins().iconst(types::I64, *lo);
+                let hi = self.b.ins().iconst(types::I64, *hi);
+                let host = if *fallible {
+                    self.host.inline_range_result
+                } else {
+                    self.host.inline_range
+                };
+                Ok(self.call_host(host, &[value, lo, hi]))
+            }
             TNumericOp::Origin { origin } => {
                 let _ = value; // preserve receiver evaluation before the adapter call
                 let text = jet_codegen::float_provenance::jet_float_origin(Some(origin.as_str()));
@@ -24805,7 +24828,7 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 let host_id = match &print_ty {
-                    Type::Int | Type::IntN { .. } => self.host.print_i64,
+                    Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => self.host.print_i64,
                     Type::String => self.host.print_str,
                     Type::Float | Type::Float32 => self.host.print_f64,
                     Type::Bool => self.host.print_bool,

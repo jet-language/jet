@@ -4168,6 +4168,14 @@ pub enum TNumericOp {
     FloatNarrow {
         dst_spelling: String,
     },
+    /// D-TYPE2-SPELL1: check an `Int` against an inline structural range. The
+    /// range is carried by the resolved op; TIR and every engine erase the
+    /// destination to the ordinary `Int` carrier.
+    InlineRange {
+        lo: i64,
+        hi: i64,
+        fallible: bool,
+    },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
     ToShow,

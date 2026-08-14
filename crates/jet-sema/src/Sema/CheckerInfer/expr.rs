@@ -1463,7 +1463,21 @@ impl<'a> Checker<'a> {
                     Some(Type::Tagged { inner, .. }) => Some(*inner),
                     other => other,
                 };
-                if let Some(Type::IntN { signed, bits }) = expected {
+                if let Some(Type::InlineRange { base, lo, hi }) = expected {
+                    if (n as i128) < i128::from(lo) || (n as i128) > i128::from(hi) {
+                        self.diags.push(Diagnostic::error(
+                            "E0135",
+                            format!("`{n}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+                            format!(
+                                "a range type only holds values inside its bounds; `{n}` can never be an `Int({lo}..{hi})`"
+                            ),
+                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                            Some(span),
+                        ));
+                    }
+                    *width = None;
+                    Some(Type::InlineRange { base, lo, hi })
+                } else if let Some(Type::IntN { signed, bits }) = expected {
                     let (lo, hi) = crate::AST::int_range(signed, bits);
                     let value = super::exact_integer_literal(n, raw.as_deref());
                     if !super::exact_integer_fits(&value, lo, hi) {
@@ -2092,6 +2106,28 @@ impl<'a> Checker<'a> {
                 // literal is range-checked at its negated value (`-128` fits `I8`)
                 // and the operand's own positive range check doesn't fire spuriously.
                 if let UnOp::Neg = op {
+                    if let (
+                        Expr::Int(n, ispan, width, raw),
+                        Some(Type::InlineRange { base, lo, hi }),
+                    ) = (inner.as_mut(), self.expected_type.clone())
+                    {
+                        let value = super::exact_integer_literal(*n, raw.as_deref()).neg();
+                        if value < i128::from(lo) || value > i128::from(hi) {
+                            self.diags.push(Diagnostic::error(
+                                "E0135",
+                                format!(
+                                    "`-{n}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"
+                                ),
+                                format!(
+                                    "a range type only holds values inside its bounds; `-{n}` can never be an `Int({lo}..{hi})`"
+                                ),
+                                format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                                Some(*ispan),
+                            ));
+                        }
+                        *width = None;
+                        return Some(Type::InlineRange { base, lo, hi });
+                    }
                     if let (Expr::Int(n, ispan, width, raw), Some(Type::IntN { signed: true, bits })) =
                         (inner.as_mut(), self.expected_type.clone())
                     {
@@ -2107,7 +2143,10 @@ impl<'a> Checker<'a> {
                 let t = self.infer(inner)?;
                 match op {
                     UnOp::Neg => {
-                        if t.is_float() || matches!(t, Type::Int | Type::IntN { signed: true, .. })
+                        if let Type::InlineRange { base, .. } = &t {
+                            Some(base.as_ref().erased_inline_ranges())
+                        } else if t.is_float()
+                            || matches!(t, Type::Int | Type::IntN { signed: true, .. })
                         {
                             Some(t)
                         } else if let Type::IntN { bits, .. } = t {
@@ -2136,7 +2175,9 @@ impl<'a> Checker<'a> {
                     // number it is the bitwise complement, and the width comes
                     // back unchanged.
                     UnOp::Not => {
-                        if t == Type::Bool || t.is_integer() {
+                        if let Type::InlineRange { base, .. } = &t {
+                            Some(base.as_ref().erased_inline_ranges())
+                        } else if t == Type::Bool || t.is_integer() {
                             Some(t)
                         } else {
                             self.diags.push(Diagnostic::error(
@@ -3658,7 +3699,7 @@ impl<'a> Checker<'a> {
                     *kind = IndexKind::Range;
                     return Some(Type::List(inner.clone()));
                 }
-                if index_value_ty != &Type::Int {
+                if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -3676,7 +3717,44 @@ impl<'a> Checker<'a> {
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
             Type::FixedList { elem, len, .. } => {
                 *kind = IndexKind::List;
-                if let Expr::Int(n, _, _, _) = index.as_ref() {
+                if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
+                    if let Type::Named(name) = index_value_ty {
+                        if let Some((lo, hi)) = self.registry.distinct_range(name) {
+                            let base_is_int =
+                                matches!(self.registry.distinct_base(name), Some(Type::Int));
+                            if base_is_int && lo >= 0 && (hi as u64) < *len {
+                                *kind = IndexKind::FixedListProof;
+                                return Some((**elem).clone());
+                            }
+                            self.diags.push(Diagnostic::error(
+                                "E0965",
+                                format!(
+                                    "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
+                                    name, lo, hi
+                                ),
+                                format!(
+                                    "this `[T#{}]` value only has proven indexes 0 through {}",
+                                    len,
+                                    len.saturating_sub(1)
+                                ),
+                                "use a refinement whose invariant fits the list length".to_string(),
+                                Some(index.span()),
+                            ));
+                            return Some((**elem).clone());
+                        }
+                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "list indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "count positions with a whole number starting at 0".to_string(),
+                        "use an Int index, like `items[0]`".to_string(),
+                        Some(index.span()),
+                    ));
+                } else if let Expr::Int(n, _, _, _) = index.as_ref() {
                     // E0965: compile-time out-of-bounds index.
                     if *n < 0 || *n as u64 >= *len {
                         self.diags.push(Diagnostic::error(
@@ -3752,7 +3830,7 @@ impl<'a> Checker<'a> {
                 if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
             {
                 *kind = IndexKind::List;
-                if idx_ty != Type::Int {
+                if !matches!(&idx_ty, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -3788,7 +3866,9 @@ impl<'a> Checker<'a> {
             }
             Type::Map { key, value, .. } => {
                 *kind = IndexKind::Map;
-                if idx_ty != **key {
+                let key_compatible = idx_ty == **key
+                    || matches!((&**key, &idx_ty), (Type::Int, Type::InlineRange { .. }));
+                if !key_compatible {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -3809,7 +3889,7 @@ impl<'a> Checker<'a> {
             Type::Named(n) if is_simd_lane_type(n) && !self.registry.contains(n) => {
                 let lane_name = n.clone();
                 *kind = IndexKind::Lane(lane_name.clone());
-                if idx_ty != Type::Int {
+                if !matches!(&idx_ty, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(
@@ -3904,7 +3984,7 @@ impl<'a> Checker<'a> {
         let base_ty = self.infer(base)?;
         for e in [start.as_mut(), end.as_mut()] {
             let t = self.infer(e)?;
-            if t != Type::Int {
+            if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
                 self.diags.push(Diagnostic::error(
                     "E0505",
                     format!(
@@ -3967,7 +4047,7 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         let mut valid = true;
         for bound in [start.as_mut(), end.as_mut()] {
-            if self.infer(bound)? != Type::Int {
+            if !matches!(&self.infer(bound)?, Type::Int | Type::InlineRange { .. }) {
                 valid = false;
                 self.diags.push(Diagnostic::error(
                     "E0505",

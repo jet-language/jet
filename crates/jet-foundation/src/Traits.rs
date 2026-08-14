@@ -460,7 +460,12 @@ impl TraitRegistry {
         visiting: &mut HashSet<String>,
     ) -> Option<String> {
         match ty {
-            Type::Int | Type::IntN { .. } | Type::Bool | Type::String | Type::Char => None,
+            Type::Int
+            | Type::IntN { .. }
+            | Type::InlineRange { .. }
+            | Type::Bool
+            | Type::String
+            | Type::Char => None,
             Type::Float | Type::Float32 => Some(ty.name()),
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
                 let offender = self.partial_comparable_offender(inner, items, visiting);
@@ -1146,6 +1151,9 @@ impl TraitRegistry {
                     self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
                 }
             }
+            Type::InlineRange { base: inner, .. } => {
+                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            }
             Type::Named(name) if type_params.iter().any(|param| param.name == *name) => {
                 type_params
                     .iter()
@@ -1159,7 +1167,9 @@ impl TraitRegistry {
             | Type::Bool
             | Type::String
             | Type::Char
-            | Type::IntN { .. } => true,
+            | Type::IntN { .. }
+            | Type::InlineRange { .. }
+            | Type::Float32 => true,
             Type::Quantity { base, .. } => {
                 self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
             }
@@ -1263,7 +1273,7 @@ impl TraitRegistry {
     /// on the same path as ordinary trait-object assignment and inference.
     pub fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
         match ty {
-            Type::IntN { .. } => {
+            Type::IntN { .. } | Type::InlineRange { .. } => {
                 Generics::is_builtin_trait(trait_name) && trait_name != CLOSE
             }
             Type::Float32 => {
@@ -2358,7 +2368,8 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         Type::List(inner)
         | Type::Option(inner)
         | Type::Tagged { inner, .. }
-        | Type::FixedList { elem: inner, .. } => field_auto_ok(inner, owner),
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. } => field_auto_ok(inner, owner),
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             field_auto_ok(key, owner) && field_auto_ok(value, owner)
         }

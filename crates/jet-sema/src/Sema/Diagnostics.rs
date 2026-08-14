@@ -515,6 +515,7 @@ fn is_cloneable_rec(
         Type::TraitObject(_) => false,
         Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, visiting),
         Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, visiting),
+        Type::InlineRange { base, .. } => is_cloneable_rec(base, registry, visiting),
         Type::Union(members) => members
             .iter()
             .all(|m| is_cloneable_rec(m, registry, visiting)),
@@ -634,6 +635,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         // heap allocation regardless of the element type.
         Type::FixedList { .. } => true,
         Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, visiting),
+        Type::InlineRange { base, .. } => type_owns_heap_rec(base, registry, visiting),
         Type::Union(members) => members
             .iter()
             .any(|m| type_owns_heap_rec(m, registry, visiting)),
@@ -904,6 +906,11 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
         Type::Named(name) => Type::Named(name),
         Type::TraitObject(names) => Type::TraitObject(names),
         Type::IntN { signed, bits } => Type::IntN { signed, bits },
+        Type::InlineRange { base, lo, hi } => Type::InlineRange {
+            base: Box::new(core_crypto_nominal(*base)),
+            lo,
+            hi,
+        },
         Type::Float32 => Type::Float32,
         Type::Quantity { base, dimension } => Type::Quantity {
             base: Box::new(core_crypto_nominal(*base)),
@@ -1110,6 +1117,7 @@ pub(crate) fn is_printable(
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_printable(elem, registry, trait_reg),
         Type::Tagged { inner, .. } => is_printable(inner, registry, trait_reg),
+        Type::InlineRange { base, .. } => is_printable(base, registry, trait_reg),
         Type::Union(members) => members
             .iter()
             .all(|m| is_printable(m, registry, trait_reg)),
@@ -1175,6 +1183,7 @@ pub(crate) fn is_displayable(
         Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_displayable(elem, type_reg, trait_reg),
         Type::Tagged { inner, .. } => is_displayable(inner, type_reg, trait_reg),
+        Type::InlineRange { base, .. } => is_displayable(base, type_reg, trait_reg),
         Type::Union(members) => members
             .iter()
             .all(|m| is_displayable(m, type_reg, trait_reg)),
@@ -1265,6 +1274,7 @@ pub(crate) fn is_debuggable(
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_debuggable(elem, type_reg, trait_reg),
         Type::Tagged { inner, .. } => is_debuggable(inner, type_reg, trait_reg),
+        Type::InlineRange { base, .. } => is_debuggable(base, type_reg, trait_reg),
         Type::Union(members) => members
             .iter()
             .all(|m| is_debuggable(m, type_reg, trait_reg)),
@@ -1327,6 +1337,7 @@ pub(crate) fn is_equatable(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_equatable(elem, registry, trait_reg),
         Type::Tagged { inner, .. } => is_equatable(inner, registry, trait_reg),
+        Type::InlineRange { base, .. } => is_equatable(base, registry, trait_reg),
         Type::Union(members) => members
             .iter()
             .all(|member| is_equatable(member, registry, trait_reg)),
@@ -1422,6 +1433,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Tagged { inner, .. } => {
             native_structural_ordering(inner, registry, &mut HashSet::new())
         }
+        Type::InlineRange { base, .. } => types_comparable(base, registry),
         Type::Union(_) => false,
         // Same as the prior `\0Quantity` encoding: falls through the generic
         // `Type::Apply` trait-lookup path, which never registered an
@@ -1701,6 +1713,7 @@ mod tests {
                 .sum(),
             Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
             Type::Quantity { base, .. } => count_core_crypto_markers(base),
+            Type::InlineRange { base, .. } => count_core_crypto_markers(base),
             Type::Tagged { marker, inner } => {
                 usize::from(matches!(
                     marker,

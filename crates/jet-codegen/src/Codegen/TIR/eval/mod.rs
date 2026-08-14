@@ -28,6 +28,7 @@ mod contract_semantics {
 mod range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
     include!("../../../Prelude/Core/RangeBounds.rs");
+    include!("../../../Prelude/Core/InlineRange.rs");
 }
 
 mod disjoint_semantics {

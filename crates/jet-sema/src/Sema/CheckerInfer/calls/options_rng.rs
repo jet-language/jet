@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
             let ty = self.infer(&mut args[0].expr)?;
             if method == "sample" {
                 if let Some(k) = self.infer(&mut args[1].expr) {
-                    if k != Type::Int {
+                    if !matches!(&k, Type::Int | Type::InlineRange { .. }) {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!("`sample` count must be Int, not {}", k.show()),

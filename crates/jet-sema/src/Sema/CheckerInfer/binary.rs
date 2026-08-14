@@ -136,6 +136,28 @@ impl<'a> Checker<'a> {
         match expr {
             Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
+                (Expr::Int(value, span, width, raw), Type::InlineRange { base, lo, hi }) => {
+                    let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
+                    if negated < i128::from(*lo) || negated > i128::from(*hi) {
+                        self.diags.push(Diagnostic::error(
+                            "E0135",
+                            format!(
+                                "`-{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"
+                            ),
+                            format!(
+                                "a range type only holds values inside its bounds; `-{value}` can never be an `Int({lo}..{hi})`"
+                            ),
+                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                            Some(*span),
+                        ));
+                    }
+                    *width = None;
+                    Some(Type::InlineRange {
+                        base: base.clone(),
+                        lo: *lo,
+                        hi: *hi,
+                    })
+                }
                 (Expr::Int(value, span, width, raw), Type::IntN { signed: true, bits }) => {
                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
                     let (lower, upper) = crate::AST::int_range(true, *bits);
@@ -153,6 +175,29 @@ impl<'a> Checker<'a> {
                 Type::Int => {
                     *width = None;
                     Some(Type::Int)
+                }
+                Type::InlineRange { base, lo, hi } => {
+                    if (*value as i128) < i128::from(*lo)
+                        || (*value as i128) > i128::from(*hi)
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0135",
+                            format!(
+                                "`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"
+                            ),
+                            format!(
+                                "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`"
+                            ),
+                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                            Some(*span),
+                        ));
+                    }
+                    *width = None;
+                    Some(Type::InlineRange {
+                        base: base.clone(),
+                        lo: *lo,
+                        hi: *hi,
+                    })
                 }
                 Type::IntN { signed, bits } => {
                     let (lower, upper) = crate::AST::int_range(*signed, *bits);
@@ -225,6 +270,18 @@ impl<'a> Checker<'a> {
         target: &Type,
     ) {
         if source == target {
+            return;
+        }
+        // An inline range is a proof on its carrier, not a runtime wrapper.
+        // Strip that proof before selecting the ordinary numeric conversion;
+        // otherwise `Int(0..10)` would manufacture a method name from the
+        // display spelling instead of widening through `Int`.
+        let erased = source.erased_inline_ranges();
+        if &erased != source {
+            if &erased == target {
+                return;
+            }
+            self.widen_numeric_expr(expr, &erased, target);
             return;
         }
         if self.contextualize_numeric_literal(expr, target).is_some() {
@@ -638,6 +695,38 @@ impl<'a> Checker<'a> {
                 self.widen_numeric_expr(rhs, &rt, &join);
                 lt = join.clone();
                 rt = join;
+            }
+        }
+
+        // D-RANGETYPE1: arithmetic on a range refinement widens to the base
+        // carrier. The result is not silently claimed to remain inside the
+        // input interval (`10 + 10` is not in `0..10`).
+        let arithmetic = matches!(
+            op,
+            BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::FloorDiv
+                | BinOp::Mod
+                | BinOp::Rem
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr
+                | BinOp::Pow
+        );
+        if arithmetic {
+            let left_erased = lt.erased_inline_ranges();
+            if left_erased != lt {
+                self.widen_numeric_expr(lhs, &lt, &left_erased);
+                lt = left_erased;
+            }
+            let right_erased = rt.erased_inline_ranges();
+            if right_erased != rt {
+                self.widen_numeric_expr(rhs, &rt, &right_erased);
+                rt = right_erased;
             }
         }
 

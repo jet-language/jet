@@ -907,6 +907,7 @@ pub(crate) fn lower_shared_transaction_lambda(
             &param_ty,
             Type::Int
                 | Type::IntN { .. }
+                | Type::InlineRange { .. }
                 | Type::Float
                 | Type::Float32
                 | Type::Bool
@@ -1483,6 +1484,7 @@ fn lower_function(
                 ty,
                 Type::Int
                     | Type::IntN { .. }
+                    | Type::InlineRange { .. }
                     | Type::Float
                     | Type::Float32
                     | Type::Bool

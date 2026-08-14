@@ -794,6 +794,14 @@ pub enum Type {
         signed: bool,
         bits: u8,
     },
+    /// D-TYPE2-SPELL1 / card #1549: an inline value-range refinement. The
+    /// interval is knowledge, not a runtime wrapper; the shared TIR boundary
+    /// removes it before tier-specific code generation.
+    InlineRange {
+        base: Box<Type>,
+        lo: i64,
+        hi: i64,
+    },
     /// D-SG9/S42: 32-bit float. The default 64-bit float is spelled `Float`
     /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
     Float32,
@@ -1153,6 +1161,16 @@ impl Type {
                     },
                 );
             }
+            Type::InlineRange { base, lo, hi } => {
+                vector.extend(&base.knowledge_vector());
+                vector.push(
+                    crate::Registry::type_plane("Interval"),
+                    KnowledgeFact::Interval {
+                        lo: i128::from(*lo),
+                        hi: i128::from(*hi),
+                    },
+                );
+            }
             Type::FixedList {
                 elem,
                 len,
@@ -1433,6 +1451,7 @@ impl Type {
             },
             Type::Quantity { base, .. } => base.erased_carrier(),
             Type::FixedList { elem, .. } => Type::List(Box::new(elem.erased_carrier())),
+            Type::InlineRange { base, .. } => base.erased_carrier(),
             Type::ComputeDim(_) => Type::Int,
             Type::Tagged { inner, .. } => inner.erased_carrier(),
             Type::Fn {
@@ -1460,6 +1479,75 @@ impl Type {
             Type::Union(members) => canonicalize_union(
                 members.iter().map(Type::erased_carrier).collect(),
             ),
+            _ => self.clone(),
+        }
+    }
+
+    /// Remove only inline-range knowledge while preserving the surrounding
+    /// carrier, compiler tags, callable contracts, and fixed-list shape.
+    /// TIR uses this narrower projection at its shared boundary; the broader
+    /// `erased_carrier` operation remains available to ABI/layout consumers.
+    pub fn erased_inline_ranges(&self) -> Type {
+        match self {
+            Type::List(inner) => Type::List(Box::new(inner.erased_inline_ranges())),
+            Type::Map { key, key_span, value } => Type::Map {
+                key: Box::new(key.erased_inline_ranges()),
+                key_span: *key_span,
+                value: Box::new(value.erased_inline_ranges()),
+            },
+            Type::Shared(inner) => Type::Shared(Box::new(inner.erased_inline_ranges())),
+            Type::Option(inner) => Type::Option(Box::new(inner.erased_inline_ranges())),
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(ok.erased_inline_ranges()),
+                err: Box::new(err.erased_inline_ranges()),
+            },
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                call_metadata,
+                return_view_provenance,
+            } => Type::Fn {
+                params: params.iter().map(Type::erased_inline_ranges).collect(),
+                ret: ret
+                    .as_ref()
+                    .map(|return_type| Box::new(return_type.erased_inline_ranges())),
+                effect_bound: effect_bound.clone(),
+                param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
+                return_view_provenance: return_view_provenance.clone(),
+            },
+            Type::Apply { name, args } => Type::Apply {
+                name: name.clone(),
+                args: args.iter().map(Type::erased_inline_ranges).collect(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.erased_inline_ranges())))
+                    .collect(),
+            ),
+            Type::FixedList { elem, len, len_expr } => Type::FixedList {
+                elem: Box::new(elem.erased_inline_ranges()),
+                len: *len,
+                len_expr: len_expr.clone(),
+            },
+            Type::InlineRange { base, .. } => base.erased_inline_ranges(),
+            Type::Tagged { marker, inner } => Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(inner.erased_inline_ranges()),
+            },
+            Type::Union(members) => canonicalize_union(
+                members
+                    .iter()
+                    .map(Type::erased_inline_ranges)
+                    .collect(),
+            ),
+            Type::Quantity { base, dimension } => Type::Quantity {
+                base: Box::new(base.erased_inline_ranges()),
+                dimension: dimension.clone(),
+            },
             _ => self.clone(),
         }
     }
@@ -1508,6 +1596,7 @@ impl Type {
             Type::FixedList { elem, .. } => {
                 format!("[{}]", elem.carrier_identity_name())
             }
+            Type::InlineRange { base, .. } => base.carrier_identity_name(),
             Type::Tagged { inner, .. } => inner.carrier_identity_name(),
             Type::Union(members) => members
                 .iter()
@@ -1643,6 +1732,11 @@ impl Type {
                 len: *len,
                 len_expr: len_expr.clone(),
             },
+            Type::InlineRange { base, lo, hi } => Type::InlineRange {
+                base: Box::new(base.map_named_types(map)),
+                lo: *lo,
+                hi: *hi,
+            },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker: marker.clone(),
                 inner: Box::new(inner.map_named_types(map)),
@@ -1741,6 +1835,9 @@ impl Type {
                     hi
                 )
             }
+            Type::InlineRange { base, lo, hi } => {
+                format!("{} (a whole number from {} to {})", base.name(), lo, hi)
+            }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
             Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.show(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
@@ -1815,6 +1912,7 @@ impl Type {
             }
             Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", elem.name(), fixed_list_measure(len, len_expr.as_deref())),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
+            Type::InlineRange { base, lo, hi } => format!("{}({lo}..{hi})", base.name()),
             Type::Float32 => "F32".to_string(),
             Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.name(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
@@ -1861,6 +1959,7 @@ impl Type {
         }
         match self {
             Type::Tagged { inner, .. } => inner.is_scalar(),
+            Type::InlineRange { base, .. } => base.is_scalar(),
             Type::Apply { name, args }
                 if name == crate::Syntax::TYPE_PTR && args.len() == 1 => true,
             _ => matches!(
@@ -1874,6 +1973,7 @@ impl Type {
     pub fn is_integer(&self) -> bool {
         match self {
             Type::Tagged { inner, .. } => inner.is_integer(),
+            Type::InlineRange { base, .. } => base.is_integer(),
             _ => matches!(self, Type::Int | Type::IntN { .. }),
         }
     }
@@ -1884,6 +1984,7 @@ impl Type {
         match self {
             Type::Int => None,
             Type::IntN { .. } => self.knowledge_vector().interval_i128(),
+            Type::InlineRange { lo, hi, .. } => Some((i128::from(*lo), i128::from(*hi))),
             Type::Tagged { inner, .. } => inner.integer_range(),
             _ => None,
         }
@@ -1893,6 +1994,7 @@ impl Type {
         match self {
             Type::Int => Some((true, 64)),
             Type::IntN { signed, bits } => Some((*signed, *bits)),
+            Type::InlineRange { base, .. } => base.integer_layout(),
             Type::Tagged { inner, .. } => inner.integer_layout(),
             _ => None,
         }

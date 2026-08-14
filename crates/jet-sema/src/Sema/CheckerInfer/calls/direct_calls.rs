@@ -1288,7 +1288,10 @@ impl<'a> Checker<'a> {
                     if matches!(param_ty, Type::Fn { .. }) {
                         self.expected_type = Some(param_ty.clone());
                         self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
-                    } else if matches!(param_ty, Type::IntN { .. } | Type::Float32) {
+                    } else if matches!(
+                        param_ty,
+                        Type::IntN { .. } | Type::Float32 | Type::InlineRange { .. }
+                    ) {
                         // D-SG9: let a fixed-width literal argument adopt the parameter's
                         // width and be range-checked at the literal.
                         self.expected_type = Some(param_ty.clone());

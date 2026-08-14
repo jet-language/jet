@@ -195,7 +195,8 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
                 Ok(types::F64)
             }
             TNumericOp::CastAs { .. } => init_clif_ty(arg, meta),
-            TNumericOp::TryFrom { .. }
+            TNumericOp::InlineRange { .. }
+            | TNumericOp::TryFrom { .. }
             | TNumericOp::FloatToInt { .. }
             | TNumericOp::FloatNarrow { .. } => Ok(types::I64),
             _ => Err("jit distinct conversion operation unsupported".to_string()),
@@ -224,6 +225,7 @@ pub(crate) fn clif_ty_with_distinct(
     ty: &Type,
     distinct_bases: &HashMap<String, Type>,
 ) -> Option<types::Type> {
+    let ty = ty.erased_inline_ranges();
     let ty = ty
         .quantity_parts()
         .map_or_else(|| ty.clone(), |(base, _)| base.clone());
@@ -336,7 +338,7 @@ pub(crate) fn clif_ty_with_distinct(
         return Some(types::I64);
     }
     match &ty {
-        Type::Int | Type::IntN { .. } | Type::String => Some(types::I64),
+        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::String => Some(types::I64),
         Type::Float | Type::Float32 => Some(types::F64),
         Type::Bool => Some(types::I8),
         Type::Char => Some(types::I32),
@@ -367,6 +369,7 @@ pub(crate) fn func_signature(
                 ty,
                 Type::Int
                     | Type::IntN { .. }
+                    | Type::InlineRange { .. }
                     | Type::Float
                     | Type::Float32
                     | Type::Bool
@@ -459,7 +462,7 @@ pub(crate) fn receiver_clif_ty(tir: &TFunc, meta: &JitMeta<'_>) -> types::Type {
 fn is_i64_option(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Option(inner) if matches!(inner.as_ref(), Type::Int)
+        Type::Option(inner) if matches!(inner.as_ref(), Type::Int | Type::InlineRange { .. })
     )
 }
 
@@ -930,7 +933,7 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn raw_bag_key_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Tagged { inner, .. } => self.raw_bag_key_type(inner),
-            Type::Int | Type::IntN { .. } | Type::Bool | Type::Char => true,
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Bool | Type::Char => true,
             Type::Named(name) => {
                 if let Some(base) = self.distinct_base(name) {
                     return self.raw_bag_key_type(base);

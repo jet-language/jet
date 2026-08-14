@@ -172,6 +172,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
+    include_str!("../Prelude/Core/InlineRange.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),

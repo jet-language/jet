@@ -106,7 +106,7 @@ impl<'a> Checker<'a> {
             }
             // The address is a plain Int.
             if let Some(t) = self.infer(addr) {
-                if t != Type::Int {
+                if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(

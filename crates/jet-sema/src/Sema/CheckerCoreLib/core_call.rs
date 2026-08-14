@@ -2429,7 +2429,7 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(arg) = args.get_mut(0) {
                         let ty = self.infer(&mut arg.expr)?;
-                        if !matches!(ty, Type::Int | Type::IntN { .. }) {
+                        if !matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!("`{}` needs a whole number, not {}", name, ty.show()),
@@ -2627,7 +2627,7 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) {
                         if name == "radix" {
                             let ty = self.infer(&mut arg.expr)?;
-                            if !matches!(ty, Type::Float | Type::Float32 | Type::Int | Type::IntN { .. }) {
+                            if !matches!(ty, Type::Float | Type::Float32 | Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("`radix` needs a number, not {}", ty.show()),
@@ -3022,7 +3022,7 @@ impl<'a> Checker<'a> {
                     let arg_span = arg.expr.span();
                     let ty = self.infer(&mut arg.expr)?;
                     if let Some(k) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
-                        if k != Type::Int {
+                        if !matches!(&k, Type::Int | Type::InlineRange { .. }) {
                             let k_span = args.get(1).map(|a| a.expr.span()).unwrap_or(span);
                             self.diags.push(Diagnostic::error(
                                 "E0112",
@@ -3137,8 +3137,8 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     let ms_ty = self.infer(&mut args[0].expr)?;
-                    if !(matches!(ms_ty, Type::Int)
-                        || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                    if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
+                        || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
                     {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -3181,8 +3181,8 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     let ms_ty = self.infer(&mut args[0].expr)?;
-                    if !(matches!(ms_ty, Type::Int)
-                        || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                    if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
+                        || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
                     {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -3225,8 +3225,8 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(cap) = args.get_mut(0) {
                         let cap_ty = self.infer(&mut cap.expr)?;
-                        if !(matches!(cap_ty, Type::Int)
-                            || matches!(cap_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                        if !(matches!(&cap_ty, Type::Int | Type::InlineRange { .. })
+                            || matches!(&cap_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
                         {
                             self.diags.push(Diagnostic::error(
                                 "E0112",

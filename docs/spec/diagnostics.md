@@ -980,7 +980,7 @@ the `core.args` runtime-error voice above (no new code for that).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#CLI` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#CLI` struct. |
+| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#CLI` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#CLI` struct. |
 | E1306 | two `#CLI` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
 | E1307 | a subcommand variant's payload isn't a `#CLI` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#CLI`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#CLI` struct payload. |
 | E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#CLI`-derived, or an `enum` whose every variant carries a `#CLI` struct payload. | Mark the struct `#CLI`, or give the enum's variants `#CLI` struct payloads. |

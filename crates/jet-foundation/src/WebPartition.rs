@@ -90,6 +90,7 @@ pub fn is_abi_safe_type(ty: &Type) -> bool {
         | Type::String
         | Type::Char
         | Type::IntN { .. }
+        | Type::InlineRange { .. }
         | Type::Float32 => true,
         Type::Named(n) if n == "String" => true,
         Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => is_abi_safe_type(inner),

@@ -1608,12 +1608,16 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     // Rust integer suffix. Sema may leave bare `IntLit(_, None)` when the list
     // type comes from the head alone; retag from the expected element type so
     // emit produces `104u8` rather than `104i64` (I2).
-    if matches!(expected_elem, Type::IntN { .. } | Type::List(_) | Type::FixedList { .. }) {
+    if matches!(expected_elem, Type::IntN { .. } | Type::InlineRange { .. } | Type::List(_) | Type::FixedList { .. }) {
         if let TExprKind::ListLit(elems) = &mut expr.kind {
             for elem in elems.iter_mut() {
                 match (&mut elem.kind, expected_elem) {
                     (TExprKind::IntLit(_, width), Type::IntN { signed, bits }) => {
                         *width = Some((*signed, *bits));
+                        elem.ty = expected_elem.clone();
+                    }
+                    (TExprKind::IntLit(_, width), Type::InlineRange { .. }) => {
+                        *width = None;
                         elem.ty = expected_elem.clone();
                     }
                     // A nested list literal (`[[U8]]`) drives suffixes one

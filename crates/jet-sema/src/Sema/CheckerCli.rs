@@ -31,10 +31,13 @@ pub(crate) fn cli_flag_name(field_name: &str) -> String {
 }
 
 /// D-CLIFLAG1: is `ty` one of the scalar types a CLI flag can hold —
-/// `Int`/`Float`/`Bool`/`String`/`Path`? (`Path` is `Type::Named("Path")`,
+/// `Int` (including an inline range)/`Float`/`Bool`/`String`/`Path`? (`Path` is `Type::Named("Path")`,
 /// the stdlib path type, not a user struct.)
 fn is_cli_scalar(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Float | Type::Bool | Type::String)
+    matches!(
+        ty,
+        Type::Int | Type::InlineRange { .. } | Type::Float | Type::Bool | Type::String
+    )
         || matches!(ty, Type::Named(n) if n == "Path")
 }
 
@@ -110,8 +113,8 @@ fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
             "field `{}` has no CLI flag mapping ({})",
             field_name, ty_show
         ),
-        "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int`, \
-         `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested \
+        "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int` \
+         (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested \
          `#[CLI]` structs and other collection/closure types don't)."
             .to_string(),
         "change the field to a supported type, or drop it from the `#[CLI]` struct".to_string(),

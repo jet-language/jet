@@ -145,6 +145,10 @@ use runtime::{
     program_name, Parsed, Spec,
 };
 
+mod inline_range_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
 #[derive(Clone)]
 pub(crate) struct CLIPlan {
     pub schema: CLICommandSchema,
@@ -711,6 +715,48 @@ fn decode_frame(
                         ));
                     }
                 },
+            },
+            (
+                CLIInputShape::Value {
+                    kind: CLIValueKind::Int,
+                    optional: false,
+                    default,
+                },
+                Type::InlineRange { lo, hi, .. },
+            ) => {
+                let value = match option_val(parsed, flag_name) {
+                    Some(v) => v
+                        .trim()
+                        .parse::<i64>()
+                        .map_err(|_| format!("invalid int for --{flag_name}"))?,
+                    None => match default {
+                        Some(CLIDefault::Value(CtValue::Int(n))) => *n,
+                        Some(CLIDefault::TypeDefault) => *lo,
+                        Some(CLIDefault::Value(other)) => other
+                            .jet_show()
+                            .trim()
+                            .parse::<i64>()
+                            .map_err(|_| format!("bad default for --{flag_name}"))?,
+                        Some(CLIDefault::Recorded(s)) => s
+                            .trim()
+                            .parse::<i64>()
+                            .map_err(|_| format!("bad default for --{flag_name}"))?,
+                        None if input.positional.is_some() => {
+                            return Err(format!(
+                                "missing required argument {flag_name}\n\n{}",
+                                help_text(spec)
+                            ));
+                        }
+                        None => {
+                            return Err(format!(
+                                "missing required flag --{flag_name}\n\n{}",
+                                help_text(spec)
+                            ));
+                        }
+                    },
+                };
+                inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi)
+                    .map_err(|reason| format!("invalid value for --{flag_name}: {reason}"))?
             },
             (
                 CLIInputShape::Value {

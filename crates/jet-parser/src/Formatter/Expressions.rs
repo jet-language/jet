@@ -336,6 +336,14 @@ impl<'a> Fmt<'a> {
             Type::Int => self.write(Syntax::TYPE_INT),
             Type::Float => self.write(Syntax::TYPE_FLOAT),
             Type::IntN { signed, bits } => self.write(&crate::AST::int_spelling(*signed, *bits)),
+            Type::InlineRange { base, lo, hi } => {
+                self.fmt_type(base);
+                self.write("(");
+                self.write(&lo.to_string());
+                self.write("..");
+                self.write(&hi.to_string());
+                self.write(")");
+            }
             Type::Float32 => self.write("F32"),
             Type::Bool => self.write(Syntax::TYPE_BOOL),
             Type::String => self.write(Syntax::TYPE_STRING),

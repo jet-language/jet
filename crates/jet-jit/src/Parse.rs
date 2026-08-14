@@ -181,6 +181,9 @@ fn pack_str_binds(binds: &[(String, Type, String)]) -> i64 {
                 Type::IntN { .. } => {
                     let _ = rt.heap.record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
                 }
+                Type::InlineRange { .. } => {
+                    let _ = rt.heap.record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
+                }
                 Type::Float | Type::Float32 => {
                     let _ = rt
                         .heap
@@ -362,7 +365,6 @@ host_fns! {
     cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_binary;
     reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_binary;
 }
-
 
 
 

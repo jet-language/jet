@@ -3531,8 +3531,8 @@ D-CLI-POS1=A adds positional filling for required value fields:
 | required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
-Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
-type (a `[K:V]`, a closure, a `[T]`, a nested struct that isn't itself
+Supported scalars: `Int` (including `Int(lo..hi)`), `Float`, `Bool`, `String`, `Path`. Any other field
+type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
 `#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults
 use the *existing* `#Default(expr)` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter

@@ -174,6 +174,11 @@ fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
             base: Box::new(rewrite_apply_heads(base, qualify)),
             dimension: dimension.clone(),
         },
+        Type::InlineRange { base, lo, hi } => Type::InlineRange {
+            base: Box::new(rewrite_apply_heads(base, qualify)),
+            lo: *lo,
+            hi: *hi,
+        },
         _ => ty.clone(),
     }
 }

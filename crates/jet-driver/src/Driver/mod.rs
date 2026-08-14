@@ -1234,6 +1234,7 @@ fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetMachine::Byt
         crate::AST::Type::IntN { bits, .. } => {
             Some(crate::TargetMachine::ByteSize::bytes((*bits as u64) / 8))
         }
+        crate::AST::Type::InlineRange { base, .. } => byte_size_for_type(base),
         crate::AST::Type::Tagged { inner, .. } => byte_size_for_type(inner),
         _ => None,
     }

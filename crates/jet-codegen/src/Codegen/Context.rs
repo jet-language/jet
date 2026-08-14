@@ -1097,7 +1097,8 @@ impl Cx {
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
-                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                | Type::Tagged { inner, .. }
+                | Type::InlineRange { base: inner, .. } => contains(cx, inner, seen),
                 Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
                     contains(cx, key, seen) || contains(cx, value, seen)
                 }
@@ -1139,7 +1140,7 @@ impl Cx {
 
         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
             match ty {
-                Type::IntN { .. } | Type::FixedList { .. } => true,
+                Type::IntN { .. } | Type::InlineRange { .. } | Type::FixedList { .. } => true,
                 Type::Named(name) => {
                     if !seen.insert(name.clone()) {
                         return false;
@@ -1610,6 +1611,11 @@ impl Cx {
                 len: *len,
                 len_expr: None,
             },
+            Type::InlineRange { base, lo, hi } => Type::InlineRange {
+                base: Box::new(self.expand_type_aliases(base)),
+                lo: *lo,
+                hi: *hi,
+            },
             Type::Union(members) => crate::AST::canonicalize_union(
                 members.iter().map(|m| self.expand_type_aliases(m)).collect(),
             ),
@@ -1628,6 +1634,7 @@ impl Cx {
             Type::IntN { signed, bits } => {
                 format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
             }
+            Type::InlineRange { base, .. } => self.rust_type(base),
             Type::Float32 => "f32".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
@@ -4977,6 +4984,7 @@ pub(crate) fn field_type_cloneable(
         Type::TraitObject(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_cloneable(inner, types, param_names),
+        Type::InlineRange { base, .. } => field_type_cloneable(base, types, param_names),
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_cloneable(m, types, param_names)),
@@ -5041,6 +5049,7 @@ pub(crate) fn field_type_rust_eq_compatible(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_rust_eq_compatible(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_rust_eq_compatible(inner, types, param_names),
+        Type::InlineRange { base, .. } => field_type_rust_eq_compatible(base, types, param_names),
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_rust_eq_compatible(m, types, param_names)),
@@ -5121,6 +5130,7 @@ pub(crate) fn field_type_hashable(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_hashable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_hashable(inner, types, param_names),
+        Type::InlineRange { base, .. } => field_type_hashable(base, types, param_names),
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_hashable(m, types, param_names)),

@@ -625,7 +625,7 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// D-CLIFLAG1: a runtime expression converting an owned `String` (from
-/// `ParsedArgs`) into `ty`. `Int`/`Float` are fallible (`return Err(...)`
+/// `ParsedArgs`) into `ty`. `Int`/inline `Int(lo..hi)`/`Float` are fallible (`return Err(...)`
 /// on a bad value, in the same "core.args runtime error" voice as
 /// `jet_args_parse`'s own messages — no new diagnostic code, I8); `String`
 /// and `Path` are infallible conversions.
@@ -637,12 +637,15 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -
         Type::Int => format!(
             "match {root_prefix}jet_std::jet_int_from_str(&{var}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
         ),
+        Type::InlineRange { lo, hi, .. } => format!(
+            "match {root_prefix}jet_inline_range_from_int(match {var}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}, {lo}, {hi}) {{ Ok(__n) => __n, Err(__reason) => return Err(format!(\"invalid value for --{{}}: {{}}\\n\\n{{}}\", {flag:?}, __reason, __spec.help())) }}"
+        ),
         Type::Float => format!(
             "match {var}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
         ),
         Type::String => format!("{var}.clone()"),
         Type::Named(n) if n == "Path" => format!("{root_prefix}jet_path_from(&{var})"),
-        _ => unreachable!("is_cli_scalar gates this to Int/Float/String/Path"),
+        _ => unreachable!("is_cli_scalar gates this to Int/inline range/Float/String/Path"),
     }
 }
 
@@ -1918,9 +1921,20 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 let Some(shape_pat) = union_member_datatree_pat(items, m) else {
                     continue;
                 };
-                out.push_str(&format!(
-                    "            {shape_pat} => Ok(Self::{tag}(<{rust} as __jet_Decode>::jet_decode(__t)?)),\n"
-                ));
+                if let Some(decoded) = crate::Codegen::TIR::emit::emit_inline_range_decode(
+                    m,
+                    "__t",
+                    &cx.root_prefix,
+                    true,
+                ) {
+                    out.push_str(&format!(
+                        "            {shape_pat} => Ok(Self::{tag}({decoded}?)),\n"
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "            {shape_pat} => Ok(Self::{tag}(<{rust} as __jet_Decode>::jet_decode(__t)?)),\n"
+                    ));
+                }
             }
             out.push_str(
                 "            _ => Err(jet_std::FieldError::one(\"no matching union member\")),\n        }\n    }\n}\n\n",
@@ -2180,6 +2194,7 @@ fn c_decl_type(ty: &Type) -> String {
         Type::Int => "long long".into(), Type::Float => "double".into(),
         Type::Bool => "_Bool".into(), Type::Char => "uint32_t".into(),
         Type::IntN { signed, bits } => format!("{}int{}_t", if *signed { "" } else { "u" }, bits),
+        Type::InlineRange { base, .. } => c_decl_type(base),
         Type::Float32 => "float".into(), Type::Named(n) => n.clone(),
         Type::Tagged { inner, .. } => c_decl_type(inner),
         _ => "/* rejected by sema */ void".into(),

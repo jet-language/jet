@@ -2186,7 +2186,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
         seen: &mut std::collections::HashSet<String>,
     ) -> Option<Vec<SerdeWireShape>> {
         let shapes = match ty {
-            Type::Int | Type::IntN { .. } => vec![SerdeWireShape::Int],
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec![SerdeWireShape::Int],
             Type::Float | Type::Float32 => vec![SerdeWireShape::Float],
             Type::Bool => vec![SerdeWireShape::Bool],
             Type::String | Type::Char => vec![SerdeWireShape::Text],

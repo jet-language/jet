@@ -755,6 +755,44 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        // D-TYPE2-SPELL1 / card #1549: an inline range is the same literal-only
+        // interval grammar used by a named distinct range, but may appear in
+        // every type position. The carrier is intentionally fixed to `Int`.
+        let base = if matches!(self.peek().kind, TokKind::LParen) {
+            let open = self.bump().span;
+            let (lo, lo_span) = self.expect_range_bound_int("as the range's lower bound")?;
+            self.expect(TokKind::DotDot, "between the range's bounds")?;
+            let (hi, hi_span) = self.expect_range_bound_int("as the range's upper bound")?;
+            let close = self.peek().span;
+            self.expect(TokKind::RParen, "to close the range constraint")?;
+            if lo > hi {
+                self.diags.push(Diagnostic::error(
+                    "E0137",
+                    format!("this range is empty — {lo} is after {hi}"),
+                    "a range's low bound must not be greater than its high bound".to_string(),
+                    format!("write `{hi}..{lo}` (swap the bounds), or fix the values"),
+                    Some(Span::new(lo_span.start, hi_span.end)),
+                ));
+            }
+            if base != Type::Int {
+                self.diags.push(Diagnostic::error(
+                    "E0137",
+                    format!("inline value ranges apply to `Int`, not `{}`", base.name()),
+                    "an inline range carries an interval on the default integer carrier".to_string(),
+                    "write `Int(lo..hi)` here, or declare a named distinct type for another carrier".to_string(),
+                    Some(Span::new(open.start, close.end)),
+                ));
+                base
+            } else {
+                Type::InlineRange {
+                    base: Box::new(base),
+                    lo,
+                    hi,
+                }
+            }
+        } else {
+            base
+        };
         if matches!(self.peek().kind, TokKind::QuestionQuestion) {
             let qspan = self.peek().span;
             return Err(Diagnostic::error(

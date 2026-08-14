@@ -14,6 +14,10 @@ use jet_foundation::PackageEdition;
 
 use super::{unsupported, EvalCtx};
 
+mod range_semantics {
+    include!("../../../Prelude/Core/InlineRange.rs");
+}
+
 fn ok(v: CtValue) -> CtValue {
     CtValue::Present(Box::new(v))
 }
@@ -78,6 +82,13 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
             .parse::<i64>()
             .map(CtValue::Int)
             .map_err(|_| format!("expected Int, got `{cell}`")),
+        Type::InlineRange { lo, hi, .. } => cell
+            .parse::<i64>()
+            .map_err(|_| format!("expected Int, got `{cell}`"))
+            .and_then(|value| {
+                range_semantics::jet_inline_range_from_int(value, *lo, *hi)
+                    .map(CtValue::Int)
+            }),
         Type::Bool => match cell {
             "true" | "True" | "1" => Ok(CtValue::Bool(true)),
             "false" | "False" | "0" => Ok(CtValue::Bool(false)),

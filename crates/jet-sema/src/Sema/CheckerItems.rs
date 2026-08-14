@@ -137,6 +137,11 @@ impl<'a> Checker<'a> {
                 base: Box::new(self.qualify_method_type(owner_mod, base, generic_names)),
                 dimension: dimension.clone(),
             },
+            Type::InlineRange { base, lo, hi } => Type::InlineRange {
+                base: Box::new(self.qualify_method_type(owner_mod, base, generic_names)),
+                lo: *lo,
+                hi: *hi,
+            },
             Type::TraitObject(bounds) => Type::TraitObject(bounds.clone()),
             other => other.clone(),
         }
@@ -2659,8 +2664,9 @@ impl<'a> Checker<'a> {
 
     /// D-PARSESTR1 (shared with D-SHIFT1's `take_pattern` — I8, one hole-type
     /// rule, not two): the bound type of a str-match pattern hole. `None`
-    /// binds `String`; a typed hole must be `Int`/`Float`/`Bool`/`String` —
-    /// the only four types that can read out of matched text — else E0305.
+    /// binds `String`; a typed hole must be an integer carrier (`Int` or an
+    /// inline range), `Float`, `Bool`, or `String` — the types that can read
+    /// out of matched text — else E0305.
     pub(crate) fn str_match_hole_type(
         &mut self,
         name: &str,
@@ -2669,18 +2675,18 @@ impl<'a> Checker<'a> {
     ) -> Type {
         match ty {
             None => Type::String,
-            Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String)) => t.clone(),
+            Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String | Type::InlineRange { .. })) => t.clone(),
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0305",
                     format!(
-                        "`{{{}:{}}}` can't read text as {} — only `Int`, `Float`, `Bool`, or `String` can come out of a pattern hole",
+                        "`{{{}:{}}}` can't read text as {} — only an integer carrier, `Float`, `Bool`, or `String` can come out of a pattern hole",
                         name,
                         other.show(),
                         other.show()
                     ),
                     "a typed hole reads the matched text into that type, and only these four types know how to read text".to_string(),
-                    "use `Int`, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
+                    "use `Int`, an inline integer range, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
                     Some(hole_span),
                 ));
                 Type::String
@@ -3190,8 +3196,9 @@ impl<'a> Checker<'a> {
                         }
                         crate::AST::PatSlot::Wildcard => {}
                         crate::AST::PatSlot::Range { lo, hi } => {
-                            // D-PATR: field must be Int or Char; lo must be <= hi.
-                            if !matches!(ty, Type::Int | Type::Char) {
+                            // D-PATR: field must be Int, an inline range, or Char;
+                            // lo must be <= hi.
+                            if !matches!(ty, Type::Int | Type::InlineRange { .. } | Type::Char) {
                                 self.diags.push(Diagnostic::error(
                                     "E0316",
                                     format!(
@@ -3263,7 +3270,7 @@ impl<'a> Checker<'a> {
             }
             // D-PATR (ratified 2026-06-19): arm-head range pattern.
             (_, Pattern::Range { lo, hi, .. }) => {
-                if !matches!(subject_ty, Type::Int | Type::Char) {
+                if !matches!(subject_ty, Type::Int | Type::InlineRange { .. } | Type::Char) {
                     self.diags.push(Diagnostic::error(
                         "E0316",
                         format!(

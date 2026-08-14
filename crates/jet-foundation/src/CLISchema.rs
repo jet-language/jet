@@ -1110,7 +1110,7 @@ fn cli_standard(markers: &[Marker]) -> bool {
 fn scalar_kind(ty: &Type) -> Option<CLIValueKind> {
     match ty {
         Type::Bool => Some(CLIValueKind::Bool),
-        Type::Int => Some(CLIValueKind::Int),
+        Type::Int | Type::InlineRange { .. } => Some(CLIValueKind::Int),
         Type::Float => Some(CLIValueKind::Float),
         Type::String => Some(CLIValueKind::String),
         Type::Named(name) if name == "Path" => Some(CLIValueKind::Path),

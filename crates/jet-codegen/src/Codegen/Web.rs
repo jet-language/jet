@@ -56,6 +56,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/ViewCopy.js"),
     "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
+    "\n",
+    include_str!("../Prelude/Core/InlineRange.js"),
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
@@ -546,7 +548,15 @@ fn web_wasm_if_cond_supported(
 }
 
 fn is_list_int(ty: &Type) -> bool {
-    matches!(ty, Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }))
+    matches!(ty, Type::List(inner) if is_int_carrier(inner))
+}
+
+fn is_int_carrier(ty: &Type) -> bool {
+    match ty {
+        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => true,
+        Type::Tagged { inner, .. } => is_int_carrier(inner),
+        _ => false,
+    }
 }
 
 fn is_default_int(ty: &Type) -> bool {
@@ -591,8 +601,7 @@ fn is_map_string_int(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Map { key, value, .. }
-            if is_string_like(key)
-                && matches!(**value, Type::Int)
+            if is_string_like(key) && is_int_carrier(value)
     )
 }
 
@@ -785,8 +794,9 @@ fn web_wasm_expr_supported(
             TIR::TStrPart::Interp(value, _) => {
                 (matches!(
                     value.ty,
-                    Type::Int
+                        Type::Int
                         | Type::IntN { .. }
+                        | Type::InlineRange { .. }
                         | Type::Float
                         | Type::Float32
                         | Type::Bool
@@ -881,7 +891,9 @@ fn web_wasm_expr_supported(
         },
         TIR::TExprKind::NumericMethod {
             recv,
-            op: TIR::TNumericOp::Origin { .. } | TIR::TNumericOp::CastAs { .. },
+            op: TIR::TNumericOp::Origin { .. }
+                | TIR::TNumericOp::CastAs { .. }
+                | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
         TIR::TExprKind::HostCall(host) => match host.as_ref() {
             TIR::THostCall::FixedListIndex { base, index, .. } => {
@@ -1325,7 +1337,8 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             recv,
             op: TIR::TNumericOp::Origin { .. }
                 | TIR::TNumericOp::CastAs { .. }
-                | TIR::TNumericOp::FloatToInt { .. },
+                | TIR::TNumericOp::FloatToInt { .. }
+                | TIR::TNumericOp::InlineRange { .. },
         } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
         E::IfExpr {
@@ -1987,7 +2000,7 @@ fn js_abi_call_args(
         if let Some(fields) = find_struct_fields(bundle, n) {
             if fields
                 .iter()
-                .all(|f| matches!(f.ty, Type::Int | Type::IntN { .. }))
+                .all(|f| is_int_carrier(&f.ty))
             {
                 let bind = format!("_{name}_flat");
                 let kind = format!("struct-{}", n.to_lowercase());
@@ -2009,13 +2022,14 @@ fn js_abi_call_args(
             vec![format!("_{name}")]
         }
         Type::IntN { .. } => vec![format!("BigInt({name})")],
+        Type::InlineRange { .. } => vec![format!("BigInt({name})")],
         ty if is_string_like(ty) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"string\", wasm);\n"
             ));
             vec![format!("_{name}")]
         }
-        Type::List(inner) if matches!(**inner, Type::Int) => {
+        Type::List(inner) if matches!(**inner, Type::Int | Type::InlineRange { .. }) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"list-int\", wasm);\n"
             ));
@@ -3137,6 +3151,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
 fn wasm_ty(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Tagged { inner, .. } => wasm_ty(inner),
+        Type::InlineRange { base, .. } => wasm_ty(base),
         Type::Int => Some("JetWasmInt"),
         Type::IntN { signed: true, .. } => Some("i64"),
         Type::IntN { signed: false, .. } => Some("u64"),
@@ -3144,11 +3159,11 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::Bool => Some("bool"),
         Type::String => Some("String"),
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
-        Type::List(inner) if matches!(**inner, Type::Int) => Some("Vec<JetWasmInt>"),
+        Type::List(inner) if matches!(**inner, Type::Int | Type::InlineRange { .. }) => Some("Vec<JetWasmInt>"),
         Type::List(inner) if matches!(**inner, Type::IntN { .. }) => Some("Vec<i64>"),
         Type::List(inner) if is_string_like(inner) => Some("Vec<String>"),
         Type::Map { key, value, .. }
-            if is_string_like(key) && matches!(**value, Type::Int) =>
+            if is_string_like(key) && is_int_carrier(value) =>
         {
             Some("std::collections::BTreeMap<String, JetWasmInt>")
         }
@@ -3159,6 +3174,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
 fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
+        Type::InlineRange { base, .. } => wasm_storage_ty(base)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Int => "JetWasmInt".to_string(),
         Type::IntN { signed: true, .. } => "i64".to_string(),
@@ -3195,6 +3211,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
 fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
+        Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
@@ -3248,13 +3265,19 @@ fn wasm_param_rust_ty(
             if name == Syntax::TYPE_CHECKED_TEXT => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::Apply { name, .. })
             if name == Syntax::TYPE_CHECKED_TEXT => Some("String".to_string()),
-        (AccessConvention::Read, Type::List(inner)) if matches!(**inner, Type::Int) => {
+        (AccessConvention::Read, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::InlineRange { .. }) =>
+        {
             Some("&Vec<JetWasmInt>".to_string())
         }
-        (AccessConvention::Write, Type::List(inner)) if matches!(**inner, Type::Int) => {
+        (AccessConvention::Write, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::InlineRange { .. }) =>
+        {
             Some("&mut Vec<JetWasmInt>".to_string())
         }
-        (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::Int) => {
+        (AccessConvention::Move, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::InlineRange { .. }) =>
+        {
             Some("Vec<JetWasmInt>".to_string())
         }
         (AccessConvention::Read, Type::List(inner))
@@ -3321,10 +3344,13 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
 fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Tagged { inner, .. } => wasm_export_ty(inner),
+        Type::InlineRange { base, .. } => wasm_export_ty(base),
         // Packed (ptr,len) u64 on the C ABI; internal jet_wasm_* still uses String / Vec.
         Type::Int => Some("u64"),
         Type::String => Some("u64"),
-        Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
+        Type::List(inner)
+            if matches!(**inner, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) =>
+            Some("u64"),
         Type::List(inner) if is_string_like(inner) => Some("u64"),
         ty if is_string_like(ty) => Some("u64"),
         ty if is_map_string_int(ty) => Some("u64"),
@@ -4608,6 +4634,17 @@ fn wasm_emit_expr(
                 format!("(({value}) as {dst_rust})")
             }
         },
+        TIR::TExprKind::NumericMethod {
+            recv,
+            op: TIR::TNumericOp::InlineRange { lo, hi, fallible },
+        } => {
+            let input = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            if *fallible {
+                format!("jet_inline_range_from_int(({input}), {lo}, {hi})")
+            } else {
+                format!("({input})")
+            }
+        }
         TIR::TExprKind::IfExpr {
             cond,
             then_body,
@@ -5675,7 +5712,7 @@ fn emit_tir_js_body_inner(
                 let v = if matches!(
                     &base.ty,
                     Type::Map { value, .. }
-                        if matches!(**value, Type::Int | Type::IntN { .. })
+                        if is_int_carrier(value)
                 ) {
                     tir_js_abi_int_expr(value, funcs, file_prefix)?
                 } else {
@@ -6311,7 +6348,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             let abi_int_values = matches!(
                 &expr.ty,
                 Type::Map { value, .. }
-                    if matches!(**value, Type::Int | Type::IntN { .. })
+                    if is_int_carrier(value)
             );
             format!(
                 "new Map([{}])",
@@ -6472,6 +6509,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 jet_format!(
                     "(() => {{ const {jet_prefix}value = Number({value}); return Number.isFinite({jet_prefix}value) && {jet_prefix}value >= {lower} && {jet_prefix}value < {upper_exclusive} ? {{ tag: \"Some\", values: [BigInt(Math.trunc({jet_prefix}value))] }} : {{ tag: \"None\", values: [] }}; }})()"
                 )
+            }
+            TIR::TNumericOp::InlineRange { lo, hi, fallible } => {
+                let input = tir_js_expr(recv, funcs, file_prefix)?;
+                if *fallible {
+                    format!("jet_inline_range_from_int({input}, {lo}, {hi})")
+                } else {
+                    input
+                }
             }
             _ => return Err(()),
         },
@@ -6887,6 +6932,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/ViewCopy.rs"),
     "\n",
     include_str!("../Prelude/Memo.rs"),
+    "\n",
+    include_str!("../Prelude/Core/InlineRange.rs"),
     "\n"
 );
 

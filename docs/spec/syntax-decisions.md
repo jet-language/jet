@@ -753,7 +753,8 @@ on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
 `Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
-types**: `distinct Int(0..10)` is an `Int` provably within bounds; literal
+types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
+provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
 is fallible (`Severity.from_int(raw)?`, else E0136); an empty/reversed range is E0137;
 arithmetic widens to the base type. The constraint bounds are integer literals,
@@ -6410,8 +6411,8 @@ stays the nominal wrapper. The same checking already ratified for range types
 applies unchanged, including the literal-only bounds rule from D-RANGE-VALUE1;
 only the requirement to pre-declare a name is removed.
 
-`Int(0..100)` is registered now, but is not parseable in every type position
-until #1549. Its UI and formatter snapshots are owed to #1549.
+Implementation card #1549 carries `Int(0..100)` through every type position,
+including its UI and formatter snapshots.
 
 Amends: D-RANGE-VALUE1.
 

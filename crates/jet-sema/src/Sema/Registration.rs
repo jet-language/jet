@@ -525,12 +525,12 @@ impl<'a> Checker<'a> {
 }
 
 fn inline_ffi_scalar(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Float | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::Float32 | Type::Bool)
+    matches!(ty, Type::Int | Type::Float | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::InlineRange { .. } | Type::Float32 | Type::Bool)
         || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
 fn inline_asm_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::IntN { bits: 8 | 16 | 32 | 64, .. })
+    matches!(ty, Type::Int | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::InlineRange { .. })
 }
 
 fn inline_asm_integer_or_void(ty: &Type) -> bool {

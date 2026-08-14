@@ -687,6 +687,7 @@ fn fragment_serde_encode_type(ty: &Type, cx: &Cx) -> bool {
         ty,
         Type::Int
             | Type::IntN { .. }
+            | Type::InlineRange { .. }
             | Type::Float
             | Type::Float32
             | Type::Bool
@@ -947,6 +948,23 @@ pub(crate) fn lower_method_call_with_sig(
     )
 }
 
+/// D-TYPE2-SPELL1: sema marks `Int(lo..hi)`'s descriptor call with the
+/// structural range it resolved. The descriptor has no runtime value; only
+/// the destination-owned conversion argument reaches TIR.
+fn inline_range_receiver(receiver: &Expr) -> Option<(i64, i64)> {
+    let Expr::Call(call) = receiver else {
+        return None;
+    };
+    match call.resolved_ret.as_ref() {
+        Some(Type::InlineRange { lo, hi, .. }) => Some((*lo, *hi)),
+        Some(Type::Result { ok, .. }) => match ok.as_ref() {
+            Type::InlineRange { lo, hi, .. } => Some((*lo, *hi)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn lower_method_call_impl(
     receiver: &Expr,
     method: &str,
@@ -975,6 +993,26 @@ fn lower_method_call_impl(
             cx,
             env,
         );
+    }
+    if method == Syntax::conversion_method_for_source("Int")
+        && args.len() == 1
+        && inline_range_receiver(receiver).is_some()
+    {
+        let (lo, hi) = inline_range_receiver(receiver).expect("inline range checked above");
+        let input = lower_expr(&args[0].expr, cx, env);
+        let fallible = matches!(resolved_ret, Some(Type::Result { .. }));
+        let ty = resolved_ret.cloned().unwrap_or_else(|| Type::InlineRange {
+            base: Box::new(Type::Int),
+            lo,
+            hi,
+        });
+        return TExpr {
+            ty,
+            kind: TExprKind::NumericMethod {
+                recv: Box::new(input),
+                op: TNumericOp::InlineRange { lo, hi, fallible },
+            },
+        };
     }
     // D-CALLDUAL1=E: sema has already selected one `#Root` function. Lower
     // the receiver as argument zero and keep the callee on the ordinary

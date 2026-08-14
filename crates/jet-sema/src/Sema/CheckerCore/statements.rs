@@ -844,7 +844,10 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                             }
-                            if idx_ty.as_ref() != Some(&Type::Int)
+                            if !matches!(
+                                idx_ty.as_ref(),
+                                Some(Type::Int | Type::InlineRange { .. })
+                            )
                                 && !matches!(base_ty, Some(Type::Map { .. }))
                             {
                                 if let Some(ref it) = idx_ty {
@@ -1772,7 +1775,7 @@ impl<'a> Checker<'a> {
                             for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
                                 let t = self.infer(e);
                                 if let Some(t) = t {
-                                    if t != Type::Int {
+                                    if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
                                         self.diags.push(Diagnostic::error(
                                             "E0109",
                                             format!(
@@ -1793,7 +1796,7 @@ impl<'a> Checker<'a> {
                                 // D-LOOP-ADVANCE2=A: the stride must be a positive Int.
                                 let t = self.infer(step);
                                 if let Some(t) = t {
-                                    if t != Type::Int {
+                                    if !matches!(&t, Type::Int | Type::InlineRange { .. }) {
                                         self.diags.push(Diagnostic::error(
                                         "E0123",
                                         format!(
@@ -1880,7 +1883,7 @@ impl<'a> Checker<'a> {
                         ForKind::In { collection, step } => {
                             if let Some(step) = step {
                                 if let Some(ty) = self.infer(step) {
-                                    if ty != Type::Int {
+                                    if !matches!(&ty, Type::Int | Type::InlineRange { .. }) {
                                         self.diags.push(Diagnostic::error(
                                             "E0123",
                                             format!("a source loop stride must be {}, not {}", Type::Int.show(), ty.show()),
@@ -2426,7 +2429,9 @@ impl<'a> Checker<'a> {
                 } => {
                     if let Some(limit) = limit {
                         if let Some(limit_ty) = self.infer(limit) {
-                            self.check_type_assignable(&Type::Int, &limit_ty, limit.span());
+                            if !matches!(limit_ty, Type::InlineRange { .. }) {
+                                self.check_type_assignable(&Type::Int, &limit_ty, limit.span());
+                            }
                         }
                     }
                     self.push_scope();
@@ -2907,7 +2912,7 @@ impl<'a> Checker<'a> {
                                 if !signature_valid {
                                     continue;
                                 }
-                                if !matches!(ty, Some(Type::Int)) {
+                                if !matches!(ty, Some(Type::Int | Type::InlineRange { .. })) {
                                     let got = ty
                                         .as_ref()
                                         .map(|t| t.show())

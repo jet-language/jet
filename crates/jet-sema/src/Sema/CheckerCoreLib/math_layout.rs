@@ -275,7 +275,7 @@ pub fn layout_axis_of(ty: &Type) -> Option<LayoutAxis> {
         Type::Named(n) if n == "HVar" => Some(LayoutAxis::H),
         Type::Named(n) if n == "VVar" => Some(LayoutAxis::V),
         Type::Named(n) if n == "LengthVar" => Some(LayoutAxis::Neutral),
-        Type::Int | Type::Float => Some(LayoutAxis::Neutral),
+        Type::Int | Type::InlineRange { .. } | Type::Float => Some(LayoutAxis::Neutral),
         _ => None,
     }
 }

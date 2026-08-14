@@ -31,6 +31,10 @@ pub(crate) mod service_prelude {
     include!("../../../jet-codegen/src/Prelude/Service.rs");
 }
 
+mod inline_range_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -1465,6 +1469,30 @@ extern "C" fn jet_jit_distinct_range_result(handle: i64, lo: i64, hi: i64) -> i6
         } else {
             let error = rt.heap.alloc_string("value is outside the distinct type's range");
             alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+extern "C" fn jet_jit_inline_range(value: i64, lo: i64, hi: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match inline_range_kernel::jet_inline_range_from_int(value, lo, hi) {
+            Ok(value) => value,
+            Err(message) => {
+                rt.set_trap(&message);
+                value
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_inline_range_result(value: i64, lo: i64, hi: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match inline_range_kernel::jet_inline_range_from_int(value, lo, hi) {
+            Ok(value) => alloc_jit_result(rt, true, value as u64),
+            Err(message) => {
+                let error = rt.heap.alloc_string(message);
+                alloc_jit_result(rt, false, error as u64)
+            }
         }
     })
 }
@@ -3559,6 +3587,8 @@ host_fns! {
     numeric_int_checked_widen: "jet_jit_numeric_int_checked_widen" => jet_jit_numeric_int_checked_widen: sig_numeric_int_checked_widen;
     distinct_range: "jet_jit_distinct_range" => jet_jit_distinct_range: sig_i64_i64_i64_i64;
     distinct_range_result: "jet_jit_distinct_range_result" => jet_jit_distinct_range_result: sig_i64_i64_i64_i64;
+    inline_range: "jet_jit_inline_range" => jet_jit_inline_range: sig_i64_i64_i64_i64;
+    inline_range_result: "jet_jit_inline_range_result" => jet_jit_inline_range_result: sig_i64_i64_i64_i64;
     numeric_predicate: "jet_jit_numeric_predicate" => jet_jit_numeric_predicate: sig_f64_i64_i8;
     numeric_bit_count: "jet_jit_numeric_bit_count" => jet_jit_numeric_bit_count: sig_i64_i64_i64_i64;
     numeric_int_bit_count: "jet_jit_numeric_int_bit_count" => jet_jit_numeric_int_bit_count: sig_i64_i64_i64_i64;

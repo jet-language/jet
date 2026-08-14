@@ -276,7 +276,10 @@ fn erase_runtime_qualifiers(mut ty: &Type) -> &Type {
 }
 
 fn intish_ty(ty: &Type) -> bool {
-    matches!(erase_runtime_qualifiers(ty), Type::Int | Type::IntN { .. })
+    matches!(
+        erase_runtime_qualifiers(ty),
+        Type::Int | Type::IntN { .. } | Type::InlineRange { .. }
+    )
 }
 
 /// `Signal/Derived/Computed.get()` — TIR often erases the Apply payload to
@@ -295,7 +298,12 @@ fn reactive_get_intish(expr: &TExpr) -> bool {
 fn jit_bag_raw_key_candidate(ty: &Type) -> bool {
     match ty {
         Type::Tagged { inner, .. } => jit_bag_raw_key_candidate(inner),
-        Type::Int | Type::IntN { .. } | Type::Bool | Type::Char | Type::Named(_) => true,
+        Type::Int
+            | Type::IntN { .. }
+            | Type::InlineRange { .. }
+            | Type::Bool
+            | Type::Char
+            | Type::Named(_) => true,
         _ => false,
     }
 }
@@ -304,10 +312,10 @@ pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
     // IntN (U8/…) shares the i64 list ABI — bytes / write_at / random.bytes.
     matches!(
         ty,
-        Type::List(inner) if matches!(inner.as_ref(), Type::Int | Type::IntN { .. })
+        Type::List(inner) if intish_ty(inner)
     ) || matches!(
         ty,
-        Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Int | Type::IntN { .. })
+        Type::FixedList { elem, .. } if intish_ty(elem)
     )
 }
 
@@ -380,6 +388,11 @@ pub(crate) fn jit_list_of_int_list_type(ty: &Type) -> bool {
 
 pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     match ty {
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(inner.as_ref(), Type::InlineRange { .. }) =>
+        {
+            Some(Type::Int)
+        }
         Type::List(inner) | Type::FixedList { elem: inner, .. }
             if matches!(
                 inner.as_ref(),
@@ -535,12 +548,19 @@ pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
+fn jit_map_int_key_type(ty: &Type) -> bool {
+    matches!(
+        erase_runtime_qualifiers(ty),
+        Type::Int | Type::InlineRange { .. }
+    )
+}
+
 fn jit_map_string_int_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Map { key, value, .. }
             if matches!(key.as_ref(), Type::String)
-                && matches!(value.as_ref(), Type::Int)
+                && intish_ty(value)
     )
 }
 
@@ -549,7 +569,7 @@ pub(crate) fn jit_map_int_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Map { key, value, .. }
-            if matches!(key.as_ref(), Type::Int)
+            if jit_map_int_key_type(key)
                 && (jit_value_type(value) || matches!(value.as_ref(), Type::String))
     )
 }
@@ -646,6 +666,7 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
                         t.as_ref(),
                         Type::Int
                             | Type::IntN { .. }
+                            | Type::InlineRange { .. }
                             | Type::Float
                             | Type::Float32
                             | Type::Bool
@@ -782,6 +803,7 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         }
         Type::Int
         | Type::IntN { .. }
+        | Type::InlineRange { .. }
         | Type::Float
         | Type::Float32
         | Type::Bool
@@ -908,6 +930,7 @@ fn resident_safe_expr_work_item<'a>(
                         &e.ty,
                         Type::Int
                             | Type::IntN { .. }
+                            | Type::InlineRange { .. }
                             | Type::Float
                             | Type::String
                             | Type::Char
@@ -982,7 +1005,7 @@ fn resident_safe_expr_work_item<'a>(
                     hooks[i]
                         || matches!(
                             &operand.ty,
-                            Type::Int | Type::IntN { .. } | Type::Float
+                            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Float
                         )
                 })
                 && ops
@@ -1127,13 +1150,14 @@ fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
     if arg.clone {
         let clone_ok = matches!(
             ty,
-            Type::Int
+                Type::Int
                 | Type::Float
                 | Type::Bool
                 | Type::Char
                 | Type::String
                 | Type::Option(_)
                 | Type::IntN { .. }
+                | Type::InlineRange { .. }
                 | Type::Float32
         ) || jit_struct_type(ty)
             || jit_compound_type(ty)
@@ -1701,7 +1725,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             jit_map_resident_type(&expr.ty)
                 && entries.iter().all(|(k, v)| {
                     let key_ok = if jit_map_int_type(&expr.ty) {
-                        matches!(&k.ty, Type::Int)
+                        jit_map_int_key_type(&k.ty)
                     } else {
                         matches!(&k.ty, Type::String)
                     };
@@ -1718,6 +1742,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         &e.ty,
                         Type::Int
                             | Type::IntN { .. }
+                            | Type::InlineRange { .. }
                             | Type::Float
                             | Type::String
                             | Type::Char
@@ -1759,7 +1784,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         } => {
             if *is_map {
                 let key_ok = if jit_map_int_type(&base.ty) {
-                    matches!(&index.ty, Type::Int)
+                    jit_map_int_key_type(&index.ty)
                 } else {
                     jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)
                 };
@@ -1822,7 +1847,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             )
                     }
                     TNumericOp::ToShow => {
-                        matches!(&recv.ty, Type::Int | Type::IntN { .. } | Type::Float)
+                        matches!(&recv.ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Float)
                     },
                     TNumericOp::CastAs { dst_rust } => {
                         recv.ty.is_numeric()
@@ -1831,6 +1856,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TNumericOp::CheckedIntToFloat { .. } => recv.ty.is_integer(),
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
+                    TNumericOp::InlineRange { .. } => recv.ty.is_integer(),
                     TNumericOp::Origin { .. } => true,
                 }
         }
@@ -2041,7 +2067,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     hooks[i]
                         || matches!(
                             &operands[i].ty,
-                            Type::Int | Type::IntN { .. } | Type::Float
+                            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Float
                         )
                 })
                 && ops
@@ -2176,8 +2202,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         } => {
             matches!(prefix.as_str(), "wrapping" | "saturating" | "checked")
                 && matches!(*op, "add" | "sub" | "mul" | "div")
-                && matches!(&lhs.ty, Type::Int | Type::IntN { .. })
-                && matches!(&rhs.ty, Type::Int | Type::IntN { .. })
+                && intish_ty(&lhs.ty)
+                && intish_ty(&rhs.ty)
                 && resident_safe_expr(lhs, callees)
                 && resident_safe_expr(rhs, callees)
         }
@@ -2259,7 +2285,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             THostCall::FixedListIndex { base, index, .. } => {
                 resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
-                    && matches!(&index.ty, Type::Int | Type::IntN { .. } | Type::Named(_))
+                    && (intish_ty(&index.ty) || matches!(&index.ty, Type::Named(_)))
             }
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } | THostCall::SwitchSubjectValue => true,
@@ -3013,7 +3039,7 @@ fn resident_safe_builtin_op(
             jit_map_resident_type(recv_ty)
                 && args.len() == 1
                 && (if jit_map_int_type(recv_ty) {
-                    matches!(&args[0].ty, Type::Int)
+                    jit_map_int_key_type(&args[0].ty)
                 } else {
                     matches!(&args[0].ty, Type::String)
                 })
@@ -3023,7 +3049,7 @@ fn resident_safe_builtin_op(
             jit_map_resident_type(recv_ty)
                 && args.len() == 2
                 && (if jit_map_int_type(recv_ty) {
-                    matches!(&args[0].ty, Type::Int)
+                    jit_map_int_key_type(&args[0].ty)
                 } else {
                     matches!(&args[0].ty, Type::String)
                 })
@@ -3800,7 +3826,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             ..
         } => {
             let compound = op.as_ref().is_none_or(|op| match &value.ty {
-                Type::Int | Type::IntN { .. } => matches!(
+                Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => matches!(
                     op,
                     BinOp::Add
                         | BinOp::Sub
@@ -3976,7 +4002,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         } => {
             if *is_map {
                 let key_ok = if jit_map_int_type(&base.ty) {
-                    matches!(&index.ty, Type::Int)
+                    jit_map_int_key_type(&index.ty)
                 } else {
                     jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)
                 };

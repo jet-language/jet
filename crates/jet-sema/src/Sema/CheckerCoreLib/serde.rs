@@ -56,7 +56,8 @@ impl<'a> Checker<'a> {
                 | Type::Bool
                 | Type::String
                 | Type::Char
-                | Type::Float32 => true,
+                | Type::Float32
+                | Type::InlineRange { .. } => true,
                 // Codable's shared DataTree Int is i64. Admitting U64 here
                 // would let sema promise a round trip that no codec lens can
                 // preserve for values above i64::MAX.
@@ -97,7 +98,8 @@ impl<'a> Checker<'a> {
                 | Type::Bool
                 | Type::String
                 | Type::Char
-                | Type::Float32 => true,
+                | Type::Float32
+                | Type::InlineRange { .. } => true,
                 Type::IntN { .. } => sized_int_has_datatree_form(t),
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),

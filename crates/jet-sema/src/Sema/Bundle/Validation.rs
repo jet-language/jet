@@ -308,7 +308,8 @@ fn type_mentions_encoding_surface(ty: &Type) -> bool {
         Type::List(inner)
         | Type::Shared(inner)
         | Type::Option(inner)
-        | Type::Tagged { inner, .. } => type_mentions_encoding_surface(inner),
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. } => type_mentions_encoding_surface(inner),
         Type::FixedList { elem, .. } => type_mentions_encoding_surface(elem),
         Type::Map { key, value, .. } => {
             type_mentions_encoding_surface(key) || type_mentions_encoding_surface(value)
@@ -2133,7 +2134,8 @@ fn property_param_generatable(ty: &Type) -> bool {
         | Type::String
         | Type::Char
         | Type::Float32
-        | Type::IntN { .. } => true,
+        | Type::IntN { .. }
+        | Type::InlineRange { .. } => true,
         Type::List(inner) | Type::Option(inner) => property_param_generatable(inner),
         Type::FixedList { elem, .. } => property_param_generatable(elem),
         _ => false,

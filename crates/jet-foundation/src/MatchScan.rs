@@ -8,6 +8,10 @@
 
 use crate::AST::{BinEndian, BinMatchPart, BinSpec, StrMatchPart, Type};
 
+mod inline_range_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
 /// One value bound by a binary pattern hole: a fixed-width integer, or the
 /// `..rest` tail as raw bytes.
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +66,11 @@ fn str_hole_admits(ty: &Option<Type>, raw: &str) -> bool {
     match ty {
         Some(Type::Int) => crate::Numeric::CtBigInt::from_str(raw).is_ok(),
         Some(Type::IntN { .. }) => raw.parse::<i64>().is_ok(),
+        Some(Type::InlineRange { lo, hi, .. }) => raw
+            .parse::<i64>()
+            .ok()
+            .and_then(|value| inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi).ok())
+            .is_some(),
         Some(Type::Float) | Some(Type::Float32) => raw.parse::<f64>().is_ok(),
         Some(Type::Bool) => matches!(raw, "true" | "false" | "True" | "False" | "0" | "1"),
         _ => true,

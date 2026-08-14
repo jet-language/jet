@@ -457,11 +457,14 @@ pub fn apply_static_type_method(
     ) {
         let source = crate::AST::numeric_type_from_name(source_name)?;
         let value = args.into_iter().next().unwrap_or(CtValue::Unit);
-        let int_kind = |ty: &Type| match ty {
-            Type::Int => Some((true, 64)),
-            Type::IntN { signed, bits } => Some((*signed, *bits)),
-            _ => None,
-        };
+        fn int_kind(ty: &Type) -> Option<(bool, u8)> {
+            match ty {
+                Type::Int => Some((true, 64)),
+                Type::IntN { signed, bits } => Some((*signed, *bits)),
+                Type::InlineRange { base, .. } => int_kind(base),
+                _ => None,
+            }
+        }
         if matches!(source, Type::Float) && matches!(target, Type::Float32) {
             let CtValue::Float(CtFloat::F64(n)) = value else {
                 return Some(Err(unsupported(

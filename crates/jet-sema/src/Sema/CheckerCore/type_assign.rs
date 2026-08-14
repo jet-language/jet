@@ -96,7 +96,9 @@ impl<'a> Checker<'a> {
                         self.warn_soft_public_type_tree(field, span);
                     }
                 }
-                Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                Type::FixedList { elem, .. }
+                | Type::Tagged { inner: elem, .. }
+                | Type::InlineRange { base: elem, .. } => {
                     self.warn_soft_public_type_tree(elem, span);
                 }
                 Type::Fn { params, ret, .. } => {
@@ -616,6 +618,7 @@ impl<'a> Checker<'a> {
                     self.check_declared_type_rules(inner, span);
                 }
                 Type::Tagged { inner, .. } => self.check_declared_type_rules(inner, span),
+                Type::InlineRange { base, .. } => self.check_declared_type_rules(base, span),
                 _ => {}
             }
         }

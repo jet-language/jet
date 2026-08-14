@@ -727,7 +727,10 @@ impl<'a> Checker<'a> {
                         checker.check_call_argument_captures(&arg.expr);
                         inferred
                     });
-                    if !matches!(got, Some(Type::Int | Type::Float)) {
+                    if !matches!(
+                        got,
+                        Some(Type::Int | Type::InlineRange { .. } | Type::Float)
+                    ) {
                         self.diags.push(Diagnostic::error(
                             "E0108",
                             format!(

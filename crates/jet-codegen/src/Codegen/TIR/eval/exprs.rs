@@ -2582,6 +2582,7 @@ impl<'a> EvalCtx<'a> {
         match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(value),
             Type::Int | Type::IntN { .. } => Ok(datatree("Int", Some(value))),
+            Type::InlineRange { base, .. } => self.eval_serde_encode_value(value, base),
             Type::Float | Type::Float32 => Ok(datatree("Float", Some(value))),
             Type::Bool => Ok(datatree("Bool", Some(value))),
             Type::String => Ok(datatree("Text", Some(value))),
@@ -2952,6 +2953,22 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let result: Result<CtValue, CtValue> = match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(tree),
+            Type::InlineRange { base, lo, hi } => {
+                let decoded = self.eval_datatree_decode_status(tree, base, status)?;
+                match decoded {
+                    CtValue::Present(value) => match *value {
+                        CtValue::Int(value) => match super::range_semantics::jet_inline_range_from_int(
+                            value, *lo, *hi,
+                        ) {
+                            Ok(value) => Ok(CtValue::Int(value)),
+                            Err(reason) => Err(decode_error("", reason)),
+                        },
+                        other => Ok(other),
+                    },
+                    CtValue::Failed(CtReport::Told(error)) => Err(*error),
+                    other => Ok(other),
+                }
+            }
             Type::Int | Type::IntN { .. } => {
                 let decoded = match datatree_variant(&tree) {
                     Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Int(*value)),
@@ -9163,6 +9180,18 @@ impl<'a> EvalCtx<'a> {
                     Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
                     )))))
+                }
+            }
+            TNumericOp::InlineRange { lo, hi, fallible } => {
+                let CtValue::Int(n) = v else {
+                    return Err(unsupported("inline range conversion expects Int", self.span()));
+                };
+                if !*fallible {
+                    return Ok(CtValue::Int(*n));
+                }
+                match super::range_semantics::jet_inline_range_from_int(*n, *lo, *hi) {
+                    Ok(value) => Ok(CtValue::Present(Box::new(CtValue::Int(value)))),
+                    Err(error) => Ok(CtValue::failed(Box::new(CtValue::Str(error)))),
                 }
             }
         }

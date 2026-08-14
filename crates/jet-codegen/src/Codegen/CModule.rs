@@ -173,7 +173,7 @@ fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String
         Type::Bool => "bool".to_string(),
         Type::Char => "u32".to_string(),
         Type::String => "*const std::os::raw::c_char".to_string(),
-        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { params, ret, .. } => {
             let ps = params
@@ -211,7 +211,7 @@ fn c_wrapper_param_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> S
         Type::Bool => "bool".to_string(),
         Type::Char => "&char".to_string(),
         Type::String => "&String".to_string(),
-        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => cx.rust_type(ty),
         // Card #436: by-reference, matching the ordinary Jet call-site
         // convention for a non-scalar `Read` param (see the call-arg match
         // in `emit_c_module`, which clones through this reference before
@@ -237,7 +237,7 @@ fn c_wrapper_ret_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> Str
         Type::Bool => "bool".to_string(),
         Type::Char => "char".to_string(),
         Type::String => "String".to_string(),
-        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { .. } => c_abi_rust_type(ty, cx, span),
         Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx, span),

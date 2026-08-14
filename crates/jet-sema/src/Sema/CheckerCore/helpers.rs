@@ -8,7 +8,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char => true,
-        Type::IntN { .. } | Type::Float32 => true,
+        Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => true,
         Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
         _ => false,
     }

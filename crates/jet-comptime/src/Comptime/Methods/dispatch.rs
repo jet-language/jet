@@ -700,6 +700,7 @@ fn integer_width_from_type(ty: &Type) -> Option<u32> {
     match ty {
         Type::Int => Some(64),
         Type::IntN { bits, .. } => Some(u32::from(*bits)),
+        Type::InlineRange { base, .. } => integer_width_from_type(base),
         _ => None,
     }
 }

@@ -1304,6 +1304,7 @@ fn field_error_under(path: &str, value: Expr, span: Span) -> Expr {
 fn serde_zero_expr(ty: &Type, span: Span) -> Expr {
     match ty {
         Type::Int | Type::IntN { .. } => Expr::Int(0, span, None, None),
+        Type::InlineRange { lo, .. } => Expr::Int(*lo, span, None, None),
         Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32)),
         Type::Bool => Expr::Bool(false, span),
         Type::String => string_expr("", span),

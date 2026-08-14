@@ -38,7 +38,8 @@ fn contains_taskgroup(ty: &Type) -> bool {
         | Type::Shared(inner)
         | Type::Option(inner)
         | Type::FixedList { elem: inner, .. }
-        | Type::Tagged { inner, .. } => contains_taskgroup(inner),
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. } => contains_taskgroup(inner),
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             contains_taskgroup(key) || contains_taskgroup(value)
         }
@@ -631,6 +632,39 @@ impl<'a> Checker<'a> {
                             Some(args[0].expr.span()),
                         ));
                         it = Some(Type::Named(type_name.clone()));
+                    }
+                }
+            }
+            let inline_target = match &it {
+                Some(Type::Result { ok, .. }) => match ok.as_ref() {
+                    Type::InlineRange { lo, hi, .. } => Some((*lo, *hi, ok.as_ref().clone())),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((lo, hi, target)) = inline_target {
+                if let Expr::MethodCall {
+                    receiver,
+                    method,
+                    args,
+                    ..
+                } = &b.init
+                {
+                    let descriptor = matches!(receiver.as_ref(), Expr::Call(call)
+                        if call.resolved_ret.as_ref().is_some_and(|ty| ty == &target));
+                    if descriptor
+                        && method.as_str() == Syntax::conversion_method_for_source("Int")
+                        && args.len() == 1
+                    {
+                        let range_name = format!("Int({lo}..{hi})");
+                        self.diags.push(Diagnostic::error(
+                            "E0136",
+                            format!("making a `{range_name}` from a runtime value can fail"),
+                            "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+                            format!("write `{range_name}.{method}(raw)?` and handle the failure"),
+                            Some(args[0].expr.span()),
+                        ));
+                        it = Some(target);
                     }
                 }
             }

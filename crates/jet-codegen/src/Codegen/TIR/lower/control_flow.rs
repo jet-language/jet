@@ -1402,6 +1402,14 @@ pub(crate) fn str_match_scan_closure_ex(
                             root_prefix = &cx.root_prefix
                         ));
                     }
+                    Type::InlineRange { lo, hi, .. } => {
+                        body.push_str(&jet_format!(
+                            "let {var}: i64 = match {var}.trim().parse::<i64>() {{ Ok({jet_prefix}v) => match jet_inline_range_from_int({jet_prefix}v, {lo}, {hi}) {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }}, Err(_) => return None }};\n",
+                            var = var,
+                            lo = lo,
+                            hi = hi
+                        ));
+                    }
                     Type::Float => {
                         body.push_str(&jet_format!(
                             "let {var}: f64 = match {var}.trim().parse::<f64>() {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",

@@ -947,8 +947,8 @@ impl<'a> Checker<'a> {
             return None;
         }
         let ms_ty = self.infer(&mut args[0].expr)?;
-        if !(matches!(ms_ty, Type::Int)
-            || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+        if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
+            || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
         {
             self.diags.push(Diagnostic::error(
                 "E0112",

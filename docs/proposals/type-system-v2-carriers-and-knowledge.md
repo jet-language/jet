@@ -355,6 +355,9 @@ UserId :: distinct Int                             // naming is still there when
 
 `U8` is then revealed as exactly `Int(0..255)` plus a one-byte layout — the alias teaches the
 model. The same inline position accepts unit and exactness knowledge later without new grammar.
+Card #1549 implements this structural form across parameters, returns, fields, bindings, and
+the shared AOT, JIT, interpreter, comptime, and web conversion paths; only the carrier reaches
+runtime.
 
 **3. Literals reuse one literal machinery.** The lexer already turns `500ms` and `12.5usd` into
 unit literals. Imaginary literals use the same suffix path, with no new grammar. Measured values

@@ -203,11 +203,24 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            let (base, base_ty_span) = self.type_()?;
+            let (parsed_base, base_ty_span) = self.type_()?;
+            // `type_()` also owns the structural `Int(lo..hi)` spelling used
+            // in ordinary type positions. A named distinct keeps the same
+            // source form but stores the interval in its declaration metadata;
+            // unwrap it here so `Severity :: distinct Int(0..10)` does not
+            // become a distinct type whose base is already an inline range.
+            let (base, inline_range) = match parsed_base {
+                crate::AST::Type::InlineRange { base, lo, hi } => {
+                    (*base, Some((lo, hi, base_ty_span)))
+                }
+                base => (base, None),
+            };
             let base_span = base_ty_span;
             // D-RANGETYPE1: an optional literal range constraint right after the
             // base type — `distinct Int(0..10)`. `..` is inclusive (S22).
-            let range = if matches!(self.peek().kind, TokKind::LParen) {
+            let range = if let Some(inline_range) = inline_range {
+                Some(inline_range)
+            } else if matches!(self.peek().kind, TokKind::LParen) {
                 let open = self.bump().span;
                 let (lo, lo_span) = self.expect_range_bound_int("as the range's lower bound")?;
                 self.expect(TokKind::DotDot, "between the range's bounds")?;
@@ -259,7 +272,7 @@ impl<'a> Parser<'a> {
         /// D-RANGETYPE1: a plain (non-negative — S34 doesn't lex a leading `-` into
         /// the literal) integer literal used as one bound of a `distinct
         /// Base(lo..hi)` range constraint.
-        fn expect_range_bound_int(&mut self, where_: &str) -> Result<(i64, Span), Diagnostic> {
+        pub(crate) fn expect_range_bound_int(&mut self, where_: &str) -> Result<(i64, Span), Diagnostic> {
             match self.peek().kind {
                 TokKind::Int(n, _) => {
                     let span = self.bump().span;

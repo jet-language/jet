@@ -908,6 +908,12 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
                 frame_text(out, &dimension.identity());
             }
             ComputeDim(value) => { out.push(21); out.extend_from_slice(&value.to_be_bytes()); }
+            InlineRange { base, lo, hi } => {
+                out.push(22);
+                write(out, base);
+                out.extend_from_slice(&lo.to_be_bytes());
+                out.extend_from_slice(&hi.to_be_bytes());
+            }
         }
     }
     let mut out = Vec::new();

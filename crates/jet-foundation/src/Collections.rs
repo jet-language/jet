@@ -66,7 +66,12 @@ pub fn is_reserved_type(name: &str) -> bool {
 pub fn is_map_key_type(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Int | Type::Bool | Type::String | Type::Char | Type::Named(_)
+        Type::Int
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::Named(_)
+            | Type::InlineRange { .. }
     )
 }
 
@@ -74,7 +79,13 @@ pub fn is_map_key_type(ty: &Type) -> bool {
 pub fn is_hashable_type(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Int | Type::Bool | Type::String | Type::Char | Type::Named(_) | Type::IntN { .. }
+        Type::Int
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::Named(_)
+            | Type::IntN { .. }
+            | Type::InlineRange { .. }
     )
 }
 
@@ -505,7 +516,13 @@ pub fn builtin_method_return(
         // shape), so it is NOT listed here.
         Type::Option(inner) => option_method_return(inner, method, arg_count),
         Type::Result { ok, .. } => result_method_return(ok, method, arg_count),
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::InlineRange { .. } => {
             numeric_method_return(recv_ty, method, arg_count)
         }
         _ => None,
@@ -749,6 +766,7 @@ fn u8t() -> Type {
 fn int_kind(ty: &Type) -> Option<(bool, u8)> {
     match ty {
         Type::IntN { signed, bits } => Some((*signed, *bits)),
+        Type::InlineRange { base, .. } => int_kind(base),
         _ => None,
     }
 }
@@ -802,6 +820,12 @@ pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> O
     }
     if matches!(source, Type::IntN { .. }) && matches!(target, Type::Int) {
         return Some(Some(target.clone()));
+    }
+    if matches!(target, Type::InlineRange { .. }) {
+        return Some(Some(Type::Result {
+            ok: Box::new(target.clone()),
+            err: Box::new(Type::String),
+        }));
     }
     Some(Some(match (int_kind(&source), int_kind(target)) {
         (Some(src), Some(dst)) if !int_conv_widening(src, dst) => Type::Result {

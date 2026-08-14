@@ -29,6 +29,10 @@ mod datatree_kind_rt {
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
 }
 
+mod inline_range_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
 // ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
@@ -416,6 +420,19 @@ pub(super) fn typed_decode_builtin_value(
     match ty {
         Type::Int => Some(decode_int(tree)),
         Type::IntN { signed, bits } => Some(decode_int_n(tree, *signed, *bits, &ty.name())),
+        Type::InlineRange { base, lo, hi } => Some(
+            typed_decode_builtin_value(base, tree).map(|result| {
+                result.and_then(|value| match value {
+                    CtValue::Int(n) => match inline_range_semantics::jet_inline_range_from_int(
+                        n, *lo, *hi,
+                    ) {
+                        Ok(value) => Ok(CtValue::Int(value)),
+                        Err(reason) => Err(decode_error(reason)),
+                    },
+                    other => Ok(other),
+                })
+            }),
+        ),
         Type::Float => Some(decode_float(tree)),
         Type::Float32 => Some(decode_f32(tree)),
         Type::Bool => Some(decode_bool(tree)),
@@ -493,6 +510,7 @@ pub(super) fn typed_decode_builtin_value(
 fn zero_value(ty: &Type) -> CtValue {
     match ty {
         Type::Int | Type::IntN { .. } => CtValue::Int(0),
+        Type::InlineRange { lo, .. } => CtValue::Int(*lo),
         Type::Float | Type::Float32 => CtValue::Float(CtFloat::f64(0.0)),
         Type::Bool => CtValue::Bool(false),
         Type::String => CtValue::Str(String::new()),

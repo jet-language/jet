@@ -159,6 +159,11 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             base: Box::new(substitute_type(base, subst)),
             dimension: dimension.clone(),
         },
+        Type::InlineRange { base, lo, hi } => Type::InlineRange {
+            base: Box::new(substitute_type(base, subst)),
+            lo: *lo,
+            hi: *hi,
+        },
         other => other.clone(),
     }
 }
@@ -248,6 +253,18 @@ pub fn unify_types(
             Type::Quantity { base: b1, dimension: d1 },
             Type::Quantity { base: b2, dimension: d2 },
         ) if d1 == d2 => unify_types(b1, b2, subst, type_params),
+        (
+            Type::InlineRange {
+                base: b1,
+                lo: lo1,
+                hi: hi1,
+            },
+            Type::InlineRange {
+                base: b2,
+                lo: lo2,
+                hi: hi2,
+            },
+        ) if lo1 == lo2 && hi1 == hi2 => unify_types(b1, b2, subst, type_params),
         _ => false,
     }
 }
@@ -266,6 +283,7 @@ pub fn free_type_params(ty: &Type) -> HashSet<String> {
 fn collect_free(ty: &Type, out: &mut HashSet<String>) {
     match ty {
         Type::IntN { .. } | Type::Float32 => {}
+        Type::InlineRange { base, .. } => collect_free(base, out),
         Type::Named(n) if is_type_var_name(n) => {
             out.insert(n.clone());
         }
@@ -769,7 +787,8 @@ pub fn collect_clone_type_param_mentions(
         | Type::Option(inner)
         | Type::FixedList { elem: inner, .. }
         | Type::Tagged { inner, .. }
-        | Type::Quantity { base: inner, .. } => {
+        | Type::Quantity { base: inner, .. }
+        | Type::InlineRange { base: inner, .. } => {
             collect_clone_type_param_mentions(inner, param_names, out)
         }
         Type::Union(members) => {
@@ -871,6 +890,7 @@ pub fn collect_type_param_mentions(
             }
         }
         Type::Quantity { base, .. } => collect_type_param_mentions(base, param_names, out),
+        Type::InlineRange { base, .. } => collect_type_param_mentions(base, param_names, out),
         _ => {}
     }
 }

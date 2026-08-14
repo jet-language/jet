@@ -73,7 +73,7 @@ impl CellSchema {
             Type::Named(name) if name == "Unit" => {
                 Ok(Self::Unit)
             }
-            Type::Int | Type::IntN { .. } => Ok(Self::Int),
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(Self::Int),
             Type::Float | Type::Float32 => Ok(Self::Float),
             Type::Bool => Ok(Self::Bool),
             Type::Char => Ok(Self::Char),

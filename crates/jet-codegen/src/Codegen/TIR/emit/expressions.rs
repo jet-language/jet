@@ -817,6 +817,13 @@ fn emit_numeric_op(
              Ok({jet_prefix}value as f32) }} else {{ Err(\
              \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
         ),
+        TNumericOp::InlineRange { lo, hi, fallible } => {
+            if *fallible {
+                format!("jet_inline_range_from_int(({recv}), {lo}, {hi})")
+            } else {
+                format!("({recv})")
+            }
+        }
     }
 }
 
@@ -830,6 +837,7 @@ fn zip_integer_signed(ty: &Type) -> Option<bool> {
     match ty {
         Type::Int => Some(true),
         Type::IntN { signed, .. } => Some(*signed),
+        Type::InlineRange { base, .. } => zip_integer_signed(base),
         _ => None,
     }
 }
@@ -837,6 +845,7 @@ fn zip_integer_signed(ty: &Type) -> Option<bool> {
 fn zip_fill_target(ty: &Type) -> &Type {
     match ty {
         Type::Option(inner) | Type::Tagged { inner, .. } => zip_fill_target(inner),
+        Type::InlineRange { base, .. } => zip_fill_target(base),
         _ => ty,
     }
 }
@@ -892,6 +901,74 @@ fn emit_proven_fixed_list_index(index: &TExpr, cx: &Cx) -> String {
         _ => rendered,
     };
     format!("({scalar} as usize)")
+}
+
+fn type_contains_inline_range(ty: &Type) -> bool {
+    match ty {
+        Type::InlineRange { .. } => true,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => type_contains_inline_range(inner),
+        Type::Map { key, value, .. } => {
+            type_contains_inline_range(key) || type_contains_inline_range(value)
+        }
+        Type::Result { ok, err } => {
+            type_contains_inline_range(ok) || type_contains_inline_range(err)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| type_contains_inline_range(field)),
+        Type::Union(members) => members.iter().any(type_contains_inline_range),
+        _ => false,
+    }
+}
+
+pub(crate) fn emit_inline_range_decode(
+    ty: &Type,
+    tree: &str,
+    root: &str,
+    borrowed: bool,
+) -> Option<String> {
+    let tree = if borrowed {
+        tree.to_string()
+    } else {
+        format!("&({tree})")
+    };
+    match ty {
+        Type::InlineRange { lo, hi, .. } => Some(format!(
+            "{root}jet_decode_inline_range({tree}, {lo}, {hi})"
+        )),
+        Type::Tagged { inner, .. } => emit_inline_range_decode(inner, &tree, root, true),
+        Type::List(inner) if type_contains_inline_range(inner) => {
+            let child = emit_inline_range_decode(inner, "__item", root, true)?;
+            Some(format!(
+                "{root}jet_decode_inline_range_list({tree}, |__item| {child})"
+            ))
+        }
+        Type::FixedList { elem, len, .. } if type_contains_inline_range(elem) => {
+            let child = emit_inline_range_decode(elem, "__item", root, true)?;
+            Some(format!(
+                "{root}jet_decode_inline_range_fixed::<_, _, {len}>({tree}, |__item| {child})"
+            ))
+        }
+        Type::Option(inner) if type_contains_inline_range(inner) => {
+            let child = emit_inline_range_decode(inner, "__item", root, true)?;
+            Some(format!(
+                "{root}jet_decode_inline_range_option({tree}, |__item| {child})"
+            ))
+        }
+        Type::Map { key, value, .. }
+            if matches!(key.as_ref(), Type::String) && type_contains_inline_range(value) =>
+        {
+            let child = emit_inline_range_decode(value, "__item", root, true)?;
+            Some(format!(
+                "{root}jet_decode_inline_range_map({tree}, |__item| {child})"
+            ))
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
@@ -5432,11 +5509,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::DataTreeText => format!("({}).text()", recv),
                 THandleOp::DataTreeBool => format!("({}).bool()", recv),
                 THandleOp::DataTreeFloat => format!("({}).float()", recv),
-                THandleOp::DataTreeDecode(target) => format!(
-                    "<{} as __jet_Decode>::jet_decode(&({}))",
-                    cx.rust_type(target),
-                    recv
-                ),
+                THandleOp::DataTreeDecode(target) => emit_inline_range_decode(
+                    target,
+                    &recv,
+                    root,
+                    false,
+                )
+                .unwrap_or_else(|| {
+                    format!(
+                        "<{} as __jet_Decode>::jet_decode(&({}))",
+                        cx.rust_type(target),
+                        recv
+                    )
+                }),
                 THandleOp::SerdeEncode => {
                     format!("{}::jet_encode(&({}))", mangle("Encode"), recv)
                 }

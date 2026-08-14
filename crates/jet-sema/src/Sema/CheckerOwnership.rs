@@ -4495,7 +4495,9 @@ impl<'a> Checker<'a> {
             Type::Tuple(fields) => fields
                 .iter()
                 .any(|(_, field)| self.type_contains_cell_guard_inner(field, seen)),
-            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+            Type::FixedList { elem, .. }
+            | Type::Tagged { inner: elem, .. }
+            | Type::InlineRange { base: elem, .. } => {
                 self.type_contains_cell_guard_inner(elem, seen)
             }
             Type::Union(members) => members
@@ -4592,7 +4594,9 @@ impl<'a> Checker<'a> {
             Type::Tuple(fields) => fields
                 .iter()
                 .any(|(_, field)| self.type_contains_local_cell_inner(field, seen)),
-            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+            Type::FixedList { elem, .. }
+            | Type::Tagged { inner: elem, .. }
+            | Type::InlineRange { base: elem, .. } => {
                 self.type_contains_local_cell_inner(elem, seen)
             }
             Type::Union(members) => members
@@ -4665,7 +4669,7 @@ impl<'a> Checker<'a> {
     ) -> Option<SendabilityProblem> {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
-            Type::IntN { .. } | Type::Float32 => None,
+            Type::IntN { .. } | Type::Float32 | Type::InlineRange { .. } => None,
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
                 self.sendability_problem_inner(inner, true, seen)
             }

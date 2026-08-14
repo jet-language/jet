@@ -332,7 +332,8 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char
-        | Type::Float32 => true,
+        | Type::Float32
+        | Type::InlineRange { .. } => true,
         Type::IntN { .. } => sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
@@ -362,7 +363,8 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char
-        | Type::Float32 => true,
+        | Type::Float32
+        | Type::InlineRange { .. } => true,
         Type::IntN { .. } => sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),

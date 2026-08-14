@@ -659,7 +659,13 @@ fn expr_may_own_heap(expr: &Expr) -> bool {
 
 fn type_may_own_heap(ty: &Type) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => false,
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::InlineRange { .. }
+        | Type::Float32 => false,
         Type::FixedList { elem, .. } | Type::Option(elem) | Type::Tagged { inner: elem, .. } => {
             type_may_own_heap(elem)
         }

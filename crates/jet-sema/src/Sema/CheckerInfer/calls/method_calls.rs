@@ -381,6 +381,42 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     }
 }
 
+/// D-TYPE2-SPELL1 / card #1549: recover the parser's ordinary call-shaped
+/// receiver for `Int(lo..hi).from_int(...)`. The call is a type-head
+/// descriptor, not a runtime constructor; sema records its resolved range on
+/// the inner call for TIR to consume.
+fn inline_range_descriptor(expr: &Expr) -> Option<(i64, i64)> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    if call.name != crate::Syntax::TYPE_INT || call.args.len() != 1 {
+        return None;
+    }
+    let Expr::Range {
+        start,
+        end,
+        exclusive: false,
+        ..
+    } = &call.args[0].expr
+    else {
+        return None;
+    };
+    let Expr::Int(lo, ..) = start.as_ref() else {
+        return None;
+    };
+    let Expr::Int(hi, ..) = end.as_ref() else {
+        return None;
+    };
+    Some((*lo, *hi))
+}
+
+fn inline_range_literal(expr: &Expr) -> Option<(i64, Span)> {
+    let Expr::Int(value, span, ..) = expr else {
+        return None;
+    };
+    Some((*value, *span))
+}
+
 impl<'a> Checker<'a> {
     fn check_http_route_constant(
         &mut self,
@@ -1139,6 +1175,82 @@ impl<'a> Checker<'a> {
                         resolved_ret_out,
                     );
                 }
+            }
+            // D-TYPE2-SPELL1: an inline range uses the destination-owned
+            // conversion seam. Runtime inputs stay fallible; a literal is
+            // discharged here after the same interval proof used by literal
+            // parameter/return checking.
+            if self.lookup(crate::Syntax::TYPE_INT).is_none()
+                && method == crate::Syntax::conversion_method_for_source("Int")
+                && inline_range_descriptor(receiver).is_some()
+            {
+                let (lo, hi) = inline_range_descriptor(receiver)
+                    .expect("inline range descriptor checked above");
+                if lo > hi {
+                    self.diags.push(Diagnostic::error(
+                        "E0137",
+                        format!("this range is empty — {lo} is after {hi}"),
+                        "a range's low bound must not be greater than its high bound".to_string(),
+                        format!("write `{hi}..{lo}` (swap the bounds), or fix the values"),
+                        Some(span),
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Int({lo}..{hi}).{method}` takes one value, got {}", args.len()),
+                        "a range conversion wraps exactly one integer value".to_string(),
+                        format!("write `Int({lo}..{hi}).{method}(value)`"),
+                        Some(span),
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let source = Type::Int;
+                let old = self.expected_type.replace(source.clone());
+                let got = self.infer(&mut args[0].expr);
+                self.expected_type = old;
+                if let Some(got) = got.as_ref() {
+                    self.check_type_assignable(&source, got, args[0].expr.span());
+                }
+                let target = Type::InlineRange {
+                    base: Box::new(Type::Int),
+                    lo,
+                    hi,
+                };
+                // The inner call is sema-approved descriptor metadata. TIR
+                // reads it to recognize the static receiver without redoing
+                // parser or type inference work in an engine.
+                if let Expr::Call(call) = receiver.as_mut() {
+                    call.resolved_ret = Some(target.clone());
+                }
+                if let Some((value, literal_span)) = inline_range_literal(&args[0].expr) {
+                    if value < lo || value > hi {
+                        self.diags.push(Diagnostic::error(
+                            "E0135",
+                            format!("`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+                            format!(
+                                "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`"
+                            ),
+                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+                            Some(literal_span),
+                        ));
+                    }
+                    *resolved_ret_out = Some(target.clone());
+                    return Some(target);
+                }
+                let ret = Type::Result {
+                    ok: Box::new(target),
+                    err: Box::new(Type::String),
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
             }
             if let Expr::Ident(type_name, type_span) = &**receiver {
                 let display_type_name = self.display_type_name(type_name, None);

@@ -269,6 +269,7 @@ fn str_tuple(canonical: &[(String, Type)], binds: &[(String, Type, String)]) -> 
                     .unwrap_or_else(|_| jet_foundation::Numeric::CtBigInt::from_int(0)),
             ),
             Type::IntN { .. } => CtValue::Int(raw.parse::<i64>().unwrap_or(0)),
+            Type::InlineRange { .. } => CtValue::Int(raw.parse::<i64>().unwrap_or(0)),
             Type::Float | Type::Float32 => {
                 CtValue::Float(CtFloat::f64(raw.parse::<f64>().unwrap_or(0.0)))
             }

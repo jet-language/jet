@@ -225,7 +225,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
                     if !fields.is_empty()
                         && fields
                             .iter()
-                            .all(|(_, ty)| matches!(ty, Type::Int | Type::IntN { .. }))
+                            .all(|(_, ty)| matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }))
                     {
                         let flat_fields = fields
                             .iter()
@@ -645,7 +645,8 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
         | Type::Option(inner)
         | Type::FixedList { elem: inner, .. }
         | Type::Tagged { inner, .. }
-        | Type::Quantity { base: inner, .. } => {
+        | Type::Quantity { base: inner, .. }
+        | Type::InlineRange { base: inner, .. } => {
             collect_signature_clone_types(inner, cx, out);
         }
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {

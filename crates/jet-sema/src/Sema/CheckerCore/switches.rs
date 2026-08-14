@@ -463,7 +463,8 @@ impl<'a> Checker<'a> {
 
         /// The completion half of the shared policy: an else-less all-pattern
         /// table must cover the subject's whole type (E0307); D-PATR open
-        /// scalars can never prove totality.
+        /// scalars and inline ranges without interval-aware coverage can
+        /// never prove totality.
         pub(crate) fn check_pattern_coverage_complete(
             &mut self,
             st: &Type,
@@ -477,11 +478,23 @@ impl<'a> Checker<'a> {
                 return;
             }
             let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
-            // D-PATR: Int/Char are open scalar types — range arms can never
-            // prove totality, so an `else` (or wildcard) is always required.
-            // `missing_pattern_coverage` returns None for Int/Char (infinite
-            // domain), so we detect this case separately.
-            if matches!(st, Type::Int | Type::Char) {
+            // D-PATR: Int/Char are open scalar types, and an inline range is
+            // finite but has no interval-aware coverage proof yet — range
+            // arms can never prove totality here, so an `else` (or wildcard)
+            // is always required. `missing_pattern_coverage` returns None for
+            // these scalar cases, so we detect them separately.
+            if matches!(st, Type::Int | Type::InlineRange { .. } | Type::Char) {
+                let domain_note = if matches!(st, Type::InlineRange { .. }) {
+                    format!(
+                        "`{}` is an inline range; range arms are not proven to cover its full interval (D-PATR)",
+                        st.show()
+                    )
+                } else {
+                    format!(
+                        "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
+                        st.show()
+                    )
+                };
                 self.diags.push(Diagnostic::error(
                     "E0307",
                     format!(
@@ -490,10 +503,7 @@ impl<'a> Checker<'a> {
                         st.show(),
                         Syntax::KW_ELSE,
                     ),
-                    format!(
-                        "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
-                        st.show()
-                    ),
+                    domain_note,
                     format!(
                         "add `{} {} {{ … }}` to handle values not matched by any range",
                         Syntax::KW_ELSE,

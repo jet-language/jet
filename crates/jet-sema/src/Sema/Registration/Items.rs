@@ -680,6 +680,7 @@ impl<'a> ComptimeTypeResolver<'a> {
                     ),
                 }
             }
+            Type::InlineRange { base, .. } => self.resolve_type(base),
             Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => {
                 self.resolve_type(inner)
             }

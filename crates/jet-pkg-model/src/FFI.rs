@@ -2426,6 +2426,9 @@ fn type_key(ty: &Type) -> String {
         Type::Int => "Int".into(),
         Type::Float => "Float".into(),
         Type::IntN { signed, bits } => crate::AST::int_spelling(*signed, *bits),
+        Type::InlineRange { base, lo, hi } => {
+            format!("InlineRange<{},{}..{}>", type_key(base), lo, hi)
+        }
         Type::Float32 => "F32".into(),
         Type::Bool => "Bool".into(),
         Type::String => "String".into(),
@@ -3130,6 +3133,7 @@ fn inline_rust_type(ty: &Type) -> String {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
         Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+        Type::InlineRange { base, .. } => inline_rust_type(base),
         Type::Float32 => "f32".to_string(),
         Type::Bool => "bool".to_string(),
         _ => "()".to_string(),
@@ -3172,6 +3176,7 @@ fn inline_c_type(ty: &Type, cpp: bool) -> &'static str {
             signed: false,
             bits: 64,
         } => "uint64_t",
+        Type::InlineRange { base, .. } => inline_c_type(base, cpp),
         Type::Float32 => "float",
         Type::Bool if cpp => "bool",
         Type::Bool => "_Bool",
@@ -3353,7 +3358,12 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
     fn cabi_ok(ty: &Type) -> bool {
         matches!(
             ty,
-            Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::String
+            Type::Int
+                | Type::InlineRange { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::String
         )
     }
     for (_, ty) in &entry.params {
@@ -3377,7 +3387,7 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                     "unsafe {{ String::from_utf8_unchecked(std::slice::from_raw_parts(p{i}_ptr, p{i}_len).to_vec()) }}"
                 ));
             }
-            Type::Int => {
+            Type::Int | Type::InlineRange { .. } => {
                 params.push(format!("p{i}: i64"));
                 call_args.push(format!("p{i}"));
             }
@@ -3414,7 +3424,7 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                 "    let s = {call};\n    let mut v = s.into_bytes();\n    v.shrink_to_fit();\n    let len = v.len();\n    let ptr = v.as_mut_ptr();\n    std::mem::forget(v);\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
             ),
         ),
-        Some(Type::Int) => (
+        Some(Type::Int) | Some(Type::InlineRange { .. }) => (
             String::new(),
             " -> i64".to_string(),
             format!("    {call}\n"),
@@ -3448,6 +3458,7 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
         Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+        Type::InlineRange { base, .. } => rust_type(base, user_types),
         Type::Float32 => "f32".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),

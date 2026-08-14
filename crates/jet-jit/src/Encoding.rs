@@ -18,6 +18,10 @@ mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
 
+mod inline_range_rt {
+    include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
 mod codec_rt {
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
@@ -1611,6 +1615,27 @@ extern "C" fn jet_jit_decode_int_range(
     }
 }
 
+/// Apply the shared inline-range kernel to a successful typed DataTree decode.
+/// The result handle remains the carrier for both success and failure, so this
+/// host only adapts the result arena to the Prelude function.
+extern "C" fn jet_jit_decode_inline_range(result: i64, lo: i64, hi: i64) -> i64 {
+    let state = Concurrency::with_runtime_mut(|rt| {
+        result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+            .copied()
+    });
+    let Some(value) = state else { return result };
+    if !value.ok {
+        return result;
+    }
+    let value = value.bits as i64;
+    match inline_range_rt::jet_inline_range_from_int(value, lo, hi) {
+        Ok(_) => result,
+        Err(reason) => result_err_decode("", &reason),
+    }
+}
+
 extern "C" fn jet_jit_decode_f32_range(result: i64) -> i64 {
     let state = Concurrency::with_runtime_mut(|rt| {
         result
@@ -2038,6 +2063,7 @@ host_fns! {
     datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
     datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
     decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
+    decode_inline_range: "jet_jit_decode_inline_range" => jet_jit_decode_inline_range: sig_ternary;
     decode_f32_range: "jet_jit_decode_f32_range" => jet_jit_decode_f32_range: sig_unary;
     decode_fixed_len: "jet_jit_decode_fixed_len" => jet_jit_decode_fixed_len: sig_binary;
     datatree_decode_list_error: "jet_jit_datatree_decode_list_error" => jet_jit_datatree_decode_list_error: sig_unary;

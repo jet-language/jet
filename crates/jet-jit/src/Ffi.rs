@@ -76,7 +76,7 @@ static FFI_STATE: Mutex<Option<FfiState>> = Mutex::new(None);
 
 fn param_abi(ty: &Type) -> Option<ParamAbi> {
     match ty {
-        Type::Int => Some(ParamAbi::Int),
+        Type::Int | Type::InlineRange { .. } => Some(ParamAbi::Int),
         Type::Float | Type::Float32 => Some(ParamAbi::Float),
         Type::Bool => Some(ParamAbi::Bool),
         Type::String => Some(ParamAbi::String),
@@ -89,7 +89,7 @@ fn param_abi(ty: &Type) -> Option<ParamAbi> {
 fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
     match ty {
         None => Some(RetAbi::Unit),
-        Some(Type::Int) => Some(RetAbi::Int),
+        Some(Type::Int) | Some(Type::InlineRange { .. }) => Some(RetAbi::Int),
         Some(Type::Float) | Some(Type::Float32) => Some(RetAbi::Float),
         Some(Type::Bool) => Some(RetAbi::Bool),
         Some(Type::String) => Some(RetAbi::String),

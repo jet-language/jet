@@ -705,7 +705,7 @@ fn lower_method_pre_contracts(
 /// boundary, but retain compiler-owned tags except for `Range`, whose adapters
 /// all require the exact nominal carrier.
 fn canonicalize_pre_tier_expr(mut expr: TExpr) -> TExpr {
-    let ty = expr.ty.without_user_tags().clone();
+    let ty = expr.ty.without_user_tags().erased_inline_ranges();
     expr.ty = if matches!(ty.erased_carrier(), Type::Named(name) if name == Syntax::TYPE_RANGE) {
         Type::Named(Syntax::TYPE_RANGE.to_string())
     } else {
@@ -4687,6 +4687,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     | Type::Apply { .. }
                     | Type::Int
                     | Type::IntN { .. }
+                    | Type::InlineRange { .. }
                     | Type::Float
                     | Type::Float32
             ) {
