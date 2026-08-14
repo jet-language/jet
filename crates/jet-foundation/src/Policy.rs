@@ -1563,6 +1563,7 @@ mod tests {
             ("Job", RuleSite::Function),
             ("Doc", RuleSite::Type),
             ("Doc", RuleSite::Variant),
+            ("Doc", RuleSite::Method),
         ];
         for (name, site) in legal {
             assert!(super::rule_allows(name, site), "#{name} at {site:?}");
