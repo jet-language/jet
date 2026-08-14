@@ -208,7 +208,7 @@ fn register_text_head_contracts(
         .iter()
         .map(|(name, function)| (name.clone(), super::super::func_to_sig(function)))
         .collect();
-    let type_params = funcs
+    let type_params: HashMap<String, Vec<crate::AST::TypeParam>> = funcs
         .iter()
         .map(|(name, function)| (name.clone(), function.type_params.clone()))
         .collect();
