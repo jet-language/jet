@@ -72,7 +72,7 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
     };
     let expected = shape(&aot);
     let expected_report = jet::render_all_json(
-        &jet::Diagnostics::ReportPath::from_path(&path),
+        &jet::Diagnostics::ReportPath::from_path(file.as_path()),
         &src,
         &aot,
     );
@@ -82,7 +82,7 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
         assert_eq!(
             jet::render_all_json(
-                &jet::Diagnostics::ReportPath::from_path(&path),
+                &jet::Diagnostics::ReportPath::from_path(file.as_path()),
                 &src,
                 &diags,
             ),
@@ -150,7 +150,7 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
     };
     let expected = shape(&aot);
     let expected_report = jet::render_all_json(
-        &jet::Diagnostics::ReportPath::from_path(&path),
+        &jet::Diagnostics::ReportPath::from_path(file.as_path()),
         &src,
         &aot,
     );
@@ -168,7 +168,7 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
         assert_eq!(
             jet::render_all_json(
-                &jet::Diagnostics::ReportPath::from_path(&path),
+                &jet::Diagnostics::ReportPath::from_path(file.as_path()),
                 &src,
                 &diags,
             ),
@@ -234,7 +234,7 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
     };
     let expected = shape(&aot);
     let expected_report = jet::render_all_json(
-        &jet::Diagnostics::ReportPath::from_path(&path),
+        &jet::Diagnostics::ReportPath::from_path(file.as_path()),
         &src,
         &aot,
     );
@@ -246,7 +246,7 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic or recovery data drifted from AOT");
         assert_eq!(
             jet::render_all_json(
-                &jet::Diagnostics::ReportPath::from_path(&path),
+                &jet::Diagnostics::ReportPath::from_path(file.as_path()),
                 &src,
                 &diags,
             ),
@@ -313,7 +313,7 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
     };
     let expected = shape(&aot);
     let expected_report = jet::render_all_json(
-        &jet::Diagnostics::ReportPath::from_path(&path),
+        &jet::Diagnostics::ReportPath::from_path(file.as_path()),
         &src,
         &aot,
     );
@@ -332,7 +332,7 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
         );
         assert_eq!(
             jet::render_all_json(
-                &jet::Diagnostics::ReportPath::from_path(&path),
+                &jet::Diagnostics::ReportPath::from_path(file.as_path()),
                 &src,
                 &diags,
             ),
