@@ -770,7 +770,7 @@ fn run() {
 /// JetMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_builtin_methods() {
-    let src = "\
+    let src = r#"
 fn run() {
     probe := [String: Int].{ "k": 41 }
     print(probe.add(\"k\", 5) ?? 0)
@@ -790,7 +790,7 @@ fn run() {
     vs := m.values()
     print(vs.len())
 }
-";
+"#;
     assert_tiers_agree(
         "tir_map_builtins",
         src,
@@ -868,7 +868,7 @@ fn run() {
 /// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
 #[test]
 fn iter_positional_pick_uses_skip_then_first() {
-    let src = "\
+    let src = r#"
 fn run() {
     nums := [10, 20, 30]
     print(nums.skip(1).first() ?? -1)
@@ -878,7 +878,7 @@ fn run() {
     decimals := [1.5, 2.5]
     print(decimals.skip(1).first() ?? -1.0)
 }
-";
+"#;
     let rust = compile("tir_iter_positional_pick", src);
     assert!(rust.contains("jet_iter_first("));
     assert!(!rust.contains("jet_iter_nth("));
