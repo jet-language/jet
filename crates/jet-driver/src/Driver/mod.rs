@@ -4864,6 +4864,16 @@ pub fn compile_tests(
     ))
 }
 
+/// D-CMD-OVERRIDE1=C: compile an expert `fn test(...)` command override. The
+/// entry wrapper is synthesized before sema; codegen receives the same checked
+/// bundle as the stock harness and only changes the outer command adapter.
+pub fn compile_test_override(
+    file: &str,
+    coverage: bool,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_command_override(file, crate::Codegen::CommandOverrideKind::Test, coverage)
+}
+
 /// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
 /// fuzz` target — no property test, an ambiguous set, or a named test that
 /// doesn't exist / isn't a property test. Same tier as `run_bench`'s "can't
@@ -5137,6 +5147,173 @@ pub fn compile_benches(
         crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()),
         ffi,
     ))
+}
+
+/// D-CMD-OVERRIDE1=C: compile an expert `fn bench(...)` command override.
+pub fn compile_bench_override(
+    file: &str,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_command_override(file, crate::Codegen::CommandOverrideKind::Bench, false)
+}
+
+fn compile_command_override(
+    file: &str,
+    kind: crate::Codegen::CommandOverrideKind,
+    coverage: bool,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    swap_command_entry_point(&mut bundle, kind);
+    let mode = match kind {
+        crate::Codegen::CommandOverrideKind::Test => crate::Sema::CompileMode::TestOverride,
+        crate::Codegen::CommandOverrideKind::Bench => crate::Sema::CompileMode::BenchOverride,
+    };
+    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+    let _lints = classify_diagnostics(
+        &bundle,
+        parse_teaching
+            .into_iter()
+            .chain(diags)
+            .collect(),
+        false,
+    )?;
+    let ffi = match crate::FFI::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
+    let rust = crate::Codegen::emit_bundle_command_override(
+        &bundle,
+        ffi.as_ref(),
+        kind,
+        coverage,
+    );
+    Ok((rust, ffi))
+}
+
+fn swap_command_entry_point(
+    bundle: &mut crate::AST::ProgramBundle,
+    kind: crate::Codegen::CommandOverrideKind,
+) {
+    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
+    use crate::Diagnostics::Span;
+
+    let (entry_name, suite_name, suite_method) = match kind {
+        crate::Codegen::CommandOverrideKind::Test => ("test", "TestSuite", "test_suite"),
+        crate::Codegen::CommandOverrideKind::Bench => ("bench", "BenchSuite", "bench_suite"),
+    };
+    let entry_module = &mut bundle.modules[bundle.entry];
+    let Some(target) = entry_module.items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == entry_name => Some(function.clone()),
+        _ => None,
+    }) else {
+        return;
+    };
+    if entry_module
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
+        && !entry_module.script_body.is_empty()
+    {
+        return;
+    }
+
+    let zero = Span::new(0, 0);
+    let alias_base = format!("__jet_command_{}", suite_name.to_ascii_lowercase());
+    let mut alias = alias_base.clone();
+    let mut suffix = 0;
+    while entry_module.imports.iter().any(|import| import.import_alias() == alias) {
+        suffix += 1;
+        alias = format!("{alias_base}_{suffix}");
+    }
+    let existing_testing_alias = entry_module.imports.iter().find_map(|import| {
+        matches!(&import.kind, ImportKind::Module(name, _) if name == "core.testing")
+            .then(|| (!import.alias.is_empty()).then(|| import.alias.clone()))
+            .flatten()
+    });
+    if let Some(existing_alias) = existing_testing_alias {
+        alias = existing_alias;
+    } else {
+        entry_module.imports.push(ImportDecl {
+            kind: ImportKind::Module("core.testing".to_string(), zero),
+            alias: alias.clone(),
+            alias_span: zero,
+            span: zero,
+            is_pub: false,
+            is_package_pub: false,
+            inline_version: None,
+        });
+    }
+
+    for item in entry_module.items.iter_mut() {
+        if let Item::Func(function) = item {
+            if function.name == "run" {
+                function.name = jet_foundation::Names::mangle_generated("unused_run");
+                if function.span == function.name_span {
+                    function.return_type = None;
+                    function.return_type_span = None;
+                }
+            }
+        }
+    }
+
+    let suite_expr = Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(alias, zero)),
+        method: suite_method.to_string(),
+        method_span: zero,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: Vec::new(),
+        recv_type: None,
+        resolved_ret: None,
+        checked_widen: false,
+    };
+    let args = if target.params.is_empty() {
+        Vec::new()
+    } else {
+        vec![CallArg {
+            convention: target.params[0].convention,
+            expr: suite_expr,
+            span: zero,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }]
+    };
+    let call = Expr::Call(Call {
+        name: entry_name.to_string(),
+        name_span: target.name_span,
+        type_args: Vec::new(),
+        args,
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    });
+    let body = if target.return_type.is_some() {
+        vec![Stmt::Return(Some(call), zero)]
+    } else {
+        vec![Stmt::Expr(call)]
+    };
+    let mut wrapper = target;
+    wrapper.name = "run".to_string();
+    wrapper.name_span = zero;
+    wrapper.params = Vec::new();
+    wrapper.type_params = Vec::new();
+    wrapper.head_pattern = None;
+    wrapper.meta = None;
+    wrapper.is_pub = false;
+    wrapper.is_package_pub = false;
+    wrapper.external_type = None;
+    wrapper.is_unsafe = false;
+    wrapper.unsafe_reason = None;
+    wrapper.unsafe_span = None;
+    wrapper.is_pure = false;
+    wrapper.is_task = false;
+    wrapper.task_span = None;
+    wrapper.task_metadata = None;
+    wrapper.every = None;
+    wrapper.markers = Vec::new();
+    wrapper.body = body;
+    entry_module.items.push(Item::Func(Func { ..wrapper }));
 }
 
 #[cfg(test)]

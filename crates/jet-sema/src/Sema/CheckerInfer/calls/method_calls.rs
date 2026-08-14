@@ -3632,7 +3632,7 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(
                     handle_ty.as_str(),
-                    "Clock" | "Rng" | "Stopwatch" | "Duration" | "Solver"
+                    "Clock" | "Rng" | "Stopwatch" | "Duration" | "Solver" | "TestSuite" | "BenchSuite"
                 ) {
                     if let Some(ret) =
                         Collections::builtin_method_return(&recv_ty, method, args.len(), false)

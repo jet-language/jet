@@ -451,6 +451,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr" | "terminal"),
         "TerminalSize" => matches!(member, "cols" | "rows"),
         "TerminalPolicy" => matches!(member, "size" | "mode"),
+        "TestSuite" | "BenchSuite" => matches!(member, "iteration" | "result"),
         "Range" => matches!(member, "start" | "end" | "exclusive"),
         "DimensionAxis" => matches!(member, "name" | "exponent"),
         "DimensionInfo" => matches!(member, "axes" | "identity" | "display"),

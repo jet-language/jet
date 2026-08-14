@@ -2613,9 +2613,12 @@ fn run() {
 }
 ```
 
-Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, and
-`fake_rng`. Use `expect(value).snapshot()` inside `#Test`
-blocks for assertion snapshots; `testing.snap` is for explicit named files.
+Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
+`fake_rng`, `test_suite`, and `bench_suite`. `test_suite()` and `bench_suite()`
+return the ordinary command values supplied to an expert `fn test` or `fn bench`
+override; each exposes `iteration`, `result`, and `run()`. Use
+`expect(value).snapshot()` inside `#Test` blocks for assertion snapshots;
+`testing.snap` is for explicit named files.
 
 Benchmark limits use a `#Bench` region plus a typed `Budget` declaration. The
 shared budget evaluator owns samples, baselines, confidence, reports, and CI

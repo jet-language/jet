@@ -446,6 +446,8 @@ fn test_and_bench_help_keep_shared_runner_flags_paired() {
     let bench_help = String::from_utf8_lossy(&bench_help.stdout);
     assert!(test_help.contains("--filter"), "test help lost shared filter flag: {test_help}");
     assert!(bench_help.contains("--filter"), "bench help missing shared filter flag: {bench_help}");
+    assert!(test_help.contains("--default"), "test help missing command override escape hatch: {test_help}");
+    assert!(bench_help.contains("--default"), "bench help missing command override escape hatch: {bench_help}");
     for flag in ["--shuffle", "--coverage", "--update-snapshots", "--serial"] {
         assert!(!bench_help.contains(flag), "bench help exposed test-only flag {flag}: {bench_help}");
     }
@@ -850,6 +852,7 @@ fn test_json_golden() {
     let p = bad_file(&line!().to_string());
     let out = Command::new(jet())
         .arg("test")
+        .arg("--default")
         .arg(&p)
         .arg("--json")
         .output()

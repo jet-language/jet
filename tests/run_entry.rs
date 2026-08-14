@@ -232,7 +232,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
         .expect("jet test should accept a script with a #Test block");
     assert!(harness.contains("script test"), "test name missing from harness");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["test", path, "--serial"])
+        .args(["test", "--default", path, "--serial"])
         .output()
         .expect("jet test should run");
     let _ = std::fs::remove_dir_all(&dir);

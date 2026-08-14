@@ -27,6 +27,7 @@ fn jet_test_example_output() {
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -50,7 +51,7 @@ fn jet_test_package_collects_imported_module_tests() {
         return;
     }
     let package = root.join("examples/features/tooling/test_package_modules");
-    let out = Command::new(&jet).arg("test").arg(&package).output().unwrap();
+    let out = Command::new(&jet).arg("test").arg("--default").arg(&package).output().unwrap();
     assert!(
         out.status.success(),
         "package test failed:\nstdout: {}\nstderr: {}",
@@ -77,6 +78,7 @@ fn concurrent_jet_test_same_file_is_process_isolated() {
         children.push(
             Command::new(&jet)
                 .arg("test")
+                .arg("--default")
                 .arg(&example)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -112,6 +114,7 @@ fn jet_test_members_example_output() {
     let example = root.join("examples/features/tooling/test_members.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -139,6 +142,7 @@ fn jet_scope_expect_fail_passing_region_fails() {
     let fixture = root.join("tests/fixtures/scope_expect_fail_passes.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -165,7 +169,7 @@ fn jet_scope_expect_fail_asserts_runtime_code() {
     }
     let fixture = root.join("tests/fixtures/scope_expect_fail_code.jet");
     let out = Command::new(&jet)
-        .args(["test", fixture.to_str().expect("fixture path")])
+        .args(["test", "--default", fixture.to_str().expect("fixture path")])
         .output()
         .unwrap();
     assert!(
@@ -193,6 +197,7 @@ fn jet_scope_setup_failure_fails_test() {
     let fixture = root.join("tests/fixtures/scope_setup_fail.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -220,6 +225,7 @@ fn jet_scope_timeout_exceeded_fails() {
     let fixture = root.join("tests/fixtures/scope_timeout_exceeded.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -251,6 +257,7 @@ fn jet_bench_example_regions() {
     let example = root.join("examples/features/tooling/bench.jet");
     let out = Command::new(&jet)
         .arg("bench")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -292,6 +299,7 @@ fn jet_bench_para_map_crossover_matrix() {
     let example = root.join("examples/features/tooling/para_map_crossover_bench.jet");
     let out = Command::new(&jet)
         .arg("bench")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -326,7 +334,7 @@ fn jet_bench_failure_is_not_reported_as_timing() {
         return;
     }
     let fixture = root.join("tests/fixtures/bench_fail.jet");
-    let out = Command::new(&jet).arg("bench").arg(&fixture).output().unwrap();
+    let out = Command::new(&jet).arg("bench").arg("--default").arg(&fixture).output().unwrap();
     assert!(!out.status.success(), "failed benchmark body unexpectedly passed");
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("bench region failed"),
@@ -348,7 +356,7 @@ fn jet_test_fail_then_fixed() {
     let fail = root.join("tests/fixtures/test_fail.jet");
     let fixed = root.join("tests/fixtures/test_fail.fixed.jet");
 
-    let bad = Command::new(&jet).arg("test").arg(&fail).output().unwrap();
+    let bad = Command::new(&jet).arg("test").arg("--default").arg(&fail).output().unwrap();
     assert!(!bad.status.success());
     assert!(
         String::from_utf8_lossy(&bad.stdout).contains("FAIL"),
@@ -368,7 +376,7 @@ fn jet_test_fail_then_fixed() {
         "require_eq report should preserve source location"
     );
 
-    let good = Command::new(&jet).arg("test").arg(&fixed).output().unwrap();
+    let good = Command::new(&jet).arg("test").arg("--default").arg(&fixed).output().unwrap();
     assert!(good.status.success());
     assert!(
         String::from_utf8_lossy(&good.stdout).contains("pass"),
@@ -567,6 +575,7 @@ fn jet_property_test_passes() {
     let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -600,6 +609,7 @@ fn jet_property_test_shrinks_failure() {
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -632,6 +642,7 @@ fn jet_property_test_rejects_ungeneratable_param() {
     let fixture = root.join("tests/fixtures/prop_bad_type.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -660,6 +671,7 @@ fn jet_doctest_passes() {
     let example = root.join("examples/features/comptime/doctests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&example)
         .output()
         .unwrap();
@@ -690,6 +702,7 @@ fn jet_doctest_mismatch_fires_e2901() {
     let fixture = root.join("tests/fixtures/doctest_fail.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -712,6 +725,7 @@ fn jet_test_coverage_reports_hit_and_miss() {
     let fixture = root.join("tests/fixtures/coverage.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg("--coverage")
         .arg(&fixture)
         .output()
@@ -812,6 +826,7 @@ fn jet_bench_target_integration() {
     fs::create_dir_all(&cwd).unwrap();
     let out = Command::new(&jet)
         .arg("bench")
+        .arg("--default")
         .arg(&example)
         .current_dir(&cwd)
         .output()
@@ -888,7 +903,7 @@ fn jet_test_dir_recurses_into_subdirectories() {
         "#Test(\"two levels down\") { require(true) }\n",
     )
     .unwrap();
-    let out = Command::new(&jet).arg("test").arg(&dir).output().unwrap();
+    let out = Command::new(&jet).arg("test").arg("--default").arg(&dir).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -914,6 +929,7 @@ fn jet_test_filter_keeps_only_matching_names() {
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg("--filter=consistent")
         .arg(&example)
         .output()
@@ -950,6 +966,7 @@ fn jet_test_shuffle_prints_the_seed_used() {
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg("--shuffle=42")
         .arg(&example)
         .output()
@@ -981,6 +998,7 @@ fn jet_test_serial_flag_still_passes() {
     let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
         .arg("test")
+        .arg("--default")
         .arg("--serial")
         .arg(&example)
         .output()

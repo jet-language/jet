@@ -644,7 +644,7 @@ renumbered, and no new `W` code may be allocated.
 | E0939 | sema | `#Memo` argument is not hashable (D-MEMO1=A) |
 | E0940 | sema | `#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A) |
 | E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
-| E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1) |
+| E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | @panic :: user-authored compile error (message verbatim) |
@@ -2237,13 +2237,13 @@ pointer to `docs/spec/syntax-decisions.md`.
 |------|-----|-----|
 | `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for Printable, Equatable, or Debug. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
 
-### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1)
+### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)
 
-`run`, `dev`, `build`, and `test` already name Jet's built-in entry points.
+`run`, `dev`, `build`, `test`, and `bench` already name Jet's built-in entry points.
 CLI command and flag names are reserved too, and two jobs cannot share one
 name in the same scope. A `#Job fn` picks a *user-chosen* verb beside them — reusing a reserved name
 is a collision, not a task.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` is a built-in lifecycle verb, not a job name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |
+| `` `{name}` is a built-in lifecycle verb, not a job name ``. | `run`/`dev`/`build`/`test`/`bench` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |

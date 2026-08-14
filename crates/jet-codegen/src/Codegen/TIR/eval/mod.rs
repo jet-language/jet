@@ -3259,6 +3259,14 @@ fn insert_core_struct_field_types(
             ),
         ],
     );
+    fields.insert(
+        "TestSuite".to_string(),
+        vec![("iteration".to_string(), Type::Int), ("result".to_string(), Type::Int)],
+    );
+    fields.insert(
+        "BenchSuite".to_string(),
+        vec![("iteration".to_string(), Type::Int), ("result".to_string(), Type::Int)],
+    );
 }
 
 fn normalize_struct_field_types(

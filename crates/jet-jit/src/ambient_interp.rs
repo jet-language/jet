@@ -2707,6 +2707,26 @@ pub fn ambient_core_call(
                 crate::testing_shared::jet_testing_temp_dir_path(prefix),
             )))
         }
+        ("core.testing", "test_suite") => {
+            let suite = jet_codegen::command_suite::jet_test_suite_new();
+            Some(Ok(CtValue::Struct {
+                type_name: "TestSuite".to_string(),
+                fields: vec![
+                    ("iteration".to_string(), CtValue::Int(suite.iteration)),
+                    ("result".to_string(), CtValue::Int(suite.result)),
+                ],
+            }))
+        }
+        ("core.testing", "bench_suite") => {
+            let suite = jet_codegen::command_suite::jet_bench_suite_new();
+            Some(Ok(CtValue::Struct {
+                type_name: "BenchSuite".to_string(),
+                fields: vec![
+                    ("iteration".to_string(), CtValue::Int(suite.iteration)),
+                    ("result".to_string(), CtValue::Int(suite.result)),
+                ],
+            }))
+        }
         ("core.services", "runtime") => {
             let (Some(CtValue::Str(store)), Some(retention)) = (args.first(), args.get(1)) else {
                 return Some(Err(unsupported("core.services.runtime arguments", span)));
@@ -3554,6 +3574,58 @@ pub fn ambient_handle(
     }
     if let Some(result) = ambient_http_handle(op, recv, args, span) {
         return Some(result);
+    }
+    if matches!(op, "TestSuiteRun" | "BenchSuiteRun") {
+        let expected = if op == "TestSuiteRun" {
+            "TestSuite"
+        } else {
+            "BenchSuite"
+        };
+        let CtValue::Struct { type_name, fields } = recv else {
+            return Some(Err(unsupported("command suite receiver", span)));
+        };
+        if type_name != expected {
+            return Some(Err(unsupported("command suite receiver", span)));
+        }
+        let iteration = fields.iter().find_map(|(name, value)| {
+            (name == "iteration").then_some(match value {
+                CtValue::Int(value) => *value,
+                _ => 0,
+            })
+        }).unwrap_or(0);
+        let result = fields.iter().find_map(|(name, value)| {
+            (name == "result").then_some(match value {
+                CtValue::Int(value) => *value,
+                _ => 0,
+            })
+        }).unwrap_or(0);
+        let (status, iteration, result) = if op == "TestSuiteRun" {
+            let mut suite = jet_codegen::command_suite::JetTestSuite {
+                iteration,
+                result,
+                runner: None,
+            };
+            let status = jet_codegen::command_suite::jet_test_suite_run(&mut suite);
+            (status, suite.iteration, suite.result)
+        } else {
+            let mut suite = jet_codegen::command_suite::JetBenchSuite {
+                iteration,
+                result,
+                runner: None,
+            };
+            let status = jet_codegen::command_suite::jet_bench_suite_run(&mut suite);
+            (status, suite.iteration, suite.result)
+        };
+        if let CtValue::Struct { fields, .. } = recv {
+            for (name, value) in fields.iter_mut() {
+                match name.as_str() {
+                    "iteration" => *value = CtValue::Int(iteration),
+                    "result" => *value = CtValue::Int(result),
+                    _ => {}
+                }
+            }
+        }
+        return Some(Ok(CtValue::Int(status)));
     }
     if op == "DBWithPolicy" {
         let handle = db_handle(recv)?;

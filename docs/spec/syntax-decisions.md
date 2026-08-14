@@ -5577,7 +5577,7 @@ function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
 function call, no separate DAG syntax. Invoked canonically with
 `jet run <entry> -- <name>`; `jetpack run <name>` is the Jetpack engine bridge.
-`run`, `dev`, `build`, `test` remain reserved lifecycle verb names a job
+`run`, `dev`, `build`, `test`, `bench` remain reserved lifecycle verb names a job
 cannot reuse.
 
 **D-JOB-NAME1=A — one word for named auxiliary entries** *(ratified
@@ -5597,6 +5597,16 @@ reserved against built-in lifecycle/CLI names and collisions at one scope.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 
+**D-CMD-OVERRIDE1=C — every command may be expert-overridden** *(ratified
+2026-08-05, card #1451)*: `fn test(suite: TestSuite)` and
+`fn bench(suite: BenchSuite)` are ordinary functions that become the selected
+command entry when present. The compiler supplies the discovered suite after
+the command's filter; the value exposes `run()`, `iteration`, and `result`.
+A zero-parameter `fn test()` or `fn bench()` replaces the stock harness without
+receiving a suite. `jet test --default` and `jet bench --default` force the
+stock harness and ignore the override. The rule adds no token: it extends the
+existing named-function entry convention.
+
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
 (D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1);
@@ -5614,8 +5624,8 @@ dev`'s watch loop runs due jobs on their own schedule (UTC for
 `#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
 
-*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Job fn
-run|dev|build|test` (E0928); `jet run <entry> -- <name>` dispatches an
+*Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C)*: reserved-lifecycle reject on `#Job fn
+run|dev|build|test|bench` (E0928); `jet run <entry> -- <name>` dispatches an
 `#Job fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
 (D-JPK-DISPATCH1); unknown names list declared jobs (E1294). Typed job
 args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps

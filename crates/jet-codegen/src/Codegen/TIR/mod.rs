@@ -4776,6 +4776,10 @@ pub enum THandleOp {
     StderrIsTty,
     /// Stopwatch: `elapsed_millis()` → `{root}jet_stopwatch_elapsed_millis(&(recv))`.
     StopwatchElapsedMillis,
+    /// D-CMD-OVERRIDE1=C: `TestSuite.run()` calls the installed command runner.
+    TestSuiteRun,
+    /// D-CMD-OVERRIDE1=C: `BenchSuite.run()` calls the installed command runner.
+    BenchSuiteRun,
     /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
     ClockNow,
     /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).

@@ -902,6 +902,78 @@ pub(super) fn eval_handle_with_type_and_sink(
                     .saturating_sub(start_ms),
             ))
         }
+        THandleOp::TestSuiteRun => {
+            let CtValue::Struct { type_name, fields } = recv else {
+                return Err(unsupported("TestSuiteRun receiver", span));
+            };
+            if type_name != "TestSuite" {
+                return Err(unsupported("TestSuiteRun receiver", span));
+            }
+            let iteration = fields.iter().find_map(|(name, value)| {
+                (name == "iteration").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
+            }).unwrap_or(0);
+            let result = fields.iter().find_map(|(name, value)| {
+                (name == "result").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
+            }).unwrap_or(0);
+            let mut suite = crate::command_suite::JetTestSuite {
+                iteration,
+                result,
+                runner: None,
+            };
+            let status = crate::command_suite::jet_test_suite_run(&mut suite);
+            if let CtValue::Struct { fields, .. } = recv {
+                for (name, value) in fields.iter_mut() {
+                    match name.as_str() {
+                        "iteration" => *value = CtValue::Int(suite.iteration),
+                        "result" => *value = CtValue::Int(suite.result),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(CtValue::Int(status))
+        }
+        THandleOp::BenchSuiteRun => {
+            let CtValue::Struct { type_name, fields } = recv else {
+                return Err(unsupported("BenchSuiteRun receiver", span));
+            };
+            if type_name != "BenchSuite" {
+                return Err(unsupported("BenchSuiteRun receiver", span));
+            }
+            let iteration = fields.iter().find_map(|(name, value)| {
+                (name == "iteration").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
+            }).unwrap_or(0);
+            let result = fields.iter().find_map(|(name, value)| {
+                (name == "result").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
+            }).unwrap_or(0);
+            let mut suite = crate::command_suite::JetBenchSuite {
+                iteration,
+                result,
+                runner: None,
+            };
+            let status = crate::command_suite::jet_bench_suite_run(&mut suite);
+            if let CtValue::Struct { fields, .. } = recv {
+                for (name, value) in fields.iter_mut() {
+                    match name.as_str() {
+                        "iteration" => *value = CtValue::Int(suite.iteration),
+                        "result" => *value = CtValue::Int(suite.result),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(CtValue::Int(status))
+        }
         THandleOp::GameSceneNew => Err(unsupported("handle `GameSceneNew`", span)),
         THandleOp::GameReplayRecord => Err(unsupported("handle `GameReplayRecord`", span)),
         THandleOp::GameBackendHeadless => Err(unsupported("handle `GameBackendHeadless`", span)),

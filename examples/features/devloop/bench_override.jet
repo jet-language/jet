@@ -1,0 +1,22 @@
+// D-CMD-OVERRIDE1=C (card #1451): `fn bench` owns command policy while the
+// compiler-owned BenchSuite remains an ordinary value.
+use core.testing as testing
+
+fn bench(suite: BenchSuite) {
+    print("bench setup")
+    print("bench suite {suite.iteration}:{suite.result}")
+    suite.run()
+    print("bench teardown")
+}
+
+#Bench("override body") {
+    print("bench body")
+}
+
+fn run() {
+    bench(testing.bench_suite())
+}
+
+fn dev() {
+    run()
+}

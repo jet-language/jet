@@ -6547,6 +6547,12 @@ impl LowerCtx<'_, '_> {
                 let seed = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.random.rng_new, &[seed]))
             }
+            "test_suite" if args.is_empty() => {
+                Ok(self.call_host(self.host.testing_test_suite_new, &[]))
+            }
+            "bench_suite" if args.is_empty() => {
+                Ok(self.call_host(self.host.testing_bench_suite_new, &[]))
+            }
             other => Err(format!("jit core call unsupported: core.testing.{other}")),
         }
     }
@@ -20947,6 +20953,12 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::StopwatchElapsedMillis => {
                 Ok(self.call_host(self.host.time.stopwatch_elapsed, &[recv_val]))
+            }
+            THandleOp::TestSuiteRun => {
+                Ok(self.call_host(self.host.testing_test_suite_run, &[recv_val]))
+            }
+            THandleOp::BenchSuiteRun => {
+                Ok(self.call_host(self.host.testing_bench_suite_run, &[recv_val]))
             }
             THandleOp::ClockNow => {
                 Ok(self.call_host(self.host.clock_now, &[recv_val]))

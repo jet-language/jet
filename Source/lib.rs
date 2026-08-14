@@ -1750,6 +1750,17 @@ pub fn compile_tests_with_path_cov(
     with_compiler_stack(|| Driver::compile_tests(file, coverage))
 }
 
+/// D-CMD-OVERRIDE1=C: compile the entry function override through the same
+/// compiler stack as the stock test harness.
+pub fn compile_test_override_with_path(
+    src: &str,
+    file: &str,
+    coverage: bool,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    let _ = src;
+    with_compiler_stack(|| Driver::compile_test_override(file, coverage))
+}
+
 /// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.
 pub use Driver::FuzzCompileError;
 
@@ -1767,6 +1778,27 @@ pub fn compile_benches_with_path(
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     with_compiler_stack(|| Driver::compile_benches(file))
+}
+
+/// D-CMD-OVERRIDE1=C: compile the entry function override for `jet bench`.
+pub fn compile_bench_override_with_path(
+    src: &str,
+    file: &str,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    let _ = src;
+    with_compiler_stack(|| Driver::compile_bench_override(file))
+}
+
+/// Does the entry file define one command-named function? The loader owns
+/// source discovery, so imported functions never accidentally become command
+/// overrides.
+pub fn has_entry_fn(file: &str, name: &str) -> bool {
+    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
+        Ok(bundle) => bundle.modules[bundle.entry].items.iter().any(|item| {
+            matches!(item, AST::Item::Func(function) if function.name == name)
+        }),
+        Err(_) => false,
+    })
 }
 
 /// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`

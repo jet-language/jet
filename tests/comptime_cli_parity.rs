@@ -463,7 +463,7 @@ fn benchmark_cli_help_and_selected_region_keep_aot_golden_contract() {
     assert!(String::from_utf8_lossy(&help.stdout).contains("--filter"));
 
     let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["bench", "main.jet", "--filter=sum_to(1000)"])
+        .args(["bench", "--default", "main.jet", "--filter=sum_to(1000)"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
@@ -473,6 +473,77 @@ fn benchmark_cli_help_and_selected_region_keep_aot_golden_contract() {
     assert_eq!(selected.lines().filter(|line| line.contains("ns/iter")).count(), 1);
     assert!(selected.contains("main.jet::sum_to(1000)"), "selected benchmark lost path-qualified region: {selected}");
     assert!(selected.contains("profile: release"), "selected benchmark lost profile label: {selected}");
+}
+
+#[test]
+fn command_override_examples_match_aot_default_run_and_interpreter() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("command_override_parity");
+    let cases = [
+        ("test_override", "test_override.jet"),
+        ("bench_override", "bench_override.jet"),
+    ];
+
+    for (stem, file_name) in cases {
+        fs::copy(
+            root.join("examples/features/devloop").join(file_name),
+            scratch.join(file_name),
+        )
+        .unwrap_or_else(|error| panic!("copy command override `{file_name}`: {error}"));
+        let expected = fs::read(
+            root.join("examples/features/expected/devloop").join(format!("{stem}.out")),
+        )
+        .unwrap_or_else(|error| panic!("read command override golden `{stem}`: {error}"));
+
+        let release = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", "--release", file_name])
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("run release command override `{stem}`: {error}"));
+        assert!(release.status.success(), "release `{stem}` failed: {}", String::from_utf8_lossy(&release.stderr));
+        assert_eq!(release.stdout, expected, "release `{stem}` differs from golden");
+
+        let default_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", file_name])
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("run default command override `{stem}`: {error}"));
+        assert!(default_run.status.success(), "default run `{stem}` failed: {}", String::from_utf8_lossy(&default_run.stderr));
+        assert_eq!(default_run.stdout, expected, "default run `{stem}` differs from golden");
+
+        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["dev", file_name, "--interpret", "--watch=off"])
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("run interpreted command override `{stem}`: {error}"));
+        assert!(interpreted.status.success(), "interpreted `{stem}` failed: {}", String::from_utf8_lossy(&interpreted.stderr));
+        assert_eq!(interpreted.stdout, expected, "interpreted `{stem}` differs from golden");
+    }
+
+    let override_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["test", "test_override.jet", "--serial"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run test command override");
+    assert!(override_run.status.success(), "test override failed: {}", String::from_utf8_lossy(&override_run.stderr));
+    assert!(String::from_utf8_lossy(&override_run.stdout).contains("jet test: using fn test override"));
+
+    for command in ["test", "bench"] {
+        let help = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args([command, "--help"])
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("show `{command}` help: {error}"));
+        assert!(help.status.success(), "{command} help failed: {}", String::from_utf8_lossy(&help.stderr));
+        assert!(String::from_utf8_lossy(&help.stdout).contains("--default"), "{command} help omitted --default");
+    }
 }
 
 #[test]

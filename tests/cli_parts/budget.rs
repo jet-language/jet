@@ -22,7 +22,7 @@ fn compiler_probe_rejects_missing_edit_input_and_closed_metric_typos() {
 fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = allocation_budget_project("allocation_probe_runtime");
-    let run = || Command::new(jet()).args(["bench", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let run = || Command::new(jet()).args(["bench", "--default", "src/main.jet"]).current_dir(&dir).output().unwrap();
 
     let first = run();
     assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));

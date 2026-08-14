@@ -248,7 +248,7 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant" | "Hasher"
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer" | "Mod" | "ModGrant" | "Hasher" | "TestSuite" | "BenchSuite"
         ))
     {
         return Some(types::I64);
@@ -1158,6 +1158,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "LogField" => &["key", "value", "kind", "redacted"],
         "LogSpan" => &["id", "name"],
         "Rng" => &["state"],
+        "TestSuite" | "BenchSuite" => &["iteration", "result"],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         "TerminalSize" => &["cols", "rows"],
@@ -1342,6 +1343,10 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         },
         "Rotation" => match field {
             "previous" | "current" => Some(Type::Named("KeyRef".into())),
+            _ => None,
+        },
+        "TestSuite" | "BenchSuite" => match field {
+            "iteration" | "result" => Some(Type::Int),
             _ => None,
         },
         "ProcessResult" => match field {

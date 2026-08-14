@@ -1685,6 +1685,8 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
 /// Grouped so new flags don't keep growing every `run_test*` signature.
 #[derive(Clone, Default)]
 pub(crate) struct TestRunOpts {
+    /// `--default` forces the stock harness when the entry defines `fn test`.
+    pub(crate) default: bool,
     pub(crate) update_snapshots: bool,
     pub(crate) coverage: bool,
     /// `--release`: build the test harness with the release AOT profile.
@@ -1790,16 +1792,28 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     // D-TEST4: discover and run any `///` doctest examples first. They are
     // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
-    let doctests_ok = run_doctests(path, &shown, &src, update_snapshots, &profile, mode);
+    let override_entry = !opts.default && jet::has_entry_fn(&shown, "test");
+    let doctests_ok = if override_entry {
+        true
+    } else {
+        run_doctests(path, &shown, &src, update_snapshots, &profile, mode)
+    };
 
     // A file with doctests but no `#Test` blocks is testable on its doctests
     // alone — skip the test harness (which would otherwise error E0601 "no #Test
     // blocks"). A file with NEITHER falls through so the harness reports E0601.
-    if has_doctests && !jet::has_test_blocks(&shown) {
+    if !override_entry && has_doctests && !jet::has_test_blocks(&shown) {
         return doctests_ok;
     }
 
-    let (rust_code, ffi_link) = match jet::compile_tests_with_path_cov(&src, &shown, coverage) {
+    let (rust_code, ffi_link) = match if override_entry {
+        if !mode.quiet {
+            println!("jet test: using fn test override");
+        }
+        jet::compile_test_override_with_path(&src, &shown, coverage)
+    } else {
+        jet::compile_tests_with_path_cov(&src, &shown, coverage)
+    } {
         Ok(r) => r,
         Err(diags) => {
             report_problems(mode, &shown, &src, &diags);
@@ -1830,7 +1844,13 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
             shown.as_ref(),
             profile.budget_name(),
             &profile_tag,
-            if coverage { "testcov" } else { "test" },
+            if override_entry {
+                if coverage { "testcov-override" } else { "test-override" }
+            } else if coverage {
+                "testcov"
+            } else {
+                "test"
+            },
         ),
     );
     // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes

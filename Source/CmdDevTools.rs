@@ -2891,6 +2891,8 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
 pub(crate) struct BenchRunOpts {
     /// `--filter=<substr>` selects benchmark region names after discovery.
     pub(crate) filter: Option<String>,
+    /// `--default` forces the stock harness when the entry defines `fn bench`.
+    pub(crate) default: bool,
 }
 
 const BENCH_PROFILE_LABEL: &str = "release";
@@ -2949,10 +2951,24 @@ fn run_bench_file(path: &Path, shown: &str, opts: &BenchRunOpts, mode: OutputMod
         }
     };
 
+    let override_entry = !opts.default && jet::has_entry_fn(&file, "bench");
+    if override_entry && !mode.quiet && !mode.json {
+        println!("jet bench: using fn bench override");
+    }
     // D-BENCH1: region files use the generated harness. A filter applies only
     // to discovered regions; a file without regions contributes no result.
     if jet::has_bench_blocks(&file) {
-        return run_bench_regions(&file, shown, &src, opts.filter.as_deref(), mode);
+        return run_bench_regions(
+            &file,
+            shown,
+            &src,
+            opts.filter.as_deref(),
+            mode,
+            override_entry,
+        );
+    }
+    if override_entry {
+        return run_bench_override_program(&file, shown, &src, opts.filter.as_deref(), mode);
     }
     if opts.filter.is_some() {
         return true;
@@ -3041,13 +3057,21 @@ fn run_bench_regions(
     src: &str,
     filter: Option<&str>,
     mode: OutputMode,
+    command_override: bool,
 ) -> bool {
-    if filter.is_none() && !mode.json {
+    if !command_override && filter.is_none() && !mode.json {
         if let Some(status) = crate::CmdBudget::reuse_bench_report(file) {
             return status == 0;
         }
     }
-    let evidence = collect_bench_evidence_with_filter(file, src, mode, false, filter);
+    let evidence = collect_bench_evidence_with_filter(
+        file,
+        src,
+        mode,
+        false,
+        filter,
+        command_override,
+    );
     for bench in &evidence {
         let samples = bench
             .samples
@@ -3086,7 +3110,7 @@ fn run_bench_regions(
             );
         }
     }
-    if filter.is_none() && crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
+    if !command_override && filter.is_none() && crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
         return false;
     }
     true
@@ -3110,7 +3134,7 @@ pub(crate) fn collect_bench_evidence(
     mode: OutputMode,
     relay_output: bool,
 ) -> Vec<BenchEvidence> {
-    collect_bench_evidence_with_filter(file, src, mode, relay_output, None)
+    collect_bench_evidence_with_filter(file, src, mode, relay_output, None, false)
 }
 
 fn collect_bench_evidence_with_filter(
@@ -3119,8 +3143,13 @@ fn collect_bench_evidence_with_filter(
     mode: OutputMode,
     relay_output: bool,
     filter: Option<&str>,
+    command_override: bool,
 ) -> Vec<BenchEvidence> {
-    let (rust_code, ffi_link) = match jet::compile_benches_with_path(file) {
+    let (rust_code, ffi_link) = match if command_override {
+        jet::compile_bench_override_with_path(src, file)
+    } else {
+        jet::compile_benches_with_path(file)
+    } {
         Ok(r) => r,
         Err(diags) => {
             report_problems(mode, file, src, &diags);
@@ -3219,6 +3248,52 @@ fn collect_bench_evidence_with_filter(
         evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
     }
     evidence
+}
+
+fn run_bench_override_program(
+    file: &str,
+    shown: &str,
+    src: &str,
+    filter: Option<&str>,
+    mode: OutputMode,
+) -> bool {
+    let (rust_code, ffi_link) = match jet::compile_bench_override_with_path(src, file) {
+        Ok(value) => value,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            return false;
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("bench_override_{}", stem(file)));
+    build(
+        file,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Release,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        None,
+        None,
+        mode,
+        None,
+    );
+    let mut command = Command::new(&bin);
+    if let Some(filter) = filter {
+        command.env("JET_BENCH_FILTER", filter);
+    }
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("bench: couldn't run `{}`: {}", shown, error);
+            return false;
+        }
+    };
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    let _ = fs::remove_file(&bin);
+    output.status.success()
 }
 
 /// Collect `ServiceProbe` evidence by cycling each named service down→up→ready

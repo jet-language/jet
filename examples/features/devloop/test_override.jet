@@ -1,0 +1,23 @@
+// D-CMD-OVERRIDE1=C (card #1451): `fn test` owns command policy while the
+// compiler-owned TestSuite remains an ordinary value. `jet test --default`
+// selects the stock harness instead.
+use core.testing as testing
+
+fn test(suite: TestSuite) {
+    print("test setup")
+    print("test suite {suite.iteration}:{suite.result}")
+    suite.run()
+    print("test teardown")
+}
+
+#Test "override body" {
+    print("test body")
+}
+
+fn run() {
+    test(testing.test_suite())
+}
+
+fn dev() {
+    run()
+}

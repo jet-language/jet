@@ -784,6 +784,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.testing", "corpus", "jet_testing_corpus", true, &[true]),
     CoreCallRecord::new("core.testing", "fake_clock", "jet_std_clock_new", true, &[false]),
     CoreCallRecord::new("core.testing", "fake_rng", "jet_std_rng_new", true, &[false]),
+    CoreCallRecord::new("core.testing", "test_suite", "jet_test_suite_new", true, &[]),
+    CoreCallRecord::new("core.testing", "bench_suite", "jet_bench_suite_new", true, &[]),
     CoreCallRecord::new("core.math", "round", "jet_std_math_round", true, &[false]),
     CoreCallRecord::new("core.math", "isqrt", "jet_std_math_isqrt", true, &[false]),
     CoreCallRecord::new("core.math", "factorial", "jet_std_math_factorial", true, &[false]),

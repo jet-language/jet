@@ -684,10 +684,11 @@ pub const KW_JOB: &str = "Job";
 /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
 pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
-/// D-JPK-TASKRUN1=A: lifecycle verbs a `#Job fn` must not reuse — they already
-/// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).
+/// D-JPK-TASKRUN1=A / D-CMD-OVERRIDE1=C: lifecycle verbs a `#Job fn` must not
+/// reuse — they already name Jet's built-in entry points (`fn run`/`fn dev`/
+/// `fn build`/`fn test`/`fn bench`).
 /// Sema rejects a collision as E0928.
-pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
+pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test", "bench"];
 
 /// D-JOB-SUBCMD1=C: bare names reserved by Jet's command and flag surface.
 /// Job dispatch claims the first argv word before ordinary CLI parsing.

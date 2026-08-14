@@ -989,7 +989,7 @@ pub(crate) fn check_module_bodies(
                     m.type_params = own_params;
                 }
             }
-            Item::Test(t) if mode == CompileMode::Test => {
+            Item::Test(t) if matches!(mode, CompileMode::Test | CompileMode::TestOverride) => {
                 let Some(test_name) = t.name.as_deref() else {
                     continue;
                 };
@@ -1078,7 +1078,7 @@ pub(crate) fn check_module_bodies(
             // D-BENCH1: a `#Bench` body type-checks exactly like a `#Test` body
             // (a bare statement list, no params, unit context) — only the mode
             // gate differs.
-            Item::Bench(b) if mode == CompileMode::Bench => {
+            Item::Bench(b) if matches!(mode, CompileMode::Bench | CompileMode::BenchOverride) => {
                 let Some(bench_name) = b.name.as_deref() else {
                     continue;
                 };

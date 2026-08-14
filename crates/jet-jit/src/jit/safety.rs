@@ -5210,6 +5210,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::AllocReset
         | THandleOp::ClockNow
         | THandleOp::StopwatchElapsedMillis
+        | THandleOp::TestSuiteRun
+        | THandleOp::BenchSuiteRun
         | THandleOp::RngBool
         | THandleOp::RngFloat
         | THandleOp::RngSplit => args.is_empty(),

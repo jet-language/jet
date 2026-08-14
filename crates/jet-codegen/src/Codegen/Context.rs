@@ -424,6 +424,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "HookPolicy" => Some("JetHookPolicy"),
         "EventConfigError" => Some("JetEventConfigError"),
         "Stopwatch" => Some("Stopwatch"),
+        "TestSuite" => Some("JetTestSuite"),
+        "BenchSuite" => Some("JetBenchSuite"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
         "Rng" => Some("Rng"),

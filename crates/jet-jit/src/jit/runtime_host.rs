@@ -3005,6 +3005,68 @@ extern "C" fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
     })
 }
 
+/// D-CMD-OVERRIDE1=C: resident handles marshal the same Prelude-owned suite
+/// snapshot as AOT. Discovery and filtering stay in the command callback.
+extern "C" fn jet_jit_testing_test_suite_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let suite = jet_codegen::command_suite::jet_test_suite_new();
+        let handle = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(handle, 0, suite.iteration);
+        let _ = rt.heap.record_set_int(handle, 1, suite.result);
+        handle
+    })
+}
+
+extern "C" fn jet_jit_testing_test_suite_run(handle: i64) -> i64 {
+    let (iteration, result) = Concurrency::with_runtime_mut(|rt| {
+        (
+            rt.heap.record_get_int(handle, 0).unwrap_or(0),
+            rt.heap.record_get_int(handle, 1).unwrap_or(0),
+        )
+    });
+    let mut suite = jet_codegen::command_suite::JetTestSuite {
+        iteration,
+        result,
+        runner: None,
+    };
+    let status = jet_codegen::command_suite::jet_test_suite_run(&mut suite);
+    Concurrency::with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_int(handle, 0, suite.iteration);
+        let _ = rt.heap.record_set_int(handle, 1, suite.result);
+    });
+    status
+}
+
+extern "C" fn jet_jit_testing_bench_suite_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let suite = jet_codegen::command_suite::jet_bench_suite_new();
+        let handle = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(handle, 0, suite.iteration);
+        let _ = rt.heap.record_set_int(handle, 1, suite.result);
+        handle
+    })
+}
+
+extern "C" fn jet_jit_testing_bench_suite_run(handle: i64) -> i64 {
+    let (iteration, result) = Concurrency::with_runtime_mut(|rt| {
+        (
+            rt.heap.record_get_int(handle, 0).unwrap_or(0),
+            rt.heap.record_get_int(handle, 1).unwrap_or(0),
+        )
+    });
+    let mut suite = jet_codegen::command_suite::JetBenchSuite {
+        iteration,
+        result,
+        runner: None,
+    };
+    let status = jet_codegen::command_suite::jet_bench_suite_run(&mut suite);
+    Concurrency::with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_int(handle, 0, suite.iteration);
+        let _ = rt.heap.record_set_int(handle, 1, suite.result);
+    });
+    status
+}
+
 // #1633: one host_fns! listing for the top-level table + delegate composition.
 host_fns! {
     struct HostFns;
@@ -3469,6 +3531,10 @@ host_fns! {
     reflect_field_value: "jet_jit_reflect_field_value" => jet_jit_reflect_field_value: sig_str_unary_i64;
     testing_temp_dir: "jet_jit_testing_temp_dir" => jet_jit_testing_temp_dir: sig_str_unary_i64;
     testing_snap: "jet_jit_testing_snap" => jet_jit_testing_snap: sig_str_eq;
+    testing_test_suite_new: "jet_jit_testing_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
+    testing_test_suite_run: "jet_jit_testing_test_suite_run" => jet_jit_testing_test_suite_run: sig_str_unary_i64;
+    testing_bench_suite_new: "jet_jit_testing_bench_suite_new" => jet_jit_testing_bench_suite_new: sig_str_begin;
+    testing_bench_suite_run: "jet_jit_testing_bench_suite_run" => jet_jit_testing_bench_suite_run: sig_str_unary_i64;
     cli_main: "jet_jit_cli_main" => crate::CLI::jet_jit_cli_main: sig_noarg_i64;
 }
 

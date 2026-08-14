@@ -221,6 +221,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
+        | "TestSuite" | "BenchSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
@@ -491,6 +492,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "start" | "end" => Some(Type::Int),
             _ => None,
         };
+    }
+    if matches!(type_name, "TestSuite" | "BenchSuite") {
+        return matches!(field, "iteration" | "result").then_some(Type::Int);
     }
     if type_name == "TLSPeerIdentity" {
         return match field {

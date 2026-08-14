@@ -103,4 +103,9 @@ pub mod terminal_default;
 /// emitted process prelude and the resident JIT adapter.
 #[path = "Prelude/CoreLib/ProcessPty.rs"]
 pub mod process_pty;
+/// D-CMD-OVERRIDE1=C: command-suite values compile from the same Prelude
+/// source that AOT embeds in `mod jet_std`.
+pub mod command_suite {
+    include!("Prelude/CommandSuite.rs");
+}
 // Prelude/ contains include_str-embedded text files, not Rust modules.

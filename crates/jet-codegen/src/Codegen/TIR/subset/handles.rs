@@ -228,6 +228,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Stderr", "flush", 0) => THandleOp::StderrFlush,
         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
         ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
+        ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
+        ("BenchSuite", "run", 0) => THandleOp::BenchSuiteRun,
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
         ("Clock", "tick", 1) => THandleOp::ClockTick,
@@ -568,6 +570,9 @@ pub(crate) fn handle_method_return_ty(
 ) -> Type {
     if let Some(ret) = resolved_ret {
         return ret.clone();
+    }
+    if matches!(handle, "TestSuite" | "BenchSuite") && method == "run" && nargs == 0 {
+        return Type::Int;
     }
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();

@@ -12,8 +12,8 @@
 //! later to get the same answer, so this checker and every runtime consumer
 //! can never disagree.
 //!
-//! D-JPK-TASKRUN1 also lives here: a `#Job fn` must not reuse the reserved
-//! lifecycle verbs `run`/`dev`/`build`/`test` (E0928).
+//! D-JPK-TASKRUN1 / D-CMD-OVERRIDE1=C also lives here: a `#Job fn` must not
+//! reuse the reserved lifecycle verbs `run`/`dev`/`build`/`test`/`bench` (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
@@ -62,15 +62,15 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     Diagnostic::error("E0926", what.to_string(), why.to_string(), fix.to_string(), Some(span))
 }
 
-/// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1).
+/// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C).
 fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
     let reserved = Syntax::TASK_RESERVED_LIFECYCLE.join(", ");
     Diagnostic::error(
         "E0928",
         format!("`{name}` is a built-in lifecycle verb, not a job name"),
         format!(
-            "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
-             a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1)."
+            "`run`, `dev`, `build`, `test`, and `bench` already name Jet's built-in entry points — \
+             a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C)."
         ),
         format!(
             "rename it, e.g. `#Job fn {name}_assets()`, or drop `#Job` if this is the lifecycle entry."
@@ -95,7 +95,7 @@ fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
     )
 }
 
-/// D-JPK-TASKRUN1: reject `#Job fn run|dev|build|test`. Called alongside the
+/// D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C: reject `#Job fn run|dev|build|test|bench`. Called alongside the
 /// `#Every` value check during registration.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_task {

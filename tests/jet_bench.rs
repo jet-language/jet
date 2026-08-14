@@ -33,7 +33,7 @@ fn jet_bench_directory_recurses_and_filter_selects_regions() {
     fs::write(scratch.join("nested/child.jet"), source).unwrap();
 
     let all = Command::new(jet_bin())
-        .args(["bench", "."])
+        .args(["bench", "--default", "."])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
@@ -46,7 +46,7 @@ fn jet_bench_directory_recurses_and_filter_selects_regions() {
     assert!(all_stdout.contains("nested/child.jet::other"), "nested region lost path qualification: {all_stdout}");
 
     let filtered = Command::new(jet_bin())
-        .args(["bench", ".", "--filter=needle"])
+        .args(["bench", "--default", ".", "--filter=needle"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
@@ -68,7 +68,7 @@ fn jet_bench_json_has_one_release_profile_record_per_region() {
     fs::copy(source, scratch.join("bench.jet")).unwrap();
 
     let output = Command::new(jet_bin())
-        .args(["bench", "bench.jet", "--json"])
+        .args(["bench", "--default", "bench.jet", "--json"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()

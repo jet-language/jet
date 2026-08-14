@@ -113,6 +113,9 @@
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
+// D-CMD-OVERRIDE1=C (card #1451) adds no token: `fn test(suite: TestSuite)` and
+// `fn bench(suite: BenchSuite)` extend the existing command-entry convention.
+// `--default` selects the stock harness; no keyword or sigil enters the grammar.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
 // items. Effect-only `if` and `loop` bodies use no arrow. D-BRACE1=A

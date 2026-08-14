@@ -453,7 +453,7 @@ pub(super) fn resolve_outputs(
                 }
             }
         }
-    } else if mode == CompileMode::Test {
+    } else if matches!(mode, CompileMode::Test | CompileMode::TestOverride) {
         for (_, _, fact) in &mut resolved {
             fact.selected = fact.kind == crate::AST::OutputKind::Check;
         }

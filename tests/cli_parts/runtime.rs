@@ -329,6 +329,59 @@ fn top_level_help_lists_job_vocabulary_only() {
     assert!(!stdout.contains(&retired_flag), "retired job flag leaked: {stdout}");
 }
 
+#[test]
+fn command_overrides_report_themselves_and_default_bypasses_them() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = isolated_cwd("command_override_precedence");
+    let file = dir.join("override.jet");
+    fs::write(
+        &file,
+        r#"use core.testing as testing
+
+fn test(suite: TestSuite) {
+    print("override")
+    suite.run()
+}
+
+#Test("stock") {
+    print("stock")
+}
+
+fn run() {}
+"#,
+    )
+    .unwrap();
+
+    let override_run = Command::new(jet())
+        .args(["test", "override.jet", "--serial"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(override_run.status.success(), "override failed: {:?}", override_run);
+    let override_stdout = String::from_utf8_lossy(&override_run.stdout);
+    assert!(override_stdout.contains("jet test: using fn test override"), "{override_stdout}");
+    assert!(override_stdout.contains("override"), "{override_stdout}");
+    assert!(override_stdout.contains("stock: pass"), "{override_stdout}");
+
+    let stock_run = Command::new(jet())
+        .args(["test", "override.jet", "--default", "--serial"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(stock_run.status.success(), "stock failed: {:?}", stock_run);
+    let stock_stdout = String::from_utf8_lossy(&stock_run.stdout);
+    assert!(!stock_stdout.contains("using fn test override"), "{stock_stdout}");
+    assert!(!stock_stdout.contains("override\n"), "{stock_stdout}");
+    assert!(stock_stdout.contains("stock"), "{stock_stdout}");
+    assert!(stock_stdout.contains("stock: pass"), "{stock_stdout}");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #1659 criterion 2: `jet <cmd> --help`/`-h` works for a command that used
 /// to hit the generic E2102 "unknown flag" — it neither runs the command nor
 /// errors, and names the command in its own help text.
@@ -632,7 +685,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     fs::write(dir.join("nested/child.jet"), source).unwrap();
 
     let tests = Command::new(jet())
-        .args(["test", ".", "--filter=needle"])
+        .args(["test", "--default", ".", "--filter=needle"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -643,7 +696,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     assert!(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}");
 
     let benches = Command::new(jet())
-        .args(["bench", ".", "--filter=needle"])
+        .args(["bench", "--default", ".", "--filter=needle"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -656,7 +709,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     assert!(!bench_stdout.contains("::other"), "filtered bench ran other: {bench_stdout}");
 
     let json = Command::new(jet())
-        .args(["bench", ".", "--filter=needle", "--json"])
+        .args(["bench", "--default", ".", "--filter=needle", "--json"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()

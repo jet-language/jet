@@ -1654,6 +1654,8 @@ impl TraitRegistry {
             "Solver",
             "Stat",
             "Stopwatch",
+            "TestSuite",
+            "BenchSuite",
             "TcpListener",
             "TcpStream",
             "TDigest",

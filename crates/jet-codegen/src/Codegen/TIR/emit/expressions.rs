@@ -3585,6 +3585,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::StopwatchElapsedMillis => {
                     format!("{}jet_stopwatch_elapsed_millis(&({}))", root, recv)
                 }
+                THandleOp::TestSuiteRun => {
+                    format!("{}jet_test_suite_run(&mut ({}))", root, recv)
+                }
+                THandleOp::BenchSuiteRun => {
+                    format!("{}jet_bench_suite_run(&mut ({}))", root, recv)
+                }
                 // D-DET1: deterministic injected Clock/Rng capability methods.
                 THandleOp::ClockNow => format!("{}jet_clock_now(&({}))", root, recv),
                 THandleOp::ClockTick => {

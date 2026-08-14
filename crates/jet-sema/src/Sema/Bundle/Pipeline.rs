@@ -2456,6 +2456,8 @@ fn check_bundle_opts_for_output_inner(
         // bench set is never an error here.
         CompileMode::Bench
         | CompileMode::Test
+        | CompileMode::TestOverride
+        | CompileMode::BenchOverride
         | CompileMode::Run
         | CompileMode::Check
         | CompileMode::Eval => {}

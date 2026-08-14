@@ -690,7 +690,7 @@ fn run() {}
     fs::write(&test_file, test_src).expect("write snap.jet");
     // First run with -u creates the golden.
     let create = Command::new(jet_bin())
-        .args(["test", "--update-snapshots", "snap.jet"])
+        .args(["test", "--default", "--update-snapshots", "snap.jet"])
         .current_dir(&dir)
         .output()
         .expect("jet test -u create");
@@ -718,7 +718,7 @@ fn run() {}
     // Stale golden without -u must fail.
     fs::write(snap_path, "stale-value").expect("seed stale");
     let stale = Command::new(jet_bin())
-        .args(["test", "snap.jet"])
+        .args(["test", "--default", "snap.jet"])
         .current_dir(&dir)
         .output()
         .expect("jet test stale");
@@ -730,7 +730,7 @@ fn run() {}
 
     // -u must rewrite the golden and pass.
     let update = Command::new(jet_bin())
-        .args(["test", "-u", "snap.jet"])
+        .args(["test", "--default", "-u", "snap.jet"])
         .current_dir(&dir)
         .output()
         .expect("jet test -u");
@@ -760,7 +760,7 @@ fn run() {}
     fs::create_dir_all(dir.join("__snapshots__")).expect("mkdir __snapshots__");
     fs::write(dir.join("__snapshots__/helper-case.snap"), "helper-stale").expect("seed helper");
     let helper_stale = Command::new(jet_bin())
-        .args(["test", "helper.jet"])
+        .args(["test", "--default", "helper.jet"])
         .current_dir(&dir)
         .output()
         .expect("helper stale");
@@ -769,7 +769,7 @@ fn run() {}
         "testing.snap stale must fail without -u"
     );
     let helper_update = Command::new(jet_bin())
-        .args(["test", "--update-snapshots", "helper.jet"])
+        .args(["test", "--default", "--update-snapshots", "helper.jet"])
         .current_dir(&dir)
         .output()
         .expect("helper -u");

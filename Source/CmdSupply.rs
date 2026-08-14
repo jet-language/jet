@@ -60,7 +60,7 @@ fn run_publish_tests(root: &Path, entry: &Path) -> bool {
 
     let entry_arg = entry.to_string_lossy().into_owned();
     let output = match Command::new(jet_bin)
-        .args(["test", entry_arg.as_str()])
+        .args(["test", entry_arg.as_str(), "--default"])
         .current_dir(root)
         .output()
     {

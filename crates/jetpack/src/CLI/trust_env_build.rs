@@ -990,6 +990,7 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
         .unwrap_or_else(find_jet_binary);
     match std::process::Command::new(jet)
         .arg("test")
+        .arg("--default")
         .arg(dir)
         .current_dir(dir)
         .status()

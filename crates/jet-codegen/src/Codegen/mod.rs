@@ -597,6 +597,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
+    include_str!("../Prelude/CommandSuite.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
@@ -1157,6 +1158,7 @@ fn push_corelib_prelude_body(
         if !omit_testing_shared {
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         }
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs"));
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
@@ -3177,13 +3179,30 @@ fn emit_test_main_cov(
     out: &mut String,
     coverage: bool,
 ) {
+    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, false);
+}
+
+fn emit_test_main_cov_mode(
+    tests: &[TestCase<'_>],
+    checks: &[&ResolvedOutput],
+    coverage_branches: &[crate::Codegen::Context::CoverageBranch],
+    out: &mut String,
+    coverage: bool,
+    command_override: bool,
+) {
     out.push_str("#[derive(Clone, Copy)]\n");
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
-    out.push_str("fn main() {\n");
-    out.push_str("    jet_std_env_init();\n");
-    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-    out.push_str("    jet_test_trace_tier();\n");
-    out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
+    if command_override {
+        out.push_str("fn jet_test_command_run() -> (i64, i64) {\n");
+        out.push_str("    let output = jet_test_take_output();\n");
+        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
+    } else {
+        out.push_str("fn main() {\n");
+        out.push_str("    jet_std_env_init();\n");
+        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+        out.push_str("    jet_test_trace_tier();\n");
+        out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
+    }
     if coverage {
         for branch in coverage_branches {
             out.push_str(&format!(
@@ -3273,8 +3292,24 @@ fn emit_test_main_cov(
         // D-COV1: write the hit set before any `exit` (which would skip Drop).
         out.push_str("    jet_cov_dump();\n");
     }
-    out.push_str("    if report.failed > 0 { std::process::exit(1); }\n");
+    if command_override {
+        out.push_str("    (slots.len() as i64, i64::from(report.failed > 0))\n");
+    } else {
+        out.push_str("    if report.failed > 0 { std::process::exit(1); }\n");
+    }
     out.push_str("}\n");
+    if command_override {
+        out.push_str("\nfn main() {\n");
+        out.push_str("    jet_std_env_init();\n");
+        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+        out.push_str("    jet_test_suite_install(jet_test_command_run);\n");
+        out.push_str("    run();\n");
+        out.push_str("    let output = jet_test_take_output();\n");
+        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
+        out.push_str("    let status = jet_test_suite_status();\n");
+        out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
+        out.push_str("}\n");
+    }
 }
 
 fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
@@ -3693,6 +3728,14 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     emit_bundle_tests_cov(bundle, link, false)
 }
 
+/// D-CMD-OVERRIDE1=C: the two command names share one compiler-generated
+/// override path and differ only in the suite value handed to user code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandOverrideKind {
+    Test,
+    Bench,
+}
+
 /// D-COV1: emit the `jet test` harness, optionally with coverage instrumentation.
 /// `coverage = false` is byte-identical to the historical `emit_bundle_tests`
 /// (golden tests rely on this), so the probes/prelude only appear under
@@ -3701,6 +3744,29 @@ pub fn emit_bundle_tests_cov(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
     coverage: bool,
+) -> String {
+    emit_bundle_tests_cov_inner(bundle, link, coverage, false)
+}
+
+/// D-CMD-OVERRIDE1=C: emit the selected command override with the same
+/// checked test/bench bodies as the stock harness.
+pub fn emit_bundle_command_override(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    kind: CommandOverrideKind,
+    coverage: bool,
+) -> String {
+    match kind {
+        CommandOverrideKind::Test => emit_bundle_tests_cov_inner(bundle, link, coverage, true),
+        CommandOverrideKind::Bench => emit_bundle_benches_inner(bundle, link, true),
+    }
+}
+
+fn emit_bundle_tests_cov_inner(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    coverage: bool,
+    command_override: bool,
 ) -> String {
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives =
@@ -3729,10 +3795,12 @@ pub fn emit_bundle_tests_cov(
             output.selected && output.kind == crate::AST::OutputKind::Check
         })
     }).collect::<Vec<_>>();
-    assert!(
-        !tests.is_empty() || !checks.is_empty(),
-        "emit_bundle_tests called with no test blocks or Check Outputs"
-    );
+    if !command_override {
+        assert!(
+            !tests.is_empty() || !checks.is_empty(),
+            "emit_bundle_tests called with no test blocks or Check Outputs"
+        );
+    }
     let want_prop_prelude = any_property_test(&tests);
 
     let mut out = String::new();
@@ -3894,7 +3962,14 @@ pub fn emit_bundle_tests_cov(
     emit_test_fns(&cx, &tests, None, &mut out);
     coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
     emit_output_check_fns(&checks, &mut out);
-    emit_test_main_cov(&tests, &checks, &coverage_branches, &mut out, coverage);
+    emit_test_main_cov_mode(
+        &tests,
+        &checks,
+        &coverage_branches,
+        &mut out,
+        coverage,
+        command_override,
+    );
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))
@@ -4290,6 +4365,14 @@ fn emit_fuzz_main(
 /// valid; the timing wrapper aborts the benchmark command on such an error
 /// instead of printing false timings.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
+    emit_bundle_benches_inner(bundle, link, false)
+}
+
+fn emit_bundle_benches_inner(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    command_override: bool,
+) -> String {
     let entry = &bundle.modules[bundle.entry];
     let bundle_auto_derives =
         crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
@@ -4301,10 +4384,12 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             _ => None,
         })
         .collect();
-    assert!(
-        !benches.is_empty(),
-        "emit_bundle_benches called with no bench blocks"
-    );
+    if !command_override {
+        assert!(
+            !benches.is_empty(),
+            "emit_bundle_benches called with no bench blocks"
+        );
+    }
     // Benches never declare property params, so they never need the generator prelude.
     let want_prop_prelude = false;
     // D-COV1: coverage instrumentation is a `jet test` feature; benches don't use it.
@@ -4505,9 +4590,18 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("}\n\n");
     }
 
-    out.push_str("fn main() {\n");
-    out.push_str("    jet_std_env_init();\n");
-    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+    if command_override {
+        out.push_str("fn jet_bench_command_run() -> (i64, i64) {\n");
+        out.push_str("    let output = jet_test_take_output();\n");
+        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
+    } else {
+        out.push_str("fn main() {\n");
+        out.push_str("    jet_std_env_init();\n");
+        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+    }
+    if command_override {
+        out.push_str("    let mut selected: i64 = 0;\n");
+    }
     out.push_str("    let bench_filter = std::env::var(\"JET_BENCH_FILTER\").ok();\n");
     out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     for (i, bench) in benches.iter().enumerate() {
@@ -4522,13 +4616,31 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             name,
             i
         ));
+        if command_override {
+            out.push_str("        selected += 1;\n");
+        }
         out.push_str("        print!(\"JETBENCH1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
         out.push_str("        for sample in samples { print!(\"\\t{}\", sample); }\n        println!();\n");
         out.push_str("        print!(\"JETALLOC1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
         out.push_str("        for (count, bytes) in allocations { print!(\"\\t{}:{}\", count, bytes); }\n        println!();\n");
         out.push_str("        }\n    }\n");
     }
+    if command_override {
+        out.push_str("    (selected, 0)\n");
+    }
     out.push_str("}\n");
+    if command_override {
+        out.push_str("\nfn main() {\n");
+        out.push_str("    jet_std_env_init();\n");
+        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+        out.push_str("    jet_bench_suite_install(jet_bench_command_run);\n");
+        out.push_str("    run();\n");
+        out.push_str("    let output = jet_test_take_output();\n");
+        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
+        out.push_str("    let status = jet_bench_suite_status();\n");
+        out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
+        out.push_str("}\n");
+    }
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))
