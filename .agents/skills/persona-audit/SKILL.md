@@ -29,6 +29,12 @@ not applicable. Keep these rows separate from the later project loop:
 | `time-to-first-window` | elapsed time from the first command to a usable first-party window | record milliseconds, backend, and input; use `not-applicable` until a windowed backend exists |
 | `first-pixel` | elapsed time from window creation to the first visible rendered pixel | record milliseconds, backend, and frame evidence; never infer it from a window handle |
 
+Gate these measurements on the complete `#820-#825` backend chain, in order:
+`#820` → `#821` → `#822` → `#823` → `#824` → `#825`. The current
+`core.game` default is headless/no-op. It is not evidence of a usable window or
+a first pixel. Until the chain is complete and a real run exposes window and
+frame receipts, record an honest non-result.
+
 Keep `not-applicable`, `not-proven`, and `blocked` distinct. Use
 `not-applicable` when the persona's project has no window target, `not-proven`
 when a target exists but the run or evidence is missing, and `blocked` when the

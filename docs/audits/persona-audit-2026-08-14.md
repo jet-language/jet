@@ -2,7 +2,7 @@
 
 **Card:** #1924
 
-**Status:** first-session lens is now part of the reusable persona-audit workflow; runtime timing remains unproven in this pass.
+**Status:** first-session lens is now part of the reusable persona-audit workflow; the `#820-#825` backend chain is incomplete, so runtime timing remains unproven in this pass.
 
 **Method:** Four fresh personas cover beginner, experienced CLI developer, graphics beginner, and unattended coding agent. This pass reads the current skill, report corpus, and truthfulness guard. Builds, tests, linters, formatters, and devtools were skipped by instruction, so this report records no invented elapsed time, window, or pixel evidence.
 
@@ -31,7 +31,7 @@ Core loop: declare commands, ask for help, run a valid subcommand, inspect JSON 
 Core loop: create a first-party window, draw one pixel, change its color, and rerun after each edit.
 
 - **Pull:** the lens names the joy event precisely: a usable window followed by a visible first pixel.
-- **Push:** no window creation or frame receipt was exercised in this pass. The graphics loop cannot claim completion without a windowed backend and a real frame observation.
+- **Push:** the `#820-#825` backend chain is incomplete. This pass exercised no window creation or frame receipt, so the graphics loop cannot claim completion.
 - **Verdict:** blocked. First-session evidence is not-proven.
 - **Reaction:** not collected; this pass did not run the persona loop.
 
@@ -48,14 +48,19 @@ Core loop: read repository context, edit one file, run the checker, read the str
 
 Record both checks for every persona. `not-applicable`, `not-proven`, and `blocked` are different states. No value below is a zero or an inferred pixel.
 
+The report gates window measurements on the complete `#820-#825` backend chain:
+`#820` → `#821` → `#822` → `#823` → `#824` → `#825`. The current `core.game`
+default is headless/no-op. This pass had no windowed run, backend/input receipt,
+or frame receipt.
+
 | persona | time-to-first-window | first-pixel | state |
 | --- | --- | --- | --- |
 | Mara | not-applicable — CLI project has no window target | not-applicable — no window is created | usable-with-friction |
 | Devon | not-applicable — CLI project has no window target | not-applicable — no window is created | usable-with-friction |
-| Inez | not-proven — window target exists in the persona, but execution was skipped; no milliseconds/backend/input receipt | not-proven — no frame evidence | blocked |
+| Inez | not-proven — window target exists, but the `#820-#825` backend chain is incomplete; no milliseconds/backend/input receipt | not-proven — no frame evidence because no windowed run exists | blocked |
 | Luna | not-applicable — checker project has no window target | not-applicable — no window is created | blocked |
 
-Required evidence when a windowed backend is available:
+Required evidence after the `#820-#825` backend chain is complete:
 
 1. Start the clock before the first project command.
 2. Record milliseconds, backend, size, and input for `time-to-first-window`.
