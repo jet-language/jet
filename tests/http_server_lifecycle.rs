@@ -171,6 +171,9 @@ pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;

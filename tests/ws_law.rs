@@ -157,6 +157,9 @@ pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
@@ -164,6 +167,75 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
+
+/// D-LIVEQUERY1/D-WS1: the native transport is the shared Prelude seam. A
+/// typed rerun updates its canonical sink and serialized topic, while a later
+/// connection receives only the latest event for that topic.
+#[test]
+fn live_query_rerun_publishes_and_reconnect_replays_latest() {
+    let footprint = format!("law_live_{}.rows", std::process::id());
+    let frames = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let frame_sink = frames.clone();
+    let transport_id = jet_app_ws_register(std::sync::Arc::new(move |frame| {
+        frame_sink.lock().unwrap().push(frame);
+    }));
+    assert_ne!(transport_id, 0, "live transport registration must succeed");
+
+    let reruns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let rerun_count = reruns.clone();
+    let query = jet_app_live_query(footprint.clone(), "v1".to_string(), move || {
+        let call = rerun_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        Ok(format!("v{}", call + 1))
+    });
+    assert!(query.error.is_empty(), "query registration failed: {:?}", query.error);
+
+    let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let delivered_sink = delivered.clone();
+    let query = jet_app_live_bind_sink(
+        &query,
+        std::sync::Arc::new(move |value| delivered_sink.lock().unwrap().push(value)),
+    );
+    assert!(query.error.is_empty(), "sink binding failed: {:?}", query.error);
+    assert_eq!(jet_app_live_get(&query), "v1");
+
+    assert_eq!(jet_app_invalidate(footprint.clone()), 1);
+    assert_eq!(reruns.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(jet_app_live_get(&query), "v2");
+    assert!(jet_app_live_show(&query).contains("generation=2"));
+    assert_eq!(*delivered.lock().unwrap(), vec!["v2".to_string()]);
+
+    let topic_prefix = format!("live:{}:", query.id);
+    let published = frames
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|frame| frame.starts_with(&topic_prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(published.len(), 2, "initial and rerun events must publish");
+    assert!(published[0].ends_with(&format!(":{}:v1", footprint)));
+    assert!(published[1].ends_with(&format!(":{}:v2", footprint)));
+
+    let replayed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let replay_sink = replayed.clone();
+    let reconnect_id = jet_app_ws_register(std::sync::Arc::new(move |frame| {
+        replay_sink.lock().unwrap().push(frame);
+    }));
+    assert_ne!(reconnect_id, 0, "reconnect registration must succeed");
+    assert_eq!(
+        replayed
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|frame| frame.starts_with(&topic_prefix))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![format!("live:{}:2:{}:v2", query.id, footprint)]
+    );
+
+    jet_app_ws_unregister(reconnect_id);
+    jet_app_ws_unregister(transport_id);
+}
 
 #[test]
 fn direct_ws_consumers_include_client_core_first() {
