@@ -49,40 +49,40 @@ Generated on: 2026-08-14
 | Measure | Count |
 | --- | ---: |
 | Languages compared | 11 |
-| Shared containers | 54 |
-| Core modules | 85 |
-| Module members | 1120 |
-| Collection method rows | 731 |
-| Jet-side rows | 1853 |
-| Total rows | 10265 |
+| Shared containers | 51 |
+| Core modules | 78 |
+| Module members | 1122 |
+| Collection method rows | 730 |
+| Jet-side rows | 1852 |
+| Total rows | 9385 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 404 |
-| Equal | 881 |
-| Jet loses (two or more languages agree) | 153 |
-| Single witness (recorded, not scored) | 8152 |
+| Jet wins | 455 |
+| Equal | 827 |
+| Jet loses (two or more languages agree) | 121 |
+| Single witness (recorded, not scored) | 7307 |
 | Exported type, not an operation | 153 |
-| Not compared | 415 |
-| Deliberately declined | 107 |
+| Not compared | 417 |
+| Deliberately declined | 105 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 366 | 10 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 416 | 50 |
+| Rust | standard-library source (rust-src component) | 1032 | 342 | 10 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 372 | 28 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 187 | 4 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 248 | 18 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 331 | 25 |
-| TypeScript | runtime introspection | 724 | 233 | 43 |
-| Ruby | runtime introspection | 1294 | 352 | 29 |
-| Elixir | runtime introspection | 1270 | 383 | 47 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 287 | 53 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 244 | 10 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 316 | 22 |
+| TypeScript | runtime introspection | 724 | 208 | 30 |
+| Ruby | runtime introspection | 1294 | 317 | 23 |
+| Elixir | runtime introspection | 1270 | 384 | 43 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 271 | 45 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 52 | 0 |
-| Python | runtime introspection | 2232 | 435 | 85 |
+| Python | runtime introspection | 1896 | 392 | 67 |
 
 ## Loss clusters
 
@@ -94,22 +94,20 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.files | 54 | #288 | building | live |
+| core.files | 39 | #288 | building | live |
 | core.tasks | 17 | #1468 | done | closed |
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
 | core.net | 9 | #1469 | done | closed |
-| core.sys | 9 | #1465 | done | closed |
-| Bytes | 8 | #1467 | done | closed |
 | core.crypto | 8 | #1725 | building | live |
 | core.log | 8 | #1474 | done | closed |
 | core.archive | 4 | #1470 | done | closed |
-| core.term | 3 | #1480 | done | closed |
 | core.regex | 3 | #1471 | done | closed |
 | core.net.tls | 2 | #1593 | ready | live |
 | Set | 2 | #1584 | done | closed |
-| core.process | 1 | #1590 | done | closed |
+| Bytes | 1 | #1467 | done | closed |
 | core.crypto.uuid | 1 | #1590 | done | closed |
+| core.process | 1 | #1590 | done | closed |
 | Map | 1 | #1477 | done | closed |
 | String | 1 | #1581 | done | closed |
 
@@ -132,7 +130,7 @@ No competitor surface records a container for these Core modules, so no
 row scores them. They are listed so the shortfall stays countable rather
 than invisible.
 
-`app`, `core.auth`, `core.web.browser`, `core.compiler`, `core.compute`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.compiler.lang`, `core.mem`, `core.mod`, `core.perf`, `core.plugin`, `core.game.raylib`, `core.reactive`, `core.reactive.loadable`, `core.units`, `core.mem.scope`, `core.services`, `core.data.sketch.cms`, `core.data.sketch.hll`, `core.data.sketch.reservoir`, `core.data.sketch.tdigest`, `core.compute.solve`, `core.ui`, `core.crypto.vault`, `core.crypto.expert`, `core.watcher`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.net.ws`
+`app`, `core.auth`, `core.compiler`, `core.compiler.lang`, `core.compute`, `core.compute.solve`, `core.crypto.vault`, `core.data.plot`, `core.data.sketch.cms`, `core.data.sketch.hll`, `core.data.sketch.reservoir`, `core.data.sketch.tdigest`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.game.raylib`, `core.mem.scope`, `core.mod`, `core.net.ws`, `core.perf`, `core.plugin`, `core.reactive`, `core.reactive.loadable`, `core.services`, `core.ui`, `core.units`, `core.watcher`, `core.web.browser`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`
 
 ## Consumer
 
