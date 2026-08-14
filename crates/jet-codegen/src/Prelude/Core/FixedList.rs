@@ -1,7 +1,7 @@
-/// D-FIXARR1 / I9: checked fixed-list indexing shared by every tier.
+/// D-FIXARR1 / I9: checked fixed-list indexing for unproven indexes.
 ///
-/// The getter is an adapter. Bounds selection and the error wording live here;
-/// an execution tier supplies only its storage read after the check succeeds.
+/// The getter is an adapter. Dynamic bounds selection and error wording live
+/// here; sema-proven fixed-list indexes use direct engine reads instead.
 #[derive(Clone, Copy, Debug)]
 pub struct JetFixedListIndexError {
     pub index: i64,

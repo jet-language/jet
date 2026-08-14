@@ -1470,18 +1470,6 @@ fn collect_semantic_items(
                         format!("{} range [{lower}, {upper}]", definition.name),
                     );
                 }
-                if let Some((invariant, span)) = &definition.invariant {
-                    push_front_end_fact(
-                        target,
-                        path,
-                        source,
-                        facts,
-                        "refinements",
-                        "refinement",
-                        *span,
-                        format!("{} invariant {invariant}", definition.name),
-                    );
-                }
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {

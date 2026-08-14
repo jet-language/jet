@@ -506,6 +506,20 @@ fn repl_function_declare_and_call() {
 }
 
 #[test]
+fn repl_range_fact_proves_fixed_list_index() {
+    let out = run_transcript(
+        &[
+            "Die :: distinct Int(1..6)",
+            "fn pick(faces: [String#6], roll: Die) => String { return faces[roll.raw() - 1] }",
+            "pick([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\"], Die.from_int(3))",
+        ],
+        None,
+    );
+    assert!(out.contains("two : String"), "REPL range proof failed: {out:?}");
+    assert!(!out.contains("E0965"), "REPL range proof emitted a bounds error: {out:?}");
+}
+
+#[test]
 fn repl_hard_reject_unsafe() {
     let out = run_transcript(&["#Unsafe { }"], None);
     assert!(

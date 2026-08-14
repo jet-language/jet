@@ -1713,10 +1713,6 @@ pub struct DistinctDef {
     /// Int(0..10)` provably holds `0..=10` (`..` inclusive, S22). `(lo, hi,
     /// span-of-the-`(lo..hi)`-clause)`.
     pub range: Option<(i64, i64, Span)>,
-    /// D-REFINE1: source predicate carried by `#Invariant("…")`. The proved
-    /// integer bounds also live in `range`; this preserves the applied rule for
-    /// formatter round trips.
-    pub invariant: Option<(String, Span)>,
     pub span: Span,
 }
 
@@ -1881,7 +1877,6 @@ impl UnitFamilyDef {
                     base: Type::Float,
                     base_span: member.name_span,
                     range: None,
-                    invariant: None,
                     span: member.name_span,
                 })
             })

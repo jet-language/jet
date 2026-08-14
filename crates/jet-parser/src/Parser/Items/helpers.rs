@@ -14,7 +14,3 @@ pub(super) fn format_version_segment(f: f64) -> String {
         format!("{s}.0")
     }
 }
-
-pub(super) fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
-    crate::Policy::parse_invariant_bounds(text)
-}

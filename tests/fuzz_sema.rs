@@ -137,8 +137,7 @@ fn run() {
         (
             "curated/refined_index".to_string(),
             r#"
-#Invariant("value >= 0 && value < 3")
-Index3 :: distinct Int
+Index3 :: distinct Int(0..2)
 
 fn pick(xs: [Int#3], i: Index3) => Int {
     return xs[i]
@@ -190,7 +189,7 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
         3 => format!("{src}\nfn _fuzz_id_{n}<T>(x: T) -> T {{\n    return x\n}}\n"),
         4 => format!("{src}\nfn _fuzz_fixed_{n}(xs: [Int#3]) -> Int {{\n    return xs[1]\n}}\n"),
         5 => format!(
-            "{src}\n#Invariant(\"value >= 0 && value < 3\")\n_FuzzIndex{n} :: distinct Int\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
+            "{src}\n_FuzzIndex{n} :: distinct Int(0..2)\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
         ),
         _ => format!(
             "{src}\nfn _fuzz_inc_{n}(x: Int) -> Int {{\n    return x + 1\n}}\nfn _fuzz_fixed_{n}() -> [Int#3] {{\n    return [_fuzz_inc_{n}(1), _fuzz_inc_{n}(2), _fuzz_inc_{n}(3)]\n}}\n"

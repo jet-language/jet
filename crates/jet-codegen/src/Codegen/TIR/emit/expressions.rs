@@ -283,13 +283,10 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 _ => unreachable!("Cell guard projection has one or two sema paths"),
             }
         }
-        THostCall::FixedListIndex { base, index, line } => {
+        THostCall::FixedListIndex { base, index, line: _line } => {
             let b = emit_tir_expr(base, cx);
-            let i = emit_tir_expr(index, cx);
-            jet_format!(
-                "{{ let {jet_prefix}fixed = &({b}); jet_fixed_list_index({jet_prefix}fixed.len(), ({i}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {line}, &{jet_prefix}error.message())) }}",
-                cx.file
-            )
+            let i = emit_proven_fixed_list_index(index, cx);
+            format!("(({b})[{i}].clone())")
         }
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
@@ -816,6 +813,18 @@ fn emit_zip_fill_value(raw: String, source: &Type, target: Option<&Type>, cx: &C
         }
     }
     format!("(({raw}) as {})", cx.rust_type(target))
+}
+
+fn emit_proven_fixed_list_index(index: &TExpr, cx: &Cx) -> String {
+    let rendered = emit_tir_expr(index, cx);
+    let scalar = match index.ty.without_user_tags() {
+        Type::Named(_) => format!("({rendered}).0"),
+        Type::Tagged { inner, .. } if matches!(inner.without_user_tags(), Type::Named(_)) => {
+            format!("({rendered}).0")
+        }
+        _ => rendered,
+    };
+    format!("({scalar} as usize)")
 }
 
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {

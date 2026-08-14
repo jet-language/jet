@@ -1,15 +1,15 @@
-// D-REFINE1: `#Invariant` refines a distinct Int through a pure linear bounds
-// proof. D-OOBPROOF1 lets fixed-size-list indexing use the carried proof.
-#Invariant("value >= 0 && value < 4") Index4 :: distinct Int
+// D-TYPE2-REFINE1: one interval fact feeds the fixed-list index prover.
+// D-OOBPROOF1 proves `faces[roll.raw() - 1]` without a runtime bounds check.
+Die :: distinct Int(1..6)
 
-fn pick(xs: [String#4], i: Index4) => String :: ~xs[i]
+fn pick(faces: [String#6], roll: Die) => String :: ~faces[roll.raw() - 1]
 
-fn checked(raw: Int) => Index4 ? String :: Ok(Index4.from_int(raw)?)
+fn checked(raw: Int) => Die ? String :: Ok(Die.from_int(raw)?)
 
 fn run() {
-    idx :: Index4.from_int(2)
-    words :: [String#4].{"zero", "one", "two", "three"}
-    print(pick(words, idx))
-    from_runtime :: checked(3) ?? Index4.from_int(0)
-    print(pick(words, from_runtime))
+    roll :: Die.from_int(3)
+    faces :: [String#6].{"zero", "one", "two", "three", "four", "five"}
+    print(pick(faces, roll))
+    from_runtime :: checked(4) ?? Die.from_int(1)
+    print(pick(faces, from_runtime))
 }

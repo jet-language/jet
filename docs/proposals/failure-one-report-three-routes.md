@@ -461,7 +461,7 @@ fn charge(cents: Int(1..)) {
 }
 ```
 
-This is the same move D-TYPE2-REFINE1 already made for `#Invariant`: proof
+This is the same move D-TYPE2-REFINE1 already made for range facts: proof
 first, check as the fallback. The three constraint layers now compose by
 attribution instead of colliding.
 

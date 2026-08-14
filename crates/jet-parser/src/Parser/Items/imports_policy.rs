@@ -1141,9 +1141,7 @@ impl<'a> Parser<'a> {
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                     TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                     TokKind::KwImpl => self.impl_or_error_conv(),
-                    TokKind::Hash
-                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_INVARIANT)
-                            || self.at_bundle_distinct_def() =>
+                    TokKind::Hash if self.at_bundle_distinct_def() =>
                     {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
                         self.distinct_def(is_pub, is_package_pub)

@@ -2121,7 +2121,6 @@ mod tests {
                 base: Type::Int,
                 base_span: span(),
                 range: Some((0, 10, span())),
-                invariant: None,
                 span: span(),
             },
             "main",

@@ -2924,8 +2924,9 @@ result :: [Int#3].{2, 4, 6};
 - Destructuring a `[T#N]` with the wrong number of names is **E0963**.
 - Calling `push`, `pop`, `insert`, `remove`, or `clear` on a `[T#N]` is **E0964**.
 - A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
-- A `distinct Int` with `#Invariant("value >= lo && value < hi")` may index a
-  `[T#N]` without a runtime bounds check when `lo >= 0` and `hi < N`.
+- A range fact on `distinct Int(lo..hi)` may index a `[T#N]` without a runtime
+  bounds check when `lo >= 0` and `hi < N`. Sized integer interval facts use
+  the same prover.
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
 

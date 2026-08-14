@@ -131,12 +131,12 @@ fn collect_items(graph: &mut PolicyFactGraph, items: &[Item]) {
                     graph.record(
                         PolicyDomain::Refinement,
                         def.name.clone(),
-                        format!("#Invariant / range proves value in {lo}..{hi}"),
+                        format!("range fact proves value in {lo}..{hi}"),
                     );
                     graph.record(
                         PolicyDomain::Bounds,
                         def.name.clone(),
-                        "range-refined distinct feeds D-OOBPROOF1 fixed-list indexing",
+                        "interval fact feeds D-OOBPROOF1 fixed-list indexing",
                     );
                 }
             }
@@ -208,11 +208,11 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
             );
         }
     }
-    if func_has_fixed_list_param(func) && func_has_named_index_param(func) {
+    if func_has_fixed_list_param(func) && func_has_interval_index_param(func) {
         graph.record(
             PolicyDomain::Bounds,
             func.name.clone(),
-            "fixed-list param + refined index param share D-OOBPROOF1 facts",
+            "fixed-list param + interval index param share D-OOBPROOF1 facts",
         );
     }
 }
@@ -223,8 +223,8 @@ fn func_has_fixed_list_param(func: &Func) -> bool {
         .any(|param| matches!(param.ty, Type::FixedList { .. }))
 }
 
-fn func_has_named_index_param(func: &Func) -> bool {
+fn func_has_interval_index_param(func: &Func) -> bool {
     func.params
         .iter()
-        .any(|param| matches!(param.ty, Type::Named(_)))
+        .any(|param| matches!(param.ty, Type::Named(_) | Type::IntN { .. }))
 }

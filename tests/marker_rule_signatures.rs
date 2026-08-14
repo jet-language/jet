@@ -463,11 +463,9 @@ fn run() {}
 fn static_string_products_resolve_before_consumers() {
     let source = r#"
 @label :: "shared"
-@invariant :: "value >= 0 && value < 4"
 @page :: "index.html"
 #HTML(@page)
-#Invariant(@invariant)
-Tiny :: distinct Int
+Tiny :: distinct Int(0..3)
 #Test(@label) {}
 #Bench(@label) {}
 fn run() {}
@@ -505,7 +503,6 @@ fn run() {}
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
         "@value :: 42\n#HTML(value)\nfn run() {}",
-        "@value :: 42\n#Invariant(value)\nTiny :: distinct Int\nfn run() {}",
         "@value :: 42\n#Test(value) {}\nfn run() {}",
         "@value :: 42\n#Bench(value) {}\nfn run() {}",
     ] {
@@ -561,7 +558,6 @@ fn run() {}
 fn static_string_products_reject_nonstatic_expressions_once() {
     for source in [
         "#HTML(runtime_name)\nfn run() {}",
-        "#Invariant(runtime_name)\nTiny :: distinct Int\nfn run() {}",
         "#Test(runtime_name) {}\nfn run() {}",
         "#Bench(runtime_name) {}\nfn run() {}",
     ] {
@@ -578,24 +574,35 @@ fn static_string_products_reject_nonstatic_expressions_once() {
 }
 
 #[test]
-fn resolved_invariant_text_keeps_domain_validation() {
-    let diagnostics = codes(
+fn invariant_marker_is_retired_in_favor_of_range_types() {
+    let source = "#Invariant(\"value >= 0 && value < 4\") Index4 :: distinct Int\nfn run() {}";
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    let diagnostics = jet::Parser::parse(&tokens).expect_err("retired marker must not parse");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0927"
+            && diagnostic.what.contains("#Invariant")
+            && diagnostic.fix.contains("distinct Int(lo..hi)")
+    }), "{diagnostics:?}");
+}
+
+#[test]
+fn sized_and_named_range_failures_share_the_index_error_shape() {
+    let diagnostics = diagnostics(
         r#"
-@invariant :: "value != 3"
-#Invariant(@invariant)
-Tiny :: distinct Int
+Die :: distinct Int(1..6)
+fn sized(faces: [Int#6], index: U8) => Int { return faces[index] }
+fn named(faces: [Int#6], index: Die) => Int { return faces[index] }
 fn run() {}
 "#,
     );
-    assert_eq!(
-        diagnostics
-            .iter()
-            .filter(|code| code.as_str() == "E0003")
-            .count(),
-        1,
-        "{diagnostics:?}"
-    );
-    assert!(!diagnostics.iter().any(|code| code == "E0930"));
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0965")
+        .collect();
+    assert_eq!(errors.len(), 2, "{diagnostics:?}");
+    assert_eq!(errors[0].why, errors[1].why, "{diagnostics:?}");
+    assert_eq!(errors[0].fix, errors[1].fix, "{diagnostics:?}");
 }
 
 #[test]

@@ -356,6 +356,27 @@ impl JetArena {
         }
     }
 
+    /// Read a sema-proven fixed-list integer slot. This path has no user-facing
+    /// bounds check; an invalid carrier is an internal compiler/runtime fault.
+    pub fn list_get_int_proven(&self, list: i64, index: i64) -> i64 {
+        let value = match self.values.get(list as usize) {
+            Some(JetVal::List(values)) => &values[index as usize],
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let index = uninit_semantics::jet_uninit_read(initialized, index as usize)
+                    .expect("proven fixed-list read of uninitialized slot");
+                &values[index]
+            }
+            _ => panic!("proven fixed-list read of a non-list carrier"),
+        };
+        match value {
+            JetVal::Int(value) => *value,
+            _ => panic!("proven fixed-list integer read of a non-integer slot"),
+        }
+    }
+
     /// Clone one string handle from a homogeneous `[String]` list. JIT host
     /// adapters use this to marshal lists into shared Prelude functions;
     /// numeric list storage remains unchanged because string handles are the
@@ -396,6 +417,26 @@ impl JetArena {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// Read a sema-proven fixed-list float slot without a language bounds check.
+    pub fn list_get_float_proven(&self, list: i64, index: i64) -> f64 {
+        let value = match self.values.get(list as usize) {
+            Some(JetVal::List(values)) => &values[index as usize],
+            Some(JetVal::UninitList {
+                values,
+                initialized,
+            }) => {
+                let index = uninit_semantics::jet_uninit_read(initialized, index as usize)
+                    .expect("proven fixed-list read of uninitialized slot");
+                &values[index]
+            }
+            _ => panic!("proven fixed-list read of a non-list carrier"),
+        };
+        match value {
+            JetVal::Float(value) => *value,
+            _ => panic!("proven fixed-list float read of a non-float slot"),
         }
     }
 

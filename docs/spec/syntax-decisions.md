@@ -2648,8 +2648,8 @@ compiler-extension API (D-DX5-HOOK1) and not PATH `jet-*` helpers (D-DX5).
 **D-NOSTD1**: no `no_std` flag — the std baseline follows the typed platform
 `target:` (bare-metal ⇒ no-std).
 **D-OOBPROOF1**: bounds-check elision is proof-carrying: a fixed-list index
-whose distinct-`Int` invariant fits `0..N-1` lowers without the runtime bounds
-helper; other dynamic indexes keep the check.
+whose interval fact fits `0..N-1` lowers without the runtime bounds helper;
+other dynamic indexes keep the check.
 
 **D-DX5-HOOK1=A — compiler-extension v1 boundary** *(ratified 2026-07-14,
 card #549)*: the optional formal compiler-extension API's first hook is a
@@ -6254,9 +6254,9 @@ The range becomes an interval fact on the plane registry. The prover for
 fixed-list indexing consumes interval facts instead of parsed strings. The marker
 row retires under law zero with a replacement note.
 
-The `#Invariant` row remains only as a migration anchor until implementation
-card #1548 removes its parser and sema references. Its removal and any UI or
-formatter snapshot updates are owed to #1548.
+Implementation card #1548 removes the parser and sema references. The registry
+row remains retired as a migration anchor, and all active examples, UI, and
+formatter consumers use the direct range spelling.
 
 Amends: D-RANGETYPE1, D-REFINE1, and D-VERDICT-1455-1. Replacement: use
 `distinct Int(lo..hi)` for a named range and `Int(lo..hi)` inline.

@@ -457,6 +457,24 @@ impl TypeRegistry {
         }
     }
 
+    /// D-TYPE2-REFINE1: project one integer interval from the shared knowledge
+    /// vector. Plain `Int` is deliberately not a proof: its full domain needs
+    /// the ordinary runtime index check.
+    pub(crate) fn integer_interval(&self, ty: &Type) -> Option<(i128, i128)> {
+        let ty = ty.without_user_tags();
+        match ty {
+            Type::IntN { .. } => ty.integer_range(),
+            Type::Named(name) => {
+                let base = self.distinct_base(name)?;
+                base.is_integer()
+                    .then(|| self.distinct_range(name))
+                    .flatten()
+                    .map(|(lo, hi)| (i128::from(lo), i128::from(hi)))
+            }
+            _ => None,
+        }
+    }
+
     /// D-CAPBUNDLE1: true when the distinct type has `#Comparable`.
     pub(crate) fn distinct_is_comparable(&self, name: &str) -> bool {
         matches!(

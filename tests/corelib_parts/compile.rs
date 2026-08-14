@@ -1,31 +1,30 @@
 #[test]
-fn invariant_refinement_proves_fixed_array_index() {
+fn range_interval_proves_fixed_array_index() {
     let src = r#"
 tag Checked { deny: [Net] }
-#Invariant("value >= 0 && value < 4")
-Index4 :: distinct Int
+Die :: distinct Int(1..6)
 
-fn pick(xs: [Int#4], i: Index4) => Int {
-    return xs[i]
+fn pick(faces: [String#6], roll: Die) => String {
+    return faces[roll.raw() - 1]
 }
 
 fn run() {
-    values :: [Int#4].{ 0, 1, 2, 3 }
-    print(pick(values, Index4.from_int(2)))
-    print(pick(values, #Checked Index4.from_int(0)))
+    faces :: [String#6].{ "zero", "one", "two", "three", "four", "five" }
+    print(pick(faces, Die.from_int(3)))
+    print(pick(faces, #Checked Die.from_int(1)))
 }
 "#;
     let dir = std::env::temp_dir().join(format!(
-        "jet_corelib_refinement_index_{}",
+        "jet_corelib_range_interval_index_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let (code, aot_stdout, stderr) = build_and_run(&dir, "refinement_index", src, &[], None);
+    let (code, aot_stdout, stderr) = build_and_run(&dir, "range_interval_index", src, &[], None);
     assert_eq!(code, 0, "fixed-list AOT failed: {stderr}");
-    assert_eq!(aot_stdout, "2\n0\n");
+    assert_eq!(aot_stdout, "two\nzero\n");
 
-    let path = dir.join("refinement_index.jet");
+    let path = dir.join("range_interval_index.jet");
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
             jet_jit::reset_jit_trace_for_test();
@@ -63,23 +62,22 @@ fn run() {
     let web_src = r#"
 #Target(Web)
 tag Checked { deny: [Net] }
-#Invariant("value >= 0 && value < 4")
-Index4 :: distinct Int
+Die :: distinct Int(1..6)
 
 #Target(JS)
-fn pick(xs: [Int#4], i: Index4) => Int {
-    return xs[i]
+fn pick(faces: [String#6], roll: Die) => String {
+    return faces[roll.raw() - 1]
 }
 
 #Target(JS)
 fn run() {
-    values :: [Int#4].{ 0, 1, 2, 3 }
-    print(pick(values, Index4.from_int(2)))
-    print(pick(values, #Checked Index4.from_int(0)))
+    faces :: [String#6].{ "zero", "one", "two", "three", "four", "five" }
+    print(pick(faces, Die.from_int(3)))
+    print(pick(faces, #Checked Die.from_int(1)))
 }
 "#;
-    if let Some(web_stdout) = run_web_js_source(&dir, "refinement_index_web", web_src) {
-        assert_eq!(web_stdout, "2\n0\n");
+    if let Some(web_stdout) = run_web_js_source(&dir, "range_interval_index_web", web_src) {
+        assert_eq!(web_stdout, "two\nzero\n");
     }
     let _ = fs::remove_dir_all(&dir);
 }

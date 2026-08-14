@@ -365,6 +365,14 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
              }",
             "view_sum([10, 20, 30])",
         ),
+        (
+            "range-fixed-index",
+            "Die :: distinct Int(1..6)\n\
+             fn pick(faces: [Int#6], roll: Die) => Int {\n\
+                 return faces[roll.raw() - 1]\n\
+             }",
+            "pick([0, 1, 2, 3, 4, 5], Die.from_int(3))",
+        ),
     ];
     for (index, (name, preamble, expression)) in cases.iter().enumerate() {
         check_aot_comptime(index, name, preamble, expression);

@@ -2423,7 +2423,8 @@ pub enum THostCall {
         editable: bool,
         edit_paths_disjoint: bool,
     },
-    /// Checked fixed-list index through `jet_fixed_list_index`.
+    /// D-OOBPROOF1: sema-proved fixed-list index. Each engine performs a
+    /// direct read; the checked helper remains for unproven indexing.
     FixedListIndex {
         base: Box<TExpr>,
         index: Box<TExpr>,

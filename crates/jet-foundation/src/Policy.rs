@@ -1433,58 +1433,6 @@ pub fn marker_argument_unknown_variant(
     )
 }
 
-pub fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
-    let mut lo = i64::MIN;
-    let mut hi = i64::MAX;
-    let mut saw = false;
-    for raw in text.split("&&") {
-        let clause = raw.trim();
-        if clause.is_empty() {
-            return None;
-        }
-        let (new_lo, new_hi) = parse_invariant_clause(clause)?;
-        lo = lo.max(new_lo);
-        hi = hi.min(new_hi);
-        saw = true;
-    }
-    (saw && lo != i64::MIN && hi != i64::MAX).then_some((lo, hi))
-}
-
-fn parse_invariant_clause(clause: &str) -> Option<(i64, i64)> {
-    for op in ["<=", ">=", "==", "<", ">"] {
-        if let Some((left, right)) = clause.split_once(op) {
-            let left = left.trim();
-            let right = right.trim();
-            return match (left == "value", right == "value") {
-                (true, false) => {
-                    let n = right.parse::<i64>().ok()?;
-                    match op {
-                        ">=" => Some((n, i64::MAX)),
-                        ">" => n.checked_add(1).map(|value| (value, i64::MAX)),
-                        "<=" => Some((i64::MIN, n)),
-                        "<" => n.checked_sub(1).map(|value| (i64::MIN, value)),
-                        "==" => Some((n, n)),
-                        _ => None,
-                    }
-                }
-                (false, true) => {
-                    let n = left.parse::<i64>().ok()?;
-                    match op {
-                        "<=" => Some((n, i64::MAX)),
-                        "<" => n.checked_add(1).map(|value| (value, i64::MAX)),
-                        ">=" => Some((i64::MIN, n)),
-                        ">" => n.checked_sub(1).map(|value| (i64::MIN, value)),
-                        "==" => Some((n, n)),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
 #[path = "Policy/MarkerSource.rs"]
 mod MarkerSource;
 

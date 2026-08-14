@@ -1,5 +1,4 @@
 use super::super::{Diagnostic, Parser, Span, StrTokPart, Syntax, TokKind, describe};
-use super::helpers::parse_invariant_bounds;
 
 impl<'a> Parser<'a> {
         // --- statements ------------------------------------------------------
@@ -70,8 +69,6 @@ impl<'a> Parser<'a> {
             // D-CAPBUNDLE1: zero or more stacked bundle markers (retired `#`
             // spelling on any of them teaches E0062).
             let mut derives = Vec::new();
-            let mut invariant_range = None;
-            let mut invariant = None;
             let mut type_markers = Vec::new();
             let mut marker_count = 0usize;
             loop {
@@ -85,13 +82,6 @@ impl<'a> Parser<'a> {
                 }
                 marker_count += 1;
                 let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Type)?;
-                if marker.name == Syntax::MARKER_INVARIANT {
-                    let (bounds, span, text) = self.parse_invariant_range(marker.clone())?;
-                    invariant_range = bounds.map(|(lo, hi)| (lo, hi, span));
-                    invariant = text.map(|text| (text, span));
-                    type_markers.push(marker);
-                    continue;
-                }
                 if marker.name == Syntax::MARKER_NUMERIC
                     || marker.name == Syntax::MARKER_BUNDLE_COMPARABLE
                     || marker.name == Syntax::MARKER_BUNDLE_PRINTABLE
@@ -239,7 +229,7 @@ impl<'a> Parser<'a> {
                 }
                 Some((lo, hi, range_span))
             } else {
-                invariant_range
+                None
             };
             self.expect(TokKind::Semi, "after a distinct type declaration")?;
             let end = self.toks[self.pos - 1].span.end;
@@ -262,7 +252,6 @@ impl<'a> Parser<'a> {
                 base,
                 base_span,
                 range,
-                invariant,
                 span,
             })
         }
@@ -286,48 +275,6 @@ impl<'a> Parser<'a> {
                     "a range constraint's bounds are literal whole numbers".to_string(),
                     "write a plain integer, e.g. `0..10`".to_string(),
                     Some(self.peek().span),
-                )),
-            }
-        }
-    
-        /// D-REFINE1: first shipped `#Invariant` prover accepts a quoted linear
-        /// integer range over the reserved value name:
-        /// `#Invariant("value >= 0 && value < 4")`.
-        pub(in crate::Parser) fn parse_invariant_range(
-            &mut self,
-            marker: crate::AST::Marker,
-        ) -> Result<(Option<(i64, i64)>, Span, Option<String>), Diagnostic> {
-            let arguments = self.bound_registered_rule_arguments(&marker)?;
-            let Some(invariant) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_INVARIANT, marker.span));
-            };
-            let text = match invariant {
-                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(text) => Some(text.clone()),
-                    crate::AST::StrPart::Interp(..) => None,
-                },
-                _ => None,
-            };
-            let span = marker.span;
-            let text_span = marker.args[0].span();
-            let Some(text) = text else {
-                return Ok((None, span, None));
-            };
-            match parse_invariant_bounds(&text) {
-                Some((lo, hi)) if lo <= hi => Ok((Some((lo, hi)), span, Some(text))),
-                Some((lo, hi)) => Err(Diagnostic::error(
-                    "E0137",
-                    format!("this invariant range is empty — {} is after {}", lo, hi),
-                    "a refinement's low bound must not be greater than its high bound".to_string(),
-                    "fix the `#Invariant` bounds".to_string(),
-                    Some(text_span),
-                )),
-                None => Err(Diagnostic::error(
-                    "E0003",
-                    "`#Invariant` only supports linear integer bounds over `value`".to_string(),
-                    "the first D-REFINE1 prover accepts comparisons joined with `&&`".to_string(),
-                    "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`".to_string(),
-                    Some(span),
                 )),
             }
         }

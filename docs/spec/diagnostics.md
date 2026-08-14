@@ -662,7 +662,7 @@ renumbered, and no new `W` code may be allocated.
 | E0961 | parse | member spread `.[…]` entry is not a bare identifier (D-SPREAD1) |
 | E0963 | sema  | fixed-size list length is not a computable integer (D-META-CONST1/S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
-| E0965 | sema  | compile-time or refinement-proven index out of range on `[T#N]` (S76, D-REFINE1) |
+| E0965 | sema  | compile-time or interval-proven index out of range on `[T#N]` (S76, D-TYPE2-REFINE1) |
 | E1310 | parse/sema | variadic parameter not last, or variadic param has a default (D-VARIADIC1) |
 | E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
 | E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
@@ -1055,7 +1055,7 @@ parse error.
 | E0961 | A member-spread list entry is not a bare name. | `prefix.[a, b]` only expands field or package names off the prefix — calls and expressions are not members. | Write bare names like `default.[cargo, ripgrep]`. |
 | E0963 | A fixed-size list length must be known at compile time, must be an integer, and must fit the target's array-size representation. | A fixed-size list needs one known number of elements; destructuring must then name exactly that many elements. | Use a literal, a same-file `@` binding, or another comptime expression that produces an in-range integer. |
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change. |
-| E0965 | An index is out of range for a `[T#N]` at compile time. | Literal indexes and `#Invariant`-refined distinct indexes must fit 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, widen to `[T]` for runtime checking, or tighten the refinement invariant. |
+| E0965 | An index interval is out of range for a `[T#N]` at compile time. | Literal indexes and interval facts must fit 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, widen to `[T]` for runtime checking, or tighten the range. |
 
 ## Variadic and spread diagnostics (D-VARIADIC1)
 

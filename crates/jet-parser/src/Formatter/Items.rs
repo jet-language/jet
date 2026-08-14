@@ -458,14 +458,12 @@ impl<'a> Fmt<'a> {
         self.write(&d.name);
         self.write(" :: distinct ");
         self.fmt_type(&d.base);
-        if d.invariant.is_none() {
-            if let Some((low, high, _)) = d.range {
-                self.write("(");
-                self.write(&low.to_string());
-                self.write("..");
-                self.write(&high.to_string());
-                self.write(")");
-            }
+        if let Some((low, high, _)) = d.range {
+            self.write("(");
+            self.write(&low.to_string());
+            self.write("..");
+            self.write(&high.to_string());
+            self.write(")");
         }
     }
 

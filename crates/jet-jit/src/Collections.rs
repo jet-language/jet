@@ -797,42 +797,12 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     })
 }
 
-extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt
-            .heap
-            .list_len(list)
-            .expect("jit fixed-list index: bad handle");
-        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
-            rt.heap.list_get_int(list, position as i64).unwrap_or_default()
-        }) {
-            Ok(value) => value,
-            Err(error) => {
-                rt.set_runtime_stop("E3010", line, &error.message());
-                0
-            }
-        }
-    })
+extern "C" fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int_proven(list, idx))
 }
 
-extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt
-            .heap
-            .list_len(list)
-            .expect("jit fixed-list index f64: bad handle");
-        match jet_codegen::fixed_list::jet_fixed_list_index(len as usize, idx, |position| {
-            rt.heap
-                .list_get_float(list, position as i64)
-                .unwrap_or_default()
-        }) {
-            Ok(value) => value,
-            Err(error) => {
-                rt.set_runtime_stop("E3010", line, &error.message());
-                0.0
-            }
-        }
-    })
+extern "C" fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.list_get_float_proven(list, idx))
 }
 
 fn jet_jit_list_get_range(list: i64, idx: i64, line: u32) -> (i64, i64, bool) {

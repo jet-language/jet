@@ -3930,14 +3930,20 @@ fn wasm_emit_expr(
             TIR::THostCall::FixedListIndex {
                 base,
                 index,
-                line,
+                line: _line,
             } => {
                 let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
-                let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
-                let file = mangle_generated("source_file");
-                jet_format!(
-                    "{{ let {jet_prefix}fixed = ({base}); jet_fixed_list_index({jet_prefix}fixed.len(), ({index}).0, |{jet_prefix}i| {jet_prefix}fixed[{jet_prefix}i].clone()).unwrap_or_else(|{jet_prefix}error| jet_arithmetic_stop({file}, {line}, &{jet_prefix}error.message())) }}"
-                )
+                let rendered_index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
+                let index = match index.ty.without_user_tags() {
+                    Type::Named(_) => format!("({rendered_index}).0"),
+                    Type::Tagged { inner, .. }
+                        if matches!(inner.without_user_tags(), Type::Named(_)) =>
+                    {
+                        format!("({rendered_index}).0")
+                    }
+                    _ => rendered_index,
+                };
+                format!("(({base})[({index} as usize)].clone())")
             }
             _ => return Err(()),
         },
@@ -5567,13 +5573,11 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             TIR::THostCall::FixedListIndex {
                 base,
                 index,
-                line,
+                line: _line,
             } => format!(
-                "jet_fixed_list_index({}, {}, {}, {})",
+                "({})[Number({})]",
                 tir_js_expr(base, funcs, file_prefix)?,
                 tir_js_expr(index, funcs, file_prefix)?,
-                mangle_generated("source_file"),
-                line
             ),
             _ => return Err(()),
         },

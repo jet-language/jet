@@ -541,8 +541,7 @@ fn public_build_product() {
 fn static_guarantees_shared_engine() {
     // FEATURE_CLAIM: claim.static-guarantees / shared-facts-engine
     let src = r#"
-#Invariant("value >= 0 && value < 4")
-Index4 :: distinct Int
+Die :: distinct Int(1..6)
 
 #[Pre(n >= 0, "n non-negative"), Post(result >= 0, "result non-negative")]
 fn absish(n: Int) => Int {
@@ -561,15 +560,15 @@ fn stamp(path: String) =[FS]=> String ? {
     return path
 }
 
-fn pick(xs: [String#4], i: Index4) => String {
-    return xs[i]
+fn pick(faces: [String#6], roll: Die) => String {
+    return faces[roll.raw() - 1]
 }
 
 fn run() {
     dirty :: #Input "x"
     safe := clean(dirty)
-    words :: [String#4].{ "a", "b", "c", "d" }
-    print(pick(words, Index4.from_int(1)))
+    faces :: [String#6].{ "a", "b", "c", "d", "e", "f" }
+    print(pick(faces, Die.from_int(1)))
     print(absish(3))
     print(add(1, 2))
     print(safe)
@@ -595,8 +594,8 @@ fn run() {
 
     // Existing verticals still ship through the same engine surface.
     assert!(
-        read("examples/features/types/refinements.jet").contains("#Invariant"),
-        "I5 refinements example must remain"
+        read("examples/features/types/refinements.jet").contains("distinct Int("),
+        "I5 range refinements example must remain"
     );
     assert!(
         read("examples/features/contracts/pre_post.jet").contains("#Pre"),

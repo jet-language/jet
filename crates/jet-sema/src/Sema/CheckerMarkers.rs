@@ -614,42 +614,9 @@ pub(crate) fn resolve_static_rule_products(
             }
         }
     }
-    for (name, marker_span, text) in &static_strings {
+    for (name, _marker_span, text) in &static_strings {
         match name.as_str() {
             Syntax::MARKER_HTML => module.html_path = Some(text.clone()),
-            Syntax::MARKER_INVARIANT => {
-                if let Some(crate::AST::Item::Distinct(distinct)) = module
-                    .items
-                    .iter_mut()
-                    .find(|item| matches!(item, crate::AST::Item::Distinct(distinct)
-                        if distinct.span.start <= marker_span.start && marker_span.end <= distinct.span.end))
-                {
-                    match crate::Policy::parse_invariant_bounds(text) {
-                        Some((lo, hi)) if lo <= hi => {
-                            distinct.range = Some((lo, hi, *marker_span));
-                            distinct.invariant = Some((text.clone(), *marker_span));
-                        }
-                        Some((lo, hi)) => diags.push(Diagnostic::error(
-                            "E0137",
-                            format!("this invariant range is empty — {lo} is after {hi}"),
-                            "a refinement's low bound must not be greater than its high bound"
-                                .to_string(),
-                            "fix the `#Invariant` bounds".to_string(),
-                            Some(*marker_span),
-                        )),
-                        None => diags.push(Diagnostic::error(
-                            "E0003",
-                            "`#Invariant` only supports linear integer bounds over `value`"
-                                .to_string(),
-                            "the first D-REFINE1 prover accepts comparisons joined with `&&`"
-                                .to_string(),
-                            "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`"
-                                .to_string(),
-                            Some(*marker_span),
-                        )),
-                    }
-                }
-            }
             _ => {}
         }
     }

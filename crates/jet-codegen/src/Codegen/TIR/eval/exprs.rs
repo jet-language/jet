@@ -6516,12 +6516,7 @@ impl<'a> EvalCtx<'a> {
                     let b = self.eval_expr_child(base, scope)?;
                     let idx = as_int(&self.eval_expr_child(index, scope)?, self.span())?;
                     match b {
-                        CtValue::List(xs) => crate::fixed_list::jet_fixed_list_index(
-                            xs.len(),
-                            idx,
-                            |position| xs[position].clone(),
-                        )
-                        .map_err(|error| unsupported(&error.message(), self.span())),
+                        CtValue::List(xs) => Ok(xs[idx as usize].clone()),
                         other => {
                             if let Some(r) =
                                 crate::Comptime::MathLayout::lane_at(&other, idx, self.span())

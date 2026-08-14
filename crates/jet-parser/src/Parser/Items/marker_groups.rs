@@ -1635,12 +1635,6 @@ impl<'a> Parser<'a> {
                                 d.derives
                                     .push((crate::Generics::DECODE.to_string(), marker.name_span));
                             }
-                            Syntax::MARKER_INVARIANT => {
-                                let (bounds, span, text) =
-                                    self.parse_invariant_range(marker)?;
-                                d.range = bounds.map(|(low, high)| (low, high, span));
-                                d.invariant = text.map(|text| (text, span));
-                            }
                             _ => {}
                         }
                     }

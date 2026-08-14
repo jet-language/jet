@@ -111,7 +111,7 @@ Every row below is a compile-time fact attached to a carrier. No two rows share 
 |---|---|---|---|
 | 1 | Dimensions | exponent map serialized into a string inside `\0Quantity` (`types.rs:621`) | type-level data smuggled as text |
 | 2 | Ranges | `distinct Int(0..10)` (D-RANGETYPE1) | overlaps 3 and 4 |
-| 3 | Invariants | `#Invariant("value >= 0 && value < 4")` string parser (D-REFINE1) | second spelling of 2; prover is interval-only anyway |
+| 3 | Invariants | retired `#Invariant` row; direct range fact in `Type.Interval` (D-TYPE2-REFINE1) | second spelling of 2; the old string parser added no knowledge |
 | 4 | Fixed widths | `IntN{signed,bits}` + hand-written `int_range` containment | secretly a range fact plus layout |
 | 5 | Lengths | `FixedList{len: u64, len_expr}` resolved by the ordinary comptime evaluator | one of four compile-time-number encodings |
 | 6 | Shapes | `\0compute.dimension.N` string-encoded `Named` for `Vec<N>`/`Matrix<M,N>` | second encoding |
@@ -160,7 +160,7 @@ Three consequences, each an "of course" once seen:
 The ratified widening law — value-set containment — is not a table; it is the trivial theorem
 "a subset needs no conversion". `sensor: U8 = 300` fails for exactly the same reason
 `severity: Severity = 300` fails on `distinct Int(0..10)`. One prover: interval facts. It replaces
-`numeric_widening_to`, `int_range`, the D-RANGETYPE1 checks, the `#Invariant` string parser, and
+`numeric_widening_to`, `int_range`, the D-RANGETYPE1 checks, the retired `#Invariant` string parser, and
 the fixed-list index proof — five mechanisms today, one in v2. Surface unchanged: `U8` still reads `U8`.
 
 **2. The operator slate was one decision made nine times.** Every rule ratified on 2026-08-05 is
@@ -255,7 +255,7 @@ three things:
   completing what D-QUANTITY-PRINT1 already did for printing.
 
 ### Interval plane — algebra: interval arithmetic on measures
-One refinement story: `Severity :: distinct Int(0..10)`. The `#Invariant("...")` string form retires —
+One refinement story: `Severity :: distinct Int(0..10)`. The `#Invariant("...")` string form is retired —
 the prover is interval-only today, so the string spelling provably adds nothing but a parser.
 Sized widths sit here too (above) for *checking and conversion*: the same interval facts drive
 containment widening and fit errors. Their *arithmetic* contracts do not change: a `distinct`

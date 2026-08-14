@@ -3370,6 +3370,63 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-TYPE2-REFINE1/D-OOBPROOF1: fold the interval known for an index
+    /// expression. The interval comes from the existing type knowledge vector;
+    /// arithmetic only widens it, so a proof can never claim fewer values than
+    /// the expression may produce.
+    fn proven_integer_interval(&self, expr: &Expr) -> Option<(i128, i128)> {
+        match expr {
+            Expr::Int(value, _, _, _) => {
+                let value = i128::from(*value);
+                Some((value, value))
+            }
+            Expr::Paren(inner, _) => self.proven_integer_interval(inner),
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .and_then(|local| self.registry.integer_interval(&local.ty)),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if method == "raw" && args.is_empty() => {
+                self.proven_integer_interval(receiver)
+            }
+            Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                let (lo, hi) = self.proven_integer_interval(inner)?;
+                Some((hi.checked_neg()?, lo.checked_neg()?))
+            }
+            Expr::Binary(op, lhs, rhs, _) => {
+                let (left_lo, left_hi) = self.proven_integer_interval(lhs)?;
+                let (right_lo, right_hi) = self.proven_integer_interval(rhs)?;
+                match op {
+                    crate::AST::BinOp::Add => Some((
+                        left_lo.checked_add(right_lo)?,
+                        left_hi.checked_add(right_hi)?,
+                    )),
+                    crate::AST::BinOp::Sub => Some((
+                        left_lo.checked_sub(right_hi)?,
+                        left_hi.checked_sub(right_lo)?,
+                    )),
+                    crate::AST::BinOp::Mul => {
+                        let products = [
+                            left_lo.checked_mul(right_lo)?,
+                            left_lo.checked_mul(right_hi)?,
+                            left_hi.checked_mul(right_lo)?,
+                            left_hi.checked_mul(right_hi)?,
+                        ];
+                        Some((
+                            *products.iter().min()?,
+                            *products.iter().max()?,
+                        ))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn infer_index(
         &mut self,
         base: &mut Box<Expr>,
@@ -3435,44 +3492,7 @@ impl<'a> Checker<'a> {
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
             Type::FixedList { elem, len, .. } => {
                 *kind = IndexKind::List;
-                if index_value_ty != &Type::Int {
-                    if let Type::Named(name) = index_value_ty {
-                        if let Some((lo, hi)) = self.registry.distinct_range(name) {
-                            let base_is_int =
-                                matches!(self.registry.distinct_base(name), Some(Type::Int));
-                            if base_is_int && lo >= 0 && (hi as u64) < *len {
-                                *kind = IndexKind::FixedListProof;
-                                return Some((**elem).clone());
-                            }
-                            self.diags.push(Diagnostic::error(
-                                "E0965",
-                                format!(
-                                    "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
-                                    name, lo, hi
-                                ),
-                                format!(
-                                    "this `[T#{}]` value only has proven indexes 0 through {}",
-                                    len,
-                                    len.saturating_sub(1)
-                                ),
-                                "use a refinement whose invariant fits the list length".to_string(),
-                                Some(index.span()),
-                            ));
-                            return Some((**elem).clone());
-                        }
-                    }
-                    self.diags.push(Diagnostic::error(
-                        "E0505",
-                        format!(
-                            "list indexes must be {}, not {}",
-                            Type::Int.show(),
-                            idx_ty.show()
-                        ),
-                        "count positions with a whole number starting at 0".to_string(),
-                        "use an Int index, like `items[0]`".to_string(),
-                        Some(index.span()),
-                    ));
-                } else if let Expr::Int(n, _, _, _) = index.as_ref() {
+                if let Expr::Int(n, _, _, _) = index.as_ref() {
                     // E0965: compile-time out-of-bounds index.
                     if *n < 0 || *n as u64 >= *len {
                         self.diags.push(Diagnostic::error(
@@ -3488,6 +3508,36 @@ impl<'a> Checker<'a> {
                             Some(index.span()),
                         ));
                     }
+                } else if let Some((lo, hi)) = self.proven_integer_interval(index) {
+                    if lo >= 0 && hi < i128::from(*len) {
+                        *kind = IndexKind::FixedListProof;
+                        return Some((**elem).clone());
+                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0965",
+                        format!(
+                            "the index interval {lo}..{hi} is not inside this fixed-size list's indexes"
+                        ),
+                        format!(
+                            "this `[T#{}]` value only has proven indexes 0 through {}",
+                            len,
+                            len.saturating_sub(1)
+                        ),
+                        "use an index whose proven interval fits the list length".to_string(),
+                        Some(index.span()),
+                    ));
+                } else if index_value_ty != &Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "list indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "count positions with a whole number starting at 0".to_string(),
+                        "use an Int index, like `items[0]`".to_string(),
+                        Some(index.span()),
+                    ));
                 }
                 Some((**elem).clone())
             }
