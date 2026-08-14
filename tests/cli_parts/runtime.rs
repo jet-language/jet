@@ -367,7 +367,7 @@ fn run() {}
     assert!(override_stdout.contains("stock: pass"), "{override_stdout}");
 
     let stock_run = Command::new(jet())
-        .args(["test", "override.jet", "--default", "--serial"])
+        .args(["test", "override.jet", "--show-default", "--serial"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -685,7 +685,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     fs::write(dir.join("nested/child.jet"), source).unwrap();
 
     let tests = Command::new(jet())
-        .args(["test", "--default", ".", "--filter=needle"])
+        .args(["test", "--show-default", ".", "--filter=needle"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -696,7 +696,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     assert!(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}");
 
     let benches = Command::new(jet())
-        .args(["bench", "--default", ".", "--filter=needle"])
+        .args(["bench", "--show-default", ".", "--filter=needle"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -709,7 +709,7 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     assert!(!bench_stdout.contains("::other"), "filtered bench ran other: {bench_stdout}");
 
     let json = Command::new(jet())
-        .args(["bench", "--default", ".", "--filter=needle", "--json"])
+        .args(["bench", "--show-default", ".", "--filter=needle", "--json"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()

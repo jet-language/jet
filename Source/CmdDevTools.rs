@@ -2891,8 +2891,8 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
 pub(crate) struct BenchRunOpts {
     /// `--filter=<substr>` selects benchmark region names after discovery.
     pub(crate) filter: Option<String>,
-    /// `--default` forces the stock harness when the entry defines `fn bench`.
-    pub(crate) default: bool,
+    /// `--show-default` forces the stock harness when the entry defines `fn bench`.
+    pub(crate) show_default: bool,
 }
 
 const BENCH_PROFILE_LABEL: &str = "release";
@@ -2951,7 +2951,7 @@ fn run_bench_file(path: &Path, shown: &str, opts: &BenchRunOpts, mode: OutputMod
         }
     };
 
-    let override_entry = !opts.default && jet::has_entry_fn(&file, "bench");
+    let override_entry = !opts.show_default && jet::has_entry_fn(&file, "bench");
     if override_entry && !mode.quiet && !mode.json {
         println!("jet bench: using fn bench override");
     }

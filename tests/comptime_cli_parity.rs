@@ -463,7 +463,7 @@ fn benchmark_cli_help_and_selected_region_keep_aot_golden_contract() {
     assert!(String::from_utf8_lossy(&help.stdout).contains("--filter"));
 
     let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["bench", "--default", "main.jet", "--filter=sum_to(1000)"])
+        .args(["bench", "--show-default", "main.jet", "--filter=sum_to(1000)"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
@@ -542,7 +542,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
             .output()
             .unwrap_or_else(|error| panic!("show `{command}` help: {error}"));
         assert!(help.status.success(), "{command} help failed: {}", String::from_utf8_lossy(&help.stderr));
-        assert!(String::from_utf8_lossy(&help.stdout).contains("--default"), "{command} help omitted --default");
+        assert!(String::from_utf8_lossy(&help.stdout).contains("--show-default"), "{command} help omitted --show-default");
     }
 }
 

@@ -5613,7 +5613,7 @@ unknown commands.
 command entry when present. The compiler supplies the discovered suite after
 the command's filter; the value exposes `run()`, `iteration`, and `result`.
 A zero-parameter `fn test()` or `fn bench()` replaces the stock harness without
-receiving a suite. `jet test --default` and `jet bench --default` force the
+receiving a suite. `jet test --show-default` and `jet bench --show-default` force the
 stock harness and ignore the override. The rule adds no token: it extends the
 existing named-function entry convention.
 

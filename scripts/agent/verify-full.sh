@@ -146,7 +146,7 @@ fi
 # Compile every selected workspace test target before running tests.
 # A non-compiling target must fail this gate loudly.
 # D-CMD-OVERRIDE1=C: this gate delegates to Cargo; any direct Jet test/bench
-# invocation in verification uses --default so a file-scoped override cannot
+# invocation in verification uses --show-default so a file-scoped override cannot
 # change the repository gate.
 if [ -n "${JET_TEST_SHARD:-}" ]; then
   shard_count="${JET_TEST_SHARD_COUNT:?JET_TEST_SHARD requires JET_TEST_SHARD_COUNT}"

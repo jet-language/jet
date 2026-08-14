@@ -1580,8 +1580,8 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
 /// Grouped so new flags don't keep growing every `run_test*` signature.
 #[derive(Clone, Default)]
 pub(crate) struct TestRunOpts {
-    /// `--default` forces the stock harness when the entry defines `fn test`.
-    pub(crate) default: bool,
+    /// `--show-default` forces the stock harness when the entry defines `fn test`.
+    pub(crate) show_default: bool,
     pub(crate) update_snapshots: bool,
     pub(crate) coverage: bool,
     /// `--release`: build the test harness with the release AOT profile.
@@ -1687,7 +1687,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     // D-TEST4: discover and run any `///` doctest examples first. They are
     // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
-    let override_entry = !opts.default && jet::has_entry_fn(&shown, "test");
+    let override_entry = !opts.show_default && jet::has_entry_fn(&shown, "test");
     let doctests_ok = if override_entry {
         true
     } else {

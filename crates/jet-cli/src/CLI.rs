@@ -990,7 +990,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },
     FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
-    FlagSpec { long: "--default", help: "with test/bench: ignore fn test/fn bench and use the stock harness" },
+    FlagSpec { long: "--show-default", help: "with test/bench: ignore fn test/fn bench and use the stock harness" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
     FlagSpec { long: "--iterations", help: "with fuzz: case budget --iterations=<n> (default 1000)" },

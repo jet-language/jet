@@ -1641,7 +1641,7 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
         let _ = fs::remove_file(&report_path);
         let mut command = Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jet")));
         command
-            .args(["test", &member.path, "--serial", "--default"])
+            .args(["test", &member.path, "--serial", "--show-default"])
             .env("JET_TEST_PROOF_REPORT", &report_path)
             .env("JET_PROVE_FRESH_TEST", "1");
         match supervise_child(&mut command, Duration::from_secs(120)) {

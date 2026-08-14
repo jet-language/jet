@@ -710,7 +710,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
 
     let workspace = benchmark_budget_project("perf_report_compiler_identity");
     let seeded = Command::new(&compiler)
-        .args(["bench", "--default", "src/main.jet"])
+        .args(["bench", "--show-default", "src/main.jet"])
         .current_dir(&workspace)
         .output()
         .unwrap();
@@ -727,7 +727,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
         let first = scope.spawn(|| {
             start.wait();
             Command::new(&compiler)
-                .args(["bench", "--default", "src/main.jet"])
+                .args(["bench", "--show-default", "src/main.jet"])
                 .current_dir(&workspace)
                 .output()
                 .unwrap()
@@ -735,7 +735,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
         let second = scope.spawn(|| {
             start.wait();
             Command::new(&padded_compiler)
-                .args(["bench", "--default", "src/main.jet"])
+                .args(["bench", "--show-default", "src/main.jet"])
                 .current_dir(&workspace)
                 .output()
                 .unwrap()
@@ -786,7 +786,7 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
 fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = benchmark_budget_project("bench_owned_budget_refresh");
-    let run = || Command::new(jet()).args(["bench", "--default", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let run = || Command::new(jet()).args(["bench", "--show-default", "src/main.jet"]).current_dir(&dir).output().unwrap();
     let first = run();
     assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));
     assert!(String::from_utf8_lossy(&first.stderr).contains("report "));

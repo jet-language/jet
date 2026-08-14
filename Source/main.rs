@@ -2273,7 +2273,7 @@ fn main() {
                                 run_test_opts(
                                     &entry_str,
                                     TestRunOpts {
-                                        default: jet_argv.iter().any(|a| a == "--default"),
+                                        show_default: jet_argv.iter().any(|a| a == "--show-default"),
                                         release: release_flag,
                                         trace_tiers: jet_argv.iter().any(|a| a == "--trace-tiers"),
                                         ..Default::default()
@@ -2298,7 +2298,7 @@ fn main() {
                                 run_bench(
                                     &project,
                                     BenchRunOpts {
-                                        default: jet_argv.iter().any(|a| a == "--default"),
+                                        show_default: jet_argv.iter().any(|a| a == "--show-default"),
                                         filter: bench_filter.clone(),
                                     },
                                     mode,
@@ -2424,7 +2424,7 @@ fn main() {
             // test at a time (matches `--update-snapshots`/`-u`'s existing style
             // of a plain boolean flag).
             let serial = jet_argv.iter().any(|a| a == "--serial");
-            let default = jet_argv.iter().any(|a| a == "--default");
+            let show_default = jet_argv.iter().any(|a| a == "--show-default");
             // Keep directory targets intact so package tests/checks are
             // collected together instead of resolving to one run entry.
             let target_path = Path::new(target);
@@ -2436,7 +2436,7 @@ fn main() {
             run_test_opts(
                 &resolved,
                 TestRunOpts {
-                    default,
+                    show_default,
                     update_snapshots,
                     coverage,
                     release,
@@ -2480,7 +2480,7 @@ fn main() {
             run_bench(
                 &resolved,
                 BenchRunOpts {
-                    default: jet_argv.iter().any(|a| a == "--default"),
+                    show_default: jet_argv.iter().any(|a| a == "--show-default"),
                     filter: bench_filter,
                 },
                 mode,

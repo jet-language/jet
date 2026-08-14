@@ -402,7 +402,7 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     assert!(rust.contains("fn jet_output_check_1()"), "{rust}");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["test", "--default", file.to_str().unwrap()])
+        .args(["test", "--show-default", file.to_str().unwrap()])
         .current_dir(&dir)
         .output()
         .expect("run Check Output harness");
