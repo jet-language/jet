@@ -4560,6 +4560,12 @@ fn wasm_emit_expr(
                     if kind == "Instant" && method == "elapsed" => {
                         format!("jet_time_monotonic_now_ns().saturating_sub({recv})")
                     }
+                TIR::THandleOp::TaskJoin if args.is_empty() => {
+                    format!("jet_task_join({recv})")
+                }
+                TIR::THandleOp::TaskDetach if args.is_empty() => {
+                    format!("jet_task_detach({recv})")
+                }
                 _ => return Err(()),
             }
         }
@@ -4847,20 +4853,6 @@ fn wasm_emit_expr(
         },
         TIR::TExprKind::Lambda(lam) => {
             wasm_tir_lambda(lam, funcs, file_prefix, reconstructions)?
-        }
-        TIR::TExprKind::HandleMethod { recv, op, args }
-            if args.is_empty()
-                && matches!(
-                    op,
-                    TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach
-                ) =>
-        {
-            let recv = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
-            match op {
-                TIR::THandleOp::TaskJoin => format!("jet_task_join({recv})"),
-                TIR::THandleOp::TaskDetach => format!("jet_task_detach({recv})"),
-                _ => unreachable!(),
-            }
         }
         TIR::TExprKind::CoreClosureCall {
             kind: TIR::TCoreClosureKind::Spawn {
