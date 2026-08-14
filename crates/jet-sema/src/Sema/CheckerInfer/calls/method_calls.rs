@@ -4502,6 +4502,10 @@ impl<'a> Checker<'a> {
                 }
             }
             let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
+                let iter_positional_pick = matches!(
+                    &recv_ty,
+                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER
+                ) && method == "nth";
                 let materializer = matches!(
                     &recv_ty,
                     Type::Apply { name, .. } if name == Syntax::TYPE_ITER
@@ -4509,22 +4513,31 @@ impl<'a> Checker<'a> {
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
                 let candidate = self.method_candidate(method, &recv_ty, Some(&type_name));
-                let fix = candidate
-                    .as_deref()
-                    .map(|candidate| format!("did you mean `{candidate}`?"))
-                    .or_else(|| {
-                        materializer
-                            .map(|method| format!("call `{method}` first"))
-                    })
-                    .unwrap_or_else(|| {
-                        format!(
-                            "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
-                        )
-                    });
+                let (why, fix) = if iter_positional_pick {
+                    (
+                        "positional picks on `Iter` use one consuming path".to_string(),
+                        "use `.skip(n).first()`; `nth` is not part of the API".to_string(),
+                    )
+                } else {
+                    (
+                        "check the method name on this type".to_string(),
+                        candidate
+                            .as_deref()
+                            .map(|candidate| format!("did you mean `{candidate}`?"))
+                            .or_else(|| {
+                                materializer.map(|method| format!("call `{method}` first"))
+                            })
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
+                                )
+                            }),
+                    )
+                };
                 let mut diagnostic = Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", display_type_name, method),
-                    "check the method name on this type".to_string(),
+                    why,
                     fix,
                     Some(span),
                 );

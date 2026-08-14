@@ -902,8 +902,10 @@ copy:
 
 - E0107 uses the known Core module list when an unresolved name is a unique
   module alias. It says `Fix: add use core.files as fs`, not `declare it first`.
-- E0102 says `Fix: call .to_list() first` for a missing method on the lazy
-  stdlib `Iter`. User types keep `define it inside struct T or impl T`.
+- E0102 says `Fix: use .skip(n).first()` for `.nth(...)` on the lazy stdlib
+  `Iter`; `nth` is not part of the API. Other missing methods on `Iter` keep
+  `Fix: call .to_list() first`. User types keep `define it inside struct T or
+  impl T`.
 
 ## Callable and control syntax diagnostics
 

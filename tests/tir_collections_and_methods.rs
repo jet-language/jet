@@ -873,12 +873,16 @@ fn run() {
     nums := [10, 20, 30]
     print(nums.skip(1).first() ?? -1)
     print(nums.skip(9).first() ?? -1)
+    words := ["zero", "one"]
+    print(words.skip(1).first() ?? "missing")
+    decimals := [1.5, 2.5]
+    print(decimals.skip(1).first() ?? -1.0)
 }
 ";
     let rust = compile("tir_iter_positional_pick", src);
     assert!(rust.contains("jet_iter_first("));
     assert!(!rust.contains("jet_iter_nth("));
-    assert_tiers_agree("tir_iter_positional_pick", src, "20\n-1\n");
+    assert_tiers_agree("tir_iter_positional_pick", src, "20\n-1\none\n2.5\n");
 }
 
 /// `remove` on both a list (value default and explicit slot mode) and a map

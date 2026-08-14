@@ -73,6 +73,7 @@ const CASES: &[&str] = &[
     // `.to_list()` materializes it for the differential's string print.
     "[\"b\": 2, \"a\": 1, \"c\": 3].keys().to_list()",
     "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
+    "\"a,b,c\".split(\",\").skip(1).first()",
     "[2: \"two\", 1: \"one\"].keys().to_list()",
     "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
