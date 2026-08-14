@@ -81,9 +81,9 @@ pub enum JetVal {
     /// String-keyed map; values are packed i64 (ints or heap handles).
     Map(BTreeMap<String, i64>),
     Record(Vec<JetVal>),
-    // D-BIGINT1: JIT-tier `BigInt` handle. Reuses `CtBigInt` (jet-foundation)
-    // limb-for-limb so a JIT-computed BigInt prints byte-identical to the AOT
-    // `JetBigInt` (CommonTypes.rs) and comptime `CtBigInt` paths (R12 parity).
+    // D-INTBIG1: exact integer carrier. Reuses `CtBigInt` (jet-foundation)
+    // limb-for-limb so a JIT-computed spilled Int prints byte-identical to the
+    // AOT and comptime exact integer paths (R12 parity).
     BigInt(jet_foundation::Numeric::CtBigInt),
 }
 
@@ -698,7 +698,7 @@ impl JetArena {
         Some(self.alloc_string(value))
     }
 
-    // ── D-BIGINT1: JIT-tier `BigInt` handles ────────────────────────────────
+    // ── D-INTBIG1: exact integer carrier handles ────────────────────────────
 
     pub fn alloc_bigint_from_int(&mut self, n: i64) -> i64 {
         let id = self.values.len() as i64;
@@ -707,7 +707,7 @@ impl JetArena {
         id
     }
 
-    /// `Err` on a malformed literal (mirrors AOT's `JetBigInt::from_str(...).expect(...)`
+    /// `Err` on a malformed literal (mirrors AOT's exact-carrier parse trap
     /// panic path — the caller traps instead of unwinding a Rust panic through the
     /// JIT frame, I1).
     /// parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
@@ -759,6 +759,420 @@ impl JetArena {
 
     pub fn bigint_to_string(&self, a: i64) -> Option<String> {
         Some(self.get_bigint(a)?.to_string_rep())
+    }
+
+    // ── D-INTBIG1: packed default `Int` ───────────────────────────────────
+    // A resident signed 63-bit payload is its own value. Larger values use
+    // the same arena and CtBigInt limbs as the legacy precise-number carrier;
+    // the public language type is still only `Int`.
+    const INT_SMALL_MIN: i64 = -(1i64 << 62);
+    const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
+    const INT_BIG_TAG: i64 = i64::MIN;
+
+    fn int_is_tagged(value: i64) -> bool {
+        value < Self::INT_SMALL_MIN
+    }
+
+    fn int_big_value(&self, value: i64) -> Option<jet_foundation::Numeric::CtBigInt> {
+        if !Self::int_is_tagged(value) {
+            return None;
+        }
+        let id = value.wrapping_sub(Self::INT_BIG_TAG) as usize;
+        match self.values.get(id) {
+            Some(JetVal::BigInt(value)) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    fn int_value(&self, value: i64) -> jet_foundation::Numeric::CtBigInt {
+        self.int_big_value(value)
+            .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(value))
+    }
+
+    fn int_pack(&mut self, value: jet_foundation::Numeric::CtBigInt) -> i64 {
+        if let Some(small) = value.try_i64() {
+            if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&small) {
+                return small;
+            }
+        }
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::BigInt(value));
+        Self::INT_BIG_TAG.wrapping_add(id)
+    }
+
+    pub fn int_from_i64(&mut self, value: i64) -> i64 {
+        if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
+            value
+        } else {
+            self.int_pack(jet_foundation::Numeric::CtBigInt::from_int(value))
+        }
+    }
+
+    pub fn int_from_u64(&mut self, value: u64) -> i64 {
+        if value <= Self::INT_SMALL_MAX as u64 {
+            value as i64
+        } else {
+            self.int_pack(jet_foundation::Numeric::CtBigInt::from_u64(value))
+        }
+    }
+
+    pub fn int_from_str(&mut self, value: &str) -> Result<i64, String> {
+        Ok(self.int_pack(jet_foundation::Numeric::CtBigInt::from_str(value)?))
+    }
+
+    pub fn int_to_i64(&self, value: i64) -> Option<i64> {
+        match self.int_big_value(value) {
+            Some(value) => value.try_i64(),
+            None => Some(value),
+        }
+    }
+
+    pub fn int_to_i128(&self, value: i64) -> Option<i128> {
+        self.int_big_value(value)
+            .map(|value| value.try_i128())
+            .unwrap_or_else(|| Some(i128::from(value)))
+    }
+
+    pub fn int_is_zero(&self, value: i64) -> bool {
+        self.int_big_value(value)
+            .map(|value| value.is_zero())
+            .unwrap_or(value == 0)
+    }
+
+    pub fn int_is_negative(&self, value: i64) -> bool {
+        self.int_big_value(value)
+            .map(|value| value.negative)
+            .unwrap_or(value < 0)
+    }
+
+    pub fn int_to_string(&self, value: i64) -> String {
+        self.int_big_value(value)
+            .map(|value| value.to_string_rep())
+            .unwrap_or_else(|| value.to_string())
+    }
+
+    pub fn int_to_f64(&self, value: i64) -> f64 {
+        self.int_to_string(value).parse::<f64>().unwrap_or_else(|_| {
+            if self.int_is_negative(value) {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            }
+        })
+    }
+
+    pub fn int_checked_widen(&self, value: i64, target_f32: bool) -> Option<f64> {
+        self.int_value(value).checked_widen(target_f32)
+    }
+
+    pub fn int_bit_count(&self, value: i64, width: u32, method: &str) -> Option<i64> {
+        self.int_value(value).bit_count(width, method)
+    }
+
+    pub fn int_compare(&self, left: i64, right: i64) -> i64 {
+        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+            return match left.cmp(&right) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            };
+        }
+        match self.int_value(left).compare(&self.int_value(right)) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    }
+
+    pub fn int_add(&mut self, left: i64, right: i64) -> i64 {
+        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+            if let Some(value) = left.checked_add(right) {
+                if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        self.int_pack(self.int_value(left).add(&self.int_value(right)))
+    }
+
+    pub fn int_sub(&mut self, left: i64, right: i64) -> i64 {
+        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+            if let Some(value) = left.checked_sub(right) {
+                if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        self.int_pack(self.int_value(left).sub(&self.int_value(right)))
+    }
+
+    pub fn int_mul(&mut self, left: i64, right: i64) -> i64 {
+        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+            if let Some(value) = left.checked_mul(right) {
+                if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        self.int_pack(self.int_value(left).mul(&self.int_value(right)))
+    }
+
+    pub fn int_bit_and(&mut self, left: i64, right: i64) -> i64 {
+        let left = self.int_value(left);
+        let right = self.int_value(right);
+        self.int_pack(left.bit_and(&right))
+    }
+
+    pub fn int_bit_or(&mut self, left: i64, right: i64) -> i64 {
+        let left = self.int_value(left);
+        let right = self.int_value(right);
+        self.int_pack(left.bit_or(&right))
+    }
+
+    pub fn int_bit_xor(&mut self, left: i64, right: i64) -> i64 {
+        let left = self.int_value(left);
+        let right = self.int_value(right);
+        self.int_pack(left.bit_xor(&right))
+    }
+
+    pub fn int_neg(&mut self, value: i64) -> i64 {
+        if !Self::int_is_tagged(value) {
+            if let Some(value) = value.checked_neg() {
+                if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        self.int_pack(self.int_value(value).neg())
+    }
+
+    pub fn int_abs(&mut self, value: i64) -> i64 {
+        if self.int_is_negative(value) {
+            self.int_neg(value)
+        } else {
+            value
+        }
+    }
+
+    pub fn int_try_from(&self, value: i64, kind: i64) -> Option<i128> {
+        let value = self.int_to_i128(value)?;
+        let (lo, hi) = match kind {
+            0 => (i8::MIN as i128, i8::MAX as i128),
+            1 => (i16::MIN as i128, i16::MAX as i128),
+            2 => (i32::MIN as i128, i32::MAX as i128),
+            3 => (i64::MIN as i128, i64::MAX as i128),
+            4 => (u8::MIN as i128, u8::MAX as i128),
+            5 => (u16::MIN as i128, u16::MAX as i128),
+            6 => (u32::MIN as i128, u32::MAX as i128),
+            7 => (u64::MIN as i128, u64::MAX as i128),
+            _ => return None,
+        };
+        (lo..=hi).contains(&value).then_some(value)
+    }
+
+    pub fn int_not(&mut self, value: i64) -> i64 {
+        let negated = self.int_neg(value);
+        let one = self.int_from_i64(1);
+        self.int_sub(negated, one)
+    }
+
+    pub fn int_shl(&mut self, value: i64, count: i64) -> Option<i64> {
+        let value = self.int_value(value);
+        let count = self.int_value(count);
+        Some(self.int_pack(value.shl(&count)?))
+    }
+
+    pub fn int_shr(&mut self, value: i64, count: i64) -> Option<i64> {
+        let value = self.int_value(value);
+        let count = self.int_value(count);
+        Some(self.int_pack(value.shr(&count)?))
+    }
+
+    pub fn int_div_rem(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
+        if self.int_is_zero(divisor) {
+            return None;
+        }
+        if !Self::int_is_tagged(value) && !Self::int_is_tagged(divisor) {
+            if let (Some(quotient), Some(remainder)) =
+                (value.checked_div(divisor), value.checked_rem(divisor))
+            {
+                return Some((quotient, remainder));
+            }
+        }
+        let (quotient, remainder) = self.int_value(value).div_rem(&self.int_value(divisor))?;
+        Some((self.int_pack(quotient), self.int_pack(remainder)))
+    }
+
+    pub fn int_div(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        Some(self.int_div_rem(value, divisor)?.0)
+    }
+
+    pub fn int_rem(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        Some(self.int_div_rem(value, divisor)?.1)
+    }
+
+    pub fn int_floor_div(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        let (quotient, remainder) = self.int_div_rem(value, divisor)?;
+        if !self.int_is_zero(remainder)
+            && self.int_is_negative(value) != self.int_is_negative(divisor)
+        {
+            let one = self.int_from_i64(1);
+            Some(self.int_sub(quotient, one))
+        } else {
+            Some(quotient)
+        }
+    }
+
+    pub fn int_mod(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        let (quotient, remainder) = self.int_div_rem(value, divisor)?;
+        if !self.int_is_zero(remainder)
+            && self.int_is_negative(value) != self.int_is_negative(divisor)
+        {
+            Some(self.int_add(remainder, divisor))
+        } else {
+            let _ = quotient;
+            Some(remainder)
+        }
+    }
+
+    pub fn int_pow(&mut self, value: i64, exponent: i64) -> Option<i64> {
+        self.int_value(value)
+            .pow(&self.int_value(exponent))
+            .map(|result| self.int_pack(result))
+    }
+
+    pub fn int_factorial(&mut self, value: i64) -> Option<i64> {
+        if self.int_is_negative(value) {
+            return None;
+        }
+        let mut current = self.int_from_i64(2);
+        let mut result = self.int_from_i64(1);
+        while self.int_compare(current, value) <= 0 {
+            result = self.int_mul(result, current);
+            let one = self.int_from_i64(1);
+            current = self.int_add(current, one);
+        }
+        Some(result)
+    }
+
+    pub fn int_is_even(&self, value: i64) -> bool {
+        self.int_value(value).is_even()
+    }
+
+    pub fn int_is_odd(&self, value: i64) -> bool {
+        self.int_value(value).is_odd()
+    }
+
+    pub fn int_isqrt(&mut self, value: i64) -> Option<i64> {
+        self.int_value(value)
+            .isqrt()
+            .map(|result| self.int_pack(result))
+    }
+
+    pub fn int_binomial(&mut self, n: i64, k: i64) -> Option<i64> {
+        let n = self.int_value(n);
+        let k = self.int_value(k);
+        jet_foundation::Numeric::CtBigInt::binomial(&n, &k)
+            .map(|result| self.int_pack(result))
+    }
+
+    pub fn int_digits(&self, value: i64) -> i64 {
+        self.int_value(value).digits()
+    }
+
+    pub fn int_leading_ones(&self, value: i64) -> i64 {
+        self.int_value(value).leading_ones()
+    }
+
+    pub fn int_trailing_ones(&self, value: i64) -> i64 {
+        self.int_value(value).trailing_ones()
+    }
+
+    pub fn int_checked_abs(&mut self, value: i64) -> Option<i64> {
+        Some(self.int_abs(value))
+    }
+
+    pub fn int_checked_neg(&mut self, value: i64) -> Option<i64> {
+        Some(self.int_neg(value))
+    }
+
+    pub fn int_checked_add(&mut self, left: i64, right: i64) -> Option<i64> {
+        Some(self.int_add(left, right))
+    }
+
+    pub fn int_checked_sub(&mut self, left: i64, right: i64) -> Option<i64> {
+        Some(self.int_sub(left, right))
+    }
+
+    pub fn int_checked_mul(&mut self, left: i64, right: i64) -> Option<i64> {
+        Some(self.int_mul(left, right))
+    }
+
+    pub fn int_checked_div(&mut self, left: i64, right: i64) -> Option<i64> {
+        self.int_div(left, right)
+    }
+
+    pub fn int_checked_rem(&mut self, left: i64, right: i64) -> Option<i64> {
+        self.int_rem(left, right)
+    }
+
+    pub fn int_checked_pow(&mut self, left: i64, right: i64) -> Option<i64> {
+        self.int_pow(left, right)
+    }
+
+    pub fn int_saturating_add(&mut self, left: i64, right: i64) -> i64 {
+        self.int_add(left, right)
+    }
+
+    pub fn int_saturating_sub(&mut self, left: i64, right: i64) -> i64 {
+        self.int_sub(left, right)
+    }
+
+    pub fn int_saturating_mul(&mut self, left: i64, right: i64) -> i64 {
+        self.int_mul(left, right)
+    }
+
+    pub fn int_wrapping_add(&mut self, left: i64, right: i64) -> i64 {
+        self.int_add(left, right)
+    }
+
+    pub fn int_wrapping_sub(&mut self, left: i64, right: i64) -> i64 {
+        self.int_sub(left, right)
+    }
+
+    pub fn int_wrapping_mul(&mut self, left: i64, right: i64) -> i64 {
+        self.int_mul(left, right)
+    }
+
+    pub fn int_int_pow(&mut self, left: i64, right: i64) -> i64 {
+        self.int_pow(left, right)
+            .unwrap_or_else(|| self.int_from_i64(0))
+    }
+
+    pub fn int_gcd(&mut self, left: i64, right: i64) -> i64 {
+        let left = self.int_value(left);
+        let right = self.int_value(right);
+        self.int_pack(jet_foundation::Numeric::CtBigInt::gcd(&left, &right))
+    }
+
+    pub fn int_lcm(&mut self, left: i64, right: i64) -> i64 {
+        let left = self.int_value(left);
+        let right = self.int_value(right);
+        self.int_pack(jet_foundation::Numeric::CtBigInt::lcm(&left, &right))
+    }
+
+    pub fn int_div_mod(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
+        let (quotient, remainder) = self.int_div_rem(value, divisor)?;
+        if !self.int_is_zero(remainder)
+            && self.int_is_negative(value) != self.int_is_negative(divisor)
+        {
+            let one = self.int_from_i64(1);
+            let quotient = self.int_sub(quotient, one);
+            let remainder = self.int_add(remainder, divisor);
+            Some((quotient, remainder))
+        } else {
+            Some((quotient, remainder))
+        }
     }
 }
 

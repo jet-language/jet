@@ -1397,8 +1397,9 @@ pub(crate) fn str_match_scan_closure_ex(
                     }
                     Type::Int => {
                         body.push_str(&jet_format!(
-                            "let {var}: i64 = match {var}.trim().parse::<i64>() {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",
-                            var = var
+                            "let {var}: i64 = match {root_prefix}jet_std::jet_int_from_str({var}.trim()) {{ Ok({jet_prefix}v) => {jet_prefix}v, Err(_) => return None }};\n",
+                            var = var,
+                            root_prefix = &cx.root_prefix
                         ));
                     }
                     Type::Float => {

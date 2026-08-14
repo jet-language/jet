@@ -137,7 +137,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
         ],
     );
     assert_deps("crates/jet-queries/Cargo.toml", &[]);
-    // Runtime values reuse foundation's compiler-owned, std-only BigInt value;
+    // Runtime values reuse foundation's compiler-owned, std-only exact integer carrier;
     // direction remains inward toward the dependency-free foundation layer.
     assert_deps("crates/jet-rt/Cargo.toml", &["jet-foundation"]);
     assert_deps("crates/jet-net/Cargo.toml", &[]);

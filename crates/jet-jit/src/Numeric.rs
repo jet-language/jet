@@ -1,21 +1,11 @@
 //! D-BIGINT1 / D-DECIMAL1 / D-NUMTYPE1: precise numeric host shims for Cranelift JIT.
-//! `BigInt` values are opaque i64 handles into the shared `JetArena` heap.
+//! Spilled exact `Int` values are opaque i64 handles into the shared `JetArena` heap.
 //! `Decimal` / `Fraction` values are opaque i64 handles into side tables on
 //! `JitRuntime`. All reuse foundation algorithms (`CtBigInt` / `CtDecimal` /
 //! `CtFraction`) — same semantics AOT Prelude calls, not a third policy copy.
 
-use super::Concurrency;
+use super::{Concurrency, JitRuntime};
 use jet_foundation::Numeric::{CtDecimal, CtFraction};
-
-/// Record an invalid `BigInt(...)` literal as a trap (mirrors AOT's
-/// `JetBigInt::from_str(...).expect(...)` panic, but as a JIT-safe trap
-/// instead of a Rust panic unwinding through a JIT frame — I1).
-/// parity: guard tests/dev.rs::bigint_example_matches_interpreter_resident_jit_default_dev_and_aot
-fn trap_bigint(msg: &str) {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.set_trap(msg);
-    });
-}
 
 fn trap_decimal(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
@@ -73,7 +63,7 @@ extern "C" fn jet_jit_bigint_from_str(str_id: i64) -> i64 {
         match rt.heap.alloc_bigint_from_str(&s) {
             Ok(id) => id,
             Err(_) => {
-                trap_bigint("invalid BigInt string");
+                rt.set_trap("invalid exact Int string");
                 0
             }
         }
@@ -123,6 +113,324 @@ extern "C" fn jet_jit_bigint_to_string(a: i64) -> i64 {
             .bigint_to_string(a)
             .expect("jit bigint to_string: bad handle");
         rt.heap.alloc_string(text)
+    })
+}
+
+// D-INTBIG1: default `Int` keeps a signed 63-bit payload inline and spills
+// through the same JetArena/CtBigInt implementation only when required.
+extern "C" fn jet_jit_int_from_int(n: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(n))
+}
+
+extern "C" fn jet_jit_int_from_u64(n: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_u64(n as u64))
+}
+
+extern "C" fn jet_jit_int_from_str(str_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let s = rt.heap.clone_string(str_id).unwrap_or_default();
+        match rt.heap.int_from_str(&s) {
+            Ok(id) => id,
+            Err(_) => {
+                rt.set_trap("invalid default Int literal");
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_add(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_add(a, b))
+}
+
+extern "C" fn jet_jit_int_sub(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_sub(a, b))
+}
+
+extern "C" fn jet_jit_int_mul(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_mul(a, b))
+}
+
+extern "C" fn jet_jit_int_bit_and(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_and(a, b))
+}
+
+extern "C" fn jet_jit_int_bit_or(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_or(a, b))
+}
+
+extern "C" fn jet_jit_int_bit_xor(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_xor(a, b))
+}
+
+extern "C" fn jet_jit_int_compare(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_compare(a, b))
+}
+
+extern "C" fn jet_jit_int_neg(a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_neg(a))
+}
+
+extern "C" fn jet_jit_int_abs(a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_abs(a))
+}
+
+extern "C" fn jet_jit_int_not(a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let negated = rt.heap.int_neg(a);
+        let one = rt.heap.int_from_i64(1);
+        rt.heap.int_sub(negated, one)
+    })
+}
+
+extern "C" fn jet_jit_int_shl(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_shl(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("invalid shift count");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_shr(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_shr(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("invalid shift count");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_to_string(a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.int_to_string(a);
+        rt.heap.alloc_string(text)
+    })
+}
+
+extern "C" fn jet_jit_int_to_f64(a: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_to_f64(a))
+}
+
+extern "C" fn jet_jit_int_div(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_div(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("division by zero");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_floor_div(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("division by zero");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_mod(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_mod(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("division by zero");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_rem(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_rem(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("division by zero");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_pow(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_trap("invalid default Int exponent");
+            0
+        }
+    })
+}
+
+/// Packed legacy option ABI: `0` is absent, otherwise payload + 1.
+extern "C" fn jet_jit_int_factorial(a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.heap.int_factorial(a) {
+            Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+            None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+        }
+    })
+}
+
+fn int_option(rt: &mut JitRuntime, value: Option<i64>) -> i64 {
+    match value {
+        Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+        None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+    }
+}
+
+fn int_pair(rt: &mut JitRuntime, quotient: i64, remainder: i64) -> i64 {
+    let handle = rt.heap.alloc_record(2);
+    let _ = rt.heap.record_set_int(handle, 0, quotient);
+    let _ = rt.heap.record_set_int(handle, 1, remainder);
+    handle
+}
+
+extern "C" fn jet_jit_int_is_even(value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.int_is_even(value)))
+}
+
+extern "C" fn jet_jit_int_is_odd(value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.int_is_odd(value)))
+}
+
+extern "C" fn jet_jit_int_isqrt(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_isqrt(value);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_binomial(n: i64, k: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_binomial(n, k);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_digits(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_digits(value))
+}
+
+extern "C" fn jet_jit_int_leading_ones(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_leading_ones(value))
+}
+
+extern "C" fn jet_jit_int_trailing_ones(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_trailing_ones(value))
+}
+
+extern "C" fn jet_jit_int_checked_abs(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_abs(value);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_neg(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_neg(value);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_add(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_add(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_sub(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_sub(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_mul(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_mul(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_div(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_div(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_rem(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_rem(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_checked_pow(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = rt.heap.int_checked_pow(left, right);
+        int_option(rt, result)
+    })
+}
+
+extern "C" fn jet_jit_int_saturating_add(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_add(left, right))
+}
+
+extern "C" fn jet_jit_int_saturating_sub(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_sub(left, right))
+}
+
+extern "C" fn jet_jit_int_saturating_mul(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_mul(left, right))
+}
+
+extern "C" fn jet_jit_int_wrapping_add(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_add(left, right))
+}
+
+extern "C" fn jet_jit_int_wrapping_sub(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_sub(left, right))
+}
+
+extern "C" fn jet_jit_int_wrapping_mul(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_mul(left, right))
+}
+
+extern "C" fn jet_jit_int_int_pow(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_int_pow(left, right))
+}
+
+extern "C" fn jet_jit_int_gcd(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_gcd(left, right))
+}
+
+extern "C" fn jet_jit_int_lcm(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_lcm(left, right))
+}
+
+extern "C" fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_mod(left, right) {
+        Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
+        None => {
+            rt.set_trap("division by zero");
+            int_pair(rt, 0, 0)
+        }
+    })
+}
+
+extern "C" fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_rem(left, right) {
+        Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
+        None => {
+            rt.set_trap("division by zero");
+            int_pair(rt, 0, 0)
+        }
     })
 }
 
@@ -288,6 +596,10 @@ host_fns! {
         sig_compare.params.push(AbiParam::new(types::I64));
         sig_compare.params.push(AbiParam::new(types::I64));
         sig_compare.returns.push(AbiParam::new(types::I8));
+        let mut sig_compare_i64 = Signature::new(cc);
+        sig_compare_i64.params.push(AbiParam::new(types::I64));
+        sig_compare_i64.params.push(AbiParam::new(types::I64));
+        sig_compare_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_unary_bool = Signature::new(cc);
         sig_unary_bool.params.push(AbiParam::new(types::I64));
         sig_unary_bool.returns.push(AbiParam::new(types::I8));
@@ -305,6 +617,55 @@ host_fns! {
     bigint_eq: "jet_jit_bigint_eq" => jet_jit_bigint_eq: sig_compare;
     bigint_neg: "jet_jit_bigint_neg" => jet_jit_bigint_neg: sig_unary;
     bigint_to_string: "jet_jit_bigint_to_string" => jet_jit_bigint_to_string: sig_unary;
+    int_from_int: "jet_jit_int_from_int" => jet_jit_int_from_int: sig_unary;
+    int_from_u64: "jet_jit_int_from_u64" => jet_jit_int_from_u64: sig_unary;
+    int_from_str: "jet_jit_int_from_str" => jet_jit_int_from_str: sig_unary;
+    int_add: "jet_jit_int_add" => jet_jit_int_add: sig_binary;
+    int_sub: "jet_jit_int_sub" => jet_jit_int_sub: sig_binary;
+    int_mul: "jet_jit_int_mul" => jet_jit_int_mul: sig_binary;
+    int_bit_and: "jet_jit_int_bit_and" => jet_jit_int_bit_and: sig_binary;
+    int_bit_or: "jet_jit_int_bit_or" => jet_jit_int_bit_or: sig_binary;
+    int_bit_xor: "jet_jit_int_bit_xor" => jet_jit_int_bit_xor: sig_binary;
+    int_compare: "jet_jit_int_compare" => jet_jit_int_compare: sig_compare_i64;
+    int_neg: "jet_jit_int_neg" => jet_jit_int_neg: sig_unary;
+    int_abs: "jet_jit_int_abs" => jet_jit_int_abs: sig_unary;
+    int_not: "jet_jit_int_not" => jet_jit_int_not: sig_unary;
+    int_shl: "jet_jit_int_shl" => jet_jit_int_shl: sig_binary;
+    int_shr: "jet_jit_int_shr" => jet_jit_int_shr: sig_binary;
+    int_to_string: "jet_jit_int_to_string" => jet_jit_int_to_string: sig_unary;
+    int_to_f64: "jet_jit_int_to_f64" => jet_jit_int_to_f64: sig_unary_f64;
+    int_div: "jet_jit_int_div" => jet_jit_int_div: sig_binary;
+    int_floor_div: "jet_jit_int_floor_div" => jet_jit_int_floor_div: sig_binary;
+    int_mod: "jet_jit_int_mod" => jet_jit_int_mod: sig_binary;
+    int_rem: "jet_jit_int_rem" => jet_jit_int_rem: sig_binary;
+    int_pow: "jet_jit_int_pow" => jet_jit_int_pow: sig_binary;
+    int_factorial: "jet_jit_int_factorial" => jet_jit_int_factorial: sig_unary;
+    int_is_even: "jet_jit_int_is_even" => jet_jit_int_is_even: sig_unary_bool;
+    int_is_odd: "jet_jit_int_is_odd" => jet_jit_int_is_odd: sig_unary_bool;
+    int_isqrt: "jet_jit_int_isqrt" => jet_jit_int_isqrt: sig_unary;
+    int_binomial: "jet_jit_int_binomial" => jet_jit_int_binomial: sig_binary;
+    int_digits: "jet_jit_int_digits" => jet_jit_int_digits: sig_unary;
+    int_leading_ones: "jet_jit_int_leading_ones" => jet_jit_int_leading_ones: sig_unary;
+    int_trailing_ones: "jet_jit_int_trailing_ones" => jet_jit_int_trailing_ones: sig_unary;
+    int_checked_abs: "jet_jit_int_checked_abs" => jet_jit_int_checked_abs: sig_unary;
+    int_checked_neg: "jet_jit_int_checked_neg" => jet_jit_int_checked_neg: sig_unary;
+    int_checked_add: "jet_jit_int_checked_add" => jet_jit_int_checked_add: sig_binary;
+    int_checked_sub: "jet_jit_int_checked_sub" => jet_jit_int_checked_sub: sig_binary;
+    int_checked_mul: "jet_jit_int_checked_mul" => jet_jit_int_checked_mul: sig_binary;
+    int_checked_div: "jet_jit_int_checked_div" => jet_jit_int_checked_div: sig_binary;
+    int_checked_rem: "jet_jit_int_checked_rem" => jet_jit_int_checked_rem: sig_binary;
+    int_checked_pow: "jet_jit_int_checked_pow" => jet_jit_int_checked_pow: sig_binary;
+    int_saturating_add: "jet_jit_int_saturating_add" => jet_jit_int_saturating_add: sig_binary;
+    int_saturating_sub: "jet_jit_int_saturating_sub" => jet_jit_int_saturating_sub: sig_binary;
+    int_saturating_mul: "jet_jit_int_saturating_mul" => jet_jit_int_saturating_mul: sig_binary;
+    int_wrapping_add: "jet_jit_int_wrapping_add" => jet_jit_int_wrapping_add: sig_binary;
+    int_wrapping_sub: "jet_jit_int_wrapping_sub" => jet_jit_int_wrapping_sub: sig_binary;
+    int_wrapping_mul: "jet_jit_int_wrapping_mul" => jet_jit_int_wrapping_mul: sig_binary;
+    int_int_pow: "jet_jit_int_int_pow" => jet_jit_int_int_pow: sig_binary;
+    int_gcd: "jet_jit_int_gcd" => jet_jit_int_gcd: sig_binary;
+    int_lcm: "jet_jit_int_lcm" => jet_jit_int_lcm: sig_binary;
+    int_div_mod: "jet_jit_int_div_mod" => jet_jit_int_div_mod: sig_binary;
+    int_div_rem_pair: "jet_jit_int_div_rem_pair" => jet_jit_int_div_rem_pair: sig_binary;
     decimal_from_str: "jet_jit_decimal_from_str" => jet_jit_decimal_from_str: sig_unary;
     decimal_add: "jet_jit_decimal_add" => jet_jit_decimal_add: sig_binary;
     decimal_sub: "jet_jit_decimal_sub" => jet_jit_decimal_sub: sig_binary;
@@ -322,6 +683,3 @@ host_fns! {
     fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
 }
-
-
-

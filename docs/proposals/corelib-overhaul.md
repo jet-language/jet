@@ -238,7 +238,7 @@ prelude cost: split/join/trim/contains, map/filter/sorted/sum, `.len()`,
 free-name prelude stays small:
 
 **Already ambient (unchanged):** built-in types (`Int`, `Float`, `Bool`,
-`String`, `[T]`, `[K: V]`, `Set`), `Val`/`None`/`Ok`/`Err`, `print`, `panic`,
+`String`, `[T]`, `[K:V]`, `Set`), `Val`/`None`/`Ok`/`Err`, `print`, `panic`,
 `?`, `??`, `?.`.
 
 **Add — uncontested by criteria (still owner-gated as one slate,

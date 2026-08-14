@@ -2918,7 +2918,7 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
 #[test]
 fn web_wasm_list_int_export_hostile_roundtrip() {
     // D-JSBIND1 / criterion #3: [Int] export params+returns as packed (ptr,len)
-    // u64 over little-endian i64 payload; JS BigInt64Array + free. Hostile:
+    // u64 over decimal UTF-8 payload; JS BigInt values + free. Hostile:
     // empty, zero, signed, mixed.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build wasm list-int (need rustc + node)");
@@ -2928,28 +2928,28 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64"),
+        wasm.contains("fn jet_abi_list_int_ret(v: Vec<JetWasmInt>) -> u64"),
         "list-int return helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>"),
+        wasm.contains("fn jet_abi_list_int_arg(packed: u64) -> Vec<JetWasmInt>"),
         "list-int arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_int_alloc(byte_len: u32) -> u32"),
         "list-int alloc export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32)"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_int_free(ptr: u32, byte_len: u32)"),
         "list-int free export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("let __jet_xs = jet_abi_list_i64_arg(__jet_xs)")
-            || wasm.contains("let xs = jet_abi_list_i64_arg(xs)"),
+        wasm.contains("let __jet_xs = jet_abi_list_int_arg(__jet_xs)")
+            || wasm.contains("let xs = jet_abi_list_int_arg(xs)"),
         "export wrapper must unpack [Int] param:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_list_i64_ret(jet_wasm_")
+        wasm.contains("jet_abi_list_int_ret(jet_wasm_")
             && wasm.contains("-> u64 "),
         "export must pack [Int] return as u64:\n{wasm}"
     );
@@ -2968,9 +2968,9 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     );
     let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
     assert!(
-        runtime.contains("jet_abi_list_i64_alloc")
-            && runtime.contains("jet_abi_list_i64_free")
-            && runtime.contains("BigInt64Array"),
+        runtime.contains("jet_abi_list_int_alloc")
+            && runtime.contains("jet_abi_list_int_free")
+            && runtime.contains("TextDecoder"),
         "runtime missing list-int ABI encode/decode:\n{runtime}"
     );
     let stdout = run_web_app(&dir);
@@ -3061,8 +3061,8 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
 
 #[test]
 fn web_wasm_map_string_int_export_hostile_roundtrip() {
-    // D-JSBIND1 / criterion #3: [String: Int] params+returns use a contiguous
-    // LE [count][key-len][utf8][i64]... blob. Live JS -> Wasm -> JS -> Wasm
+    // D-JSBIND1 / criterion #3: [String:Int] params+returns use a contiguous
+    // LE [count][key-len][utf8][value-len][decimal]... blob. Live JS -> Wasm -> JS -> Wasm
     // proof covers empty/control/Unicode keys, signed values, and ownership.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build wasm map-string-int (need rustc + node)");
@@ -3072,35 +3072,35 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_map", src, "examples/features/web/web_wasm_map.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_map_string_i64_ret(")
-            && wasm.contains("fn jet_abi_map_string_i64_arg("),
+        wasm.contains("fn jet_abi_map_string_int_ret(")
+            && wasm.contains("fn jet_abi_map_string_int_arg("),
         "map-string-int ABI helpers missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
+        wasm.contains("pub extern \"C\" fn jet_abi_map_string_int_alloc(byte_len: u32) -> u32")
             && wasm.contains(
-                "pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"
+                "pub extern \"C\" fn jet_abi_map_string_int_free(ptr: u32, byte_len: u32)"
             ),
         "map-string-int ownership exports missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_map_string_i64_ret(jet_wasm_")
-            && wasm.contains("jet_abi_map_string_i64_arg("),
-        "export wrappers must pack/unpack [String: Int]:\n{wasm}"
+        wasm.contains("jet_abi_map_string_int_ret(jet_wasm_")
+            && wasm.contains("jet_abi_map_string_int_arg("),
+        "export wrappers must pack/unpack [String:Int]:\n{wasm}"
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
         js.contains("marshalAbi(") && js.contains("\"map-string-int\""),
-        "JS bridge must marshal [String: Int] params:\n{js}"
+        "JS bridge must marshal [String:Int] params:\n{js}"
     );
     assert!(
         js.contains("unmarshalAbi(raw, \"map-string-int\", wasm)"),
-        "JS bridge must unmarshal [String: Int] returns:\n{js}"
+        "JS bridge must unmarshal [String:Int] returns:\n{js}"
     );
     let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
     assert!(
-        runtime.contains("jet_abi_map_string_i64_alloc")
-            && runtime.contains("jet_abi_map_string_i64_free")
+        runtime.contains("jet_abi_map_string_int_alloc")
+            && runtime.contains("jet_abi_map_string_int_free")
             && runtime.contains("map-string-int"),
         "runtime missing map-string-int ABI encode/decode:\n{runtime}"
     );
@@ -3119,12 +3119,12 @@ let cursor = 16;
 const frees = [];
 const wasm = {
   memory: { buffer: new ArrayBuffer(4096) },
-  jet_abi_map_string_i64_alloc(byteLen) {
+  jet_abi_map_string_int_alloc(byteLen) {
     const ptr = cursor;
     cursor += byteLen;
     return ptr;
   },
-  jet_abi_map_string_i64_free(ptr, byteLen) {
+  jet_abi_map_string_int_free(ptr, byteLen) {
     frees.push([ptr, byteLen]);
   },
 };
@@ -3154,8 +3154,8 @@ try {
 let allocations = 0;
 const bounded = {
   memory: { buffer: new ArrayBuffer(64) },
-  jet_abi_map_string_i64_alloc() { allocations += 1; return 60; },
-  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+  jet_abi_map_string_int_alloc() { allocations += 1; return 60; },
+  jet_abi_map_string_int_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
 };
 class HiddenEntryMap extends Map {
   get size() { return 0; }
@@ -3220,8 +3220,8 @@ check(frees.some(([ptr]) => ptr === 60), "post-allocation write failure leaked")
 
 const highBit = {
   memory: { buffer: new ArrayBuffer(64) },
-  jet_abi_map_string_i64_alloc() { return -2147483648; },
-  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+  jet_abi_map_string_int_alloc() { return -2147483648; },
+  jet_abi_map_string_int_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
 };
 try {
   marshalAbi(new Map([["x", 1n]]), "map-string-int", highBit);
@@ -3366,12 +3366,12 @@ const wasm = {
   jet_abi_string_free(ptr, len) {
     frees.push(["string", ptr, len]);
   },
-  jet_abi_list_i64_alloc(len) {
+  jet_abi_list_int_alloc(len) {
     const ptr = cursor;
     cursor += len * 8;
     return ptr;
   },
-  jet_abi_list_i64_free(ptr, len) {
+  jet_abi_list_int_free(ptr, len) {
     frees.push(["list-int", ptr, len]);
   },
 };
@@ -3380,8 +3380,8 @@ const bounded = {
   memory: { buffer: new ArrayBuffer(64) },
   jet_abi_string_alloc() { return 60; },
   jet_abi_string_free(ptr, len) { frees.push(["string", ptr, len]); },
-  jet_abi_list_i64_alloc() { return 48; },
-  jet_abi_list_i64_free(ptr, len) { frees.push(["list-int", ptr, len]); },
+  jet_abi_list_int_alloc() { return 48; },
+  jet_abi_list_int_free(ptr, len) { frees.push(["list-int", ptr, len]); },
 };
 
 const RealTextEncoder = globalThis.TextEncoder;
@@ -3411,8 +3411,8 @@ const highBit = {
   memory: { buffer: new ArrayBuffer(64) },
   jet_abi_string_alloc() { return -2147483648; },
   jet_abi_string_free(ptr, len) { frees.push(["string", ptr, len]); },
-  jet_abi_list_i64_alloc() { return -2147483648; },
-  jet_abi_list_i64_free(ptr, len) { frees.push(["list-int", ptr, len]); },
+  jet_abi_list_int_alloc() { return -2147483648; },
+  jet_abi_list_int_free(ptr, len) { frees.push(["list-int", ptr, len]); },
 };
 try {
   marshalAbi("x", "string", highBit);

@@ -57,6 +57,19 @@ fn editor_grammars_have_generated_sections() {
 }
 
 #[test]
+fn tree_sitter_map_type_grammar_keeps_colon_adjacent() {
+    let grammar = fs::read_to_string("editors/tree-sitter/grammar.js").unwrap();
+    assert!(
+        grammar.contains("seq(\"[\", $._type, \":\", $._type, \"]\")"),
+        "tree-sitter map types must use the canonical adjacent colon"
+    );
+    assert!(
+        !grammar.contains("seq(\"[\", $._type, \": \", $._type, \"]\")"),
+        "tree-sitter grammar must not encode retired map type spacing"
+    );
+}
+
+#[test]
 fn editor_grammars_match_generated_sections() {
     let cases = [
         (
@@ -682,7 +695,7 @@ pub fn shell() => [JSON] {
     ];
 }
 
-fn use_collections(items: [String], counts: [String: Int]) {}
+fn use_collections(items: [String], counts: [String:Int]) {}
 "#;
     let (toks, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");

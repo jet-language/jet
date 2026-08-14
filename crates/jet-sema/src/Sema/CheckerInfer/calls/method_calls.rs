@@ -4275,12 +4275,11 @@ impl<'a> Checker<'a> {
                 if recv_ty.is_numeric() {
                     *recv_type_out = Some(recv_ty.name());
                 }
-                // D-BIGINT1 / D-DECIMAL1: precise numeric handle methods.
+                // D-DECIMAL1 / D-NUMTYPE1: exact numeric handle methods.
                 if matches!(
                     &recv_ty,
                     Type::Named(n)
-                        if n == crate::Syntax::TYPE_BIGINT
-                            || n == crate::Syntax::TYPE_DECIMAL
+                        if n == crate::Syntax::TYPE_DECIMAL
                             || n == crate::Syntax::TYPE_FRACTION
                 ) {
                     *recv_type_out = Some(recv_ty.name());

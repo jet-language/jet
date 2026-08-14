@@ -819,7 +819,7 @@ pub fn rust_extra_jetdebug_bounds(params: &[TypeParam]) -> HashMap<String, Vec<S
 
 /// Collect every type-parameter name (drawn from `param_names`) that the type
 /// `ty` mentions anywhere in its structure. A type parameter `T` appears as
-/// `Type::Named("T")`; nested positions (`[T]`, `[String: T]`, `Box<T>`, …)
+/// `Type::Named("T")`; nested positions (`[T]`, `[String:T]`, `Box<T>`, …)
 /// count too.
 pub fn collect_type_param_mentions(
     ty: &Type,

@@ -1843,13 +1843,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             func,
             args,
         } => {
-            ((type_name == "BigInt"
-                && matches!(
-                    (func.as_str(), args.len()),
-                    ("from_int" | "from_str" | "to_string", 1)
-                        | ("add" | "sub" | "mul", 2)
-                ))
-                || (type_name == "Decimal"
+            ((type_name == "Decimal"
                     && matches!(
                         (func.as_str(), args.len()),
                         ("from_str" | "to_string", 1) | ("add" | "sub" | "mul", 2)
@@ -5249,13 +5243,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 )
         }
         THandleOp::PreciseMethod { type_name, method } => {
-            ((type_name == "BigInt"
-                && recv.ty == Type::Named("BigInt".into())
-                && matches!(
-                    (method.as_str(), args.len()),
-                    ("add" | "sub" | "mul", 1) | ("neg" | "to_string", 0)
-                ))
-                || (type_name == "Decimal"
+            ((type_name == "Decimal"
                     && recv.ty == Type::Named("Decimal".into())
                     && matches!(
                         (method.as_str(), args.len()),

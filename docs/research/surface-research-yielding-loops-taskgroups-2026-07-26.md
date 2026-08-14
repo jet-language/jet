@@ -86,7 +86,7 @@ The returned body selects result type.
 
 - A `Void` body returns `Void`.
 - A `T` body returns `[T]`.
-- A key-value body returns `[K: V]`.
+- A key-value body returns `[K:V]`.
 - A header guard or `next` omits the current iteration.
 - Natural exhaustion returns the completed collection.
 - `break` returns the collection built so far.

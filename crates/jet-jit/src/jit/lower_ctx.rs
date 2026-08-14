@@ -33,7 +33,8 @@ use super::safety::{
     jit_value_type, is_packed_process_signal, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
-    clif_ty, core_struct_field_type, core_struct_field_uses_result_option_abi,
+    clif_ty, core_call_uses_result_option_abi, core_struct_field_type,
+    core_struct_field_uses_result_option_abi,
     fn_value_signature, init_clif_ty,
     interrupt_callback_signature, JitMeta,
 };
@@ -518,6 +519,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::Borrow { place, .. }
             | TExprKind::DistinctCtor { arg: place, .. }
             | TExprKind::Clone(place) => self.uses_result_option_abi(place),
+            TExprKind::CoreCall { module, method, .. } => {
+                core_call_uses_result_option_abi(module, method)
+            }
             TExprKind::Call { name, .. } => self.meta.result_option_target(name),
             TExprKind::MethodCall {
                 recv,
@@ -8308,8 +8312,7 @@ impl LowerCtx<'_, '_> {
             Type::Quantity { base, .. } => self.lower_jet_show_value(value, base, uses_result),
             Type::String => Ok(value),
             Type::Int => {
-                let signed = self.b.ins().iconst(types::I64, 1);
-                Ok(self.call_host(self.host.intn_to_string, &[value, signed]))
+                Ok(self.call_host(self.host.num.int_to_string, &[value]))
             }
             Type::IntN { signed, .. } => {
                 let signed = self.b.ins().iconst(types::I64, i64::from(*signed));
@@ -9139,6 +9142,32 @@ impl LowerCtx<'_, '_> {
                 line,
             );
         }
+        if matches!(rhs_ty, Type::Int) {
+            match op {
+                BinOp::Add => return Ok(self.call_host(self.host.num.int_add, &[current, rhs])),
+                BinOp::Sub => return Ok(self.call_host(self.host.num.int_sub, &[current, rhs])),
+                BinOp::Mul => return Ok(self.call_host(self.host.num.int_mul, &[current, rhs])),
+                BinOp::Div => return Ok(self.call_host(self.host.num.int_div, &[current, rhs])),
+                BinOp::Pow => return Ok(self.call_host(self.host.num.int_pow, &[current, rhs])),
+                BinOp::FloorDiv => {
+                    return Ok(self.call_host(self.host.num.int_floor_div, &[current, rhs]));
+                }
+                BinOp::Mod => return Ok(self.call_host(self.host.num.int_mod, &[current, rhs])),
+                BinOp::Rem => return Ok(self.call_host(self.host.num.int_rem, &[current, rhs])),
+                BinOp::BitAnd => {
+                    return Ok(self.call_host(self.host.num.int_bit_and, &[current, rhs]));
+                }
+                BinOp::BitOr => {
+                    return Ok(self.call_host(self.host.num.int_bit_or, &[current, rhs]));
+                }
+                BinOp::BitXor => {
+                    return Ok(self.call_host(self.host.num.int_bit_xor, &[current, rhs]));
+                }
+                BinOp::Shl => return Ok(self.call_host(self.host.num.int_shl, &[current, rhs])),
+                BinOp::Shr => return Ok(self.call_host(self.host.num.int_shr, &[current, rhs])),
+                _ => {}
+            }
+        }
         if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
             return self.lower_prelude_binop(op, &rhs_ty, current, rhs, line);
         }
@@ -9460,8 +9489,12 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(push, &[buf_id, text]);
                         continue;
                     }
+                    if matches!(&push_ty, Type::Int) {
+                        let text = self.call_host(self.host.num.int_to_string, &[val]);
+                        self.push_str_value(buf_id, text);
+                        continue;
+                    }
                     let host_id = match &push_ty {
-                        Type::Int => self.host.str_push_i64,
                         Type::Float => self.host.str_push_f64,
                         Type::Bool => self.host.str_push_bool,
                         Type::Char => self.host.str_push_char,
@@ -9719,7 +9752,8 @@ impl LowerCtx<'_, '_> {
                 matches!(inner.as_ref(), Type::IntN { .. }),
             ),
             Type::Int => {
-                self.append_scalar_debug(buf_id, value, 0);
+                let text = self.call_host(self.host.num.int_to_string, &[value]);
+                self.push_str_value(buf_id, text);
                 Ok(())
             }
             Type::IntN { signed, .. } => {
@@ -11000,8 +11034,8 @@ impl LowerCtx<'_, '_> {
                 let handle = self
                     .runtime
                     .heap
-                    .alloc_bigint_from_str(&text)
-                    .map_err(|e| format!("jit comptime BigInt: {e}"))?;
+                    .int_from_str(&text)
+                    .map_err(|e| format!("jit comptime Int: {e}"))?;
                 Ok(self.b.ins().iconst(types::I64, handle))
             }
             CtValue::List(values) => {
@@ -12023,7 +12057,14 @@ impl LowerCtx<'_, '_> {
                     &[known, original],
                 ))
             }
-            TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
+            TExprKind::IntLit(v, _) => {
+                let value = if matches!(&expr.ty, Type::Int) {
+                    self.runtime.heap.int_from_i64(*v)
+                } else {
+                    *v
+                };
+                Ok(self.b.ins().iconst(types::I64, value))
+            }
             TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(if expr.ty == Type::Float32 {
                 (*v as f32) as f64
             } else {
@@ -12043,7 +12084,7 @@ impl LowerCtx<'_, '_> {
                 let inner = self.lower_expr(operand)?;
                 Ok(match op {
                     UnOp::Neg => match &operand.ty {
-                        Type::Int => self.b.ins().ineg(inner),
+                        Type::Int => self.call_host(self.host.num.int_neg, &[inner]),
                         Type::IntN {
                             signed: true,
                             bits,
@@ -12069,7 +12110,9 @@ impl LowerCtx<'_, '_> {
                     // Bool that is the one bit; on a whole number it is the
                     // bitwise complement, which Cranelift spells `bnot`.
                     UnOp::Not => match &operand.ty {
-                        Type::Int => self.b.ins().bnot(inner),
+                        Type::Int => {
+                            self.call_host(self.host.num.int_not, &[inner])
+                        }
                         // Turning over every bit is exclusive-or with a value
                         // whose bits are all set, so the fixed-width path
                         // reuses the host table that already narrows to the
@@ -14480,6 +14523,184 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.math" {
+                    if matches!(args.first().map(|arg| &arg.ty), Some(Type::Int)) {
+                        let exact = match method.as_str() {
+                            "abs" => Some((
+                                self.host.num.int_abs,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "factorial" => Some((
+                                self.host.num.int_factorial,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "isqrt" => Some((
+                                self.host.num.int_isqrt,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "is_even" => Some((
+                                self.host.num.int_is_even,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "is_odd" => Some((
+                                self.host.num.int_is_odd,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "digits" => Some((
+                                self.host.num.int_digits,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "leading_ones" => Some((
+                                self.host.num.int_leading_ones,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "trailing_ones" => Some((
+                                self.host.num.int_trailing_ones,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "binomial" => Some((
+                                self.host.num.int_binomial,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_abs" => Some((
+                                self.host.num.int_checked_abs,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "checked_neg" => Some((
+                                self.host.num.int_checked_neg,
+                                vec![self.lower_expr(&args[0])?],
+                            )),
+                            "checked_add" => Some((
+                                self.host.num.int_checked_add,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_sub" => Some((
+                                self.host.num.int_checked_sub,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_mul" => Some((
+                                self.host.num.int_checked_mul,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_div" => Some((
+                                self.host.num.int_checked_div,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_rem" => Some((
+                                self.host.num.int_checked_rem,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "checked_pow" => Some((
+                                self.host.num.int_checked_pow,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "saturating_add" => Some((
+                                self.host.num.int_saturating_add,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "saturating_sub" => Some((
+                                self.host.num.int_saturating_sub,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "saturating_mul" => Some((
+                                self.host.num.int_saturating_mul,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "wrapping_add" => Some((
+                                self.host.num.int_wrapping_add,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "wrapping_sub" => Some((
+                                self.host.num.int_wrapping_sub,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "wrapping_mul" => Some((
+                                self.host.num.int_wrapping_mul,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "int_pow" => Some((
+                                self.host.num.int_int_pow,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "gcd" => Some((
+                                self.host.num.int_gcd,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "lcm" => Some((
+                                self.host.num.int_lcm,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "div_mod" => Some((
+                                self.host.num.int_div_mod,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            "div_rem" => Some((
+                                self.host.num.int_div_rem_pair,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                ],
+                            )),
+                            _ => None,
+                        };
+                        if let Some((host, values)) = exact {
+                            let result = self.call_host(host, &values);
+                            if matches!(method.as_str(), "div_mod" | "div_rem") {
+                                self.emit_trap_check()?;
+                            }
+                            return Ok(result);
+                        }
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "sin" if args.len() == 1 => {
                             (self.host.core.math_sin, vec![self.lower_expr(&args[0])?])
@@ -14585,6 +14806,10 @@ impl LowerCtx<'_, '_> {
                                 },
                                 vec![self.lower_expr(&args[0])?],
                             )
+                        }
+                        "abs" if args.len() == 1 && matches!(&args[0].ty, Type::Int) => {
+                            let value = self.lower_expr(&args[0])?;
+                            return Ok(self.call_host(self.host.num.int_abs, &[value]));
                         }
                         "abs" if args.len() == 1 => {
                             let host_id = match &args[0].ty {
@@ -17081,19 +17306,13 @@ impl LowerCtx<'_, '_> {
                 func,
                 args,
             } => self.lower_math_dispatch(type_name, func, None, args, &expr.ty),
-            // D-BIGINT1 / D-DECIMAL1: precise numeric ctor/binop.
+            // D-DECIMAL1: precise numeric ctor/binop.
             TExprKind::PreciseBuiltin {
                 type_name,
                 func,
                 args,
-            } if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" => {
+            } if type_name == "Decimal" || type_name == "Fraction" => {
                 let host_fn = match (type_name.as_str(), func.as_str()) {
-                    ("BigInt", "from_int") => self.host.num.bigint_from_int,
-                    ("BigInt", "from_str") => self.host.num.bigint_from_str,
-                    ("BigInt", "add") => self.host.num.bigint_add,
-                    ("BigInt", "sub") => self.host.num.bigint_sub,
-                    ("BigInt", "mul") => self.host.num.bigint_mul,
-                    ("BigInt", "to_string") => self.host.num.bigint_to_string,
                     ("Decimal", "from_str") => self.host.num.decimal_from_str,
                     ("Decimal", "add") => self.host.num.decimal_add,
                     ("Decimal", "sub") => self.host.num.decimal_sub,
@@ -17745,7 +17964,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.lower_closure_method(recv, op, args)
             }
-            TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
+            TExprKind::NumericMethod { recv, op } => {
+                self.lower_numeric_method(recv, op, Some(&expr.ty))
+            }
             TExprKind::DistinctConvert {
                 arg,
                 op,
@@ -17753,7 +17974,7 @@ impl LowerCtx<'_, '_> {
                 fallible,
                 ..
             } => {
-                let converted = self.lower_numeric_method(arg, op)?;
+                let converted = self.lower_numeric_method(arg, op, None)?;
                 let Some((lo, hi)) = range else {
                     return Ok(converted);
                 };
@@ -19842,7 +20063,12 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn lower_numeric_method(&mut self, recv: &TExpr, op: &TNumericOp) -> Result<Value, String> {
+    fn lower_numeric_method(
+        &mut self,
+        recv: &TExpr,
+        op: &TNumericOp,
+        result_ty: Option<&Type>,
+    ) -> Result<Value, String> {
         let value = self.lower_expr(recv)?;
         match op {
             TNumericOp::Predicate(name) => {
@@ -19855,7 +20081,10 @@ impl LowerCtx<'_, '_> {
                 let op = self.b.ins().iconst(types::I64, op);
                 Ok(self.call_host(self.host.numeric_predicate, &[value, op]))
             }
-            TNumericOp::BitCount { method: name, .. } => {
+            TNumericOp::BitCount {
+                method: name,
+                width: bit_width,
+            } => {
                 let op = match name.as_str() {
                     "count_ones" => 0,
                     "count_zeros" => 1,
@@ -19864,6 +20093,13 @@ impl LowerCtx<'_, '_> {
                     _ => return Err(format!("jit numeric bit query unsupported: {name}")),
                 };
                 let op = self.b.ins().iconst(types::I64, op);
+                if matches!(&recv.ty, Type::Int) {
+                    let width = self.b.ins().iconst(types::I64, i64::from(*bit_width));
+                    return Ok(self.call_host(
+                        self.host.numeric_int_bit_count,
+                        &[value, op, width],
+                    ));
+                }
                 let width = match op {
                     _ => match &recv.ty {
                         Type::IntN { bits, .. } => i64::from(*bits),
@@ -19893,11 +20129,30 @@ impl LowerCtx<'_, '_> {
             }
             TNumericOp::CastAs { dst_rust } => {
                 let dst_float = matches!(dst_rust.as_str(), "f32" | "f64");
+                if matches!(&recv.ty, Type::Int) && dst_float {
+                    let mut converted = self.call_host(self.host.num.int_to_f64, &[value]);
+                    if dst_rust == "f32" {
+                        let narrowed = self.b.ins().fdemote(types::F32, converted);
+                        converted = self.b.ins().fpromote(types::F64, narrowed);
+                    }
+                    return Ok(converted);
+                }
                 if !dst_float {
+                    if matches!(result_ty, Some(Type::Int)) {
+                        return Ok(match &recv.ty {
+                            Type::IntN { signed: true, .. } => {
+                                self.call_host(self.host.num.int_from_int, &[value])
+                            }
+                            Type::IntN { signed: false, .. } => {
+                                self.call_host(self.host.num.int_from_u64, &[value])
+                            }
+                            _ => value,
+                        });
+                    }
                     return Ok(value);
                 }
                 let mut converted = if recv.ty.is_integer() {
-                    if matches!(recv.ty, Type::IntN { signed: false, .. }) {
+                    if matches!(&recv.ty, Type::IntN { signed: false, .. }) {
                         self.b.ins().fcvt_from_uint(types::F64, value)
                     } else {
                         self.b.ins().fcvt_from_sint(types::F64, value)
@@ -19916,6 +20171,18 @@ impl LowerCtx<'_, '_> {
                 target_f32,
                 ..
             } => {
+                if matches!(&recv.ty, Type::Int) {
+                    let target_f32 = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(*target_f32));
+                    let widened = self.call_host(
+                        self.host.numeric_int_checked_widen,
+                        &[value, target_f32],
+                    );
+                    self.emit_trap_check()?;
+                    return Ok(widened);
+                }
                 let source_signed = self
                     .b
                     .ins()
@@ -19929,7 +20196,11 @@ impl LowerCtx<'_, '_> {
                 Ok(widened)
             }
             TNumericOp::TryFrom { host_kind, .. } => {
-                let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));
+                if matches!(&recv.ty, Type::Int) {
+                    let kind = self.b.ins().iconst(types::I64, *host_kind);
+                    return Ok(self.call_host(self.host.numeric_try_int, &[value, kind]));
+                }
+                let unsigned = i64::from(matches!(&recv.ty, Type::IntN { signed: false, .. }));
                 let unsigned = self.b.ins().iconst(types::I64, unsigned);
                 let kind = self.b.ins().iconst(types::I64, *host_kind);
                 Ok(self.call_host(self.host.numeric_try_i64, &[value, unsigned, kind]))
@@ -21694,16 +21965,11 @@ impl LowerCtx<'_, '_> {
                 let other = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.duration_difference, &[recv_val, other]))
             }
-            // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
+            // D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
-                if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" =>
+                if type_name == "Decimal" || type_name == "Fraction" =>
             {
                 let (host_fn, extra_args) = match (type_name.as_str(), method.as_str()) {
-                    ("BigInt", "add") => (self.host.num.bigint_add, 1),
-                    ("BigInt", "sub") => (self.host.num.bigint_sub, 1),
-                    ("BigInt", "mul") => (self.host.num.bigint_mul, 1),
-                    ("BigInt", "neg") => (self.host.num.bigint_neg, 0),
-                    ("BigInt", "to_string") => (self.host.num.bigint_to_string, 0),
                     ("Decimal", "add") => (self.host.num.decimal_add, 1),
                     ("Decimal", "sub") => (self.host.num.decimal_sub, 1),
                     ("Decimal", "mul") => (self.host.num.decimal_mul, 1),
@@ -23376,16 +23642,28 @@ impl LowerCtx<'_, '_> {
                 }
                 match (&lhs_ty, op) {
                     (Type::Int, BinOp::Lt) => {
-                        self.bool_from_icmp(IntCC::SignedLessThan, vals[i], vals[i + 1])
+                        let ordering = self
+                            .call_host(self.host.num.int_compare, &[vals[i], vals[i + 1]]);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.bool_from_icmp(IntCC::SignedLessThan, ordering, zero)
                     }
                     (Type::Int, BinOp::Gt) => {
-                        self.bool_from_icmp(IntCC::SignedGreaterThan, vals[i], vals[i + 1])
+                        let ordering = self
+                            .call_host(self.host.num.int_compare, &[vals[i], vals[i + 1]]);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.bool_from_icmp(IntCC::SignedGreaterThan, ordering, zero)
                     }
                     (Type::Int, BinOp::Le) => {
-                        self.bool_from_icmp(IntCC::SignedLessThanOrEqual, vals[i], vals[i + 1])
+                        let ordering = self
+                            .call_host(self.host.num.int_compare, &[vals[i], vals[i + 1]]);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.bool_from_icmp(IntCC::SignedLessThanOrEqual, ordering, zero)
                     }
                     (Type::Int, BinOp::Ge) => {
-                        self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
+                        let ordering = self
+                            .call_host(self.host.num.int_compare, &[vals[i], vals[i + 1]]);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, ordering, zero)
                     }
                     (Type::IntN { signed, .. }, op) => {
                         let cc = match (signed, op) {
@@ -23452,11 +23730,11 @@ impl LowerCtx<'_, '_> {
             .copied()
             .ok_or_else(|| format!("jit increment/decrement unknown local `{}`", local.name))?;
         let old = self.b.use_var(var);
-        let delta = match op {
-            IncDecOp::Inc => self.b.ins().iconst(types::I64, 1),
-            IncDecOp::Dec => self.b.ins().iconst(types::I64, -1),
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = match op {
+            IncDecOp::Inc => self.call_host(self.host.num.int_add, &[old, one]),
+            IncDecOp::Dec => self.call_host(self.host.num.int_sub, &[old, one]),
         };
-        let next = self.b.ins().iadd(old, delta);
         self.b.def_var(var, next);
         Ok(if postfix { old } else { next })
     }
@@ -23854,6 +24132,45 @@ impl LowerCtx<'_, '_> {
         {
             return Ok(self.call_host(self.host.math.str_concat, &[l, r]));
         }
+        if matches!((&lhs_ty, &rhs_ty), (Type::Int, Type::Int)) {
+            match op {
+                BinOp::Add => return Ok(self.call_host(self.host.num.int_add, &[l, r])),
+                BinOp::Sub => return Ok(self.call_host(self.host.num.int_sub, &[l, r])),
+                BinOp::Mul => return Ok(self.call_host(self.host.num.int_mul, &[l, r])),
+                BinOp::Div => return Ok(self.call_host(self.host.num.int_div, &[l, r])),
+                BinOp::Pow => return Ok(self.call_host(self.host.num.int_pow, &[l, r])),
+                BinOp::FloorDiv => {
+                    return Ok(self.call_host(self.host.num.int_floor_div, &[l, r]));
+                }
+                BinOp::Mod => return Ok(self.call_host(self.host.num.int_mod, &[l, r])),
+                BinOp::Rem => return Ok(self.call_host(self.host.num.int_rem, &[l, r])),
+                BinOp::BitAnd => return Ok(self.call_host(self.host.num.int_bit_and, &[l, r])),
+                BinOp::BitOr => return Ok(self.call_host(self.host.num.int_bit_or, &[l, r])),
+                BinOp::BitXor => return Ok(self.call_host(self.host.num.int_bit_xor, &[l, r])),
+                BinOp::Shl => return Ok(self.call_host(self.host.num.int_shl, &[l, r])),
+                BinOp::Shr => return Ok(self.call_host(self.host.num.int_shr, &[l, r])),
+                BinOp::Compare | BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                    let ordering = self.call_host(self.host.num.int_compare, &[l, r]);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    if op == BinOp::Compare {
+                        let less = self.bool_from_icmp(IntCC::SignedLessThan, ordering, zero);
+                        let greater = self.bool_from_icmp(IntCC::SignedGreaterThan, ordering, zero);
+                        return Ok(self.ordering_from_flags(less, greater));
+                    }
+                    let cc = match op {
+                        BinOp::Eq => IntCC::Equal,
+                        BinOp::Ne => IntCC::NotEqual,
+                        BinOp::Lt => IntCC::SignedLessThan,
+                        BinOp::Gt => IntCC::SignedGreaterThan,
+                        BinOp::Le => IntCC::SignedLessThanOrEqual,
+                        BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                        _ => unreachable!(),
+                    };
+                    return Ok(self.bool_from_icmp(cc, ordering, zero));
+                }
+                _ => {}
+            }
+        }
         // ProcessResult.signal uses the legacy packed Option carrier
         // (0 = None, payload + 1 = Some). TIR reports CORE fields as Int;
         // compare only this exact carrier so repeated signaled waits preserve
@@ -24075,15 +24392,6 @@ impl LowerCtx<'_, '_> {
             }
             (Type::Bool, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Bool, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
-            (Type::Named(name), BinOp::Eq | BinOp::Ne) if name == "BigInt" => {
-                let eq = self.call_host(self.host.num.bigint_eq, &[l, r]);
-                if matches!(op, BinOp::Eq) {
-                    eq
-                } else {
-                    let one = self.b.ins().iconst(types::I8, 1);
-                    self.b.ins().isub(one, eq)
-                }
-            }
             (Type::Named(_) | Type::Apply { .. }, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Named(_) | Type::Apply { .. }, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::String, BinOp::Eq) => {
@@ -24346,6 +24654,15 @@ impl LowerCtx<'_, '_> {
                 .ins()
                 .iconst(types::I64, i64::from(*signed));
             let text = self.call_host(self.host.intn_to_string, &[value, signed]);
+            let print = self
+                .module
+                .declare_func_in_func(self.host.print_str, self.b.func);
+            self.b.ins().call(print, &[text]);
+            return Ok(());
+        }
+        if matches!(&inner.ty, Type::Int) {
+            let value = self.lower_expr(inner)?;
+            let text = self.call_host(self.host.num.int_to_string, &[value]);
             let print = self
                 .module
                 .declare_func_in_func(self.host.print_str, self.b.func);

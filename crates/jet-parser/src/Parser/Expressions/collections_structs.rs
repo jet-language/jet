@@ -21,7 +21,7 @@ impl<'a> Parser<'a> {
         /// empty-collection spelling — type-directed, list or map decided by the
         /// expected-type context (sema). `[:]` is gone; `[` immediately followed
         /// by `:` falls through to an ordinary expression-expected parse error.
-        /// D-DOTCTOR3: `[T].{ … }` / `[T#N].{ … }` / `[K: V].{ … }` is a typed-
+        /// D-DOTCTOR3: `[T].{ … }` / `[T#N].{ … }` / `[K:V].{ … }` is a typed-
         /// literal head, not a list value whose first element is a type name.
         pub(super) fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
             if let Some(lit) = self.try_typed_lit_from_bracket()? {
@@ -64,14 +64,14 @@ impl<'a> Parser<'a> {
             Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
         }
 
-        /// D-DOTCTOR3: probe `[Type].{` / `[Type#N].{` / `[K: V].{`.
+        /// D-DOTCTOR3: probe `[Type].{` / `[Type#N].{` / `[K:V].{`.
         fn try_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
             let save = self.pos;
             let save_diags = self.diags.len();
             if !matches!(self.peek().kind, TokKind::LBracket) {
                 return Ok(None);
             }
-            // Parse the whole collection type (`[T]`, `[T#N]`, `[K: V]`), not the
+            // Parse the whole collection type (`[T]`, `[T#N]`, `[K:V]`), not the
             // element alone — bumping `[` then `type_()` would see `U8` as a scalar.
             let parsed = self.type_();
             let Ok((head, head_span)) = parsed else {

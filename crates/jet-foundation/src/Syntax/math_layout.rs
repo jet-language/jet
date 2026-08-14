@@ -140,7 +140,8 @@ pub const TYPE_COMPLEX: &str = "Complex";
 /// D-LISTMAP-CANON1=A: legacy list spelling; `[T]` is canonical.
 pub const TYPE_LIST: &str = "List";
 
-/// D-LISTMAP-CANON1=A: legacy default map spelling; `[K: V]` is canonical.
+/// D-LISTMAP-CANON1=A / D-MAPSPACE1=A (ratified 2026-08-06): legacy default
+/// map spelling; `[K:V]` is canonical.
 pub const TYPE_MAP: &str = "Map";
 /// D-LISTMAP-CANON1=A / D-COLLNAME1=A: named specific collection types.
 pub const TYPE_HASH_MAP: &str = "HashMap";

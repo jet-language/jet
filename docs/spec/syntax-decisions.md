@@ -727,8 +727,8 @@ was intended). Scalar literal bodies keep comptime range checks in the E0135 /
 E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
 plain `[ … ]`; both elaborate against the element type. Examples:
 `U8.{ 250 }`, `[U8].{ 42, 0, 0 }`, `[U8#3].{ 255, 128, 0 }`,
-`[String: Int].{}`, `Int.{ fetch_rows() }`, `[[U8]].{ .{ 1, 0 }, [0, 1] }`.
-Amends D-EMPTYLIT1: `[T].{}` / `[K: V].{}` is the explicit empty collection;
+`[String:Int].{}`, `Int.{ fetch_rows() }`, `[[U8]].{ .{ 1, 0 }, [0, 1] }`.
+Amends D-EMPTYLIT1: `[T].{}` / `[K:V].{}` is the explicit empty collection;
 bare `[]` stays contextual.
 
 **S30 — Enums**:
@@ -957,7 +957,7 @@ length + inner_diameter
 
 **D-TYPEALIAS1 — Aliases**: `alias X :: Y` transparent aliases, scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
-`distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
+`distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A** + **D-MAPSPACE1=A**: `[T]`, `[K:V]`, `*T`
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
 are dead. Named specific collection spellings stay named rather than short
 bracket forms; shipped today: `Set<T>`, `Rank<T>`, `Queue<T>`,
@@ -968,10 +968,13 @@ implementations.
 **D-ALIAS-OP1=B** *(ratified 2026-08-06, card #1513; amends D-TYPEALIAS1)*:
 Alias declarations bind with `::`; the retired `=` spelling emits E0378.
 
-**D-BIGINT1** *(home moved to `core.math` by D-CORE-NUMERIC1=A, 2026-07-12)*: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
-`Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
-base-10 `Decimal` in `core.math`; default-on lint L0504 fires when a
-money-named field holds a float (`#[allow(float_money)]` suppresses).
+**D-BIGINT1** *(amended by D-TYPE2-NUM1=A, 2026-08-06)*: the former public
+`BigInt` spelling and its explicit constructors are retired. `Int` is now the
+exact arbitrary-precision beginner type; the limb carrier is internal runtime
+machinery only. **D-DECIMAL1**:
+arbitrary-precision base-10 `Decimal` in `core.math`; default-on lint L0504
+fires when a money-named field holds a float (`#[allow(float_money)]`
+suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in a
 `state TypeName { A, B, C }` block; `#State(S) fn m(self)` requires state S;
@@ -996,17 +999,18 @@ content-addressed definitions (D-CADEFS1, frozen).
 
 **S38 / D-EMPTYLIT1 — Map literal**: `["key": value, …]`. **D-EMPTYLIT1**
 *(ratified 2026-07-04)*: `[]` is the ONE empty-collection spelling for both
-list and map — type-directed from the expected-type context (a `[K: V]`
+list and map — type-directed from the expected-type context (a `[K:V]`
 binding/field/return/arg makes empty `[]` a map, same as `[T]` makes it a
 list). `[:]` is retired; `[` immediately followed by `:` is an ordinary
 parse error (E0003), no special-cased teaching text.
 **D-DOTCTOR3=A** *(ratified 2026-07-24)* amends this: `[T].{}` and
-`[K: V].{}` are the explicit empty forms that name the collection type on the
+`[K:V].{}` are the explicit empty forms that name the collection type on the
 value; bare `[]` keeps working wherever context already supplies the type.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
 
-**S64 — Map shorthand & entry iteration**: `[K: V]` is the canonical map-type
+**S64 / D-MAPSPACE1=A — Map shorthand & entry iteration**: `[K:V]` is the
+canonical map-type
 spelling. One-binding map iteration yields `.key`/`.value` entries;
 two-binding `loop name, amount; fruits` also supported.
 **D-RANGE-EXCL1=C** extends two-binding to sequences: `loop i, item; xs` yields
@@ -1055,7 +1059,7 @@ Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
 
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `Rank<T>`, ring-buffer `Queue<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
-`Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K: V]` is the default
+`Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K:V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
 `DataTree` is the single dynamic value
 (`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
@@ -2893,7 +2897,7 @@ the D-FFI-PY1 precedent):**
   recorded in the binding (order mismatch is a checked error, never a
   silent transposition).
 - **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K: V]` zero-copy views; effect root `=[Lua]=>`.
+  point); tables ↔ `[K:V]` zero-copy views; effect root `=[Lua]=>`.
 - **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
   state make embedding hostile); RubyGems as jetpack provider.
 - **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
@@ -6276,9 +6280,8 @@ checks, and the fixed-list index proof.
 
 Amends: D-INTBIG1. E0130–E0133 retire with BigInt.
 
-The existing `BigInt` Syntax and editor-highlight rows remain as migration
-anchors until #1550 removes the implementation; retirement snapshots are owed
-to #1550.
+The retired `BigInt` syntax and editor-highlight rows are removed from the
+active surface; exact `Int` owns the implementation and its snapshots.
 
 **2026-08-06 — D-TYPE2-REFINE1 = A — One spelling for value-range rules**
 *(card #1497, implementation card #1548)*. `distinct Int(1..6)` becomes the
@@ -7225,3 +7228,17 @@ artifact. `jet debug --replay=NAME` consumes it through the ratified replay
 adapters. This amends the two named D-JREPLAY1 clauses; the capture preflight,
 closed `=NAME` grammar, and the deferral of reverse-step and per-variable
 history do not change.
+
+**2026-08-14 — D-FMT-SIMPLIFY1=A implementation log** *(card #1514; ratified
+2026-08-06)*: `jet fmt` keeps its default one-style output. The opt-in
+`jet fmt --simplify` mode currently applies R1: a comment-free braced function
+body containing one `return` is emitted as the canonical `::` one-line body
+when it fits width 100; wide or commented bodies remain braced. The rewrite
+round-trips through the parser's span-free AST identity check and is stable on
+the second pass.
+
+**2026-08-14 — D-MAPSPACE1=A implementation log** *(card #1515; ratified
+2026-08-06)*: type-position map shorthand now emits `[K:V]`. Map literal
+entries and fields keep `key: value` spacing. The parser and generated grammar
+remain whitespace-agnostic; formatter output and in-repo examples use the one
+canonical type spelling.

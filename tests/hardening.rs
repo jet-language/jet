@@ -99,7 +99,7 @@ fn maybe() => (Int?) {
 }
 
 fn run() {
-    m := [String: Int].{}
+    m := [String:Int].{}
     m["k"] = 7
     x :: maybe() ?? m["k"]
     print(x)
@@ -140,7 +140,7 @@ fn run() {
 fn map_assign_through_field_uses_map_helper() {
     let src = r#"
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {
@@ -162,7 +162,7 @@ fn struct_literal_field_knows_expected_type() {
     // `[]` in a struct literal used to fail with a spurious E0501.
     let src = r#"
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {

@@ -79,7 +79,7 @@ pub fn partition_effect_key(file_alias: &str, local_key: &str) -> String {
     format!("{file_alias}::{local_key}")
 }
 
-/// D-JSBIND1=A: scalars, `String`, and homogeneous `[T]` / `[String: T]` of ABI-safe
+/// D-JSBIND1=A: scalars, `String`, and homogeneous `[T]` / `[String:T]` of ABI-safe
 /// element types. `Named` / `Apply` Codable structs and enums are checked in sema where
 /// the bundle's type definitions are available.
 pub fn is_abi_safe_type(ty: &Type) -> bool {

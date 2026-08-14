@@ -23,7 +23,7 @@ fn run() {
 }
 "#,
     r#"fn run() {
-    print((BigInt(100) - BigInt(1)).to_string())
+    print((100 - 1).to_string())
 }
 "#,
 ];

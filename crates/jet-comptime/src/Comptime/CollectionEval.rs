@@ -1391,8 +1391,10 @@ fn byte_buffer_method(
                 std::cmp::Ordering::Greater => 1,
             }))
         }
-        "parse" => match text.trim().parse::<i64>() {
-            Ok(n) => Ok(CtValue::Present(Box::new(CtValue::Int(n)))),
+        "parse" => match crate::Numeric::CtBigInt::from_str(text.trim()) {
+            Ok(n) => Ok(CtValue::Present(Box::new(
+                super::Builtins::exact_int_value(n),
+            ))),
             Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
         },
         _ => Err(unsupported(

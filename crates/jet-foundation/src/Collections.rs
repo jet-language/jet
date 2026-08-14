@@ -1,4 +1,4 @@
-//! M5 built-in collection and string surface (`[T]`, `[K: V]`, Char, String API).
+//! M5 built-in collection and string surface (`[T]`, `[K:V]`, Char, String API).
 //! M8 adds closure-powered methods (`map`, `filter`, …).
 //! Sema calls into this module; codegen mirrors the same method names.
 
@@ -27,7 +27,6 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_CONDITION,
     Syntax::TYPE_TALLY,
     Syntax::TYPE_QUEUE,
-    Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
     Syntax::DURATION_TYPE,
     Syntax::DURATION_UNIT_TYPE,
@@ -309,10 +308,7 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
         }
-        // D-BIGINT1 / D-DECIMAL1: precise numeric methods.
-        Type::Named(n) if n == crate::Syntax::TYPE_BIGINT => {
-            crate::Numeric::bigint_method_return(method, arg_count)
-        }
+        // D-DECIMAL1: precise decimal methods.
         Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
             crate::Numeric::decimal_method_return(method, arg_count)
         }
@@ -748,10 +744,10 @@ fn u8t() -> Type {
     }
 }
 
-/// `(signed, bits)` if `ty` is an integer type (`Int` = signed 64-bit).
+/// `(signed, bits)` if `ty` is a fixed-width integer. Exact `Int` has no finite
+/// width and is handled explicitly by the conversion table below.
 fn int_kind(ty: &Type) -> Option<(bool, u8)> {
     match ty {
-        Type::Int => Some((true, 64)),
         Type::IntN { signed, bits } => Some((*signed, *bits)),
         _ => None,
     }
@@ -783,7 +779,7 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         }
     }
     // D-NUMOPS1: integer bit-population queries (count -> Int).
-    if int_kind(ty).is_some() && nargs == 0 {
+    if matches!(ty, Type::Int | Type::IntN { .. }) && nargs == 0 {
         if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
             return Some(Some(Type::Int));
         }
@@ -798,6 +794,15 @@ pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> O
     }
     let source = crate::Syntax::numeric_conversion_source(method)
         .and_then(crate::AST::numeric_type_from_name)?;
+    if matches!(source, Type::Int) && matches!(target, Type::IntN { .. }) {
+        return Some(Some(Type::Result {
+            ok: Box::new(target.clone()),
+            err: Box::new(Type::String),
+        }));
+    }
+    if matches!(source, Type::IntN { .. }) && matches!(target, Type::Int) {
+        return Some(Some(target.clone()));
+    }
     Some(Some(match (int_kind(&source), int_kind(target)) {
         (Some(src), Some(dst)) if !int_conv_widening(src, dst) => Type::Result {
             ok: Box::new(target.clone()),

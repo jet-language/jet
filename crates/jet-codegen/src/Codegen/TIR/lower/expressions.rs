@@ -1,7 +1,7 @@
 use crate::jet_generated_format as jet_format;
 use crate::AST::{
     AccessConvention, BinOp, Call, CallArg, ContractClause, EnumLitArg, Expr, IndexKind, OrFallback,
-    Stmt, StrPart,
+    CtValue, Stmt, StrPart,
     TryConvert, Type, TypedLitBody,
 };
 use crate::Codegen::Cx;
@@ -366,7 +366,7 @@ fn lower_list_lit(elems: &[Expr], cx: &Cx, env: &mut LowerEnv) -> TExpr {
     }
 }
 
-fn lower_or_fallback(
+pub(super) fn lower_or_fallback(
     value: &Expr,
     fallback: &OrFallback,
     cx: &Cx,
@@ -1915,10 +1915,28 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
 #[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
-        Expr::Int(n, _, width, _) => TExpr {
-            ty: int_lit_type(width),
-            kind: TExprKind::IntLit(*n, *width),
-        },
+        Expr::Int(n, _, width, raw) => {
+            // D-INTBIG1: the lexer preserves a decimal literal that does not
+            // fit its token fast path. Keep it as a normal `Int` literal and
+            // let the packed Prelude constructor own the spill.
+            if width.is_none() {
+                if let Some(raw) = raw.as_deref() {
+                    let raw = raw.replace('_', "");
+                    if raw.parse::<i64>().is_err() {
+                        if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw) {
+                            return TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::CtLit(CtValue::BigInt(value)),
+                            };
+                        }
+                    }
+                }
+            }
+            TExpr {
+                ty: int_lit_type(width),
+                kind: TExprKind::IntLit(*n, *width),
+            }
+        }
         Expr::Float(v, _, is_f32) => TExpr {
             // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
             // node; carry that width through to TIR so emit produces the right suffix.
@@ -2321,7 +2339,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
-            // Recompute via the SAME table sema used (mirrors the math/BigInt
+            // Recompute via the SAME table sema used (mirrors the math/Int
             // early-return pattern below) rather than trusting `lhs.ty.clone()`
             // — that default is wrong here: e.g. `16.0 + label.right` has a
             // plain `Float` LEFT operand, so the result axis (`HVar`) comes
@@ -2424,7 +2442,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if lm || rm {
                     crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
                 } else if ln == rn
-                    && (ln == crate::Syntax::TYPE_BIGINT || ln == crate::Syntax::TYPE_DECIMAL)
+                    && ln == crate::Syntax::TYPE_DECIMAL
                     && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
                 {
                     lhs.ty.clone()
@@ -2434,10 +2452,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             } else {
                 lhs.ty.clone()
             };
-            // D-BIGINT1 / D-DECIMAL1: `+`/`-`/`*` lower to prelude helpers.
+            // D-DECIMAL1: `+`/`-`/`*` lower to prelude helpers.
             if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
                 if ln == rn
-                    && (ln == crate::Syntax::TYPE_BIGINT || ln == crate::Syntax::TYPE_DECIMAL)
+                    && ln == crate::Syntax::TYPE_DECIMAL
                 {
                     if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
                         if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
@@ -3018,10 +3036,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     Some(ret),
                 );
             }
-            // D-BIGINT1 / D-DECIMAL1: `BigInt(…)` / `Decimal(…)` constructors.
+            // D-DECIMAL1: `Decimal(…)` constructor.
             if !env.locals.contains_key(&call.name)
-                && (call.name == crate::Syntax::TYPE_BIGINT
-                    || call.name == crate::Syntax::TYPE_DECIMAL)
+                && call.name == crate::Syntax::TYPE_DECIMAL
                 && !cx.type_names.contains(&call.name)
             {
                 let targs: Vec<TExpr> = call
@@ -3029,20 +3046,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|a| lower_expr(&a.expr, cx, env))
                     .collect();
-                let func = if call.name == crate::Syntax::TYPE_BIGINT {
-                    if targs.first().map(|a| a.ty == Type::String).unwrap_or(false) {
-                        "from_str"
-                    } else {
-                        "from_int"
-                    }
-                } else {
-                    "from_str"
-                };
                 return TExpr {
                     ty: Type::Named(call.name.clone()),
                     kind: TExprKind::PreciseBuiltin {
                         type_name: call.name.clone(),
-                        func: func.to_string(),
+                        func: "from_str".to_string(),
                         args: targs,
                     },
                 };

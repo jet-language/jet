@@ -348,7 +348,7 @@ impl<'a> Fmt<'a> {
             Type::Map { key, value, .. } => {
                 self.write("[");
                 self.fmt_type(key);
-                self.write(": ");
+                self.write(":");
                 self.fmt_type(value);
                 self.write("]");
             }
@@ -696,8 +696,8 @@ impl<'a> Fmt<'a> {
             // slice, but only when it round-trips to the same value: some
             // Int nodes are synthesized with a borrowed nearby span whose
             // text isn't a number at all.
-            Expr::Int(n, span, _, _) => {
-                let text = int_literal_spelling(self.src, *span, *n);
+            Expr::Int(n, span, _, raw) => {
+                let text = int_literal_spelling(self.src, *span, *n, raw.as_deref());
                 self.write(&text);
             }
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),

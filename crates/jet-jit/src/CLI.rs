@@ -682,19 +682,20 @@ fn decode_frame(
                 },
                 Type::Int,
             ) => match option_val(parsed, flag_name) {
-                Some(v) => v
-                    .parse::<i64>()
+                Some(v) => Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(v.trim()))
                     .map_err(|_| format!("invalid int for --{flag_name}"))?,
                 None => match default {
                     Some(CLIDefault::Value(CtValue::Int(n))) => *n,
                     Some(CLIDefault::TypeDefault) => 0,
-                    Some(CLIDefault::Value(other)) => other
-                        .jet_show()
-                        .parse()
-                        .map_err(|_| format!("bad default for --{flag_name}"))?,
-                    Some(CLIDefault::Recorded(s)) => s
-                        .parse()
-                        .map_err(|_| format!("bad default for --{flag_name}"))?,
+                    Some(CLIDefault::Value(other)) => {
+                        let text = other.jet_show();
+                        Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(text.trim()))
+                            .map_err(|_| format!("bad default for --{flag_name}"))?
+                    }
+                    Some(CLIDefault::Recorded(s)) => {
+                        Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(s.trim()))
+                            .map_err(|_| format!("bad default for --{flag_name}"))?
+                    }
                     None if input.positional.is_some() => {
                         return Err(format!(
                             "missing required argument {flag_name}\n\n{}",

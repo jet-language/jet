@@ -400,6 +400,65 @@ impl<'a> Checker<'a> {
             }
         }
     
+        /// D-CHOOSE-TEST1=A: lower a subject-first pattern test into one
+        /// statement binding. The pattern validator supplies capture types;
+        /// the route checker proves the failed branch leaves before captures
+        /// enter scope.
+        pub(crate) fn check_refutable_binding(&mut self, b: &mut Binding) {
+            let Some(BindPattern::Refutable {
+                mut pattern,
+                mut fallback,
+                names,
+                span,
+            }) = b.pattern.clone()
+            else {
+                return;
+            };
+            let subject_span = b.init.span();
+            let subject = std::mem::replace(&mut b.init, Expr::Absent(subject_span));
+            let mut subject = Box::new(subject);
+            let (subject_ty, bindings) =
+                self.check_pattern_test_typed(&mut subject, &mut pattern, span);
+            b.init = *subject;
+            let Some(subject_ty) = subject_ty else {
+                for name in names.iter() {
+                    self.declare_bound(
+                        name.local_name(),
+                        name.span,
+                        Type::Int,
+                        false,
+                        b.sigil_span,
+                    );
+                }
+                return;
+            };
+
+            self.check_diverging_fallback(&mut fallback, &subject_ty, span);
+            if let Some(BindPattern::Refutable {
+                pattern: stored_pattern,
+                fallback: stored_fallback,
+                ..
+            }) = b.pattern.as_mut()
+            {
+                *stored_pattern = pattern;
+                *stored_fallback = fallback;
+            }
+            for name in names.iter() {
+                let ty = bindings
+                    .get(name.local_name())
+                    .or_else(|| bindings.get(&name.name))
+                    .cloned()
+                    .unwrap_or(Type::Int);
+                self.declare_bound(
+                    name.local_name(),
+                    name.span,
+                    ty,
+                    false,
+                    b.sigil_span,
+                );
+            }
+        }
+
         pub(crate) fn check_binding(&mut self, b: &mut Binding) {
             if let Some(meta) = &mut b.meta {
                 self.check_meta_attr(meta);
@@ -419,6 +478,11 @@ impl<'a> Checker<'a> {
             // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
             let prev_binding_name = self.current_binding_name.take();
             self.current_binding_name = Some(b.name.clone());
+            if matches!(&b.pattern, Some(BindPattern::Refutable { .. })) {
+                self.check_refutable_binding(b);
+                self.current_binding_name = prev_binding_name;
+                return;
+            }
             if b.pattern.is_some() {
                 self.check_destructuring_binding(b);
                 self.current_binding_name = prev_binding_name;
@@ -1328,6 +1392,9 @@ impl<'a> Checker<'a> {
                             b.sigil_span,
                         );
                     }
+                }
+                BindPattern::Refutable { .. } => {
+                    unreachable!("refutable bindings use check_refutable_binding")
                 }
             }
             // Move the initializer when it's an owned, non-scalar local (M2): the

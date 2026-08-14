@@ -1,5 +1,5 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, PlaceAccess, Stmt, Type, UnOp};
+use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, Pattern, PlaceAccess, Stmt, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle_generated;
 #[cfg(test)]
@@ -1881,6 +1881,41 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 elems: elem_names,
             });
         }
+        Stmt::Val(b)
+            if matches!(
+                &b.pattern,
+                Some(BindPattern::Refutable {
+                    pattern: Pattern::Ok { .. } | Pattern::Present { .. },
+                    ..
+                })
+            ) => {
+            // D-CHOOSE-TEST1=A: a successful `Ok`/`value` pattern test is the
+            // canonical fallible unwrap already used by `??`. The miss route
+            // is retained in the same TExpr so AOT, JIT, and interpreter all
+            // execute one prelude-backed fallback operation.
+            let Some(BindPattern::Refutable {
+                pattern,
+                fallback,
+                ..
+            }) = &b.pattern
+            else {
+                unreachable!("refutable-binding guard lost its pattern")
+            };
+            let binding = match pattern {
+                Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => binding,
+                _ => unreachable!("refutable-binding guard admitted another pattern"),
+            };
+            let init = super::expressions::lower_or_fallback(&b.init, fallback, cx, env);
+            env.bind(binding, TLocal::user(binding), Some(init.ty.clone()));
+            ready_return!(TStmt::Let {
+                name: binding.clone(),
+                kw: "let",
+                let_ty: TLetTy::inferred(),
+                init,
+                gc_promotion: None,
+                gc_transferred: false,
+            });
+        }
         Stmt::Val(b) => {
             // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: lower
             // `name := T.{ uninit }` to
@@ -2840,7 +2875,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // `field_type_cloneable` answers a narrower question than sema's
                 // `is_cloneable` (it treats every core `Named` type as
                 // non-cloneable because no derive is emitted for one), so using
-                // it directly would consume ordinary `[BigInt]` / `[Duration]`
+                // it directly would consume ordinary `[Int]` / `[Duration]`
                 // lists that sema still believes are copied — an ICE, not a fix.
                 // The shared predicate reaches inside containers, so a
                 // `[[Task<Int>]]` element is uncopyable too (it is a `Vec` of a

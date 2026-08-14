@@ -60,7 +60,8 @@ pub fn str_match_scan(
 
 fn str_hole_admits(ty: &Option<Type>, raw: &str) -> bool {
     match ty {
-        Some(Type::Int) | Some(Type::IntN { .. }) => raw.parse::<i64>().is_ok(),
+        Some(Type::Int) => crate::Numeric::CtBigInt::from_str(raw).is_ok(),
+        Some(Type::IntN { .. }) => raw.parse::<i64>().is_ok(),
         Some(Type::Float) | Some(Type::Float32) => raw.parse::<f64>().is_ok(),
         Some(Type::Bool) => matches!(raw, "true" | "false" | "True" | "False" | "0" | "1"),
         _ => true,

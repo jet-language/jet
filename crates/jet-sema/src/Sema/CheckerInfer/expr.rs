@@ -1450,7 +1450,7 @@ impl<'a> Checker<'a> {
             // a fixed-width integer type when one is expected here (binding/param/
             // return annotation, sized arithmetic). A literal that doesn't fit the
             // width is rejected (E1003) — there is no silent truncation.
-            Expr::Int(n, span, width, _) => {
+            Expr::Int(n, span, width, raw) => {
                 let (n, span) = (*n, *span);
                 // Peel transparent `#Tag T` so a `[U8]`/`#Tag U8` expected type
                 // still elaborates literal width (D-SG9 / D-TAG1).
@@ -1460,7 +1460,8 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(Type::IntN { signed, bits }) = expected {
                     let (lo, hi) = crate::AST::int_range(signed, bits);
-                    if (n as i128) < lo || (n as i128) > hi {
+                    let value = super::exact_integer_literal(n, raw.as_deref());
+                    if !super::exact_integer_fits(&value, lo, hi) {
                         self.diags.push(int_range_error(signed, bits, span));
                     }
                     *width = Some((signed, bits));
@@ -2086,12 +2087,12 @@ impl<'a> Checker<'a> {
                 // literal is range-checked at its negated value (`-128` fits `I8`)
                 // and the operand's own positive range check doesn't fire spuriously.
                 if let UnOp::Neg = op {
-                    if let (Expr::Int(n, ispan, width, _), Some(Type::IntN { signed: true, bits })) =
+                    if let (Expr::Int(n, ispan, width, raw), Some(Type::IntN { signed: true, bits })) =
                         (inner.as_mut(), self.expected_type.clone())
                     {
-                        let v = -(*n as i128);
+                        let v = super::exact_integer_literal(*n, raw.as_deref()).neg();
                         let (lo, hi) = crate::AST::int_range(true, bits);
-                        if v < lo || v > hi {
+                        if !super::exact_integer_fits(&v, lo, hi) {
                             self.diags.push(int_range_error(true, bits, *ispan));
                         }
                         *width = Some((true, bits));
@@ -3463,7 +3464,7 @@ impl<'a> Checker<'a> {
                 "E0501",
                 "an empty map needs a type".to_string(),
                 "write `[]` only where the map type is already known from around it".to_string(),
-                "name the key and value types on the literal: `[String: Int].{}`".to_string(),
+                "name the key and value types on the literal: `[String:Int].{}`".to_string(),
                 Some(span),
             ));
             return None;

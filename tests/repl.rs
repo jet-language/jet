@@ -698,8 +698,8 @@ fn repl_basics_transcript() {
 }
 
 #[test]
-fn repl_bigint_exact_transcript() {
-    run_transcript_file_strict(include_str!("repl/bigint.txt"));
+fn repl_exact_int_transcript() {
+    run_transcript_file_strict(include_str!("repl/exact_int.txt"));
 }
 
 #[test]
@@ -1213,7 +1213,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "fn state_value(s: State) => Int { if s == { .Ready(value) -> { return value } } return 0 }",
             "items: [String] :: [\"jet\", \"repl\"]",
             "items[0]",
-            "counts: [String: Int] :: [\"jet\": 2]",
+            "counts: [String:Int] :: [\"jet\": 2]",
             "counts[\"jet\"]",
             "maybe: Int? :: Val(7)",
             "maybe ?? 0",
@@ -2423,26 +2423,25 @@ fn repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable() {
     std::fs::remove_dir_all(state).ok();
 }
 
-// ── D-BIGINT1: comptime/REPL tier-0 BigInt (card #392) ─────────────────────
+// ── D-INTBIG1: comptime/REPL exact Int ─────────────────────────────────────
 // Same expression shapes and expected decimal strings as the AOT golden
 // example `examples/features/text/bigint.jet` /
 // `examples/features/expected/text/bigint.out` — proves R12 parity, not just
 // "doesn't crash".
 
 #[test]
-fn repl_bigint_construct_and_show() {
-    let out = run_transcript(&["BigInt(100)"], None);
-    assert!(out.trim().ends_with("100 : BigInt"), "got: {out:?}");
+fn repl_exact_int_construct_and_show() {
+    let out = run_transcript(&["100"], None);
+    assert!(out.trim().ends_with("100 : Int"), "got: {out:?}");
     assert!(!out.contains("E0956"), "got: {out:?}");
 }
 
 #[test]
-fn repl_bigint_add_beyond_i64_max() {
-    // max_i64 + 1 overflows a fixed Int; BigInt must not (that's the whole
-    // point of D-BIGINT1 — no silent promotion, no overflow trap either).
+fn repl_exact_int_add_beyond_i64_max() {
+    // The default Int is exact, so max_i64 + 1 keeps its value.
     let inputs = &[
-        "max_i64 :: BigInt(9223372036854775807)",
-        "one :: BigInt(1)",
+        "max_i64 :: 9223372036854775807",
+        "one :: 1",
         "sum :: max_i64 + one",
         "sum.to_string()",
     ];
@@ -2454,9 +2453,9 @@ fn repl_bigint_add_beyond_i64_max() {
 }
 
 #[test]
-fn repl_bigint_from_string_add() {
+fn repl_exact_int_from_literal_add() {
     let inputs = &[
-        "huge :: BigInt(\"999999999999999999999999999999\")",
+        "huge :: 999999999999999999999999999999",
         "doubled :: huge + huge",
         "doubled.to_string()",
     ];
@@ -2468,9 +2467,9 @@ fn repl_bigint_from_string_add() {
 }
 
 #[test]
-fn repl_bigint_mul_massive() {
+fn repl_exact_int_mul_massive() {
     let inputs = &[
-        "massive :: BigInt(\"239238749287396287369263958629386592683596293856293659263596235962935869236592863592635962395862935629368592635926359623956293659236592635986239562936592635962395629365926359863892659826398568639269856\")",
+        "massive :: 239238749287396287369263958629386592683596293856293659263596235962935869236592863592635962395862935629368592635926359623956293659236592635986239562936592635962395629365926359863892659826398568639269856",
         "massdoub :: massive * massive",
         "massdoub.to_string()",
     ];
@@ -2484,12 +2483,12 @@ fn repl_bigint_mul_massive() {
 }
 
 #[test]
-fn repl_bigint_sub_and_neg() {
+fn repl_exact_int_sub_and_neg() {
     let inputs = &[
-        "a :: BigInt(5)",
-        "b :: BigInt(3)",
-        "a.sub(b).to_string()",
-        "b.neg().to_string()",
+        "a :: 5",
+        "b :: 3",
+        "(a - b).to_string()",
+        "(-b).to_string()",
     ];
     let out = run_transcript(inputs, None);
     assert!(out.contains("\"2\" : String"), "got: {out:?}");
@@ -2497,11 +2496,11 @@ fn repl_bigint_sub_and_neg() {
 }
 
 #[test]
-fn repl_bigint_equality_is_numeric_not_identity() {
+fn repl_exact_int_equality_is_numeric() {
     let inputs = &[
-        "left :: BigInt(\"-999999999999999999999999999999\")",
-        "same :: BigInt(\"-999999999999999999999999999999\")",
-        "other :: BigInt(\"999999999999999999999999999999\")",
+        "left :: -999999999999999999999999999999",
+        "same :: -999999999999999999999999999999",
+        "other :: 999999999999999999999999999999",
         "left == same",
         "left != same",
         "left != other",

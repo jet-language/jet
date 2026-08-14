@@ -298,7 +298,7 @@ impl<'a> Parser<'a> {
             TokKind::LBracket => Err(Diagnostic::error(
                 "E0034",
                 format!("`{type_name}[...]` isn't how Jet writes generic types"),
-                "square brackets start collection types like `[Int]` or `[String: Int]`, and collection values like `[1, 2]`"
+                "square brackets start collection types like `[Int]` or `[String:Int]`, and collection values like `[1, 2]`"
                     .to_string(),
                 "write angle brackets for generic arguments, or use `[Int]` for a list type".to_string(),
                 Some(self.peek().span),
@@ -480,7 +480,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek().kind, TokKind::Colon) {
                     self.bump();
                     let (value, _) = self.type_generic_arg("map value")?;
-                    self.expect(TokKind::RBracket, "after the value type in `[K: V]`")?;
+                    self.expect(TokKind::RBracket, "after the value type in `[K:V]`")?;
                     Type::Map {
                         key: Box::new(first),
                         key_span: Some(first_span),
@@ -526,10 +526,12 @@ impl<'a> Parser<'a> {
                 match name.as_str() {
                     Syntax::TYPE_INT => Type::Int,
                     Syntax::TYPE_FLOAT => Type::Float,
-                    // D-SG9/S42: explicit fixed-width numeric spellings. `I64`/`F64`
-                    // are the same types as `Int`/`Float` and canonicalise here so
-                    // they stay fully interchangeable; the rest are distinct widths.
-                    Syntax::TYPE_I64 => Type::Int,
+                    // D-SG9/S42: explicit fixed-width numeric spellings. `I64` is
+                    // a fixed-width cell, while bare `Int` is exact and may spill.
+                    Syntax::TYPE_I64 => Type::IntN {
+                        signed: true,
+                        bits: 64,
+                    },
                     Syntax::TYPE_F64 => Type::Float,
                     Syntax::TYPE_I8 => Type::IntN {
                         signed: true,

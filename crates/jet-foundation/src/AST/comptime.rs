@@ -482,9 +482,8 @@ pub enum CtValue {
     Bool(bool),
     Char(char),
     Str(String),
-    /// D-BIGINT1: arbitrary-precision integer, comptime/REPL tier-0 mirror of
-    /// AOT's `JetBigInt` (crate::Numeric::CtBigInt keeps the same limb algorithm
-    /// so results print identically on both tiers — R12 parity).
+    /// D-INTBIG1: spilled storage for an exact default `Int`. This remains an
+    /// implementation carrier only; its language type is `Int`, not `BigInt`.
     BigInt(crate::Numeric::CtBigInt),
     /// `[U8]` byte buffer (D-CTIO1 `embed_bytes`).
     Bytes(Vec<u8>),
@@ -789,7 +788,7 @@ impl CtValue {
             CtValue::Bool(_) => Type::Bool,
             CtValue::Char(_) => Type::Char,
             CtValue::Str(_) => Type::String,
-            CtValue::BigInt(_) => Type::Named(crate::Syntax::TYPE_BIGINT.to_string()),
+            CtValue::BigInt(_) => Type::Int,
             CtValue::Bytes(_) => Type::List(Box::new(Type::IntN {
                 signed: false,
                 bits: 8,
@@ -1239,13 +1238,11 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}.to_string()", s),
-            // A `comptime`-computed `BigInt` is baked into the generated
-            // program as a call into the same prelude constructor AOT code
-            // uses for `BigInt("…")` (`jet_std::JetBigInt::from_str`), fed
-            // its canonical decimal string — never re-deriving the limbs in
-            // codegen (I3: codegen stays dumb).
+            // A spilled exact `Int` is baked through the same packed Prelude
+            // constructor used by runtime arithmetic; codegen never rebuilds
+            // limbs itself (I3).
             CtValue::BigInt(b) => format!(
-                "jet_std::JetBigInt::from_str({:?}).unwrap()",
+                "jet_std::jet_int_from_str({:?}).unwrap()",
                 b.to_string_rep()
             ),
             CtValue::Bytes(bs) => {

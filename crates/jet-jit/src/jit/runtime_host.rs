@@ -1319,7 +1319,7 @@ extern "C" fn jet_jit_trace_reset() {
 extern "C" fn jet_jit_parse_i64(id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
-        match text.trim().parse::<i64>() {
+        match rt.heap.int_from_str(text.trim()) {
             Ok(value) => alloc_jit_result(rt, true, value as u64),
             Err(_) => {
                 let error = rt
@@ -1376,6 +1376,16 @@ extern "C" fn jet_jit_numeric_try_i64(value: i64, source_unsigned: i64, kind: i6
     })
 }
 
+extern "C" fn jet_jit_numeric_try_int(value: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_try_from(value, kind) {
+        Some(value) => alloc_jit_result(rt, true, value as u64),
+        None => {
+            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
 extern "C" fn jet_jit_numeric_float_to_int(value: f64, kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let (lo, hi) = numeric_int_bounds(kind);
@@ -1416,6 +1426,16 @@ extern "C" fn jet_jit_numeric_checked_widen(
                 rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                 0.0
             }
+        }
+    })
+}
+
+extern "C" fn jet_jit_numeric_int_checked_widen(value: i64, target_f32: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_checked_widen(value, target_f32 != 0) {
+        Some(value) => value,
+        None => {
+            rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
+            0.0
         }
     })
 }
@@ -1465,6 +1485,20 @@ extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 
         _ => "trailing_zeros",
     };
     jet_codegen::Comptime::MathLayout::integer_bit_count(value, width as u32, method).unwrap_or(0)
+}
+
+extern "C" fn jet_jit_numeric_int_bit_count(value: i64, op: i64, width: i64) -> i64 {
+    let method = match op {
+        0 => "count_ones",
+        1 => "count_zeros",
+        2 => "leading_zeros",
+        _ => "trailing_zeros",
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .int_bit_count(value, width as u32, method)
+            .unwrap_or(0)
+    })
 }
 
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
@@ -3323,6 +3357,13 @@ host_fns! {
         sig_numeric_checked_widen
             .returns
             .push(AbiParam::new(types::F64));
+        let mut sig_numeric_int_checked_widen = Signature::new(cc);
+        sig_numeric_int_checked_widen
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_numeric_int_checked_widen
+            .returns
+            .push(AbiParam::new(types::F64));
         let mut sig_result_new_i64 = Signature::new(cc);
         sig_result_new_i64.params.push(AbiParam::new(types::I8));
         sig_result_new_i64.params.push(AbiParam::new(types::I64));
@@ -3511,13 +3552,16 @@ host_fns! {
     parse_i64: "jet_jit_parse_i64" => jet_jit_parse_i64: sig_str_unary_i64;
     parse_f64: "jet_jit_parse_f64" => jet_jit_parse_f64: sig_str_unary_i64;
     numeric_try_i64: "jet_jit_numeric_try_i64" => jet_jit_numeric_try_i64: sig_i64_i64_i64_i64;
+    numeric_try_int: "jet_jit_numeric_try_int" => jet_jit_numeric_try_int: sig_i64_i64_i64;
     numeric_float_to_int: "jet_jit_numeric_float_to_int" => jet_jit_numeric_float_to_int: sig_f64_i64_i64;
     numeric_float_narrow: "jet_jit_numeric_float_narrow" => jet_jit_numeric_float_narrow: sig_f64_i64;
     numeric_checked_widen: "jet_jit_numeric_checked_widen" => jet_jit_numeric_checked_widen: sig_numeric_checked_widen;
+    numeric_int_checked_widen: "jet_jit_numeric_int_checked_widen" => jet_jit_numeric_int_checked_widen: sig_numeric_int_checked_widen;
     distinct_range: "jet_jit_distinct_range" => jet_jit_distinct_range: sig_i64_i64_i64_i64;
     distinct_range_result: "jet_jit_distinct_range_result" => jet_jit_distinct_range_result: sig_i64_i64_i64_i64;
     numeric_predicate: "jet_jit_numeric_predicate" => jet_jit_numeric_predicate: sig_f64_i64_i8;
     numeric_bit_count: "jet_jit_numeric_bit_count" => jet_jit_numeric_bit_count: sig_i64_i64_i64_i64;
+    numeric_int_bit_count: "jet_jit_numeric_int_bit_count" => jet_jit_numeric_int_bit_count: sig_i64_i64_i64_i64;
     struct_new: "jet_jit_struct_new" => jet_jit_struct_new: sig_struct_new;
     struct_assign: "jet_jit_struct_assign" => jet_jit_struct_assign: sig_struct_assign;
     struct_get_i64: "jet_jit_struct_get_i64" => jet_jit_struct_get_i64: sig_struct_get_i64;

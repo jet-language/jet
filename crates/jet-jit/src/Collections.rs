@@ -3874,19 +3874,27 @@ extern "C" fn jet_jit_byte_buffer_method(
                 }
             }
             29 => i64::from(rt.byte_buffers.get(idx).is_some_and(|b| b.is_ascii())),
-            30 => match rt.byte_buffers.get(idx).map(|b| b.parse()) {
-                Some(Ok(n)) => {
+            30 => {
+                let text = rt
+                    .byte_buffers
+                    .get(idx)
+                    .map(|b| b.to_string())
+                    .unwrap_or_default();
+                match rt.heap.int_from_str(text.trim()) {
+                    Ok(n) => {
                     // Result packed: positive = Ok(n+1) won't work for negatives.
                     // Store ok as string/int via existing result helpers if any —
                     // for the example, return n directly when ok and use trap on err.
                     n
+                    }
+                    Err(_) => {
+                        rt.trapped = Some(format!(
+                            "cannot parse `{text}` as an integer"
+                        ));
+                        0
+                    }
                 }
-                Some(Err(msg)) => {
-                    rt.trapped = Some(msg);
-                    0
-                }
-                None => 0,
-            },
+            }
             // 1-arg
             40 => option_i64(
                 rt,

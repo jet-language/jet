@@ -635,7 +635,7 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -
             "match {var}.to_ascii_lowercase().as_str() {{ \"true\" => true, \"false\" => false, _ => return Err(format!(\"invalid value for --{{}}: `{{}}` is not true or false\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
         ),
         Type::Int => format!(
-            "match {var}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
+            "match {root_prefix}jet_std::jet_int_from_str(&{var}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
         ),
         Type::Float => format!(
             "match {var}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"

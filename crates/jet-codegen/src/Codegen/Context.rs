@@ -463,8 +463,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Regex" => Some("JetRegex"),
         "RegexFlags" => Some("RegexFlags"),
         "Match" => Some("JetRegexMatch"),
-        // D-BIGINT1 / D-DECIMAL1 / D-NUMTYPE1=A: precise numerics.
-        "BigInt" => Some("JetBigInt"),
+        // D-DECIMAL1 / D-NUMTYPE1=A: precise numerics.
         "Decimal" => Some("JetDecimal"),
         "Fraction" => Some("JetFraction"),
         "Closed" => Some("Closed"),

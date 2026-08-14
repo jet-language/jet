@@ -172,7 +172,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         ),
         Type::List(inner) => format!("[{}]", canonical_api_type_name(inner, dimensions)),
         Type::Map { key, value, .. } => format!(
-            "[{}: {}]",
+            "[{}:{}]",
             canonical_api_type_name(key, dimensions),
             canonical_api_type_name(value, dimensions)
         ),

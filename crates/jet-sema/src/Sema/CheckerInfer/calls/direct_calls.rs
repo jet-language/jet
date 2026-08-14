@@ -815,45 +815,6 @@ impl<'a> Checker<'a> {
                 }
             }
     
-            // D-BIGINT1: `BigInt(100)` or `BigInt("…")` — explicit construction only.
-            if self.funcs.get(&call.name).is_none()
-                && !self.registry.contains(&call.name)
-                && call.name == crate::Syntax::TYPE_BIGINT
-            {
-                if call.args.len() != 1 {
-                    self.diags.push(Diagnostic::error(
-                        "E0103",
-                        format!(
-                            "`BigInt` takes exactly one argument, got {}",
-                            call.args.len()
-                        ),
-                        "`BigInt` constructs an arbitrary-precision integer from an `Int` or `String`"
-                            .to_string(),
-                        "write `BigInt(100)` or `BigInt(\"999…\")`".to_string(),
-                        Some(call.name_span),
-                    ));
-                    for a in call.args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return Some(Some(Type::Named(call.name.clone())));
-                }
-                let got = self.infer(&mut call.args[0].expr);
-                match got {
-                    Some(Type::Int) | Some(Type::String) => {}
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0128",
-                            format!("`BigInt` expects `Int` or `String`, got `{}`", other.name()),
-                            "`BigInt` never converts from `Float` or promotes silently".to_string(),
-                            "pass an integer literal or a decimal string".to_string(),
-                            Some(call.args[0].expr.span()),
-                        ));
-                    }
-                    None => {}
-                }
-                return Some(Some(Type::Named(call.name.clone())));
-            }
-
             // D-ZIPPAD1: free `zip`/`zip_short`/`zip_pad` calls are built-in
             // sequence family calls when no user function shadows the name.
             // Check them before ordinary function lookup so arbitrary input

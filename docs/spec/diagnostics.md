@@ -273,10 +273,8 @@ renumbered, and no new `W` code may be allocated.
 | E0127 | sema  | arithmetic on a distinct type without `#Numeric`, between noncommensurable distinct types, or an inexact/explicit-only cross-unit mix (D-DIST3, D-QUAL3, D-QUANTITY-CONVERT1) |
 | E0128 | sema  | implicit coercion between a distinct type and its base, including retired `Type(value)` conversion aliases (D-DIST3, D-SHAPE-CONVERT1) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
-| E0130 | sema  | `Int` and `BigInt` mixed without explicit construction (D-BIGINT1) |
 | E0131 | sema  | `Float` and `Decimal` mixed (D-DECIMAL1) |
-| E0132 | sema  | `BigInt` and `Decimal` mixed (D-BIGINT1/D-DECIMAL1) |
-| E0133 | sema  | unsupported operator on `BigInt`/`Decimal` (D-BIGINT1/D-DECIMAL1) |
+| E0133 | sema  | unsupported operator on `Decimal` (D-DECIMAL1) |
 | E0134 | sema  | a numeric literal's unit suffix isn't an `#UnitFamily` member in scope (D-UNITLIT1) |
 | E0135 | sema  | a compile-time literal outside a range type's declared bounds (D-RANGETYPE1) |
 | E0136 | sema  | a runtime value constructed into a range type without the fallible `?` form (D-RANGETYPE1) |

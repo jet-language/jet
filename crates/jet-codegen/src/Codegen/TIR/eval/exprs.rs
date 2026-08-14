@@ -10,7 +10,7 @@ use crate::Codegen::TIR::{
     THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
     TStmt,
 };
-use crate::Comptime::Builtins::{as_bool, as_int};
+use crate::Comptime::Builtins::{as_bool, as_int, exact_big, exact_int_value};
 use crate::Comptime::{
     apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
     apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
@@ -1730,6 +1730,7 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
+        (CtValue::BigInt(value), Type::Int) => Some(value.to_string_rep()),
         (CtValue::Present(value), Type::Option(inner)) => {
             let rendered = show_typed_value(value, inner, debug).or_else(|| {
                 if debug {
@@ -2954,15 +2955,22 @@ impl<'a> EvalCtx<'a> {
             Type::Int | Type::IntN { .. } => {
                 let decoded = match datatree_variant(&tree) {
                     Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Int(*value)),
+                    Some(("Int", Some(CtValue::BigInt(value)))) if matches!(ty, Type::Int) => {
+                        Ok(CtValue::BigInt(value.clone()))
+                    }
+                    Some(("Int", Some(CtValue::BigInt(value)))) => value
+                        .try_i64()
+                        .map(CtValue::Int)
+                        .ok_or_else(|| {
+                            decode_error("", format!("expected {}, found out-of-range Int", ty.name()))
+                        }),
                     Some(("Float", Some(CtValue::Float(value))))
                         if value.as_f64().fract() == 0.0 =>
                     {
                         Ok(CtValue::Int(value.as_f64() as i64))
                     }
-                    Some(("Text", Some(CtValue::Str(value)))) => value
-                        .trim()
-                        .parse::<i64>()
-                        .map(CtValue::Int)
+                    Some(("Text", Some(CtValue::Str(value)))) => crate::Numeric::CtBigInt::from_str(value.trim())
+                        .map(exact_int_value)
                         .map_err(|_| {
                             decode_error(
                                 "",
@@ -2980,7 +2988,10 @@ impl<'a> EvalCtx<'a> {
                 };
                 if let Type::IntN { signed, bits } = ty {
                     let CtValue::Int(int_value) = &decoded else {
-                        unreachable!();
+                        return Ok(CtValue::failed(Box::new(decode_error(
+                            "",
+                            format!("expected {}, found out-of-range Int", ty.name()),
+                        ))));
                     };
                     let in_range = if *signed {
                         let shift = u32::from(*bits - 1);
@@ -3067,6 +3078,9 @@ impl<'a> EvalCtx<'a> {
             Type::String => match datatree_variant(&tree) {
                 Some(("Text", Some(CtValue::Str(value)))) => Ok(CtValue::Str(value.clone())),
                 Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Str(value.to_string())),
+                Some(("Int", Some(CtValue::BigInt(value)))) => {
+                    Ok(CtValue::Str(value.to_string_rep()))
+                }
                 Some(("Float", Some(CtValue::Float(value)))) => Ok(CtValue::Str(format!("{value:?}"))),
                 Some(("Bool", Some(CtValue::Bool(value)))) => Ok(CtValue::Str(value.to_string())),
                 _ => Err(decode_error(
@@ -5459,17 +5473,17 @@ impl<'a> EvalCtx<'a> {
                                 .expect("IntN layout");
                         crate::Comptime::MathLayout::integer_neg(n, bits, self.span())
                     }
-                    (UnOp::Neg, CtValue::Int(n)) => n
-                        .checked_neg()
-                        .map(CtValue::Int)
-                        .ok_or_else(|| unsupported("integer negation overflow", self.span())),
+                    (UnOp::Neg, CtValue::Int(n)) => Ok(exact_int_value(
+                        jet_foundation::Numeric::CtBigInt::from_int(n).neg(),
+                    )),
                     (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
-                    (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
+                    (UnOp::Neg, CtValue::BigInt(n)) => Ok(exact_int_value(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
                     // D-BITNOT1=A: on a whole number `!` turns over every bit.
                     // A sized type flips exactly its own width, so the result
                     // is narrowed back to it, the same way `-` is above; the
-                    // width-free default `Int` keeps all 64, which is `-x - 1`.
+                    // width-free default `Int` keeps the exact whole-number
+                    // result, which is `-x - 1`.
                     (UnOp::Not, CtValue::Int(n))
                         if matches!(&operand.ty, Type::IntN { .. }) =>
                     {
@@ -5484,7 +5498,15 @@ impl<'a> EvalCtx<'a> {
                             ),
                         ))
                     }
-                    (UnOp::Not, CtValue::Int(n)) => Ok(CtValue::Int(!n)),
+                    (UnOp::Not, CtValue::Int(n)) => Ok(exact_int_value(
+                        jet_foundation::Numeric::CtBigInt::from_int(n)
+                            .neg()
+                            .sub(&jet_foundation::Numeric::CtBigInt::from_int(1)),
+                    )),
+                    (UnOp::Not, CtValue::BigInt(n)) => Ok(exact_int_value(
+                        n.neg()
+                            .sub(&jet_foundation::Numeric::CtBigInt::from_int(1)),
+                    )),
                     _ => Err(unsupported("unary form", self.span())),
                 }
             }
@@ -8967,10 +8989,15 @@ impl<'a> EvalCtx<'a> {
         recv_ty: &crate::AST::Type,
         result_ty: &crate::AST::Type,
     ) -> Result<CtValue, Diagnostic> {
-        let _ = recv_ty;
         use crate::Codegen::TIR::TNumericOp;
         match op {
             TNumericOp::BitCount { method, width } => {
+                if matches!(recv_ty, Type::Int) {
+                    return exact_big(v)
+                        .and_then(|value| value.bit_count(*width, method))
+                        .map(CtValue::Int)
+                        .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()));
+                }
                 let CtValue::Int(value) = v else {
                     return Err(unsupported("numeric bit-count recv", self.span()));
                 };
@@ -8995,11 +9022,27 @@ impl<'a> EvalCtx<'a> {
                 match dst_rust.as_str() {
                     "f64" => match v {
                         CtValue::Float(f) => Ok(CtValue::Float(CtFloat::f64(f.as_f64()))),
+                        value if matches!(recv_ty, Type::Int) => {
+                            let value = exact_big(value)
+                                .ok_or_else(|| unsupported("CastAs to f64", self.span()))?;
+                            let value = value.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
+                                if value.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                            });
+                            Ok(CtValue::Float(CtFloat::f64(value)))
+                        }
                         CtValue::Int(n) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
                         _ => Err(unsupported("CastAs to f64", self.span())),
                     },
                     "f32" => match v {
                         CtValue::Float(f) => Ok(CtValue::Float(CtFloat::f32(f.as_f32()))),
+                        value if matches!(recv_ty, Type::Int) => {
+                            let value = exact_big(value)
+                                .ok_or_else(|| unsupported("CastAs to f32", self.span()))?;
+                            let value = value.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
+                                if value.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                            });
+                            Ok(CtValue::Float(CtFloat::f32(value as f32)))
+                        }
                         CtValue::Int(n) => Ok(CtValue::Float(CtFloat::f32(*n as f32))),
                         _ => Err(unsupported("CastAs to f32", self.span())),
                     },
@@ -9011,14 +9054,19 @@ impl<'a> EvalCtx<'a> {
                 target_f32,
                 ..
             } => {
-                let CtValue::Int(value) = v else {
-                    return Err(unsupported("checked numeric widening expects Int", self.span()));
+                let value = if matches!(recv_ty, Type::Int) {
+                    exact_big(v).and_then(|value| value.checked_widen(*target_f32))
+                } else {
+                    let CtValue::Int(value) = v else {
+                        return Err(unsupported("checked numeric widening expects Int", self.span()));
+                    };
+                    crate::numeric_widen::jet_numeric_checked_widen(
+                        *value as u64,
+                        *source_signed,
+                        *target_f32,
+                    )
                 };
-                let Some(value) = crate::numeric_widen::jet_numeric_checked_widen(
-                    *value as u64,
-                    *source_signed,
-                    *target_f32,
-                ) else {
+                let Some(value) = value else {
                     if let Some(sink) = self.sink.as_ref() {
                         let mut sink = sink.lock().expect("evaluator sink poisoned");
                         sink.stderr
@@ -9037,7 +9085,7 @@ impl<'a> EvalCtx<'a> {
                     ));
                 };
                 Ok(CtValue::Float(if *target_f32 {
-                    CtFloat::f32(value as f32)
+                        CtFloat::f32(value as f32)
                 } else {
                     CtFloat::f64(value)
                 }))
@@ -9047,27 +9095,41 @@ impl<'a> EvalCtx<'a> {
                 host_kind,
                 ..
             } => {
-                let CtValue::Int(n) = v else {
+                let value = if matches!(recv_ty, Type::Int) {
+                    exact_big(v)
+                } else {
+                    match v {
+                        CtValue::Int(value) => Some(jet_foundation::Numeric::CtBigInt::from_int(*value)),
+                        _ => None,
+                    }
+                };
+                let Some(value) = value else {
                     return Err(unsupported("TryFrom expects Int", self.span()));
                 };
                 let (lo, hi) = match *host_kind {
-                    0 => (i8::MIN as i64, i8::MAX as i64),
-                    1 => (i16::MIN as i64, i16::MAX as i64),
-                    2 => (i32::MIN as i64, i32::MAX as i64),
-                    3 => (i64::MIN, i64::MAX),
-                    4 => (0, u8::MAX as i64),
-                    5 => (0, u16::MAX as i64),
-                    6 => (0, u32::MAX as i64),
-                    7 => (0, i64::MAX), // U64 in i64 domain for pure-parity
-                    _ => (i64::MIN, i64::MAX),
+                    0 => (i8::MIN as i128, i8::MAX as i128),
+                    1 => (i16::MIN as i128, i16::MAX as i128),
+                    2 => (i32::MIN as i128, i32::MAX as i128),
+                    3 => (i64::MIN as i128, i64::MAX as i128),
+                    4 => (u8::MIN as i128, u8::MAX as i128),
+                    5 => (u16::MIN as i128, u16::MAX as i128),
+                    6 => (u32::MIN as i128, u32::MAX as i128),
+                    7 => (u64::MIN as i128, u64::MAX as i128),
+                    _ => (i64::MIN as i128, i64::MAX as i128),
                 };
-                if *n < lo || *n > hi {
+                let lower = jet_foundation::Numeric::CtBigInt::from_str(&lo.to_string())
+                    .expect("integer conversion lower bound");
+                let upper = jet_foundation::Numeric::CtBigInt::from_str(&hi.to_string())
+                    .expect("integer conversion upper bound");
+                if value.compare(&lower) == std::cmp::Ordering::Less
+                    || value.compare(&upper) == std::cmp::Ordering::Greater
+                {
                     return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
                     )))));
                 }
                 let _ = result_ty;
-                Ok(CtValue::Present(Box::new(CtValue::Int(*n))))
+                Ok(CtValue::Present(Box::new(exact_int_value(value))))
             }
             TNumericOp::FloatToInt {
                 dst_spelling,
@@ -9702,28 +9764,19 @@ fn eval_precise_builtin(
     args: Vec<CtValue>,
     span: crate::Diagnostics::Span,
 ) -> Result<CtValue, Diagnostic> {
-    use jet_foundation::Numeric::{CtBigInt, CtDecimal};
+    use jet_foundation::Numeric::CtDecimal;
     match (type_name, func) {
-        ("BigInt", "from_int") => match args.into_iter().next() {
-            Some(CtValue::Int(n)) => Ok(CtValue::BigInt(CtBigInt::from_int(n))),
-            _ => Err(unsupported("`BigInt.from_int`", span)),
-        },
-        ("BigInt", "from_str") => match args.into_iter().next() {
-            Some(CtValue::Str(s)) => CtBigInt::from_str(&s)
-                .map(CtValue::BigInt)
-                .map_err(|_| unsupported(&format!("`BigInt(\"{s}\")`"), span)),
-            _ => Err(unsupported("`BigInt.from_str`", span)),
-        },
         ("Decimal", "from_str") => match args.into_iter().next() {
             Some(CtValue::Str(s)) => CtDecimal::from_str(&s)
                 .map(|d| d.to_value())
                 .map_err(|_| unsupported(&format!("`Decimal(\"{s}\")`"), span)),
             _ => Err(unsupported("`Decimal.from_str`", span)),
         },
-        ("BigInt" | "Decimal" | "Fraction", "add" | "sub" | "mul" | "neg" | "to_string")
+        ("Decimal", "add" | "sub" | "mul" | "to_string")
         | (
             "Fraction",
-            "div" | "equal" | "numerator" | "denominator" | "to_float" | "is_zero",
+            "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal"
+                | "numerator" | "denominator" | "to_float" | "is_zero",
         ) => {
             let mut it = args.into_iter();
             let Some(recv) = it.next() else {

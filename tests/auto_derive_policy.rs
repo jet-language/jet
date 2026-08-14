@@ -495,7 +495,7 @@ use open_dep as library
 struct Token { value: Int }
 struct LocalEnvelope { token: Token }
 struct DependencyEnvelope { token: vendor.Token }
-struct MapEnvelope { values: [String: Int] }
+struct MapEnvelope { values: [String:Int] }
 struct UnionEnvelope { value: Int | String }
 
 fn run() {
@@ -509,7 +509,7 @@ fn run() {
     print("{badge:Debug}")
     print(badge == library.Badge.{ value: 9 })
 
-    map :: MapEnvelope.{ values: [String: Int].{ "one": 1 } }
+    map :: MapEnvelope.{ values: [String:Int].{ "one": 1 } }
     print(map)
     print("{map:Debug}")
 

@@ -830,15 +830,10 @@ impl<'a> TaintCtx<'a> {
 
 /// Names bound by a destructuring pattern (S74), flattened.
 fn pattern_names(pat: &crate::AST::BindPattern) -> Vec<String> {
-    use crate::AST::BindPattern;
-    match pat {
-        BindPattern::Struct { fields, .. } => {
-            fields.iter().map(|b| b.local_name().to_string()).collect()
-        }
-        BindPattern::List { elems, .. } | BindPattern::Tuple { elems, .. } => {
-            elems.iter().map(|b| b.name.clone()).collect()
-        }
-    }
+    pat.names()
+        .iter()
+        .map(|binding| binding.local_name().to_string())
+        .collect()
 }
 
 fn type_tags(ty: &Type) -> TagSet {

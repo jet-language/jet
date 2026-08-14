@@ -117,7 +117,7 @@ names :: loop user, users -> user.name
 Other collectors stay visible:
 
 ```jet
-by_id := [UserId: User].{}
+by_id := [UserId:User].{}
 loop user, users by_id.add(user.id, user)
 
 unique_names :: Set.from(loop user, users -> user.name)

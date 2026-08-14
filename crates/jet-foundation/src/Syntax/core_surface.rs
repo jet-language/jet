@@ -230,10 +230,9 @@ pub fn terminal_fact(name: &str) -> Option<&'static str> {
 }
 
 /// D-SG9/S42 (ratified): explicit fixed-width numeric spellings for expert and
-/// FFI/binary code. `Int`/`Float` stay the beginner defaults (64-bit); `I64`
-/// and `F64` are the explicit-width aliases for the same two types and
-/// canonicalise to `Type::Int`/`Type::Float` at parse time. The other widths
-/// are distinct types (no implicit narrowing/mixing — D-NUMOPS1).
+/// FFI/binary code. `Int`/`Float` stay the beginner defaults; `I64`/`F64` are
+/// explicit fixed-width cells. The other widths are distinct types (no
+/// implicit narrowing/mixing — D-NUMOPS1).
 pub const TYPE_I8: &str = "I8";
 pub const TYPE_I16: &str = "I16";
 pub const TYPE_I32: &str = "I32";
@@ -856,12 +855,6 @@ pub fn duration_unit_for_constructor(method: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-
-/// D-BIGINT1 (ratified 2026-06-28) / D-TYPE2-NUM1=A (ratified 2026-08-06):
-/// arbitrary-precision integer. Construct explicitly with `BigInt(100)` or
-/// `BigInt("…")`; fixed `Int` never promotes. The D-TYPE2 form retires this
-/// spelling; #1550 owns removal of its implementation references.
-pub const TYPE_BIGINT: &str = "BigInt";
 
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
 /// `Decimal("12.34")` or `core.math.decimal("12.34")`; no implicit `Float`.

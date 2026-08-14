@@ -2038,7 +2038,7 @@ pub(crate) fn type_name(v: &CtValue) -> &str {
         CtValue::Bool(_) => "Bool",
         CtValue::Char(_) => "Char",
         CtValue::Str(_) => "String",
-        CtValue::BigInt(_) => "BigInt",
+        CtValue::BigInt(_) => "Int",
         CtValue::Bytes(_) => "[U8]",
         CtValue::List(_) => "List",
         CtValue::Map(_) => "Map",

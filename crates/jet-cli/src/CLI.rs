@@ -919,6 +919,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },
     FlagSpec { long: "--restore-role-files", help: "with init: restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
+    FlagSpec { long: "--simplify", help: "with fmt: rewrite to the simplest ratified spelling" },
     FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },
     FlagSpec { long: "--explicit-copies", help: "with fmt: materialize implicit read-view copies as `~`" },
     FlagSpec { long: "--skipped", help: "with project parts: show modules omitted from automatic discovery" },

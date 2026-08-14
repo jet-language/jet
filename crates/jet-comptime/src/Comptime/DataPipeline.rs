@@ -116,7 +116,7 @@ fn ct_value_type_name(v: &CtValue) -> String {
         CtValue::Bool(_) => "Bool".to_string(),
         CtValue::Char(_) => "Char".to_string(),
         CtValue::Str(_) => "String".to_string(),
-        CtValue::BigInt(_) => "BigInt".to_string(),
+        CtValue::BigInt(_) => "Int".to_string(),
         CtValue::Bytes(_) => "[U8]".to_string(),
         CtValue::List(_) => "List".to_string(),
         CtValue::Map(_) => "Map".to_string(),

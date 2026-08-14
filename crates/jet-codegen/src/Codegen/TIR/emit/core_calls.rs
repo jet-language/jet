@@ -623,6 +623,113 @@ pub(crate) fn emit_tir_core_call(
             return rendered;
         }
     }
+    // D-INTBIG1: every whole-number core.math operation uses the exact Int
+    // Prelude carrier. Fixed-width rows remain available for explicit IntN.
+    if module == "core.math"
+        && matches!(args.first().map(|arg| &arg.ty), Some(Type::Int))
+    {
+        let exact = match method {
+            "abs" => Some(format!("{}jet_std::jet_int_abs({})", cx.root_prefix, arg(0))),
+            "factorial" => Some(format!(
+                "{}jet_std::jet_int_factorial({})",
+                cx.root_prefix,
+                arg(0)
+            )),
+            "isqrt" => Some(format!(
+                "{}jet_std::jet_int_isqrt({})",
+                cx.root_prefix,
+                arg(0)
+            )),
+            "is_even" | "is_odd" => Some(format!(
+                "{}jet_std::jet_int_{}({})",
+                cx.root_prefix,
+                method,
+                arg(0)
+            )),
+            "digits" | "leading_ones" | "trailing_ones" => Some(format!(
+                "{}jet_std::jet_int_{}({})",
+                cx.root_prefix,
+                method,
+                arg(0)
+            )),
+            "binomial" => Some(format!(
+                "{}jet_std::jet_int_binomial({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )),
+            "checked_abs" | "checked_neg" => Some(format!(
+                "{}jet_std::jet_int_{}({})",
+                cx.root_prefix,
+                method,
+                arg(0)
+            )),
+            "checked_add" | "checked_sub" | "checked_mul" | "saturating_add"
+            | "saturating_sub" | "saturating_mul" | "wrapping_add" | "wrapping_sub"
+            | "wrapping_mul" => Some(format!(
+                "{}jet_std::jet_int_{}({}, {})",
+                cx.root_prefix,
+                method,
+                arg(0),
+                arg(1)
+            )),
+            "checked_div" | "checked_rem" => Some(format!(
+                "{}jet_std::jet_int_{}({}, {}, \"core.math\", 0)",
+                cx.root_prefix,
+                method,
+                arg(0),
+                arg(1)
+            )),
+            "checked_pow" => Some(format!(
+                "{}jet_std::jet_int_checked_pow({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )),
+            "int_pow" => Some(format!(
+                "{}jet_std::jet_int_int_pow({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )),
+            "gcd" | "lcm" => Some(format!(
+                "{}jet_std::jet_int_{}({}, {})",
+                cx.root_prefix,
+                method,
+                arg(0),
+                arg(1)
+            )),
+            "div_mod" | "div_rem" => {
+                let fields = match ret_ty {
+                    Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                    _ => vec![
+                        ("quot".to_string(), Type::Int),
+                        ("rem".to_string(), Type::Int),
+                    ],
+                };
+                let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+                let helper = if method == "div_mod" {
+                    "jet_int_div_mod"
+                } else {
+                    "jet_int_div_rem_pair"
+                };
+                Some(format!(
+                    "{{ let __jet_pair = {}jet_std::{}({}, {}, \"core.math\", 0); {} {{ {}: __jet_pair.0, {}: __jet_pair.1 }} }}",
+                    cx.root_prefix,
+                    helper,
+                    arg(0),
+                    arg(1),
+                    struct_name,
+                    mangle("quot"),
+                    mangle("rem"),
+                ))
+            }
+            _ => None,
+        };
+        if let Some(exact) = exact {
+            return exact;
+        }
+    }
     if let Some(rendered) = emit_plain_core_call(module, method, args, &arg, &helper) {
         return rendered;
     }

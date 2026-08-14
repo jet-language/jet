@@ -174,7 +174,11 @@ fn pack_str_binds(binds: &[(String, Type, String)]) -> i64 {
         for (i, (_, ty, raw)) in binds.iter().enumerate() {
             let idx = i as i64;
             match ty {
-                Type::Int | Type::IntN { .. } => {
+                Type::Int => {
+                    let value = rt.heap.int_from_str(raw).unwrap_or(0);
+                    let _ = rt.heap.record_set_int(handle, idx, value);
+                }
+                Type::IntN { .. } => {
                     let _ = rt.heap.record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
                 }
                 Type::Float | Type::Float32 => {
@@ -358,7 +362,6 @@ host_fns! {
     cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_binary;
     reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_binary;
 }
-
 
 
 

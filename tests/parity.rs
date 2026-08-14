@@ -619,7 +619,7 @@ fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
         ("Float", "Float"),
         ("Bool", "Bool"),
         ("Char", "Char"),
-        ("BigInt", "BigInt"),
+        ("BigInt", "Int"),
         // D-FAIL-CARRIER1=A: one carrier, so one pair of variants.
         ("Present", "Option"),
         ("Failed", "Option"),
@@ -1280,7 +1280,6 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "wrapping").class, Class::Covered);
@@ -1310,7 +1309,6 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
         }
     }
-    assert_eq!(record(&records, Surface::Value, "BigInt", "to_string").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Decimal", "to_string").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Decimal", "add").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.math", "decimal").class, Class::Covered);

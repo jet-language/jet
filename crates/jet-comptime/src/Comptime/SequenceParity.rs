@@ -611,26 +611,19 @@ fn aggregate(
             Some(Type::Float32) => {
                 CtValue::Float(CtFloat::f32(if product { 1.0 } else { 0.0 }))
             }
-            Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIGINT => {
-                CtValue::BigInt(crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 }))
-            }
             _ => CtValue::Int(if product { 1 } else { 0 }),
         });
     };
     match first {
-        CtValue::Int(_) => {
-            let mut acc: i64 = if product { 1 } else { 0 };
+        CtValue::Int(_) | CtValue::BigInt(_) => {
+            let mut acc = crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 });
             for x in xs {
-                let CtValue::Int(value) = x else {
+                let Some(value) = crate::Comptime::Builtins::exact_big(x) else {
                     return Err(unsupported("sum/product on mixed numeric types", span));
                 };
-                acc = if product {
-                    acc.checked_mul(*value).ok_or_else(|| overflow("multiply", span))?
-                } else {
-                    acc.checked_add(*value).ok_or_else(|| overflow("add", span))?
-                };
+                acc = if product { acc.mul(&value) } else { acc.add(&value) };
             }
-            Ok(CtValue::Int(acc))
+            Ok(crate::Comptime::Builtins::exact_int_value(acc))
         }
         CtValue::Float(first) => {
             let mut acc = match first {
@@ -646,16 +639,6 @@ fn aggregate(
                     .ok_or_else(|| unsupported("sum/product on mixed float widths", span))?;
             }
             Ok(CtValue::Float(acc))
-        }
-        CtValue::BigInt(_) => {
-            let mut acc = crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 });
-            for x in xs {
-                let CtValue::BigInt(value) = x else {
-                    return Err(unsupported("sum/product on mixed numeric types", span));
-                };
-                acc = if product { acc.mul(value) } else { acc.add(value) };
-            }
-            Ok(CtValue::BigInt(acc))
         }
         _ => Err(unsupported("sum/product on non-numeric values", span)),
     }

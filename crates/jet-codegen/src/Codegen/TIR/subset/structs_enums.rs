@@ -436,7 +436,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     }
     match ty {
         Type::Named(n) => struct_is_covered(n, cx, seen),
-        // c109 Phase 16: a collection field (`[E]` / `[K: V]`) whose element/key/value
+        // c109 Phase 16: a collection field (`[E]` / `[K:V]`) whose element/key/value
         // types are covered value types. The struct-literal emit is plain
         // (`field: vec![…]`), byte-identical to the AST path. A list/map *element*
         // that is itself a covered struct/enum/collection is admitted (the Phase-5

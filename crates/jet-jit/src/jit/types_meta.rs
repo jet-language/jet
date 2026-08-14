@@ -463,6 +463,24 @@ fn is_i64_option(ty: &Type) -> bool {
     )
 }
 
+pub(crate) fn core_call_uses_result_option_abi(module: &str, method: &str) -> bool {
+    module == "core.math"
+        && matches!(
+            method,
+            "isqrt"
+                | "factorial"
+                | "binomial"
+                | "checked_abs"
+                | "checked_neg"
+                | "checked_add"
+                | "checked_sub"
+                | "checked_mul"
+                | "checked_div"
+                | "checked_rem"
+                | "checked_pow"
+        )
+}
+
 fn nominal_type_name(ty: &Type) -> Option<&str> {
     match ty {
         Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
@@ -518,6 +536,9 @@ fn result_option_expr(
         | TExprKind::DistinctCtor { arg: place, .. }
         | TExprKind::Clone(place) => result_option_expr(place, locals, targets),
         TExprKind::Call { name, .. } => targets.contains(name),
+        TExprKind::CoreCall { module, method, .. } => {
+            core_call_uses_result_option_abi(module, method)
+        }
         TExprKind::MethodCall {
             recv,
             method,

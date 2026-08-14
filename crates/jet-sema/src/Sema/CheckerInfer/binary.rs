@@ -15,10 +15,16 @@ use std::collections::HashMap;
 fn is_written_negative_int(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner, _) => is_written_negative_int(inner),
-        Expr::Int(value, _, _, _) => *value < 0,
-        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
-            matches!(inner.as_ref(), Expr::Int(value, _, _, _) if *value > 0)
+        Expr::Int(value, _, _, raw) => {
+            super::exact_integer_literal(*value, raw.as_deref()).negative
         }
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match inner.as_ref() {
+            Expr::Int(value, _, _, raw) => {
+                let value = super::exact_integer_literal(*value, raw.as_deref());
+                !value.is_zero() && !value.negative
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -44,17 +50,17 @@ impl<'a> Checker<'a> {
         match expr {
             Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
-                let Expr::Int(value, _, width, _) = inner.as_mut() else {
+                let Expr::Int(value, _, width, raw) = inner.as_mut() else {
                     return None;
                 };
                 if width.is_some() {
                     return None;
                 }
-                let negated = -(*value as i128);
+                let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
                 match peer {
                     Some(Type::IntN { signed, bits }) => {
                         let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                        if negated >= lower && negated <= upper {
+                        if super::exact_integer_fits(&negated, lower, upper) {
                             *width = Some((*signed, *bits));
                             Some(Type::IntN {
                                 signed: *signed,
@@ -74,12 +80,17 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Expr::Int(value, _, width, _) if *value >= 0 && width.is_none() => {
-                let value = *value as i128;
+            Expr::Int(value, _, width, raw)
+                if width.is_none()
+                    && super::exact_integer_literal(*value, raw.as_deref()).compare(
+                        &crate::Numeric::CtBigInt::from_int(0),
+                    ) != std::cmp::Ordering::Less =>
+            {
+                let value = super::exact_integer_literal(*value, raw.as_deref());
                 match peer {
                     Some(Type::IntN { signed, bits }) => {
                         let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                        if value >= lower && value <= upper {
+                        if super::exact_integer_fits(&value, lower, upper) {
                             *width = Some((*signed, *bits));
                             Some(Type::IntN {
                                 signed: *signed,
@@ -124,10 +135,10 @@ impl<'a> Checker<'a> {
         match expr {
             Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
-                (Expr::Int(value, span, width, _), Type::IntN { signed: true, bits }) => {
-                    let negated = -(*value as i128);
+                (Expr::Int(value, span, width, raw), Type::IntN { signed: true, bits }) => {
+                    let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
                     let (lower, upper) = crate::AST::int_range(true, *bits);
-                    if negated < lower || negated > upper {
+                    if !super::exact_integer_fits(&negated, lower, upper) {
                         self.diags
                             .push(crate::Sema::int_range_error(true, *bits, *span));
                     }
@@ -137,14 +148,15 @@ impl<'a> Checker<'a> {
                 (_, Type::IntN { signed: false, .. }) => None,
                 _ => self.contextualize_numeric_literal(inner, target),
             },
-            Expr::Int(value, span, width, _) => match target {
+            Expr::Int(value, span, width, raw) => match target {
                 Type::Int => {
                     *width = None;
                     Some(Type::Int)
                 }
                 Type::IntN { signed, bits } => {
                     let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                    if (*value as i128) < lower || (*value as i128) > upper {
+                    let exact = super::exact_integer_literal(*value, raw.as_deref());
+                    if !super::exact_integer_fits(&exact, lower, upper) {
                         self.diags
                             .push(crate::Sema::int_range_error(*signed, *bits, *span));
                     }
@@ -152,11 +164,14 @@ impl<'a> Checker<'a> {
                     Some(target.clone())
                 }
                 Type::Float | Type::Float32 => {
-                    let exact = if *target == Type::Float32 {
-                        (*value as f32) as i128 == *value as i128
-                    } else {
-                        (*value as f64) as i128 == *value as i128
-                    };
+                    let exact_value = super::exact_integer_literal(*value, raw.as_deref());
+                    let exact = exact_value.try_i64().is_some_and(|value| {
+                        if *target == Type::Float32 {
+                            (value as f32) as i64 == value
+                        } else {
+                            (value as f64) as i64 == value
+                        }
+                    });
                     if !exact {
                         let limit = if *target == Type::Float32 {
                             1i128 << 24
@@ -1204,7 +1219,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // D-BIGINT1 / D-DECIMAL1: precise numeric operators (closed family).
+        // D-DECIMAL1: exact decimal operators.
         {
             let lname = match &lt {
                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
@@ -1214,8 +1229,8 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
                 _ => String::new(),
             };
-            if crate::Numeric::is_precise_numeric_type_name(&lname)
-                || crate::Numeric::is_precise_numeric_type_name(&rname)
+            if crate::Numeric::is_decimal_type_name(&lname)
+                || crate::Numeric::is_decimal_type_name(&rname)
             {
                 if let Some((code, what, fix)) = precise_mix_error(&lt, &rt) {
                     self.diags.push(Diagnostic::error(
@@ -1238,7 +1253,7 @@ impl<'a> Checker<'a> {
                         lt.name(),
                         rt.name()
                     ),
-                    "`BigInt` and `Decimal` support `+`, `-`, `*`, and `==`/`!=` on matching types only".to_string(),
+                    "`Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only".to_string(),
                     "use a method like `.add(other)` or make both operands the same precise type".to_string(),
                     Some(span),
                 ));

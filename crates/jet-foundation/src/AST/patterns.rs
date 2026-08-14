@@ -226,6 +226,16 @@ pub enum BindPattern {
     List { elems: Vec<BindName>, span: Span },
     /// `(x, y) :: p` — binds named tuple fields in canonical (sorted) order.
     Tuple { elems: Vec<BindName>, span: Span },
+    /// D-CHOOSE-TEST1=A: `subject == pattern ?? route` binds the captures from
+    /// the successful pattern match after the route has been checked to
+    /// diverge. The subject is stored on `Binding::init`; this node stores the
+    /// refutable test and its route as one statement-level binding operation.
+    Refutable {
+        pattern: Pattern,
+        fallback: OrFallback,
+        names: Vec<BindName>,
+        span: Span,
+    },
 }
 
 impl BindPattern {
@@ -233,7 +243,8 @@ impl BindPattern {
         match self {
             BindPattern::Struct { span, .. }
             | BindPattern::List { span, .. }
-            | BindPattern::Tuple { span, .. } => *span,
+            | BindPattern::Tuple { span, .. }
+            | BindPattern::Refutable { span, .. } => *span,
         }
     }
 
@@ -243,6 +254,7 @@ impl BindPattern {
             BindPattern::Struct { fields, .. } => fields,
             BindPattern::List { elems, .. } => elems,
             BindPattern::Tuple { elems, .. } => elems,
+            BindPattern::Refutable { names, .. } => names,
         }
     }
 }
@@ -287,6 +299,91 @@ impl Pattern {
             Pattern::Struct { span, .. } => *span,
             Pattern::StrMatch { span, .. } => *span,
             Pattern::BinMatch { span, .. } => *span,
+        }
+    }
+
+    /// Capture names introduced when this pattern succeeds. The parser uses
+    /// this to turn a pattern test into a binding; sema remains authoritative
+    /// for each capture's type and the codegen consumes the normalized pattern.
+    pub fn binding_names(&self) -> Vec<BindName> {
+        match self {
+            Pattern::Variant { bindings, .. } => bindings
+                .iter()
+                .filter_map(|slot| match slot {
+                    PatSlot::Bind { name, span } => Some(BindName {
+                        name: name.clone(),
+                        span: *span,
+                        rename: None,
+                    }),
+                    PatSlot::Wildcard | PatSlot::Range { .. } => None,
+                })
+                .collect(),
+            Pattern::Present {
+                binding,
+                binding_span,
+                ..
+            }
+            | Pattern::Ok {
+                binding,
+                binding_span,
+                ..
+            }
+            | Pattern::Err {
+                binding,
+                binding_span,
+                ..
+            } => vec![BindName {
+                name: binding.clone(),
+                span: *binding_span,
+                rename: None,
+            }],
+            Pattern::Or(alternatives, _) => alternatives
+                .first()
+                .map(Pattern::binding_names)
+                .unwrap_or_default(),
+            Pattern::Struct { fields, .. } => fields
+                .iter()
+                .filter_map(|field| match field {
+                    StructPatField::Bind {
+                        field,
+                        field_span,
+                        local,
+                        local_span,
+                    } => Some(BindName {
+                        name: field.clone(),
+                        span: *field_span,
+                        rename: Some((local.clone(), *local_span)),
+                    }),
+                    StructPatField::Value { .. } => None,
+                })
+                .collect(),
+            Pattern::StrMatch { parts, .. } => parts
+                .iter()
+                .filter_map(|part| match part {
+                    StrMatchPart::Hole { name, span, .. } => Some(BindName {
+                        name: name.clone(),
+                        span: *span,
+                        rename: None,
+                    }),
+                    StrMatchPart::Lit(_) => None,
+                })
+                .collect(),
+            Pattern::BinMatch { parts, .. } => parts
+                .iter()
+                .filter_map(|part| match part {
+                    BinMatchPart::Hole {
+                        name,
+                        spec: BinSpec::Bits { .. },
+                        span,
+                    } => Some(BindName {
+                        name: name.clone(),
+                        span: *span,
+                        rename: None,
+                    }),
+                    BinMatchPart::Lit(_) | BinMatchPart::Hole { spec: BinSpec::Rest, .. } => None,
+                })
+                .collect(),
+            Pattern::Absent(_) | Pattern::Range { .. } => Vec::new(),
         }
     }
 }

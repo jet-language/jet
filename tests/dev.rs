@@ -3407,26 +3407,26 @@ fn unsupported_core_text_is_not_claimed_by_resident_jit() {
 }
 
 #[test]
-fn bigint_equality_matches_aot_in_resident_and_default_dev() {
+fn exact_int_equality_matches_aot_in_resident_and_default_dev() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
     let src = r#"
 fn run() {
-    left :: BigInt("-999999999999999999999999999999")
-    same :: BigInt("-999999999999999999999999999999")
-    other :: BigInt("999999999999999999999999999999")
+    left :: -999999999999999999999999999999
+    same :: -999999999999999999999999999999
+    other :: 999999999999999999999999999999
     print(left == same)
     print(left != same)
     print(left != other)
 }
 "#;
-    let resident = run_cranelift_without_fallback(src, "bigint_value_equality");
+    let resident = run_cranelift_without_fallback(src, "exact_int_value_equality");
 
-    let dir = std::env::temp_dir().join(format!("jet_bigint_equality_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_exact_int_equality_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("bigint_value_equality.jet");
+    let file = dir.join("exact_int_value_equality.jet");
     fs::write(&file, src).unwrap();
     let shown = file.to_string_lossy().to_string();
     let default = match dev_iteration(&shown, false, false) {
@@ -3435,13 +3435,13 @@ fn run() {
             stderr,
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev failed BigInt equality: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("default dev failed exact Int equality: {diags:?}"),
     };
     let aot = compiled_binary_output(
         &dir,
-        "bigint_value_equality",
+        "exact_int_value_equality",
         0,
-        "bigint_value_equality",
+        "exact_int_value_equality",
         &shown,
     );
     let expected = ProgramOutput::ran("true\nfalse\ntrue\n".to_string(), String::new(), 0);
@@ -3501,7 +3501,7 @@ fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
 }
 
 #[test]
-fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
+fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
@@ -3514,32 +3514,32 @@ fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
             ProgramOutput::ran(stdout, stderr, exit_code)
         }
         RunOutcome::Problems(diags) => {
-            panic!("BigInt example must execute in interpreter tier: {diags:?}")
+            panic!("exact Int example must execute in interpreter tier: {diags:?}")
         }
     };
 
     let source = fs::read_to_string(file).unwrap();
     jet_jit::reset_jit_trace_for_test();
-    let resident = run_cranelift_without_fallback(&source, "bigint_example");
+    let resident = run_cranelift_without_fallback(&source, "exact_int_example");
     assert!(
         jet_jit::jit_executed_for_test(),
-        "BigInt example must execute as native JIT"
+        "exact Int example must execute as native JIT"
     );
     assert!(
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "BigInt example must not use interpreter deopt or fallback"
+        "exact Int example must not use interpreter deopt or fallback"
     );
     let default = match dev_iteration(file, false, false) {
         RunOutcome::Ran { stdout, stderr, exit_code } => {
             ProgramOutput::ran(stdout, stderr, exit_code)
         }
-        RunOutcome::Problems(diags) => panic!("default dev failed BigInt example: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("default dev failed exact Int example: {diags:?}"),
     };
 
-    let dir = std::env::temp_dir().join(format!("jet_bigint_example_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_exact_int_example_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let aot = compiled_binary_output(&dir, "bigint_example", 0, "bigint_example", file);
+    let aot = compiled_binary_output(&dir, "exact_int_example", 0, "exact_int_example", file);
 
     assert_eq!(interpreted, expected);
     assert_eq!(resident, expected);
@@ -9921,7 +9921,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) => DataTree {
-        m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
+        m :: [String:DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }

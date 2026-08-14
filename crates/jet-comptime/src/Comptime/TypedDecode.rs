@@ -266,6 +266,7 @@ fn key_to_string(key: &CtKey) -> String {
 fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &StructDef>) -> CtValue {
     match v {
         CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
+        CtValue::BigInt(n) => json_variant("Int", Some(CtValue::BigInt(n.clone()))),
         CtValue::Float(value) => json_variant(
             "Float",
             Some(CtValue::Float(CtFloat::f64(value.as_f64()))),
@@ -305,13 +306,12 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
 fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Int(*n)),
+        Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::BigInt(n.clone())),
         Some(("Float", Some(CtValue::Float(value)))) if value.as_f64().fract() == 0.0 => {
             Ok(CtValue::Int(value.as_f64() as i64))
         }
-        Some(("Text", Some(CtValue::Str(s)))) => s
-            .trim()
-            .parse::<i64>()
-            .map(CtValue::Int)
+        Some(("Text", Some(CtValue::Str(s)))) => crate::Numeric::CtBigInt::from_str(s.trim())
+            .map(super::Builtins::exact_int_value)
             .map_err(|_| decode_error(format!("expected Int, found text {:?}", s))),
         _ => Err(decode_error(format!("expected Int, found {}", datatree_kind_for(tree)))),
     }
@@ -345,6 +345,7 @@ fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Text", Some(CtValue::Str(s)))) => Ok(CtValue::Str(s.clone())),
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
+        Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
         Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
         _ => Err(decode_error(format!("expected Text, found {}", datatree_kind_for(tree)))),
@@ -361,8 +362,12 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
 
 fn decode_int_n(tree: &CtValue, signed: bool, bits: u8, name: &str) -> Result<CtValue, CtValue> {
     let decoded = decode_int(tree)?;
-    let CtValue::Int(value) = decoded else {
-        unreachable!();
+    let value = match decoded {
+        CtValue::Int(value) => value,
+        CtValue::BigInt(value) => value
+            .try_i64()
+            .ok_or_else(|| decode_error(format!("expected {name}, found out-of-range Int")))?,
+        _ => unreachable!(),
     };
     let in_range = if signed {
         let shift = u32::from(bits - 1);
@@ -520,6 +525,7 @@ impl<'a> Interp<'a> {
         }
         Ok(match value {
             CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
+            CtValue::BigInt(n) => json_variant("Int", Some(CtValue::BigInt(n.clone()))),
             CtValue::Float(n) => json_variant("Float", Some(CtValue::Float(*n))),
             CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
             CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
@@ -560,7 +566,7 @@ impl<'a> Interp<'a> {
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                 }),
             ),
-            CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) | CtValue::BigInt(_) => {
+            CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => {
                 return Err(unsupported(
                     "this value has no comptime Encode implementation",
                     span,

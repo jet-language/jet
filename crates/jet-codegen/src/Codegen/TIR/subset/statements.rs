@@ -90,6 +90,23 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
+                // D-CHOOSE-TEST1=A: the refutable `Ok`/`value` binding is the
+                // same canonical `??` unwrap TIR as an ordinary fallible
+                // expression. Other pattern shapes remain on their existing
+                // pattern-control path until they have a payload extractor.
+                Some(BindPattern::Refutable {
+                    pattern: Pattern::Ok { .. } | Pattern::Present { .. },
+                    names,
+                    ..
+                }) => {
+                    let ok = !b.is_comptime
+                        && !b.uninit
+                        && expr_in_subset(&b.init, cx, locals);
+                    for name in names {
+                        locals.insert(name.local_name().to_string());
+                    }
+                    ok
+                }
                 // Forward-safety default: a future BindPattern variant defaults to the
                 // safe exclusion. Currently unreachable — Tuple/List/Struct are all matched.
                 #[allow(unreachable_patterns)]

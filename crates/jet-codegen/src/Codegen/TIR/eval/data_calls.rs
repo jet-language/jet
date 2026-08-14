@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
-use crate::Comptime::Builtins::as_bool;
+use crate::Comptime::Builtins::{as_bool, exact_int_value};
 use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
@@ -71,7 +71,10 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
             .parse::<f64>()
             .map(|f| CtValue::Float(CtFloat::f64(f)))
             .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Int | Type::IntN { .. } => cell
+        Type::Int => crate::Numeric::CtBigInt::from_str(cell)
+            .map(exact_int_value)
+            .map_err(|_| format!("expected Int, got `{cell}`")),
+        Type::IntN { .. } => cell
             .parse::<i64>()
             .map(CtValue::Int)
             .map_err(|_| format!("expected Int, got `{cell}`")),
@@ -85,9 +88,8 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
             .parse::<f64>()
             .map(|f| CtValue::Float(CtFloat::f64(f)))
             .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Named(n) if n == "Int" => cell
-            .parse::<i64>()
-            .map(CtValue::Int)
+        Type::Named(n) if n == "Int" => crate::Numeric::CtBigInt::from_str(cell)
+            .map(exact_int_value)
             .map_err(|_| format!("expected Int, got `{cell}`")),
         Type::Named(n) if n == "Bool" => parse_cell(&Type::Bool, cell),
         other => Err(format!("unsupported CSV field type `{other:?}`")),

@@ -5,9 +5,11 @@
 //! handles and turns the resulting scalar values into `CtValue`s.
 
 use crate::AST::{CtReport, CtValue, EnumDef, Func, Item, Param, StructDef, Type, VariantPayload};
+use crate::Comptime::Builtins::exact_int_value;
 use jet_foundation::CLISchema::{
     CLIDefault, CLICommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
+use jet_foundation::Numeric::CtBigInt;
 use crate::Comptime;
 use crate::Diagnostics::{Diagnostic, Span};
 
@@ -301,9 +303,8 @@ fn scalar_from_text(ty: &Type, text: &str, flag: &str) -> Result<CtValue, String
                 "invalid value for --{flag}: `{text}` is not true or false"
             )),
         },
-        Type::Int => text
-            .parse::<i64>()
-            .map(CtValue::Int)
+        Type::Int => CtBigInt::from_str(text)
+            .map(exact_int_value)
             .map_err(|_| format!("invalid value for --{flag}: `{text}` is not a whole number")),
         Type::Float => text
             .parse::<f64>()

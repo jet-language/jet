@@ -123,7 +123,10 @@ extern "C" fn jet_jit_math_isqrt(v: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_isqrt(v))
 }
 extern "C" fn jet_jit_math_factorial(v: i64) -> i64 {
-    opt_i64(math_rt::jet_std_math_factorial(v))
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_factorial(v) {
+        Some(value) => value.wrapping_add(1),
+        None => 0,
+    })
 }
 extern "C" fn jet_jit_math_binomial(n: i64, k: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_binomial(n, k))
@@ -397,6 +400,3 @@ host_fns! {
     div_mod: "jet_jit_math_div_mod" => jet_jit_math_div_mod: i64_i64_i64;
     div_rem: "jet_jit_math_div_rem" => jet_jit_math_div_rem: i64_i64_i64;
 }
-
-
-

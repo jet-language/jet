@@ -125,13 +125,13 @@ fn run() {}
 fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: U64]) => [String: U64] { return ~values }
+fn echo(values: [String:U64]) => [String:U64] { return ~values }
 
 #Target(JS)
 fn run() {}
 "#;
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_map_u64.jet")
-        .expect_err("[String: U64] must remain loud until an exact adapter exists");
+        .expect_err("[String:U64] must remain loud until an exact adapter exists");
     assert_eq!(
         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
         ["E-WEB-TIR-UNSUPPORTED"]
@@ -142,13 +142,13 @@ fn run() {}
 fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: I32]) => [String: I32] { return ~values }
+fn echo(values: [String:I32]) => [String:I32] { return ~values }
 
 #Target(JS)
 fn run() {}
 "#;
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_map_i32.jet")
-        .expect_err("[String: I32] must remain loud until an exact adapter exists");
+        .expect_err("[String:I32] must remain loud until an exact adapter exists");
     assert_eq!(
         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
         ["E-WEB-TIR-UNSUPPORTED"]

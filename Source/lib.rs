@@ -1926,6 +1926,14 @@ pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
     with_compiler_stack(|| Formatter::format_source(src))
 }
 
+/// Pretty-print source with explicit formatter controls.
+pub fn format_source_with_options(
+    src: &str,
+    options: Formatter::FormatOptions,
+) -> Result<String, Vec<Diagnostic>> {
+    with_compiler_stack(|| Formatter::format_source_with_options(src, options))
+}
+
 /// Front-end check for one document (LSP / editor integration).
 pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     with_compiler_stack(|| LSP::check_document(path, text))
@@ -2039,7 +2047,9 @@ fn eval_pure_program_inner(src: &str, file: &str) -> Result<String, Vec<Diagnost
         let trimmed = text.trim();
         if trimmed == "true" || trimmed == "false" {
             trimmed.to_string()
-        } else if trimmed.parse::<i64>().is_ok() || trimmed.parse::<f64>().is_ok() {
+        } else if jet_foundation::Numeric::CtBigInt::from_str(trimmed).is_ok()
+            || trimmed.parse::<f64>().is_ok()
+        {
             trimmed.to_string()
         } else {
             format!("{:?}", trimmed)

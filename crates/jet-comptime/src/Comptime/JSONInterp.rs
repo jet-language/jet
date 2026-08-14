@@ -2,6 +2,11 @@
 //! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
 
 use crate::AST::{CtFloat, CtKey, CtValue};
+use crate::Comptime::Builtins::exact_int_value;
+
+fn from_json_int(value: i64) -> CtValue {
+    exact_int_value(crate::Numeric::CtBigInt::from_int(value))
+}
 
 fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
     match value {
@@ -10,7 +15,7 @@ fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
         jet_foundation::EncodingJson::Value::Int(value) => {
-            json_variant("Int", Some(CtValue::Int(value)))
+            json_variant("Int", Some(from_json_int(value)))
         }
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
@@ -45,7 +50,7 @@ fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
         jet_foundation::EncodingJson::Value::Int(value) => {
-            json_variant("Int", Some(CtValue::Int(value)))
+            json_variant("Int", Some(from_json_int(value)))
         }
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))

@@ -3361,7 +3361,7 @@ pub enum TExprKind {
         func: String,
         args: Vec<TExpr>,
     },
-    /// D-BIGINT1 / D-DECIMAL1: precise numeric ctor/method/binop → `jet_bigint_*` / `jet_decimal_*`.
+    /// D-DECIMAL1 / D-NUMTYPE1: precise numeric ctor/method/binop.
     PreciseBuiltin {
         type_name: String,
         func: String,
@@ -4919,7 +4919,7 @@ pub enum THandleOp {
     DurationIsZero,
     DurationTotalSeconds,
     DurationDifference,
-    /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
+    /// D-DECIMAL1 / D-NUMTYPE1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,
         method: String,

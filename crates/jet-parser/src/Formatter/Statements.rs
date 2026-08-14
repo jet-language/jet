@@ -1174,6 +1174,21 @@ impl<'a> Fmt<'a> {
             self.fmt_expr(&b.init, Prec::OrFallback);
             return;
         }
+        if let Some(BindPattern::Refutable {
+            pattern, fallback, ..
+        }) = &b.pattern
+        {
+            // D-CHOOSE-TEST1=A: this statement has no binding sigil in its
+            // surface form; the successful pattern captures are the locals.
+            self.fmt_expr(&b.init, Prec::Cmp);
+            self.write(" == ");
+            self.fmt_pattern(pattern);
+            self.write(" ");
+            self.write(Syntax::OP_FALLBACK);
+            self.write(" ");
+            self.fmt_or_fallback(fallback);
+            return;
+        }
         if let Some(pat) = &b.pattern {
             // S74: a destructuring target stands in for the name.
             self.fmt_bind_pattern(pat);
@@ -1260,6 +1275,7 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
+            BindPattern::Refutable { .. } => unreachable!("refutable bindings use statement syntax"),
         }
     }
 

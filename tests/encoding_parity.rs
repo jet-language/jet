@@ -635,7 +635,7 @@ struct Packet {
     event: Event
     bytes: [U8]
     numbers: [Int]
-    labels: [String: Int]
+    labels: [String:Int]
     maybe: Int?
     score: Float
     letter: Char
@@ -648,7 +648,7 @@ fn resident() => String {
         event: Event.Count(7),
         bytes: [222, 173],
         numbers: [-2, 3],
-        labels: [String: Int].{ "x": 6 },
+        labels: [String:Int].{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
         letter: 'Z'
@@ -671,7 +671,7 @@ fn forced_deopt() => String {
         event: Event.Count(7),
         bytes: [222, 173],
         numbers: [-2, 3],
-        labels: [String: Int].{ "x": 6 },
+        labels: [String:Int].{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
         letter: 'Z'

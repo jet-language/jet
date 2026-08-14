@@ -547,6 +547,13 @@ pub(crate) fn resolve_numeric_conversion_op(
             dst_rust: dst_rust.to_string(),
         });
     };
+    if source_name == "Int" {
+        return Some(TNumericOp::TryFrom {
+            host_kind: numeric_host_kind(dsigned, dbits)?,
+            dst_rust: dst_rust.to_string(),
+            dst_spelling: target_name.to_string(),
+        });
+    }
     match parse_int_name_tir(source_name) {
         Some((ssigned, sbits)) => {
             let (slo, shi) = crate::AST::int_range(ssigned, sbits);

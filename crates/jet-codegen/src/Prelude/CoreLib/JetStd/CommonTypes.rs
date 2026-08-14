@@ -822,7 +822,7 @@
         pub reason: String,
     }
 
-    // D-BIGINT1: arbitrary-precision integer (std-only limb arithmetic).
+    // D-INTBIG1: exact integer carrier (std-only limb arithmetic).
     // #1636: mirrors `CtBigInt` in `crates/jet-foundation/src/Numeric.rs`
     // limb-for-limb (sign-magnitude, little-endian base 10^9). This copy has
     // to stay separate, hand-mirrored text: AOT/JIT output is a standalone
@@ -839,6 +839,21 @@
     const BI_BASE: u64 = 1_000_000_000;
 
     impl JetBigInt {
+        pub fn from_u64(mut value: u64) -> Self {
+            if value == 0 {
+                return Self::from_int(0);
+            }
+            let mut limbs = Vec::new();
+            while value > 0 {
+                limbs.push((value % BI_BASE) as u32);
+                value /= BI_BASE;
+            }
+            Self {
+                negative: false,
+                limbs,
+            }
+        }
+
         pub fn from_int(n: i64) -> Self {
             if n == 0 {
                 return JetBigInt {
@@ -863,7 +878,7 @@
         pub fn from_str(s: &str) -> Result<Self, String> {
             let t = s.trim();
             if t.is_empty() {
-                return Err("empty BigInt string".to_string());
+                return Err("empty exact Int string".to_string());
             }
             let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
                 (true, rest)
@@ -873,7 +888,7 @@
                 (false, t)
             };
             if body.is_empty() || !body.chars().all(|c| c.is_ascii_digit()) {
-                return Err(format!("invalid BigInt string `{s}`"));
+                return Err(format!("invalid exact Int string `{s}`"));
             }
             let mut acc = JetBigInt {
                 negative: false,
@@ -1034,6 +1049,432 @@
             }
         }
 
+        fn div_rem_small(&self, divisor: u32) -> (JetBigInt, u32) {
+            let divisor = u64::from(divisor);
+            let mut remainder = 0u64;
+            let mut limbs = vec![0u32; self.limbs.len()];
+            for index in (0..self.limbs.len()).rev() {
+                let current = remainder * BI_BASE + u64::from(self.limbs[index]);
+                limbs[index] = (current / divisor) as u32;
+                remainder = current % divisor;
+            }
+            (
+                JetBigInt {
+                    negative: false,
+                    limbs,
+                }
+                .normalize(),
+                remainder as u32,
+            )
+        }
+
+        fn bit_width(&self) -> usize {
+            let mut value = self.abs();
+            let mut width = 0usize;
+            while !value.is_zero() {
+                let (next, _) = value.div_rem_small(2);
+                value = next;
+                width += 1;
+            }
+            width
+        }
+
+        fn unsigned_bits(&self, width: usize) -> Vec<bool> {
+            let mut value = self.abs();
+            let mut bits = Vec::with_capacity(width);
+            for _ in 0..width {
+                let (next, remainder) = value.div_rem_small(2);
+                bits.push(remainder != 0);
+                value = next;
+            }
+            bits
+        }
+
+        fn from_unsigned_bits(bits: &[bool]) -> JetBigInt {
+            let mut value = JetBigInt::from_int(0);
+            for bit in bits.iter().rev() {
+                value = value.mul_small(2);
+                if *bit {
+                    value = value.add_small(1);
+                }
+            }
+            value
+        }
+
+        fn twos_complement(&self, width: usize) -> Vec<bool> {
+            let mut bits = self.unsigned_bits(width);
+            if self.negative {
+                for bit in &mut bits {
+                    *bit = !*bit;
+                }
+                let mut carry = true;
+                for bit in &mut bits {
+                    if !carry {
+                        break;
+                    }
+                    if *bit {
+                        *bit = false;
+                    } else {
+                        *bit = true;
+                        carry = false;
+                    }
+                }
+            }
+            bits
+        }
+
+        fn from_twos_complement(mut bits: Vec<bool>) -> JetBigInt {
+            let negative = bits.last().copied().unwrap_or(false);
+            if !negative {
+                return Self::from_unsigned_bits(&bits);
+            }
+            for bit in &mut bits {
+                *bit = !*bit;
+            }
+            let mut carry = true;
+            for bit in &mut bits {
+                if !carry {
+                    break;
+                }
+                if *bit {
+                    *bit = false;
+                } else {
+                    *bit = true;
+                    carry = false;
+                }
+            }
+            Self::from_unsigned_bits(&bits).neg()
+        }
+
+        fn bitwise(&self, other: &JetBigInt, op: impl Fn(bool, bool) -> bool) -> JetBigInt {
+            let width = self.bit_width().max(other.bit_width()).saturating_add(1);
+            let left = self.twos_complement(width);
+            let right = other.twos_complement(width);
+            let bits = left
+                .into_iter()
+                .zip(right)
+                .map(|(left, right)| op(left, right))
+                .collect();
+            Self::from_twos_complement(bits)
+        }
+
+        pub fn bit_and(&self, other: &JetBigInt) -> JetBigInt {
+            self.bitwise(other, |left, right| left & right)
+        }
+
+        pub fn bit_or(&self, other: &JetBigInt) -> JetBigInt {
+            self.bitwise(other, |left, right| left | right)
+        }
+
+        pub fn bit_xor(&self, other: &JetBigInt) -> JetBigInt {
+            self.bitwise(other, |left, right| left ^ right)
+        }
+
+        pub fn bit_count(&self, width: u32, method: &str) -> Option<i64> {
+            let width = usize::try_from(width).ok()?;
+            if width == 0 {
+                return None;
+            }
+            let bits = self.twos_complement(width);
+            let ones = bits.iter().filter(|bit| **bit).count();
+            let count = match method {
+                "count_ones" => ones,
+                "count_zeros" => width - ones,
+                "leading_zeros" => bits.iter().rev().take_while(|bit| !**bit).count(),
+                "trailing_zeros" => bits.iter().take_while(|bit| !**bit).count(),
+                _ => return None,
+            };
+            i64::try_from(count).ok()
+        }
+
+        pub fn checked_widen(&self, target_f32: bool) -> Option<f64> {
+            let precision = if target_f32 { 24 } else { 53 };
+            let width = self.bit_width();
+            let mut trailing = 0usize;
+            let mut value = self.abs();
+            while !value.is_zero() {
+                let (next, remainder) = value.div_rem_small(2);
+                if remainder != 0 {
+                    break;
+                }
+                trailing += 1;
+                value = next;
+            }
+            if width > precision && trailing < width - precision {
+                return None;
+            }
+            let value = self.to_string_rep().parse::<f64>().ok()?;
+            if !value.is_finite() {
+                return None;
+            }
+            if target_f32 {
+                let value = value as f32;
+                value.is_finite().then_some(value as f64)
+            } else {
+                Some(value)
+            }
+        }
+
+        fn shift_count(&self) -> Option<usize> {
+            let count = self.try_i64()?;
+            (count >= 0).then_some(count as usize)
+        }
+
+        pub fn shl(&self, count: &JetBigInt) -> Option<JetBigInt> {
+            let count = count.shift_count()?;
+            let mut value = self.clone();
+            for _ in 0..count {
+                value = value.mul_small(2);
+            }
+            Some(value)
+        }
+
+        pub fn shr(&self, count: &JetBigInt) -> Option<JetBigInt> {
+            let count = count.shift_count()?;
+            let mut value = self.clone();
+            for _ in 0..count {
+                let (quotient, remainder) = value.abs().div_rem_small(2);
+                value = if self.negative && remainder != 0 {
+                    quotient.add_small(1).neg()
+                } else {
+                    quotient.with_sign(self.negative)
+                };
+            }
+            Some(value)
+        }
+
+        pub fn is_even(&self) -> bool {
+            self.div_rem_small(2).1 == 0
+        }
+
+        pub fn is_odd(&self) -> bool {
+            !self.is_even()
+        }
+
+        pub fn digits(&self) -> i64 {
+            let digits = self.to_string_rep().trim_start_matches('-').len();
+            i64::try_from(digits).unwrap_or(i64::MAX)
+        }
+
+        pub fn leading_ones(&self) -> i64 {
+            let width = 64usize.max(self.bit_width().saturating_add(1));
+            let count = self
+                .twos_complement(width)
+                .iter()
+                .rev()
+                .take_while(|bit| **bit)
+                .count();
+            i64::try_from(count).unwrap_or(i64::MAX)
+        }
+
+        pub fn trailing_ones(&self) -> i64 {
+            let width = 64usize.max(self.bit_width().saturating_add(1));
+            let count = self
+                .twos_complement(width)
+                .iter()
+                .take_while(|bit| **bit)
+                .count();
+            i64::try_from(count).unwrap_or(i64::MAX)
+        }
+
+        pub fn isqrt(&self) -> Option<JetBigInt> {
+            if self.negative {
+                return None;
+            }
+            if self.is_zero() {
+                return Some(self.clone());
+            }
+            let one = JetBigInt::from_int(1);
+            let two = JetBigInt::from_int(2);
+            let mut root = one.clone();
+            for _ in 0..self.bit_width().saturating_add(1) / 2 {
+                root = root.mul_small(2);
+            }
+            loop {
+                let quotient = self.div_rem(&root)?.0;
+                let next = root.add(&quotient).div_rem(&two)?.0;
+                if next.compare(&root) != std::cmp::Ordering::Less {
+                    break;
+                }
+                root = next;
+            }
+            while root.mul(&root).compare(self) == std::cmp::Ordering::Greater {
+                root = root.sub(&one);
+            }
+            loop {
+                let next = root.add(&one);
+                if next.mul(&next).compare(self) == std::cmp::Ordering::Greater {
+                    break;
+                }
+                root = next;
+            }
+            Some(root)
+        }
+
+        pub fn pow(&self, exponent: &JetBigInt) -> Option<JetBigInt> {
+            if exponent.negative {
+                return None;
+            }
+            let mut exponent = exponent.clone();
+            let mut base = self.clone();
+            let mut result = JetBigInt::from_int(1);
+            while !exponent.is_zero() {
+                let (next, bit) = exponent.div_rem_small(2);
+                if bit != 0 {
+                    result = result.mul(&base);
+                }
+                exponent = next;
+                if !exponent.is_zero() {
+                    base = base.mul(&base);
+                }
+            }
+            Some(result)
+        }
+
+        pub fn gcd(left: &JetBigInt, right: &JetBigInt) -> JetBigInt {
+            let mut a = left.abs();
+            let mut b = right.abs();
+            while !b.is_zero() {
+                let (_, remainder) = a
+                    .div_rem(&b)
+                    .expect("gcd divisor is nonzero");
+                a = b;
+                b = remainder.abs();
+            }
+            a
+        }
+
+        pub fn lcm(left: &JetBigInt, right: &JetBigInt) -> JetBigInt {
+            if left.is_zero() || right.is_zero() {
+                return JetBigInt::from_int(0);
+            }
+            let divisor = Self::gcd(left, right);
+            let quotient = left
+                .abs()
+                .div_rem(&divisor)
+                .expect("lcm gcd is nonzero")
+                .0;
+            quotient.mul(&right.abs())
+        }
+
+        pub fn binomial(n: &JetBigInt, k: &JetBigInt) -> Option<JetBigInt> {
+            if n.negative || k.negative || k.compare(n) == std::cmp::Ordering::Greater {
+                return None;
+            }
+            let other = n.sub(k);
+            let limit = if k.compare(&other) == std::cmp::Ordering::Greater {
+                other
+            } else {
+                k.clone()
+            };
+            let one = JetBigInt::from_int(1);
+            let mut index = one.clone();
+            let mut result = one.clone();
+            while index.compare(&limit) != std::cmp::Ordering::Greater {
+                let numerator = n.sub(&limit).add(&index);
+                result = result
+                    .mul(&numerator)
+                    .div_rem(&index)?
+                    .0;
+                index = index.add(&one);
+            }
+            Some(result)
+        }
+
+        pub fn compare(&self, other: &JetBigInt) -> std::cmp::Ordering {
+            match (self.negative, other.negative) {
+                (false, true) => std::cmp::Ordering::Greater,
+                (true, false) => std::cmp::Ordering::Less,
+                (false, false) => match self.cmp_abs(other) {
+                    1 => std::cmp::Ordering::Greater,
+                    -1 => std::cmp::Ordering::Less,
+                    _ => std::cmp::Ordering::Equal,
+                },
+                (true, true) => match self.cmp_abs(other) {
+                    1 => std::cmp::Ordering::Less,
+                    -1 => std::cmp::Ordering::Greater,
+                    _ => std::cmp::Ordering::Equal,
+                },
+            }
+        }
+
+        pub fn is_zero(&self) -> bool {
+            self.limbs.len() == 1 && self.limbs[0] == 0
+        }
+
+        /// Return the value when it fits in a signed machine word.
+        pub fn try_i64(&self) -> Option<i64> {
+            let mut value = 0u128;
+            for &limb in self.limbs.iter().rev() {
+                value = value.checked_mul(BI_BASE as u128)?;
+                value = value.checked_add(limb as u128)?;
+            }
+            let signed = if self.negative {
+                -i128::try_from(value).ok()?
+            } else {
+                i128::try_from(value).ok()?
+            };
+            i64::try_from(signed).ok()
+        }
+
+        pub fn try_i128(&self) -> Option<i128> {
+            let mut value = 0u128;
+            for &limb in self.limbs.iter().rev() {
+                value = value.checked_mul(BI_BASE as u128)?;
+                value = value.checked_add(limb as u128)?;
+            }
+            let magnitude = i128::try_from(value).ok()?;
+            Some(if self.negative { -magnitude } else { magnitude })
+        }
+
+        /// Truncating quotient and remainder. The remainder carries the
+        /// dividend sign, matching Rust's integer rules.
+        pub fn div_rem(&self, other: &JetBigInt) -> Option<(JetBigInt, JetBigInt)> {
+            if other.is_zero() {
+                return None;
+            }
+            let divisor = other.abs();
+            let dividend = self.abs();
+            if dividend.cmp_abs(&divisor) < 0 {
+                return Some((JetBigInt::from_int(0), self.clone()));
+            }
+
+            let mut quotient = vec![0u32; dividend.limbs.len()];
+            let mut remainder = JetBigInt::from_int(0);
+            for index in (0..dividend.limbs.len()).rev() {
+                remainder.limbs.insert(0, dividend.limbs[index]);
+                remainder = remainder.normalize();
+                let mut low = 0u32;
+                let mut high = (BI_BASE - 1) as u32;
+                while low < high {
+                    let middle = low + (high - low) / 2 + 1;
+                    if divisor.mul_small(middle).cmp_abs(&remainder) <= 0 {
+                        low = middle;
+                    } else {
+                        high = middle - 1;
+                    }
+                }
+                quotient[index] = low;
+                if low != 0 {
+                    remainder = remainder.sub_abs(&divisor.mul_small(low));
+                }
+            }
+            let quotient = JetBigInt {
+                negative: self.negative != other.negative,
+                limbs: quotient,
+            }
+            .normalize();
+            remainder.negative = self.negative && !remainder.is_zero();
+            Some((quotient, remainder.normalize()))
+        }
+
+        pub fn abs(&self) -> JetBigInt {
+            JetBigInt {
+                negative: false,
+                limbs: self.limbs.clone(),
+            }
+        }
+
         pub fn to_string_rep(&self) -> String {
             if self.limbs.len() == 1 && self.limbs[0] == 0 {
                 return "0".to_string();
@@ -1056,6 +1497,454 @@
         fn jet_show(&self) -> String {
             self.to_string_rep()
         }
+    }
+
+    // D-INTBIG1: default `Int` is one packed word at the language boundary.
+    // Values in the signed 63-bit payload stay unboxed. Other values point at
+    // this std-only arena and continue through the same limb implementation.
+    // The representation is deliberately private to the generated Prelude:
+    // user code and every execution tier still see only `Int`.
+    const JET_INT_SMALL_MIN: i64 = -(1i64 << 62);
+    const JET_INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
+    const JET_INT_BIG_TAG: i64 = i64::MIN;
+    static JET_INT_BIG_VALUES: std::sync::OnceLock<std::sync::Mutex<Vec<JetBigInt>>> =
+        std::sync::OnceLock::new();
+
+    fn jet_int_big_values() -> &'static std::sync::Mutex<Vec<JetBigInt>> {
+        JET_INT_BIG_VALUES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+    }
+
+    fn jet_int_is_tagged(value: i64) -> bool {
+        value < JET_INT_SMALL_MIN
+    }
+
+    fn jet_int_big_value(value: i64) -> Option<JetBigInt> {
+        if !jet_int_is_tagged(value) {
+            return None;
+        }
+        let id = value.wrapping_sub(JET_INT_BIG_TAG) as usize;
+        let values = jet_int_big_values()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        values.get(id).cloned()
+    }
+
+    fn jet_int_value(value: i64) -> JetBigInt {
+        jet_int_big_value(value).unwrap_or_else(|| JetBigInt::from_int(value))
+    }
+
+    fn jet_int_pack(value: JetBigInt) -> i64 {
+        if let Some(small) = value.try_i64() {
+            if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&small) {
+                return small;
+            }
+        }
+        let mut values = jet_int_big_values()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let id = values.len();
+        values.push(value);
+        JET_INT_BIG_TAG.wrapping_add(id as i64)
+    }
+
+    pub fn jet_int_from_i64(value: i64) -> i64 {
+        if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+            value
+        } else {
+            jet_int_pack(JetBigInt::from_int(value))
+        }
+    }
+
+    pub fn jet_int_from_u64(value: u64) -> i64 {
+        if value <= JET_INT_SMALL_MAX as u64 {
+            value as i64
+        } else {
+            jet_int_pack(JetBigInt::from_u64(value))
+        }
+    }
+
+    pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+        Ok(jet_int_pack(JetBigInt::from_str(value)?))
+    }
+
+    pub fn jet_int_parse(value: &str) -> Result<i64, String> {
+        jet_int_from_str(value.trim())
+            .map_err(|_| format!("cannot parse `{value}` as an integer"))
+    }
+
+    pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+        if !jet_int_is_tagged(value) {
+            Some(value)
+        } else {
+            jet_int_big_value(value)?.try_i64()
+        }
+    }
+
+    pub fn jet_int_to_i128(value: i64) -> Option<i128> {
+        if !jet_int_is_tagged(value) {
+            Some(i128::from(value))
+        } else {
+            jet_int_big_value(value)?.try_i128()
+        }
+    }
+
+    pub fn jet_int_is_zero(value: i64) -> bool {
+        if !jet_int_is_tagged(value) {
+            value == 0
+        } else {
+            jet_int_big_value(value).is_some_and(|value| value.is_zero())
+        }
+    }
+
+    pub fn jet_int_is_negative(value: i64) -> bool {
+        if !jet_int_is_tagged(value) {
+            value < 0
+        } else {
+            jet_int_big_value(value).is_some_and(|value| value.negative)
+        }
+    }
+
+    pub fn jet_int_to_string(value: i64) -> String {
+        if !jet_int_is_tagged(value) {
+            value.to_string()
+        } else {
+            jet_int_big_value(value)
+                .map(|value| value.to_string_rep())
+                .unwrap_or_else(|| value.to_string())
+        }
+    }
+
+    pub fn jet_int_to_f64(value: i64) -> f64 {
+        jet_int_to_string(value).parse::<f64>().unwrap_or_else(|_| {
+            if jet_int_is_negative(value) {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            }
+        })
+    }
+
+    pub fn jet_int_checked_widen(value: i64, target_f32: bool, file: &str, line: u32) -> f64 {
+        jet_int_value(value)
+            .checked_widen(target_f32)
+            .unwrap_or_else(|| crate::jet_panic(file, line, crate::JET_NUMERIC_WIDEN_TRAP))
+    }
+
+    pub fn jet_int_bit_count(value: i64, width: u32, method: &str) -> i64 {
+        jet_int_value(value).bit_count(width, method).unwrap_or(0)
+    }
+
+    pub fn jet_int_compare(left: i64, right: i64) -> i64 {
+        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
+            return match left.cmp(&right) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            };
+        }
+        match jet_int_value(left).compare(&jet_int_value(right)) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    }
+
+    pub fn jet_int_add(left: i64, right: i64) -> i64 {
+        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
+            if let Some(value) = left.checked_add(right) {
+                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        jet_int_pack(jet_int_value(left).add(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_sub(left: i64, right: i64) -> i64 {
+        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
+            if let Some(value) = left.checked_sub(right) {
+                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        jet_int_pack(jet_int_value(left).sub(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_mul(left: i64, right: i64) -> i64 {
+        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
+            if let Some(value) = left.checked_mul(right) {
+                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        jet_int_pack(jet_int_value(left).mul(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_bit_and(left: i64, right: i64) -> i64 {
+        jet_int_pack(jet_int_value(left).bit_and(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_bit_or(left: i64, right: i64) -> i64 {
+        jet_int_pack(jet_int_value(left).bit_or(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_bit_xor(left: i64, right: i64) -> i64 {
+        jet_int_pack(jet_int_value(left).bit_xor(&jet_int_value(right)))
+    }
+
+    pub fn jet_int_neg(value: i64) -> i64 {
+        if !jet_int_is_tagged(value) {
+            if let Some(value) = value.checked_neg() {
+                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                    return value;
+                }
+            }
+        }
+        jet_int_pack(jet_int_value(value).neg())
+    }
+
+    pub fn jet_int_abs(value: i64) -> i64 {
+        if jet_int_is_negative(value) {
+            jet_int_neg(value)
+        } else {
+            value
+        }
+    }
+
+    pub fn jet_int_try_from(value: i64, kind: i64) -> Option<i128> {
+        let value = jet_int_to_i128(value)?;
+        let (lo, hi) = match kind {
+            0 => (i8::MIN as i128, i8::MAX as i128),
+            1 => (i16::MIN as i128, i16::MAX as i128),
+            2 => (i32::MIN as i128, i32::MAX as i128),
+            3 => (i64::MIN as i128, i64::MAX as i128),
+            4 => (u8::MIN as i128, u8::MAX as i128),
+            5 => (u16::MIN as i128, u16::MAX as i128),
+            6 => (u32::MIN as i128, u32::MAX as i128),
+            7 => (u64::MIN as i128, u64::MAX as i128),
+            _ => return None,
+        };
+        (lo..=hi).contains(&value).then_some(value)
+    }
+
+    pub fn jet_int_not(value: i64) -> i64 {
+        // `!x` is `-x - 1` for an exact signed integer. Reuse the same
+        // packed arithmetic helpers so the small and spilled representations
+        // stay one semantic path.
+        jet_int_sub(jet_int_neg(value), jet_int_from_i64(1))
+    }
+
+    pub fn jet_int_shl(value: i64, count: i64, file: &str, line: u32) -> i64 {
+        jet_int_value(value)
+            .shl(&jet_int_value(count))
+            .map(jet_int_pack)
+            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "invalid shift count"))
+    }
+
+    pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
+        jet_int_value(value)
+            .shr(&jet_int_value(count))
+            .map(jet_int_pack)
+            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "invalid shift count"))
+    }
+
+    fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+        if jet_int_is_zero(divisor) {
+            crate::jet_arithmetic_stop(file, line, "division by zero");
+        }
+        if !jet_int_is_tagged(value) && !jet_int_is_tagged(divisor) {
+            if let (Some(quotient), Some(remainder)) =
+                (value.checked_div(divisor), value.checked_rem(divisor))
+            {
+                return (quotient, remainder);
+            }
+        }
+        let (quotient, remainder) = jet_int_value(value)
+            .div_rem(&jet_int_value(divisor))
+            .expect("checked division by zero");
+        (jet_int_pack(quotient), jet_int_pack(remainder))
+    }
+
+    pub fn jet_int_rem(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        jet_int_div_rem(value, divisor, file, line).1
+    }
+
+    pub fn jet_int_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        jet_int_div_rem(value, divisor, file, line).0
+    }
+
+    pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
+        if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
+            jet_int_sub(quotient, jet_int_from_i64(1))
+        } else {
+            quotient
+        }
+    }
+
+    pub fn jet_int_mod(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
+        if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
+            jet_int_add(remainder, divisor)
+        } else {
+            let _ = quotient;
+            remainder
+        }
+    }
+
+    pub fn jet_int_pow(value: i64, exponent: i64, file: &str, line: u32) -> i64 {
+        let base = jet_int_value(value);
+        let exponent_value = jet_int_value(exponent);
+        if exponent_value.negative {
+            crate::jet_arithmetic_stop(file, line, "negative default Int exponent");
+        }
+        jet_int_pack(
+            base.pow(&exponent_value)
+                .expect("checked default Int exponent is nonnegative"),
+        )
+    }
+
+    pub fn jet_int_factorial(value: i64) -> Option<i64> {
+        if jet_int_is_negative(value) {
+            return None;
+        }
+        let mut current = jet_int_from_i64(2);
+        let mut result = jet_int_from_i64(1);
+        while jet_int_compare(current, value) <= 0 {
+            result = jet_int_mul(result, current);
+            current = jet_int_add(current, jet_int_from_i64(1));
+        }
+        Some(result)
+    }
+
+    pub fn jet_int_is_even(value: i64) -> bool {
+        jet_int_value(value).is_even()
+    }
+
+    pub fn jet_int_is_odd(value: i64) -> bool {
+        jet_int_value(value).is_odd()
+    }
+
+    pub fn jet_int_isqrt(value: i64) -> Option<i64> {
+        jet_int_value(value).isqrt().map(jet_int_pack)
+    }
+
+    pub fn jet_int_binomial(n: i64, k: i64) -> Option<i64> {
+        let n = jet_int_value(n);
+        let k = jet_int_value(k);
+        JetBigInt::binomial(&n, &k).map(jet_int_pack)
+    }
+
+    pub fn jet_int_digits(value: i64) -> i64 {
+        jet_int_value(value).digits()
+    }
+
+    pub fn jet_int_leading_ones(value: i64) -> i64 {
+        jet_int_value(value).leading_ones()
+    }
+
+    pub fn jet_int_trailing_ones(value: i64) -> i64 {
+        jet_int_value(value).trailing_ones()
+    }
+
+    pub fn jet_int_checked_abs(value: i64) -> Option<i64> {
+        Some(jet_int_abs(value))
+    }
+
+    pub fn jet_int_checked_neg(value: i64) -> Option<i64> {
+        Some(jet_int_neg(value))
+    }
+
+    pub fn jet_int_checked_add(left: i64, right: i64) -> Option<i64> {
+        Some(jet_int_add(left, right))
+    }
+
+    pub fn jet_int_checked_sub(left: i64, right: i64) -> Option<i64> {
+        Some(jet_int_sub(left, right))
+    }
+
+    pub fn jet_int_checked_mul(left: i64, right: i64) -> Option<i64> {
+        Some(jet_int_mul(left, right))
+    }
+
+    pub fn jet_int_checked_div(left: i64, right: i64, file: &str, line: u32) -> Option<i64> {
+        if jet_int_is_zero(right) {
+            return None;
+        }
+        Some(jet_int_div(left, right, file, line))
+    }
+
+    pub fn jet_int_checked_rem(left: i64, right: i64, file: &str, line: u32) -> Option<i64> {
+        if jet_int_is_zero(right) {
+            return None;
+        }
+        Some(jet_int_rem(left, right, file, line))
+    }
+
+    pub fn jet_int_checked_pow(left: i64, right: i64) -> Option<i64> {
+        let left = jet_int_value(left);
+        let right = jet_int_value(right);
+        left.pow(&right).map(jet_int_pack)
+    }
+
+    pub fn jet_int_saturating_add(left: i64, right: i64) -> i64 {
+        jet_int_add(left, right)
+    }
+
+    pub fn jet_int_saturating_sub(left: i64, right: i64) -> i64 {
+        jet_int_sub(left, right)
+    }
+
+    pub fn jet_int_saturating_mul(left: i64, right: i64) -> i64 {
+        jet_int_mul(left, right)
+    }
+
+    pub fn jet_int_wrapping_add(left: i64, right: i64) -> i64 {
+        jet_int_add(left, right)
+    }
+
+    pub fn jet_int_wrapping_sub(left: i64, right: i64) -> i64 {
+        jet_int_sub(left, right)
+    }
+
+    pub fn jet_int_wrapping_mul(left: i64, right: i64) -> i64 {
+        jet_int_mul(left, right)
+    }
+
+    pub fn jet_int_int_pow(left: i64, right: i64) -> i64 {
+        jet_int_checked_pow(left, right).unwrap_or_else(|| jet_int_from_i64(0))
+    }
+
+    pub fn jet_int_gcd(left: i64, right: i64) -> i64 {
+        let left = jet_int_value(left);
+        let right = jet_int_value(right);
+        jet_int_pack(JetBigInt::gcd(&left, &right))
+    }
+
+    pub fn jet_int_lcm(left: i64, right: i64) -> i64 {
+        let left = jet_int_value(left);
+        let right = jet_int_value(right);
+        jet_int_pack(JetBigInt::lcm(&left, &right))
+    }
+
+    pub fn jet_int_div_mod(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+        let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
+        if !jet_int_is_zero(remainder)
+            && jet_int_is_negative(value) != jet_int_is_negative(divisor)
+        {
+            (
+                jet_int_sub(quotient, jet_int_from_i64(1)),
+                jet_int_add(remainder, divisor),
+            )
+        } else {
+            (quotient, remainder)
+        }
+    }
+
+    pub fn jet_int_div_rem_pair(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+        jet_int_div_rem(value, divisor, file, line)
     }
 
     // D-NUMTYPE1=A: an exact ratio of two whole numbers, always reduced, with

@@ -179,7 +179,7 @@ See `examples/features/types/option_combinators.jet`.
 
 ## Collections and iterators (D-CORE-EAGER1=A, D-LOOPMAP1=B)
 
-Core collection spellings stay explicit: `[T]` for lists, `[K: V]` for the
+Core collection spellings stay explicit: `[T]` for lists, `[K:V]` for the
 default ordered map, and named types for specialized behavior. `map` and
 `filter` on a concrete list, map, or set execute immediately and return a plain
 collection. Write `.lazy()` before the chain to enter the deferred `Iter<T>`
@@ -199,7 +199,7 @@ uses that truth row.
 | Type | Constructors | Main methods |
 | --- | --- | --- |
 | `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
-| `[K: V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
+| `[K:V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
@@ -2423,7 +2423,7 @@ fn run() {
 ```
 
 **Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#Codable`/`#Encode`
-value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
+value (the dynamic `JSON` tree and the `[[String]]`/`[K:V]` forms still work too). Field
 order is preserved.
 
 **Typed decode** — `decode<T>(text)` (D-GENERIC-CALL1; D-SERDE6 owns the codec
@@ -3292,10 +3292,10 @@ decoding, which belongs to `core.text`'s `Cursor`, not a byte reader.
 
 ## Numeric surface (D-NUMOPS1)
 
-`Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
-`F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
-available for expert and FFI/binary work. `I64` and `F64` are the explicit
-names for `Int` and `Float`. A bare whole-number literal adopts a fixed-width
+`Int` and `Float` are the beginner defaults. `Int` is exact arbitrary precision
+with a small machine-word fast path; `Float` is 64-bit. The explicit-width menu
+— `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is available for expert and
+FFI/binary work. `I64` and `F64` are fixed-width expert types. A bare whole-number literal adopts a fixed-width
 peer that contains its value (D-INTLIT-WIDTH1=F). Without a sized peer it stays
 `Int` (D-NUMLIT-PEER1=A). A destination-owned literal is range-checked at
 compile time; a value that does not fit is **E1003**.

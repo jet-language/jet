@@ -1509,8 +1509,8 @@ fn yaml_scalar_value(s: &str) -> CtValue {
         }
         _ => {}
     }
-    if let Ok(n) = s.parse::<i64>() {
-        return json_variant("Int", Some(CtValue::Int(n)));
+    if let Ok(n) = crate::Numeric::CtBigInt::from_str(s) {
+        return json_variant("Int", Some(super::Builtins::exact_int_value(n)));
     }
     if (s.contains('.') || s.contains('e') || s.contains('E'))
         && s.chars()
@@ -1621,7 +1621,7 @@ fn yaml_needs_quote(s: &str) -> bool {
     matches!(
         s,
         "null" | "Null" | "NULL" | "~" | "true" | "True" | "TRUE" | "false" | "False" | "FALSE"
-    ) || s.parse::<i64>().is_ok()
+    ) || crate::Numeric::CtBigInt::from_str(s).is_ok()
         || s.parse::<f64>().is_ok()
         || s.starts_with(' ')
         || s.ends_with(' ')
@@ -2269,7 +2269,7 @@ fn cbor_codable_value(
             struct_fields,
         )?))),
         CtValue::Failed(CtReport::Clean(_)) => Ok(value.clone()),
-        CtValue::BigInt(_) => Err("CBOR cannot encode BigInt outside Jet Int".to_string()),
+        CtValue::BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill".to_string()),
         CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
         CtValue::Failed(CtReport::Told(_)) => {
             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
@@ -2492,7 +2492,7 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
         CtValue::Enum { type_name, .. } => {
             Err(format!("CBOR encoder does not own enum `{type_name}`"))
         }
-        CtValue::BigInt(_) => Err("CBOR cannot encode BigInt outside Jet Int".to_string()),
+        CtValue::BigInt(_) => Err("CBOR kernel cannot encode an exact Int spill".to_string()),
         CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
     }
 }

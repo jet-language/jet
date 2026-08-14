@@ -1162,6 +1162,7 @@ fn main() {
     let emit_rust = false;
     let emit_generated = jet_argv.iter().any(|a| a == "--emit-generated");
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
+    let fmt_simplify = jet_argv.iter().any(|a| a == "--simplify");
     let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     let json = jet_argv.iter().any(|a| a == "--json");
     reject_retired_gate_flags(jet_argv, json);
@@ -1664,6 +1665,7 @@ fn main() {
                 show_diff,
                 changed_only,
                 explicit_copies,
+                fmt_simplify,
                 mode,
             );
             return;

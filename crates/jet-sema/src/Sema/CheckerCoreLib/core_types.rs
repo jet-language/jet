@@ -226,8 +226,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
         | "RaylibWindow" | "RaylibColor" | "RaylibSound"
-        // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
-        | "BigInt" | "Decimal"
+        // D-DECIMAL1: exact decimal arithmetic.
+        | "Decimal"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.

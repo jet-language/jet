@@ -21,6 +21,36 @@ const INDENT: usize = 4;
 /// inline body whose final column exceeds this expands instead.
 const MAX_WIDTH: usize = 100;
 
+/// Formatter controls that change source shape. Plain `fmt` keeps the
+/// canonical layout; `--simplify` enables only ratified simplest-spelling
+/// rewrites.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FormatOptions {
+    /// D-FMT-SIMPLIFY1=A / card #1514: enable the approved simplify catalog.
+    pub simplify: bool,
+}
+
+/// Canonical semantic program content for formatter round-trip checks.
+/// `block_spans` records source layout only, so it is excluded when a
+/// simplify rewrite changes a braced body to a one-line body.
+pub fn canonical_program(prog: &Program) -> Vec<u8> {
+    crate::CanonicalAST::canonical_fragment(&(
+        &prog.imports,
+        &prog.items,
+        &prog.script_body,
+        &prog.fenced_statements,
+        &prog.web_target_ceiling,
+        &prog.pub_file,
+        &prog.no_prelude,
+        &prog.default_target,
+        &prog.html_path,
+        &prog.no_alloc_policy,
+        &prog.policy_declarations,
+        &prog.applied_rules,
+        &prog.rule_facts,
+    ))
+}
+
 /// D-FMT1: may this statement render inline inside a one-line brace body? Only
 /// non-block statements qualify; every block-bearing variant (`if`, loops,
 /// `switch`, `#unsafe`, etc.) must expand so fmt never nests a block inline.
@@ -48,7 +78,13 @@ pub(super) fn is_generated_label(name: &str) -> bool {
 /// Format a parsed program back to canonical Jet source.
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
     let (source_toks, _) = crate::Lexer::lex(src);
-    format_program_with_tokens(prog, src, comment_toks, &source_toks)
+    format_program_with_tokens(
+        prog,
+        src,
+        comment_toks,
+        &source_toks,
+        FormatOptions::default(),
+    )
 }
 
 /// Format compiler-owned template items without pretending that they came
@@ -66,7 +102,13 @@ pub fn format_synthetic_program(prog: &Program) -> String {
         .saturating_add(1);
     let src = " ".repeat(source_len);
     let (source_toks, _) = crate::Lexer::lex(&src);
-    format_program_with_tokens(prog, &src, &[], &source_toks)
+    format_program_with_tokens(
+        prog,
+        &src,
+        &[],
+        &source_toks,
+        FormatOptions::default(),
+    )
 }
 
 /// D-ONCE-RETIRE1=C: collect mechanical edits for the retired interpolation
@@ -362,6 +404,7 @@ fn format_program_with_tokens(
     src: &str,
     comment_toks: &[Token],
     source_toks: &[Token],
+    options: FormatOptions,
 ) -> String {
     let comments: Vec<Comment> = comment_toks
         .iter()
@@ -388,6 +431,7 @@ fn format_program_with_tokens(
         items: &prog.items,
         policy_declarations: &prog.policy_declarations,
         fenced_statements: &prog.fenced_statements,
+        simplify: options.simplify,
     };
     let mut first = true;
     let ordered_file_rules = prog
@@ -630,6 +674,7 @@ struct Fmt<'a> {
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     /// D-EACH1=C authored forms corresponding to expanded AST statements.
     fenced_statements: &'a [crate::AST::FencedStatement],
+    simplify: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1386,7 +1431,15 @@ fn compound_spell(op: BinOp) -> &'static str {
 /// the source slice at the literal's span. Falls back to plain decimal when
 /// the slice doesn't round-trip to the same value (synthesized Int nodes
 /// borrow a nearby span whose text isn't a number).
-pub(crate) fn int_literal_spelling(src: &str, span: Span, n: i64) -> String {
+pub(crate) fn int_literal_spelling(
+    src: &str,
+    span: Span,
+    n: i64,
+    raw: Option<&str>,
+) -> String {
+    if let Some(raw) = raw {
+        return raw.to_string();
+    }
     let Some(slice) = src.get(span.start..span.end) else {
         return n.to_string();
     };
@@ -1471,6 +1524,15 @@ pub(super) fn escape_str_lit(s: &str) -> String {
 
 /// Lex + parse + format. Parse errors propagate; sema is not required.
 pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
+    format_source_with_options(src, FormatOptions::default())
+}
+
+/// Lex + parse + format with explicit formatter controls. Parse errors
+/// propagate; sema is not required.
+pub fn format_source_with_options(
+    src: &str,
+    options: FormatOptions,
+) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
     let print_edits = retired_print_family_edits(src);
     let print_migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
     let migrated = apply_retired_type_edits(&print_migrated);
@@ -1489,7 +1551,20 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagno
         })
         .cloned()
         .collect();
-    Ok(format_program_with_tokens(&prog, &migrated, &comment_toks, &toks))
+    let formatted = format_program_with_tokens(&prog, &migrated, &comment_toks, &toks, options);
+    if options.simplify {
+        let (formatted_toks, formatted_lex_diags) = crate::Lexer::lex(&formatted);
+        if !formatted_lex_diags.is_empty() {
+            return Err(formatted_lex_diags);
+        }
+        let formatted_prog = crate::Parser::parse_for_fmt(&formatted_toks)?;
+        assert_eq!(
+            canonical_program(&prog),
+            canonical_program(&formatted_prog),
+            "fmt --simplify changed the parsed AST"
+        );
+    }
+    Ok(formatted)
 }
 
 /// Simple unified diff for `jet fmt --check`.

@@ -291,28 +291,7 @@ fn jet_mime_extension(mime: &String) -> Option<String> {
     crate::jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
 }
 
-// D-BIGINT1 / D-DECIMAL1: precise numeric constructors and methods.
-fn jet_bigint_from_int(n: i64) -> jet_std::JetBigInt {
-    jet_std::JetBigInt::from_int(n)
-}
-fn jet_bigint_from_str(s: &String) -> jet_std::JetBigInt {
-    jet_std::JetBigInt::from_str(s).expect("invalid BigInt string")
-}
-fn jet_bigint_add(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
-    a.add(b)
-}
-fn jet_bigint_sub(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
-    a.sub(b)
-}
-fn jet_bigint_mul(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
-    a.mul(b)
-}
-fn jet_bigint_neg(a: &jet_std::JetBigInt) -> jet_std::JetBigInt {
-    a.neg()
-}
-fn jet_bigint_to_string(a: &jet_std::JetBigInt) -> String {
-    a.to_string_rep()
-}
+// D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
     jet_std::JetDecimal::from_str(s).expect("invalid Decimal string")
 }

@@ -549,6 +549,18 @@ fn is_list_int(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }))
 }
 
+fn is_default_int(ty: &Type) -> bool {
+    matches!(ty, Type::Int)
+}
+
+fn is_list_default_int(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(**inner, Type::Int))
+}
+
+fn is_list_fixed_int(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(**inner, Type::IntN { .. }))
+}
+
 fn is_stream_type(ty: &Type) -> bool {
     matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
 }
@@ -593,7 +605,7 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc, bundle: &ProgramBundle) ->
         }
     });
     params_supported
-        // D-JSBIND1: String / [Int] / [String] / [String: Int] params/returns
+        // D-JSBIND1: String / [Int] / [String] / [String:Int] params/returns
         // cross the export boundary as packed (ptr,len) u64 ownership transfers.
         && tir.ret
             .as_ref()
@@ -762,6 +774,8 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::FloatLit(_)
         | TIR::TExprKind::BoolLit(_)
         | TIR::TExprKind::Local(_) => true,
+        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(_)
+        | crate::AST::CtValue::BigInt(_)) => true,
         TIR::TExprKind::Uninit => match &expr.ty {
             Type::FixedList { elem, .. } => wasm_internal_ty(elem, bundle).is_some(),
             ty => wasm_internal_ty(ty, bundle).is_some(),
@@ -1988,16 +2002,28 @@ fn js_abi_call_args(
         }
     }
     match ty {
-        Type::Int | Type::IntN { .. } => vec![format!("BigInt({name})")],
+        Type::Int => {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"int\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
+        Type::IntN { .. } => vec![format!("BigInt({name})")],
         ty if is_string_like(ty) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"string\", wasm);\n"
             ));
             vec![format!("_{name}")]
         }
-        Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => {
+        Type::List(inner) if matches!(**inner, Type::Int) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"list-int\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
+        Type::List(inner) if matches!(**inner, Type::IntN { .. }) => {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"list-i64\", wasm);\n"
             ));
             vec![format!("_{name}")]
         }
@@ -2534,7 +2560,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
                 || flattened_web_params(&f.tir).iter().any(|(_, ty)| pred(ty))
         })
     };
-    if need_packed_abi(&is_string_like) {
+    if need_packed_abi(&is_string_like)
+        || need_packed_abi(&is_default_int)
+        || need_packed_abi(&is_list_default_int)
+        || need_packed_abi(&is_map_string_int)
+    {
         // D-JSBIND1=A: UTF-8 ownership transfer — packed u64 (ptr<<32)|len.
         // Returns: Wasm owns → JS copies → jet_abi_string_free.
         // Params: JS TextEncoder → jet_abi_string_alloc → Wasm takes via jet_abi_string_arg.
@@ -2575,7 +2605,17 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n",
         );
     }
-    if need_packed_abi(&is_list_int) {
+    if need_packed_abi(&is_default_int) {
+        // D-INTBIG1: a scalar exact `Int` uses the same owned UTF-8 rail as
+        // String. The JS side receives a BigInt and never passes through f64.
+        out.push_str(
+            "fn jet_abi_int_ret(v: JetWasmInt) -> u64 { jet_abi_string_ret(v.to_string()) }\n\n\
+             fn jet_abi_int_arg(packed: u64) -> JetWasmInt {\n\
+             \x20   JetWasmInt::from_decimal(&jet_abi_string_arg(packed)).expect(\"JS exact integer\")\n\
+             }\n\n",
+        );
+    }
+    if need_packed_abi(&is_list_fixed_int) {
         // D-JSBIND1=A: [Int] as little-endian i64 payload — packed u64 (ptr<<32)|len.
         // Returns: Wasm owns → JS copies → jet_abi_list_i64_free.
         // Params: JS BigInt64Array → jet_abi_list_i64_alloc → Wasm takes via jet_abi_list_i64_arg.
@@ -2613,6 +2653,64 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));\n\
              \x20   }\n\
+             }\n\n",
+        );
+    }
+    if need_packed_abi(&is_list_default_int) {
+        // D-INTBIG1: exact `[Int]` uses a count/length/UTF-8 blob. Each value
+        // remains decimal text, so no width or precision boundary exists.
+        out.push_str(
+            "fn jet_abi_list_int_ret(v: Vec<JetWasmInt>) -> u64 {\n\
+             \x20   if v.is_empty() { return 0; }\n\
+             \x20   let mut buf = Vec::new();\n\
+             \x20   buf.extend_from_slice(&(v.len() as u32).to_le_bytes());\n\
+             \x20   for value in v {\n\
+             \x20       let bytes = value.to_string().into_bytes();\n\
+             \x20       buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());\n\
+             \x20       buf.extend_from_slice(&bytes);\n\
+             \x20   }\n\
+             \x20   let boxed = buf.into_boxed_slice();\n\
+             \x20   let len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | len as u64\n\
+             }\n\n\
+             fn jet_abi_list_int_arg(packed: u64) -> Vec<JetWasmInt> {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if len == 0 {\n\
+             \x20       if ptr != 0 { unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0)); } }\n\
+             \x20       return Vec::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
+             \x20       let bytes = boxed.into_vec();\n\
+             \x20       assert!(bytes.len() >= 4, \"list-int header\");\n\
+             \x20       let count = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;\n\
+             \x20       let mut offset = 4usize;\n\
+             \x20       let mut values = Vec::with_capacity(count);\n\
+             \x20       for _ in 0..count {\n\
+             \x20           assert!(offset + 4 <= bytes.len(), \"list-int length\");\n\
+             \x20           let end = offset + 4;\n\
+             \x20           let value_len = u32::from_le_bytes(bytes[offset..end].try_into().unwrap()) as usize;\n\
+             \x20           offset = end;\n\
+             \x20           let end = offset.checked_add(value_len).expect(\"list-int value overflow\");\n\
+             \x20           assert!(end <= bytes.len(), \"list-int value\");\n\
+             \x20           let text = std::str::from_utf8(&bytes[offset..end]).expect(\"JS UTF-8\");\n\
+             \x20           values.push(JetWasmInt::from_decimal(text).expect(\"JS exact integer\"));\n\
+             \x20           offset = end;\n\
+             \x20       }\n\
+             \x20       assert_eq!(offset, bytes.len(), \"list-int trailing bytes\");\n\
+             \x20       values\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_int_alloc(byte_len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_int_free(ptr: u32, byte_len: u32) {\n\
+             \x20   if ptr != 0 { unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize)); } }\n\
              }\n\n",
         );
     }
@@ -2685,11 +2783,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         );
     }
     if need_packed_abi(&is_map_string_int) {
-        // D-JSBIND1=A: [String: Int] as contiguous LE blob —
-        // [count:u32][keyLen:u32][utf8…][val:i64 LE]… packed u64 (ptr<<32)|byte_len.
+        // D-INTBIG1: [String:Int] as a count/key/value UTF-8 blob. Values
+        // stay decimal text, so maps have no fixed-width boundary.
         // Entries encoded in BTreeMap key order. Empty → 0.
         out.push_str(
-            "fn jet_abi_map_string_i64_ret(m: std::collections::BTreeMap<String, i64>) -> u64 {\n\
+            "fn jet_abi_map_string_int_ret(m: std::collections::BTreeMap<String, JetWasmInt>) -> u64 {\n\
              \x20   if m.is_empty() {\n\
              \x20       return 0;\n\
              \x20   }\n\
@@ -2701,14 +2799,17 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20       let len = bytes.len() as u32;\n\
              \x20       buf.extend_from_slice(&len.to_le_bytes());\n\
              \x20       buf.extend_from_slice(bytes);\n\
-             \x20       buf.extend_from_slice(&v.to_le_bytes());\n\
+             \x20       let value = v.to_string();\n\
+             \x20       let value_bytes = value.as_bytes();\n\
+             \x20       buf.extend_from_slice(&(value_bytes.len() as u32).to_le_bytes());\n\
+             \x20       buf.extend_from_slice(value_bytes);\n\
              \x20   }\n\
              \x20   let boxed = buf.into_boxed_slice();\n\
              \x20   let byte_len = boxed.len() as u32;\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
              \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
              }\n\n\
-             fn jet_abi_map_string_i64_arg(packed: u64) -> std::collections::BTreeMap<String, i64> {\n\
+             fn jet_abi_map_string_int_arg(packed: u64) -> std::collections::BTreeMap<String, JetWasmInt> {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if byte_len == 0 {\n\
@@ -2733,10 +2834,14 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20           let len = u32::from_le_bytes(buf[i..len_end].try_into().unwrap()) as usize;\n\
              \x20           i = len_end;\n\
              \x20           let key_end = i.checked_add(len).expect(\"map-string-int key overflow\");\n\
-             \x20           let value_end = key_end.checked_add(8).expect(\"map-string-int value overflow\");\n\
+             \x20           let value_len_end = key_end.checked_add(4).expect(\"map-string-int value length overflow\");\n\
+             \x20           assert!(value_len_end <= buf.len(), \"map-string-int value length\");\n\
+             \x20           let value_len = u32::from_le_bytes(buf[key_end..value_len_end].try_into().unwrap()) as usize;\n\
+             \x20           let value_end = value_len_end.checked_add(value_len).expect(\"map-string-int value overflow\");\n\
              \x20           assert!(value_end <= buf.len(), \"map-string-int entry\");\n\
              \x20           let key = String::from_utf8(buf[i..key_end].to_vec()).expect(\"JS UTF-8\");\n\
-             \x20           let val = i64::from_le_bytes(buf[key_end..value_end].try_into().unwrap());\n\
+             \x20           let text = std::str::from_utf8(&buf[value_len_end..value_end]).expect(\"JS UTF-8\");\n\
+             \x20           let val = JetWasmInt::from_decimal(text).expect(\"JS exact integer\");\n\
              \x20           i = value_end;\n\
              \x20           out.insert(key, val);\n\
              \x20       }\n\
@@ -2745,12 +2850,12 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20   }\n\
              }\n\n\
              #[no_mangle]\n\
-             pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32 {\n\
+             pub extern \"C\" fn jet_abi_map_string_int_alloc(byte_len: u32) -> u32 {\n\
              \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
              \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
              }\n\n\
              #[no_mangle]\n\
-             pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32) {\n\
+             pub extern \"C\" fn jet_abi_map_string_int_free(ptr: u32, byte_len: u32) {\n\
              \x20   if ptr == 0 { return; }\n\
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
@@ -2818,14 +2923,16 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
 
 fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
     let string_ret = f.return_type.as_ref().is_some_and(is_string_like);
-    let list_ret = f.return_type.as_ref().is_some_and(is_list_int);
+    let int_ret = f.return_type.as_ref().is_some_and(is_default_int);
+    let list_default_ret = f.return_type.as_ref().is_some_and(is_list_default_int);
+    let list_fixed_ret = f.return_type.as_ref().is_some_and(is_list_fixed_int);
     let list_string_ret = f.return_type.as_ref().is_some_and(is_list_string);
     let map_ret = f.return_type.as_ref().is_some_and(is_map_string_int);
     let flat = flattened_web_params(&f.tir);
     let edge_run = export
         && f.key == "run"
         && matches!(f.return_type.as_ref(), Some(Type::Result { .. }));
-    // String / [Int] / [String] / [String: Int] cannot be bare `extern "C"` —
+    // String / [Int] / [String] / [String:Int] cannot be bare `extern "C"` —
     // the packed return/argument shapes below remain the ABI contract.
     let export_wrapper = export && !edge_run;
     if edge_run {
@@ -2840,6 +2947,35 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
         out.push_str(") -> i32 {\n    jet_wasm_call(|| {\n");
+        for (name, ty) in &flat {
+            if is_default_int(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_int_arg({name});\n"));
+            } else if is_string_like(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_string_arg({name});\n"));
+            } else if is_list_default_int(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_list_int_arg({name});\n"));
+            } else if is_list_fixed_int(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_list_i64_arg({name});\n"));
+            } else if is_list_string(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_list_string_arg({name});\n"));
+            } else if is_map_string_int(ty) {
+                out.push_str(&format!("        let {name} = jet_abi_map_string_int_arg({name});\n"));
+            }
+        }
+        for reconstruction in &f.tir.web_param_reconstructions {
+            let fields = reconstruction
+                .fields
+                .iter()
+                .map(|(field, flat, _)| format!("{field}: {flat}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "        let {} = {} {{ {} }};\n",
+                reconstruction.local.rust_name(),
+                web_recon_rust_type(&reconstruction.ty),
+                fields
+            ));
+        }
         let args = f
             .tir
             .params
@@ -2864,22 +3000,26 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
         out.push(')');
-        if string_ret || list_ret || list_string_ret || map_ret {
+        if string_ret || int_ret || list_default_ret || list_fixed_ret || list_string_ret || map_ret {
             out.push_str(" -> u64 ");
         } else if let Some(ret) = &f.return_type {
             out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
         }
         out.push_str("{\n    jet_wasm_call(|| {\n");
         for (name, ty) in &flat {
-            if is_string_like(ty) {
+            if is_default_int(ty) {
+                out.push_str(&format!("    let {name} = jet_abi_int_arg({name});\n"));
+            } else if is_string_like(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_string_arg({name});\n"));
-            } else if is_list_int(ty) {
+            } else if is_list_default_int(ty) {
+                out.push_str(&format!("    let {name} = jet_abi_list_int_arg({name});\n"));
+            } else if is_list_fixed_int(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_list_i64_arg({name});\n"));
             } else if is_list_string(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_list_string_arg({name});\n"));
             } else if is_map_string_int(ty) {
                 out.push_str(&format!(
-                    "    let {name} = jet_abi_map_string_i64_arg({name});\n"
+                    "    let {name} = jet_abi_map_string_int_arg({name});\n"
                 ));
             }
         }
@@ -2904,12 +3044,22 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .map(|(name, ty, conv)| wasm_export_arg_expr(name, ty, *conv))
             .collect::<Vec<_>>()
             .join(", ");
-        if string_ret {
+        if int_ret {
+            out.push_str(&format!(
+                "    return jet_abi_int_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if string_ret {
             out.push_str(&format!(
                 "    return jet_abi_string_ret(jet_wasm_{}({args}));\n",
                 f.key
             ));
-        } else if list_ret {
+        } else if list_default_ret {
+            out.push_str(&format!(
+                "    return jet_abi_list_int_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if list_fixed_ret {
             out.push_str(&format!(
                 "    return jet_abi_list_i64_ret(jet_wasm_{}({args}));\n",
                 f.key
@@ -2921,7 +3071,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             ));
         } else if map_ret {
             out.push_str(&format!(
-                "    return jet_abi_map_string_i64_ret(jet_wasm_{}({args}));\n",
+                "    return jet_abi_map_string_int_ret(jet_wasm_{}({args}));\n",
                 f.key
             ));
         } else if f.return_type.is_some() {
@@ -2987,18 +3137,20 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
 fn wasm_ty(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Tagged { inner, .. } => wasm_ty(inner),
-        Type::Int | Type::IntN { signed: true, .. } => Some("i64"),
+        Type::Int => Some("JetWasmInt"),
+        Type::IntN { signed: true, .. } => Some("i64"),
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
         Type::String => Some("String"),
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
-        Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("Vec<i64>"),
+        Type::List(inner) if matches!(**inner, Type::Int) => Some("Vec<JetWasmInt>"),
+        Type::List(inner) if matches!(**inner, Type::IntN { .. }) => Some("Vec<i64>"),
         Type::List(inner) if is_string_like(inner) => Some("Vec<String>"),
         Type::Map { key, value, .. }
             if is_string_like(key) && matches!(**value, Type::Int) =>
         {
-            Some("std::collections::BTreeMap<String, i64>")
+            Some("std::collections::BTreeMap<String, JetWasmInt>")
         }
         _ => None,
     }
@@ -3008,12 +3160,14 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
-        Type::Int | Type::IntN { signed: true, .. } => "i64".to_string(),
+        Type::Int => "JetWasmInt".to_string(),
+        Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
+        Type::List(inner) if matches!(**inner, Type::IntN { .. }) => "Vec<i64>".to_string(),
         Type::List(inner) => format!("Vec<{}>", wasm_storage_ty(inner)?),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_storage_ty(elem)?)
@@ -3094,18 +3248,27 @@ fn wasm_param_rust_ty(
             if name == Syntax::TYPE_CHECKED_TEXT => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::Apply { name, .. })
             if name == Syntax::TYPE_CHECKED_TEXT => Some("String".to_string()),
+        (AccessConvention::Read, Type::List(inner)) if matches!(**inner, Type::Int) => {
+            Some("&Vec<JetWasmInt>".to_string())
+        }
+        (AccessConvention::Write, Type::List(inner)) if matches!(**inner, Type::Int) => {
+            Some("&mut Vec<JetWasmInt>".to_string())
+        }
+        (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::Int) => {
+            Some("Vec<JetWasmInt>".to_string())
+        }
         (AccessConvention::Read, Type::List(inner))
-            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+            if matches!(**inner, Type::IntN { .. }) =>
         {
             Some("&Vec<i64>".to_string())
         }
         (AccessConvention::Write, Type::List(inner))
-            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+            if matches!(**inner, Type::IntN { .. }) =>
         {
             Some("&mut Vec<i64>".to_string())
         }
         (AccessConvention::Move, Type::List(inner))
-            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+            if matches!(**inner, Type::IntN { .. }) =>
         {
             Some("Vec<i64>".to_string())
         }
@@ -3119,13 +3282,13 @@ fn wasm_param_rust_ty(
             Some("Vec<String>".to_string())
         }
         (AccessConvention::Read, ty) if is_map_string_int(ty) => {
-            Some("&std::collections::BTreeMap<String, i64>".to_string())
+            Some("&std::collections::BTreeMap<String, JetWasmInt>".to_string())
         }
         (AccessConvention::Write, ty) if is_map_string_int(ty) => {
-            Some("&mut std::collections::BTreeMap<String, i64>".to_string())
+            Some("&mut std::collections::BTreeMap<String, JetWasmInt>".to_string())
         }
         (AccessConvention::Move, ty) if is_map_string_int(ty) => {
-            Some("std::collections::BTreeMap<String, i64>".to_string())
+            Some("std::collections::BTreeMap<String, JetWasmInt>".to_string())
         }
         (AccessConvention::Read, Type::Fn { .. }) => Some(owned),
         (AccessConvention::Read, t) if t.is_scalar() => Some(owned),
@@ -3143,16 +3306,10 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
             if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&{name}"),
         (AccessConvention::Write, Type::Apply { name: type_name, .. })
             if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&mut {name}"),
-        (AccessConvention::Read, Type::List(inner))
-            if matches!(**inner, Type::Int | Type::IntN { .. })
-                || is_string_like(inner) =>
-        {
+        (AccessConvention::Read, Type::List(inner)) if is_list_int(ty) || is_string_like(inner) => {
             format!("&{name}")
         }
-        (AccessConvention::Write, Type::List(inner))
-            if matches!(**inner, Type::Int | Type::IntN { .. })
-                || is_string_like(inner) =>
-        {
+        (AccessConvention::Write, Type::List(inner)) if is_list_int(ty) || is_string_like(inner) => {
             format!("&mut {name}")
         }
         (AccessConvention::Read, ty) if is_map_string_int(ty) => format!("&{name}"),
@@ -3165,6 +3322,7 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Tagged { inner, .. } => wasm_export_ty(inner),
         // Packed (ptr,len) u64 on the C ABI; internal jet_wasm_* still uses String / Vec.
+        Type::Int => Some("u64"),
         Type::String => Some("u64"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
         Type::List(inner) if is_string_like(inner) => Some("u64"),
@@ -3937,7 +4095,17 @@ fn wasm_emit_expr(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<String, ()> {
     Ok(match &expr.kind {
+        TIR::TExprKind::IntLit(n, _) if matches!(&expr.ty, Type::Int) => {
+            format!("JetWasmInt::from_i64({n})")
+        }
         TIR::TExprKind::IntLit(n, _) => n.to_string(),
+        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(n))
+            if matches!(&expr.ty, Type::Int) => format!("JetWasmInt::from_i64({n})"),
+        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(n)) => n.to_string(),
+        TIR::TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => format!(
+            "JetWasmInt::from_decimal({:?}).expect(\"valid exact integer literal\")",
+            value.to_string_rep()
+        ),
         TIR::TExprKind::FloatLit(n) => n.to_string(),
         TIR::TExprKind::BoolLit(b) => b.to_string(),
         TIR::TExprKind::Unit => "()".to_string(),
@@ -3982,6 +4150,9 @@ fn wasm_emit_expr(
         TIR::TExprKind::Local(local) if local.uninit_fixed => {
             format!("({}).read_array()", local.rust_place())
         }
+        TIR::TExprKind::Local(local) if matches!(&expr.ty, Type::Int) => {
+            format!("({}).clone()", local.rust_place())
+        }
         TIR::TExprKind::Local(local) => local.rust_place(),
         TIR::TExprKind::Uninit => match &expr.ty {
             Type::FixedList { elem, len, .. } => format!(
@@ -3997,10 +4168,13 @@ fn wasm_emit_expr(
         // helpers (Prelude/Core/Power.rs, Prelude/Core/Division.rs) — the same
         // source the native build runs — because Rust spells neither operator.
         TIR::TExprKind::Binary {
-            op: op @ (crate::AST::BinOp::Pow
+            op: op @ (crate::AST::BinOp::Div
+                | crate::AST::BinOp::Pow
                 | crate::AST::BinOp::FloorDiv
                 | crate::AST::BinOp::Mod
-                | crate::AST::BinOp::Rem),
+                | crate::AST::BinOp::Rem
+                | crate::AST::BinOp::Shl
+                | crate::AST::BinOp::Shr),
             lhs,
             rhs,
             line,
@@ -4009,7 +4183,12 @@ fn wasm_emit_expr(
             let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
             wasm_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
-                .expect("the match arm admits only Prelude-carried operators")
+                .unwrap_or_else(|| {
+                    format!(
+                        "({l} {} {r})",
+                        binop(op).expect("ordinary wasm binary operator")
+                    )
+                })
         }
         TIR::TExprKind::Binary {
             op: crate::AST::BinOp::Compare,
@@ -4404,11 +4583,31 @@ fn wasm_emit_expr(
         TIR::TExprKind::NumericMethod {
             recv,
             op: TIR::TNumericOp::CastAs { dst_rust },
-        } => format!(
-            "(({}) as {})",
-            wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
-            dst_rust
-        ),
+        } => {
+            let value = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            if matches!(&recv.ty, Type::Int)
+                && matches!(&expr.ty, Type::Float | Type::Float32)
+            {
+                let converted = format!("({value}).to_f64()");
+                if dst_rust == "f32" {
+                    format!("(({converted}) as f32)")
+                } else {
+                    converted
+                }
+            } else if matches!(&expr.ty, Type::Int) {
+                match recv.ty.without_user_tags() {
+                    Type::IntN { signed: true, .. } => {
+                        format!("JetWasmInt::from_i64(({value}) as i64)")
+                    }
+                    Type::IntN { signed: false, .. } => {
+                        format!("JetWasmInt::from_u64(({value}) as u64)")
+                    }
+                    _ => format!("({value})"),
+                }
+            } else {
+                format!("(({value}) as {dst_rust})")
+            }
+        },
         TIR::TExprKind::IfExpr {
             cond,
             then_body,
@@ -4554,14 +4753,18 @@ fn emit_js_app(
             out.push_str("  const _edgeError = jetDom.takeWasmError(wasm);\n");
             out.push_str("  if (_edgeError) return jetDom.raiseRuntimeError(_edgeError);\n");
             let ret_kind = match f.return_type.as_ref() {
+                Some(ty) if is_default_int(ty) => "int",
                 Some(ty) if is_string_like(ty) => "string",
-                Some(ty) if is_list_int(ty) => "list-int",
+                Some(ty) if is_list_default_int(ty) => "list-int",
+                Some(ty) if is_list_fixed_int(ty) => "list-i64",
                 Some(ty) if is_list_string(ty) => "list-string",
                 Some(ty) if is_map_string_int(ty) => "map-string-int",
                 _ => "scalar",
             };
-            if ret_kind == "string"
+            if ret_kind == "int"
+                || ret_kind == "string"
                 || ret_kind == "list-int"
+                || ret_kind == "list-i64"
                 || ret_kind == "list-string"
                 || ret_kind == "map-string-int"
             {
@@ -5898,9 +6101,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         // carries the same rules the Prelude helpers do.
         E::Binary {
             op: op @ (crate::AST::BinOp::Pow
+                | crate::AST::BinOp::Div
                 | crate::AST::BinOp::FloorDiv
                 | crate::AST::BinOp::Mod
-                | crate::AST::BinOp::Rem),
+                | crate::AST::BinOp::Rem
+                | crate::AST::BinOp::Shl
+                | crate::AST::BinOp::Shr),
             lhs,
             rhs,
             line,
@@ -5913,7 +6119,11 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             file_prefix,
             *line,
         )
-        .expect("the match arm admits only Prelude-carried operators"),
+        .unwrap_or_else(|| {
+            let l = tir_js_expr(lhs, funcs, file_prefix).expect("js binary lhs");
+            let r = tir_js_expr(rhs, funcs, file_prefix).expect("js binary rhs");
+            format!("({l} {} {r})", binop(op).expect("ordinary JS binary operator"))
+        }),
         // Float results (D-INTDIV1 `Int / Int` → Float, float arithmetic) leave
         // BigInt land through `Number(...)` so JS does floating-point math.
         E::Binary { op, lhs, rhs, .. }
@@ -6661,6 +6871,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Division.rs"),
     "\n",
+    include_str!("../Prelude/Core/ExactInt.rs"),
+    "\n",
     include_str!("../Prelude/Core/StringConcat.rs"),
     "\n",
     include_str!("../Prelude/Core/ViewCopy.rs"),
@@ -6687,17 +6899,39 @@ fn wasm_prelude_call(
 ) -> Option<String> {
     use crate::AST::BinOp;
     let float = matches!(ty, Type::Float | Type::Float32);
+    let exact = matches!(ty, Type::Int);
     let file = mangle_generated("source_file");
     Some(match op {
         BinOp::Add if matches!(ty, Type::String) => {
             format!("jet_string_concat(&({lhs}), &({rhs}))")
         }
+        BinOp::Div if exact => {
+            format!("jet_wasm_int_div({lhs}, {rhs}, {file}, {line})")
+        }
         BinOp::Pow if float => format!("({lhs}).jet_pow({rhs})"),
+        BinOp::Pow if exact => {
+            format!("jet_wasm_int_pow({lhs}, {rhs}, {file}, {line})")
+        }
         BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file}, {line})"),
         BinOp::FloorDiv if float => format!("({lhs}).jet_floordiv({rhs})"),
+        BinOp::FloorDiv if exact => {
+            format!("jet_wasm_int_floor_div({lhs}, {rhs}, {file}, {line})")
+        }
         BinOp::FloorDiv => format!("({lhs}).jet_floordiv({rhs}, {file}, {line})"),
+        BinOp::Mod if exact => {
+            format!("jet_wasm_int_mod({lhs}, {rhs}, {file}, {line})")
+        }
         BinOp::Mod => format!("({lhs}).jet_mod({rhs}, {file}, {line})"),
+        BinOp::Rem if exact => {
+            format!("jet_wasm_int_rem({lhs}, {rhs}, {file}, {line})")
+        }
         BinOp::Rem => format!("({lhs}).jet_trunc_rem({rhs}, {file}, {line})"),
+        BinOp::Shl if exact => {
+            format!("jet_wasm_int_shl({lhs}, {rhs}, {file}, {line})")
+        }
+        BinOp::Shr if exact => {
+            format!("jet_wasm_int_shr({lhs}, {rhs}, {file}, {line})")
+        }
         _ => return None,
     })
 }
@@ -6711,19 +6945,19 @@ fn wasm_prelude_call(
 /// traps, so `^` on whole numbers never lowers to it. Floats do use it, since
 /// there the two operations agree.
 const JS_POWER_PRELUDE: &str = concat!(
-    // Every whole-number operator below computes in BigInt and clamps to 64
-    // bits with `BigInt.asIntN`, because JavaScript's own number operators are
-    // doubles (`*` stops being exact at 2^53) and its bitwise operators are
-    // 32-bit. BigInt is the only way this tier can carry the Prelude's rule
-    // rather than approximate it. Results stay BigInt (D-INTBIG1 / I9): returning
-    // `Number(value)` silently rounded every answer above 2^53.
+    // Whole-number operators compute in BigInt because JavaScript's own number
+    // operators are doubles (`*` stops being exact at 2^53) and its bitwise
+    // operators are 32-bit. Fixed-width values use the checked `*_i64` helpers;
+    // default `Int` uses the exact helpers below. Results stay BigInt
+    // (D-INTBIG1 / I9): returning `Number(value)` silently rounds answers above
+    // 2^53.
     "const JET_I64_MIN = -(2n ** 63n);\n",
     "const JET_I64_MAX = 2n ** 63n - 1n;\n",
     "function jet_i64(value, message, file, line) {\n",
     "  if (value < JET_I64_MIN || value > JET_I64_MAX) jet_runtime_stop(\"E3010\", file, line, message);\n",
     "  return value;\n",
     "}\n\n",
-    "function jet_pow(base, exponent, file, line) {\n",
+    "function jet_pow_i64(base, exponent, file, line) {\n",
     "  const e = BigInt(exponent);\n",
     "  if (e < 0n) {\n",
     "    jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result ",
@@ -6737,16 +6971,26 @@ const JS_POWER_PRELUDE: &str = concat!(
     "  }\n",
     "  return jet_i64(b ** e, overflow, file, line);\n",
     "}\n\n",
+    // D-INTBIG1: default `Int` has no fixed-width clamp. Keep the same
+    // negative-exponent trap, but let the JS BigInt carrier retain every bit.
+    "function jet_pow_int(base, exponent, file, line) {\n",
+    "  const e = BigInt(exponent);\n",
+    "  if (e < 0n) jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)\");\n",
+    "  return BigInt(base) ** e;\n",
+    "}\n\n",
     // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
     // JavaScript's `~` works on 32 bits, so it is not the same operation.
     "function jet_bitnot(value, bits, signed) {\n",
     "  const flipped = ~BigInt(value);\n",
     "  return signed ? BigInt.asIntN(bits, flipped) : BigInt.asUintN(bits, flipped);\n",
     "}\n\n",
+    "function jet_bitnot_int(value) {\n",
+    "  return ~BigInt(value);\n",
+    "}\n\n",
     // D-FLOORDIV1=A: the JS tier's copy of the one floor-division rule
     // (`Prelude/Core/Division.rs`). Whole numbers trap on a zero divisor, the
     // same as `/`, and on the one pair whose quotient leaves the range.
-    "function jet_floordiv(left, right, file, line) {\n",
+    "function jet_floordiv_i64(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
     "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
@@ -6754,6 +6998,19 @@ const JS_POWER_PRELUDE: &str = concat!(
     "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
     "  return jet_i64(quotient, \"this division overflows the value's type ",
     "(the result is outside its range)\", file, line);\n",
+    "}\n\n",
+    "function jet_floordiv_int(left, right, file, line) {\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  let quotient = a / b;\n",
+    "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
+    "  return quotient;\n",
+    "}\n\n",
+    "function jet_div_int(left, right, file, line) {\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  return BigInt(left) / b;\n",
     "}\n\n",
     // Floats round down with no trap: a zero divisor gives an infinity, exactly
     // as `/` does.
@@ -6763,7 +7020,7 @@ const JS_POWER_PRELUDE: &str = concat!(
     // D-MODSEM1=A: the floored modulo. JavaScript's `%` is the truncated
     // remainder, which Jet spells `%%`, so the answer is corrected onto the
     // divisor's side of zero.
-    "function jet_mod(left, right, file, line) {\n",
+    "function jet_mod_i64(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
     "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
@@ -6771,19 +7028,38 @@ const JS_POWER_PRELUDE: &str = concat!(
     "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
     "  return BigInt.asIntN(64, remainder);\n",
     "}\n\n",
+    "function jet_mod_int(left, right, file, line) {\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  let remainder = a % b;\n",
+    "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
+    "  return remainder;\n",
+    "}\n\n",
     // D-MODSEM1=A: the truncated remainder, which is the sign JavaScript's own
     // `%` already gives — this adds the zero-divisor trap and the 64-bit range.
-    "function jet_trunc_rem(left, right, file, line) {\n",
+    "function jet_trunc_rem_i64(left, right, file, line) {\n",
     "  const b = BigInt(right);\n",
     "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
     "  return BigInt.asIntN(64, BigInt(left) % b);\n",
+    "}\n\n",
+    "function jet_trunc_rem_int(left, right, file, line) {\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  return BigInt(left) % b;\n",
+    "}\n\n",
+    "function jet_shift_int(left, right, file, line, left_shift) {\n",
+    "  const count = BigInt(right);\n",
+    "  if (count < 0n) jet_runtime_stop(\"E3010\", file, line, \"invalid shift count\");\n",
+    "  return left_shift ? (BigInt(left) << count) : (BigInt(left) >> count);\n",
     "}\n\n"
 );
 
 /// D-EXPSEM1=A / D-STR-CONCAT1: one call shape for operators whose JS spelling
 /// must be wrapped to preserve Jet's rule. Floats take the JavaScript power,
-/// which agrees with the Prelude float power; whole numbers take `jet_pow`,
-/// which carries the exact, trapping rule.
+/// which agrees with the Prelude float power; fixed-width whole numbers take
+/// `jet_pow_i64`, and default `Int` takes `jet_pow_int`, which carries the
+/// exact, trapping rule.
 fn js_prelude_call(
     op: crate::AST::BinOp,
     lhs: &str,
@@ -6794,19 +7070,31 @@ fn js_prelude_call(
 ) -> Option<String> {
     use crate::AST::BinOp;
     let float = matches!(ty, Type::Float | Type::Float32);
+    let exact = matches!(ty, Type::Int);
     let file = mangle_generated("source_file");
     Some(match op {
         BinOp::Add if matches!(ty, Type::String) => {
             format!("jet_string_concat({lhs}, {rhs})")
         }
         BinOp::Pow if float => format!("Math.pow(Number({lhs}), Number({rhs}))"),
-        BinOp::Pow => format!("jet_pow({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Pow => format!(
+            "{}({lhs}, {rhs}, {file}, {line})",
+            if exact { "jet_pow_int" } else { "jet_pow_i64" }
+        ),
+        BinOp::Div if exact => format!("jet_div_int({lhs}, {rhs}, {file}, {line})"),
+        BinOp::FloorDiv if exact => {
+            format!("jet_floordiv_int({lhs}, {rhs}, {file}, {line})")
+        }
+        BinOp::Mod if exact => format!("jet_mod_int({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Rem if exact => format!("jet_trunc_rem_int({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Shl if exact => format!("jet_shift_int({lhs}, {rhs}, {file}, {line}, true)"),
+        BinOp::Shr if exact => format!("jet_shift_int({lhs}, {rhs}, {file}, {line}, false)"),
         // A float divisor of zero gives an infinity, exactly as `/` does, so
         // only the whole-number helper traps.
         BinOp::FloorDiv if float => format!("jet_floordiv_float({lhs}, {rhs})"),
-        BinOp::FloorDiv => format!("jet_floordiv({lhs}, {rhs}, {file}, {line})"),
-        BinOp::Mod => format!("jet_mod({lhs}, {rhs}, {file}, {line})"),
-        BinOp::Rem => format!("jet_trunc_rem({lhs}, {rhs}, {file}, {line})"),
+        BinOp::FloorDiv => format!("jet_floordiv_i64({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Mod => format!("jet_mod_i64({lhs}, {rhs}, {file}, {line})"),
+        BinOp::Rem => format!("jet_trunc_rem_i64({lhs}, {rhs}, {file}, {line})"),
         _ => return None,
     })
 }
@@ -6861,6 +7149,7 @@ fn js_unary_call(op: &crate::AST::UnOp, ty: &Type, operand: &str) -> String {
     match op {
         Neg => format!("(-{operand})"),
         Not if matches!(ty, Type::Bool) => format!("(!{operand})"),
+        Not if matches!(ty, Type::Int) => format!("jet_bitnot_int({operand})"),
         // D-BITNOT1=A: JavaScript's `~` turns over 32 bits, so it answers -1
         // where Jet answers -4294967297. The preamble helper carries the rule
         // the Prelude runs, and it needs the operand's own width: `!U8.{5}` is

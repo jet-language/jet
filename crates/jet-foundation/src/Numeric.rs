@@ -1,4 +1,4 @@
-//! D-BIGINT1 / D-DECIMAL1: arbitrary-precision `BigInt` and base-10 `Decimal`.
+//! D-INTBIG1 / D-DECIMAL1: arbitrary-precision default `Int` and base-10 `Decimal`.
 //! Shared name/method tables for sema and codegen.
 
 use crate::Syntax;
@@ -7,20 +7,8 @@ use crate::AST::{Expr, Marker, Type};
 pub const MONEY_LINT_NAMES: &[&str] =
     &["price", "cost", "amount", "fee", "balance", "tax"];
 
-pub fn is_bigint_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_BIGINT
-}
-
 pub fn is_decimal_type_name(name: &str) -> bool {
     name == Syntax::TYPE_DECIMAL
-}
-
-pub fn is_precise_numeric_type_name(name: &str) -> bool {
-    is_bigint_type_name(name) || is_decimal_type_name(name)
-}
-
-pub fn type_is_bigint(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if is_bigint_type_name(n))
 }
 
 pub fn type_is_decimal(ty: &Type) -> bool {
@@ -51,16 +39,6 @@ pub fn allows_float_money(markers: &[Marker]) -> bool {
                 .iter()
                 .any(|a| matches!(a, Expr::Ident(s, _) if s == "float_money"))
     })
-}
-
-pub fn bigint_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    let bigint = || Type::Named(Syntax::TYPE_BIGINT.to_string());
-    match (method, nargs) {
-        ("add" | "sub" | "mul", 1) => Some(Some(bigint())),
-        ("neg", 0) => Some(Some(bigint())),
-        ("to_string", 0) => Some(Some(Type::String)),
-        _ => None,
-    }
 }
 
 pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -182,10 +160,10 @@ impl CtFraction {
 
 // ── CtBigInt: comptime/REPL tier-0 arbitrary-precision integer ──────────────
 //
-// Mirrors `JetBigInt` in
+// Mirrors the exact integer carrier in
 // `crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs` limb-for-limb
-// (sign-magnitude, little-endian base 10^9) so a `BigInt` computed at comptime
-// prints byte-identical to the same expression run through the AOT path
+// (sign-magnitude, little-endian base 10^9) so a spilled `Int` computed at
+// comptime prints byte-identical to the same expression run through the AOT path
 // (R12 parity). Kept here (not in `jet-comptime`) because `CtValue` — shared
 // by every seam crate — needs the type in its own definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,6 +175,21 @@ pub struct CtBigInt {
 const CTBI_BASE: u64 = 1_000_000_000;
 
 impl CtBigInt {
+    pub fn from_u64(mut value: u64) -> Self {
+        if value == 0 {
+            return Self::from_int(0);
+        }
+        let mut limbs = Vec::new();
+        while value > 0 {
+            limbs.push((value % CTBI_BASE) as u32);
+            value /= CTBI_BASE;
+        }
+        Self {
+            negative: false,
+            limbs,
+        }
+    }
+
     pub fn from_int(n: i64) -> Self {
         if n == 0 {
             return CtBigInt {
@@ -221,7 +214,7 @@ impl CtBigInt {
     pub fn from_str(s: &str) -> Result<Self, String> {
         let t = s.trim();
         if t.is_empty() {
-            return Err("empty BigInt string".to_string());
+            return Err("empty exact Int string".to_string());
         }
         let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
             (true, rest)
@@ -231,7 +224,7 @@ impl CtBigInt {
             (false, t)
         };
         if body.is_empty() || !body.chars().all(|c| c.is_ascii_digit()) {
-            return Err(format!("invalid BigInt string `{s}`"));
+            return Err(format!("invalid exact Int string `{s}`"));
         }
         let mut acc = CtBigInt {
             negative: false,
@@ -245,6 +238,47 @@ impl CtBigInt {
         Ok(acc)
     }
 
+    /// Parse one source integer literal. The lexer keeps the original spelling
+    /// so exact `Int` can survive the i64 fast path; this is the one canonical
+    /// radix/underscore parser used by sema, comptime, and TIR lowering.
+    pub fn from_literal(s: &str) -> Result<Self, String> {
+        let text = s.replace('_', "");
+        let (negative, body) = if let Some(rest) = text.strip_prefix('-') {
+            (true, rest)
+        } else if let Some(rest) = text.strip_prefix('+') {
+            (false, rest)
+        } else {
+            (false, text.as_str())
+        };
+        let (radix, digits) = if let Some(rest) = body.strip_prefix("0x")
+            .or_else(|| body.strip_prefix("0X"))
+        {
+            (16, rest)
+        } else if let Some(rest) = body.strip_prefix("0o")
+            .or_else(|| body.strip_prefix("0O"))
+        {
+            (8, rest)
+        } else if let Some(rest) = body.strip_prefix("0b")
+            .or_else(|| body.strip_prefix("0B"))
+        {
+            (2, rest)
+        } else {
+            return Self::from_str(&text);
+        };
+        if digits.is_empty() {
+            return Err(format!("invalid integer literal `{s}`"));
+        }
+        let mut value = Self::from_int(0);
+        for digit in digits.chars() {
+            let digit = digit
+                .to_digit(radix)
+                .ok_or_else(|| format!("invalid integer literal `{s}`"))?;
+            value = value.mul_small(radix).add_small(digit);
+        }
+        value.negative = negative && !value.is_zero();
+        Ok(value)
+    }
+
     fn normalize(mut self) -> Self {
         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
             self.limbs.pop();
@@ -253,6 +287,38 @@ impl CtBigInt {
             self.negative = false;
         }
         self
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.limbs.len() == 1 && self.limbs[0] == 0
+    }
+
+    /// Return the value when it fits in the resident machine-word payload.
+    /// The tagged runtime representation reserves the outer signed bit, so
+    /// callers pass the 63-bit bound explicitly instead of silently narrowing.
+    pub fn try_i64(&self) -> Option<i64> {
+        let mut value = 0u128;
+        for &limb in self.limbs.iter().rev() {
+            value = value.checked_mul(CTBI_BASE as u128)?;
+            value = value.checked_add(limb as u128)?;
+        }
+        let signed = if self.negative {
+            let magnitude = i128::try_from(value).ok()?;
+            -magnitude
+        } else {
+            i128::try_from(value).ok()?
+        };
+        i64::try_from(signed).ok()
+    }
+
+    pub fn try_i128(&self) -> Option<i128> {
+        let mut value = 0u128;
+        for &limb in self.limbs.iter().rev() {
+            value = value.checked_mul(CTBI_BASE as u128)?;
+            value = value.checked_add(limb as u128)?;
+        }
+        let magnitude = i128::try_from(value).ok()?;
+        Some(if self.negative { -magnitude } else { magnitude })
     }
 
     fn mul_small(&self, m: u32) -> Self {
@@ -392,6 +458,338 @@ impl CtBigInt {
         }
     }
 
+    fn div_rem_small(&self, divisor: u32) -> (CtBigInt, u32) {
+        let divisor = u64::from(divisor);
+        let mut remainder = 0u64;
+        let mut limbs = vec![0u32; self.limbs.len()];
+        for index in (0..self.limbs.len()).rev() {
+            let current = remainder * CTBI_BASE + u64::from(self.limbs[index]);
+            limbs[index] = (current / divisor) as u32;
+            remainder = current % divisor;
+        }
+        (
+            CtBigInt {
+                negative: false,
+                limbs,
+            }
+            .normalize(),
+            remainder as u32,
+        )
+    }
+
+    fn bit_width(&self) -> usize {
+        let mut value = self.abs();
+        let mut width = 0usize;
+        while !value.is_zero() {
+            let (next, _) = value.div_rem_small(2);
+            value = next;
+            width += 1;
+        }
+        width
+    }
+
+    fn unsigned_bits(&self, width: usize) -> Vec<bool> {
+        let mut value = self.abs();
+        let mut bits = Vec::with_capacity(width);
+        for _ in 0..width {
+            let (next, remainder) = value.div_rem_small(2);
+            bits.push(remainder != 0);
+            value = next;
+        }
+        bits
+    }
+
+    fn from_unsigned_bits(bits: &[bool]) -> CtBigInt {
+        let mut value = CtBigInt::from_int(0);
+        for bit in bits.iter().rev() {
+            value = value.mul_small(2);
+            if *bit {
+                value = value.add_small(1);
+            }
+        }
+        value
+    }
+
+    fn twos_complement(&self, width: usize) -> Vec<bool> {
+        let mut bits = self.unsigned_bits(width);
+        if self.negative {
+            for bit in &mut bits {
+                *bit = !*bit;
+            }
+            let mut carry = true;
+            for bit in &mut bits {
+                if !carry {
+                    break;
+                }
+                if *bit {
+                    *bit = false;
+                } else {
+                    *bit = true;
+                    carry = false;
+                }
+            }
+        }
+        bits
+    }
+
+    fn from_twos_complement(mut bits: Vec<bool>) -> CtBigInt {
+        let negative = bits.last().copied().unwrap_or(false);
+        if !negative {
+            return Self::from_unsigned_bits(&bits);
+        }
+        for bit in &mut bits {
+            *bit = !*bit;
+        }
+        let mut carry = true;
+        for bit in &mut bits {
+            if !carry {
+                break;
+            }
+            if *bit {
+                *bit = false;
+            } else {
+                *bit = true;
+                carry = false;
+            }
+        }
+        Self::from_unsigned_bits(&bits).neg()
+    }
+
+    fn bitwise(&self, other: &CtBigInt, op: impl Fn(bool, bool) -> bool) -> CtBigInt {
+        let width = self.bit_width().max(other.bit_width()).saturating_add(1);
+        let left = self.twos_complement(width);
+        let right = other.twos_complement(width);
+        let bits = left
+            .into_iter()
+            .zip(right)
+            .map(|(left, right)| op(left, right))
+            .collect();
+        Self::from_twos_complement(bits)
+    }
+
+    pub fn bit_and(&self, other: &CtBigInt) -> CtBigInt {
+        self.bitwise(other, |left, right| left & right)
+    }
+
+    pub fn bit_or(&self, other: &CtBigInt) -> CtBigInt {
+        self.bitwise(other, |left, right| left | right)
+    }
+
+    pub fn bit_xor(&self, other: &CtBigInt) -> CtBigInt {
+        self.bitwise(other, |left, right| left ^ right)
+    }
+
+    pub fn bit_count(&self, width: u32, method: &str) -> Option<i64> {
+        let width = usize::try_from(width).ok()?;
+        if width == 0 {
+            return None;
+        }
+        let bits = self.twos_complement(width);
+        let ones = bits.iter().filter(|bit| **bit).count();
+        let count = match method {
+            "count_ones" => ones,
+            "count_zeros" => width - ones,
+            "leading_zeros" => bits.iter().rev().take_while(|bit| !**bit).count(),
+            "trailing_zeros" => bits.iter().take_while(|bit| !**bit).count(),
+            _ => return None,
+        };
+        i64::try_from(count).ok()
+    }
+
+    pub fn checked_widen(&self, target_f32: bool) -> Option<f64> {
+        let precision = if target_f32 { 24 } else { 53 };
+        let width = self.bit_width();
+        let mut trailing = 0usize;
+        let mut value = self.abs();
+        while !value.is_zero() {
+            let (next, remainder) = value.div_rem_small(2);
+            if remainder != 0 {
+                break;
+            }
+            trailing += 1;
+            value = next;
+        }
+        if width > precision && trailing < width - precision {
+            return None;
+        }
+        let value = self.to_string_rep().parse::<f64>().ok()?;
+        if !value.is_finite() {
+            return None;
+        }
+        if target_f32 {
+            let value = value as f32;
+            value.is_finite().then_some(value as f64)
+        } else {
+            Some(value)
+        }
+    }
+
+    fn shift_count(&self) -> Option<usize> {
+        let count = self.try_i64()?;
+        (count >= 0).then_some(count as usize)
+    }
+
+    pub fn shl(&self, count: &CtBigInt) -> Option<CtBigInt> {
+        let count = count.shift_count()?;
+        let mut value = self.clone();
+        for _ in 0..count {
+            value = value.mul_small(2);
+        }
+        Some(value)
+    }
+
+    pub fn shr(&self, count: &CtBigInt) -> Option<CtBigInt> {
+        let count = count.shift_count()?;
+        let mut value = self.clone();
+        for _ in 0..count {
+            let (quotient, remainder) = value.abs().div_rem_small(2);
+            value = if self.negative && remainder != 0 {
+                quotient.add_small(1).neg()
+            } else {
+                quotient.with_sign(self.negative)
+            };
+        }
+        Some(value)
+    }
+
+    pub fn is_even(&self) -> bool {
+        self.div_rem_small(2).1 == 0
+    }
+
+    pub fn is_odd(&self) -> bool {
+        !self.is_even()
+    }
+
+    pub fn digits(&self) -> i64 {
+        let digits = self.to_string_rep().trim_start_matches('-').len();
+        i64::try_from(digits).unwrap_or(i64::MAX)
+    }
+
+    pub fn leading_ones(&self) -> i64 {
+        let width = 64usize.max(self.bit_width().saturating_add(1));
+        let count = self
+            .twos_complement(width)
+            .iter()
+            .rev()
+            .take_while(|bit| **bit)
+            .count();
+        i64::try_from(count).unwrap_or(i64::MAX)
+    }
+
+    pub fn trailing_ones(&self) -> i64 {
+        let width = 64usize.max(self.bit_width().saturating_add(1));
+        let count = self
+            .twos_complement(width)
+            .iter()
+            .take_while(|bit| **bit)
+            .count();
+        i64::try_from(count).unwrap_or(i64::MAX)
+    }
+
+    pub fn isqrt(&self) -> Option<CtBigInt> {
+        if self.negative {
+            return None;
+        }
+        if self.is_zero() {
+            return Some(self.clone());
+        }
+        let one = CtBigInt::from_int(1);
+        let two = CtBigInt::from_int(2);
+        let mut root = one.clone();
+        for _ in 0..self.bit_width().saturating_add(1) / 2 {
+            root = root.mul_small(2);
+        }
+        loop {
+            let quotient = self.div_rem(&root)?.0;
+            let next = root.add(&quotient).div_rem(&two)?.0;
+            if next.compare(&root) != std::cmp::Ordering::Less {
+                break;
+            }
+            root = next;
+        }
+        while root.mul(&root).compare(self) == std::cmp::Ordering::Greater {
+            root = root.sub(&one);
+        }
+        loop {
+            let next = root.add(&one);
+            if next.mul(&next).compare(self) == std::cmp::Ordering::Greater {
+                break;
+            }
+            root = next;
+        }
+        Some(root)
+    }
+
+    pub fn pow(&self, exponent: &CtBigInt) -> Option<CtBigInt> {
+        if exponent.negative {
+            return None;
+        }
+        let mut exponent = exponent.clone();
+        let mut base = self.clone();
+        let mut result = CtBigInt::from_int(1);
+        while !exponent.is_zero() {
+            let (next, bit) = exponent.div_rem_small(2);
+            if bit != 0 {
+                result = result.mul(&base);
+            }
+            exponent = next;
+            if !exponent.is_zero() {
+                base = base.mul(&base);
+            }
+        }
+        Some(result)
+    }
+
+    pub fn gcd(left: &CtBigInt, right: &CtBigInt) -> CtBigInt {
+        let mut a = left.abs();
+        let mut b = right.abs();
+        while !b.is_zero() {
+            let (_, remainder) = a
+                .div_rem(&b)
+                .expect("gcd divisor is nonzero");
+            a = b;
+            b = remainder.abs();
+        }
+        a
+    }
+
+    pub fn lcm(left: &CtBigInt, right: &CtBigInt) -> CtBigInt {
+        if left.is_zero() || right.is_zero() {
+            return CtBigInt::from_int(0);
+        }
+        let divisor = Self::gcd(left, right);
+        let quotient = left
+            .abs()
+            .div_rem(&divisor)
+            .expect("lcm gcd is nonzero")
+            .0;
+        quotient.mul(&right.abs())
+    }
+
+    pub fn binomial(n: &CtBigInt, k: &CtBigInt) -> Option<CtBigInt> {
+        if n.negative || k.negative || k.compare(n) == std::cmp::Ordering::Greater {
+            return None;
+        }
+        let other = n.sub(k);
+        let limit = if k.compare(&other) == std::cmp::Ordering::Greater {
+            other
+        } else {
+            k.clone()
+        };
+        let one = CtBigInt::from_int(1);
+        let mut index = one.clone();
+        let mut result = one.clone();
+        while index.compare(&limit) != std::cmp::Ordering::Greater {
+            let numerator = n.sub(&limit).add(&index);
+            result = result
+                .mul(&numerator)
+                .div_rem(&index)?
+                .0;
+            index = index.add(&one);
+        }
+        Some(result)
+    }
+
     /// Total order (sign-aware, unlike the private magnitude-only `cmp_abs`).
     pub fn compare(&self, other: &CtBigInt) -> std::cmp::Ordering {
         match (self.negative, other.negative) {
@@ -407,6 +805,54 @@ impl CtBigInt {
                 -1 => std::cmp::Ordering::Greater,
                 _ => std::cmp::Ordering::Equal,
             },
+        }
+    }
+
+    /// Truncating quotient and remainder. Both outputs are normalized; the
+    /// remainder carries the dividend sign, matching Rust's integer rules.
+    pub fn div_rem(&self, other: &CtBigInt) -> Option<(CtBigInt, CtBigInt)> {
+        if other.is_zero() {
+            return None;
+        }
+        let divisor = other.abs();
+        let dividend = self.abs();
+        if dividend.cmp_abs(&divisor) < 0 {
+            return Some((CtBigInt::from_int(0), self.clone()));
+        }
+
+        let mut quotient = vec![0u32; dividend.limbs.len()];
+        let mut remainder = CtBigInt::from_int(0);
+        for index in (0..dividend.limbs.len()).rev() {
+            remainder.limbs.insert(0, dividend.limbs[index]);
+            remainder = remainder.normalize();
+            let mut low = 0u32;
+            let mut high = (CTBI_BASE - 1) as u32;
+            while low < high {
+                let middle = low + (high - low) / 2 + 1;
+                if divisor.mul_small(middle).cmp_abs(&remainder) <= 0 {
+                    low = middle;
+                } else {
+                    high = middle - 1;
+                }
+            }
+            quotient[index] = low;
+            if low != 0 {
+                remainder = remainder.sub_abs(&divisor.mul_small(low));
+            }
+        }
+        let quotient = CtBigInt {
+            negative: self.negative != other.negative,
+            limbs: quotient,
+        }
+        .normalize();
+        remainder.negative = self.negative && !remainder.is_zero();
+        Some((quotient, remainder.normalize()))
+    }
+
+    pub fn abs(&self) -> CtBigInt {
+        CtBigInt {
+            negative: false,
+            limbs: self.limbs.clone(),
         }
     }
 

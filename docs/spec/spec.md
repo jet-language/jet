@@ -42,11 +42,12 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   same rail with `marker Name on [.Text] { check … hole … }`: the check runs
   at comptime, the hole expression encodes each value, and a sink accepts only
   `Name` or audited `Name.raw(text)`.
-- Numbers (S67): decimal `Int` (64-bit signed, E0007 if too large) and `Float`
+- Numbers (S67): exact arbitrary-precision decimal `Int` and `Float`
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
-  E0001. Unary minus is an operator, not part of the literal. In an operator
+  E0001. `Int` uses a small machine-word fast path and spills without changing
+  its type; fixed-width destinations remain range-checked. Unary minus is an operator, not part of the literal. In an operator
   expression, a bare whole-number literal adopts a fixed-width peer when that
   type contains its exact value (D-INTLIT-WIDTH1=F); with no sized peer it stays
   `Int` (D-NUMLIT-PEER1=A). The operands then follow the ordinary numeric
@@ -1004,7 +1005,7 @@ impl Circle {
 
 - **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
-  sharing. Field order is preserved as written. Growable fields (`[T]`, `[K: V]`,
+  sharing. Field order is preserved as written. Growable fields (`[T]`, `[K:V]`,
   `String`) are rejected with **E1104** because they lack a stable C layout;
   fixed-size arrays `[T#N]` are allowed. Reserved variants (`packed`, `align(N)`,
   `columnar`) parse but error with **E1105** until their milestones ship.
@@ -1097,6 +1098,8 @@ spelling (D-IGNORERET2, amended by D-MARK-DISCARD1=A: the `#Suppress(MustUse)
 **`jet fmt --check <file>`** reports changed files and exits **1** when the
 file would change (CI mode). Formatting is lex → parse → print;
 sema and rustc are not run.
+**`jet fmt --simplify <file>`** opts into ratified simplest-spelling rewrites;
+the default `fmt` output remains unchanged by this mode.
 
 Style (zero configuration): 4-space indent, `{` on the same line as its
 header, one statement per line, at most one blank line between top-level
@@ -1243,7 +1246,7 @@ function. **`extern rust "std" { … }`** works for Rust standard-library items 
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `[T]`/`[K: V]`/`T?`/`T ? E` built from allowed types, and
+`Char`, `[T]`/`[K:V]`/`T?`/`T ? E` built from allowed types, and
 structs/enums whose fields are allowed. No borrowed parameters or returns, no
 callbacks (**E0702**).
 
@@ -2114,7 +2117,7 @@ Self-recursion through the binding is rejected (**E0804**). Calling a
 non-function → **E0803**.
 
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
-`sort_by`, `reduce` on `[T]`; `each` on `[K: V]` (two parameters). On a
+`sort_by`, `reduce` on `[T]`; `each` on `[K:V]` (two parameters). On a
 concrete list, map/filter execute now and return a plain list; write `.lazy()`
 first for the deferred `Iter` vocabulary.
 
@@ -3529,7 +3532,7 @@ D-CLI-POS1=A adds positional filling for required value fields:
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
-type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
+type (a `[K:V]`, a closure, a `[T]`, a nested struct that isn't itself
 `#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults
 use the *existing* `#Default(expr)` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter

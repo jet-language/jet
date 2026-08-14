@@ -478,7 +478,6 @@ const TYPE_CONTAINER = {
   Ordering: "core.math",
   Float: "core.math",
   Float32: "core.math",
-  BigInt: "core.math",
   Decimal: "core.math",
   String: "String",
   Range: "Iter",
@@ -581,7 +580,6 @@ const COLLECTION_METHOD_FUNCTIONS = {
   deque_method_return: "Queue",
   numeric_method_return: "core.math",
   numeric_conversion_return: "core.math",
-  bigint_method_return: "core.math",
   decimal_method_return: "core.math",
   fraction_method_return: "core.math",
   is_closure_method: "Iter",
@@ -1197,7 +1195,8 @@ function methodNames(body, constants) {
 
 // Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
 // `pub fn` table, a table in another module, or a table called anything else,
-// and all three ship: Numeric.rs holds the real BigInt and Decimal tables. This
+// and all three ship: Numeric.rs holds the real exact-Int, Decimal, and
+// Fraction tables. This
 // walks out from builtin_method_return, follows every call it dispatches, and
 // keeps following tail calls, so a new reader cannot be missed by forgetting to
 // name it.
@@ -2729,7 +2728,7 @@ function hostileFixtures() {
       { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
     ];
     const found = discoverTables(sources).functions;
-    for (const name of ["bigint_method_return", "decimal_method_return", "fraction_method_return", "builtin_static_return"]) {
+    for (const name of ["decimal_method_return", "fraction_method_return", "builtin_static_return"]) {
       if (!found.includes(name)) {
         throw new Error("dispatch discovery missed " + name);
       }

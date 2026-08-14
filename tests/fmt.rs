@@ -32,8 +32,8 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 
 #[test]
 fn type_alias_binding_sigils_are_canonical_and_idempotent() {
-    let old = "alias Result<T> = T ? Int\nfn run() {}\n";
-    let once = jet::format_source(old).expect("retired alias spelling should format");
+    let source = "alias Result<T> :: T ? Int\nfn run() {}\n";
+    let once = jet::format_source(source).expect("canonical alias spelling should format");
     assert!(once.contains("alias Result<T> :: T ? Int"), "{once}");
     assert!(!once.contains("alias Result<T> ="), "{once}");
     let twice = jet::format_source(&once).expect("canonical alias spelling should reformat");
@@ -639,7 +639,7 @@ fn fmt_preserves_comments_inside_multiline_collection_literals() {
         x: /* field value */ 9,
         y: 10
     }
-    typed_lookup :: [String: Int].{
+    typed_lookup :: [String:Int].{
         "c": /* typed mapped value */ 5,
         "d": 6
     }
@@ -905,7 +905,7 @@ fn fmt_canonicalizes_collection_type_sugar() {
     ];
 }
 
-fn use_collections(items: [String], counts: [String: Int]) {}
+fn use_collections(items: [String], counts: [String:Int]) {}
 "#;
     let out = jet::format_source(src).expect("fmt should accept collection type sugar");
     assert!(
@@ -913,7 +913,7 @@ fn use_collections(items: [String], counts: [String: Int]) {}
         "expected list return shorthand, got:\n{out}"
     );
     assert!(
-        out.contains("items: [String], counts: [String: Int]"),
+        out.contains("items: [String], counts: [String:Int]"),
         "expected bracket collection type formatting, got:\n{out}"
     );
     assert!(
@@ -925,6 +925,60 @@ fn use_collections(items: [String], counts: [String: Int]) {}
         out, twice,
         "collection shorthand formatting must be idempotent"
     );
+}
+
+#[test]
+fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
+    let source = "fn answer() => Int {\n    return 42\n}\n";
+    let plain = jet::format_source(source).expect("plain fmt should format");
+    assert!(plain.contains("fn answer() => Int { return 42 }"), "{plain}");
+    assert!(!plain.contains(":: 42"), "plain fmt must not simplify:\n{plain}");
+
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let once = jet::format_source_with_options(source, options)
+        .expect("simplify fmt should format");
+    assert_eq!(once, "fn answer() => Int :: 42\n");
+
+    let (before_tokens, before_lex_diags) = jet::Lexer::lex(source);
+    assert!(before_lex_diags.is_empty(), "{before_lex_diags:?}");
+    let before = jet::Parser::parse_for_fmt(&before_tokens).expect("source should parse");
+    let (after_tokens, after_lex_diags) = jet::Lexer::lex(&once);
+    assert!(after_lex_diags.is_empty(), "{after_lex_diags:?}");
+    let after = jet::Parser::parse_for_fmt(&after_tokens).expect("simplified source should parse");
+    assert_eq!(
+        jet::Formatter::canonical_program(&before),
+        jet::Formatter::canonical_program(&after),
+        "simplify must preserve the parsed AST"
+    );
+    assert_eq!(
+        once,
+        jet::format_source_with_options(&once, options).expect("second simplify pass should work")
+    );
+
+    let wide_name = "wide_value".repeat(12);
+    let wide = format!("fn wide() => Int {{ return {wide_name} }}\n");
+    let wide_out = jet::format_source_with_options(&wide, options)
+        .expect("wide simplify input should format");
+    assert!(!wide_out.contains(" :: "), "wide bodies must stay braced:\n{wide_out}");
+
+    let commented = "fn noted() => Int {\n    // keep this note\n    return 42\n}\n";
+    let commented_out = jet::format_source_with_options(commented, options)
+        .expect("commented simplify input should format");
+    assert!(
+        !commented_out.contains(" :: 42"),
+        "commented bodies must stay braced:\n{commented_out}"
+    );
+}
+
+#[test]
+fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
+    let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
+    let once = jet::format_source(source).expect("map type should format");
+    assert!(once.contains("values: [String:Int]"), "{once}");
+    assert!(once.contains("=> [String:Int]"), "{once}");
+    assert!(once.contains("[\"key\": 1]"), "map value spacing changed:\n{once}");
+    assert!(!once.contains("[String: Int]"), "retired map type spacing remains:\n{once}");
+    assert_eq!(once, jet::format_source(&once).expect("map type output should be stable"));
 }
 
 #[test]
@@ -970,6 +1024,14 @@ fn fmt_preserves_leading_dot_enum_lit() {
     let src = r#"enum Color {
     Red
     Blue
+}
+
+#[test]
+fn fmt_canonicalizes_subject_first_refutable_test_bind() {
+    let src = "fn run(){\n    parse() == .Ok(value) ?? return\n    print(value)\n}\n";
+    let once = jet::format_source(src).expect("subject-first test-bind should format");
+    assert!(once.contains("parse() == .Ok(value) ?? return"), "{once}");
+    assert_eq!(once, jet::format_source(&once).unwrap());
 }
 
 fn paint(c: Color) {

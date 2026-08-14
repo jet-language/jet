@@ -1,5 +1,5 @@
 use super::{
-    AccessConvention, BinMatchPart, CallablePolicyChain, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
+    AccessConvention, BinMatchPart, BindPattern, CallablePolicyChain, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
     Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
@@ -322,11 +322,11 @@ pub enum TypedLitBody {
     Fields(Vec<(String, Span, Expr)>),
     /// List / fixed-array elements: `[U8].{ 1, 2 }` / `.{ 1, 2 }`.
     Elements(Vec<Expr>),
-    /// Map entries: `[String: Int].{ "a": 1 }`.
+    /// Map entries: `[String:Int].{ "a": 1 }`.
     Entries(Vec<(Expr, Expr)>),
     /// One expression: scalar `U8.{ 250 }` or assertion `Int.{ fetch_rows() }`.
     Value(Box<Expr>),
-    /// Explicit empty: `[T].{}` / `[K: V].{}` / `.{}`.
+    /// Explicit empty: `[T].{}` / `[K:V].{}` / `.{}`.
     Empty,
 }
 
@@ -1007,7 +1007,16 @@ impl Expr {
             match stmt {
                 Stmt::Expr(expr) => walk(expr, f),
                 Stmt::DeferClose { close, .. } => walk(close, f),
-                Stmt::Val(binding) => walk(&mut binding.init, f),
+                Stmt::Val(binding) => {
+                    walk(&mut binding.init, f);
+                    if let Some(BindPattern::Refutable {
+                        pattern, fallback, ..
+                    }) = &mut binding.pattern
+                    {
+                        walk_pattern(pattern, f);
+                        walk_fallback(fallback, f);
+                    }
+                }
                 Stmt::Assign { target, value, .. } => {
                     walk_lvalue(target, f);
                     walk(value, f);

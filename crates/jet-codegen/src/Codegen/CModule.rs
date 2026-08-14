@@ -17,6 +17,7 @@ const NULL_RETURN_PANIC: &str =
     "a C function declared to return String returned a null pointer";
 const UTF8_RETURN_PANIC: &str =
     "a C function declared to return String returned bytes that are not valid UTF-8";
+const INT_RANGE_PANIC: &str = "a default Int value does not fit in the C i64 range";
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every
@@ -83,6 +84,13 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                 c_wrapper_param_type(&p.ty, cx, p.ty_span)
             ));
             match &p.ty {
+                Type::Int => {
+                    conv_lines.push(format!(
+                        "    let c{i} = {}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| jet_panic(file!(), line!(), \"{INT_RANGE_PANIC}\"));",
+                        cx.root_prefix
+                    ));
+                    call_args.push(format!("c{i}"));
+                }
                 Type::String => {
                     conv_lines.push(format!(
                         "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| jet_panic(file!(), line!(), \"{NUL_PANIC}\"));"
@@ -124,6 +132,10 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             Some(Type::Char) => format!(
                 "    let v = unsafe {{ {} }};\n    char::from_u32(v).unwrap_or('\\u{{0}}')",
                 call
+            ),
+            Some(Type::Int) => format!(
+                "    {}jet_std::jet_int_from_i64(unsafe {{ {} }})",
+                cx.root_prefix, call
             ),
             Some(_) => format!("    unsafe {{ {} }}", call),
         };

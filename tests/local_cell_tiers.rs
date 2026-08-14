@@ -144,7 +144,7 @@ fn ok_result() => Int ? String {
 }
 
 fn run() {
-    counts := [String: Int].{}
+    counts := [String:Int].{}
     counts["jet"] = 3
     map_cell :: Cell.new(^counts)
     print(map_cell.read(values => values.get("jet") ?? 0))
@@ -173,7 +173,7 @@ const GENERIC_EXPECTED: &str = "3\n7\n9\n11\n1.5\n13\n";
 
 const INT_MAP_SOURCE: &str = r#"
 fn run() {
-    values := [Int: Int].{}
+    values := [Int:Int].{}
     values[1] = 2
     cell :: Cell.new(^values)
     print(cell.read(items => items.get(1) ?? 0))
@@ -338,12 +338,12 @@ fn local_cell_non_string_map_uses_default_evaluator() {
                     assert_eq!(stdout, "2\n");
                 }
                 jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-                    panic!("default tier rejected Cell<[Int: Int]>: {diagnostics:?}")
+                    panic!("default tier rejected Cell<[Int:Int]>: {diagnostics:?}")
                 }
             }
             assert!(
                 !jet_jit::jit_executed_for_test(),
-                "Cell<[Int: Int]> must not claim resident-native execution"
+                "Cell<[Int:Int]> must not claim resident-native execution"
             );
 
             jet_jit::reset_jit_trace_for_test();
@@ -359,7 +359,7 @@ fn local_cell_non_string_map_uses_default_evaluator() {
                     assert_eq!(stdout, "2\n");
                 }
                 jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-                    panic!("interpreter rejected Cell<[Int: Int]>: {diagnostics:?}")
+                    panic!("interpreter rejected Cell<[Int:Int]>: {diagnostics:?}")
                 }
             }
         })

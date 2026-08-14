@@ -265,14 +265,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Duration", "is_zero", 0) => THandleOp::DurationIsZero,
         ("Duration", "total_seconds", 0) => THandleOp::DurationTotalSeconds,
         ("Duration", "difference", 1) => THandleOp::DurationDifference,
-        ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
-            type_name: "BigInt".to_string(),
-            method: method.to_string(),
-        },
-        ("BigInt", "neg" | "to_string", 0) => THandleOp::PreciseMethod {
-            type_name: "BigInt".to_string(),
-            method: method.to_string(),
-        },
         ("Decimal", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "Decimal".to_string(),
             method: method.to_string(),
@@ -619,8 +611,7 @@ pub(crate) fn handle_method_return_ty(
             }
         })
         .or_else(|| {
-            if handle == crate::Syntax::TYPE_BIGINT
-                || handle == crate::Syntax::TYPE_DECIMAL
+            if handle == crate::Syntax::TYPE_DECIMAL
                 || handle == crate::Syntax::TYPE_FRACTION
                 || handle == crate::Syntax::DURATION_TYPE
             {

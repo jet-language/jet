@@ -656,19 +656,45 @@ impl<'a> Fmt<'a> {
         }
         // D-ONELINE-BODY1=B: preserve the canonical concise callable body.
         // The parser desugars the marker plus expression to `return expr`; its
-        // synthetic return span starts on the author-written marker. Retired
-        // `=` input is intentionally rewritten to `::` here.
+        // synthetic return span starts on the author-written marker.
         if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
             if self.src.get(span.start..span.start.saturating_add(2)).is_some_and(|source| {
                 source == "::"
-                    || self
-                        .src
-                        .get(span.start..span.start.saturating_add(1))
-                        .is_some_and(|source| source == "=")
             }) {
                 self.write(" :: ");
                 self.fmt_expr(expr, Prec::OrFallback);
                 return;
+            }
+        }
+        // D-FMT-SIMPLIFY1=A / card #1514 criterion 3: a braced body with one
+        // return uses the canonical `::` one-line body when it fits. Keep
+        // comments and wide output in the explicit block form.
+        if self.simplify {
+            if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
+                let is_authored_return = self
+                    .src
+                    .get(span.start..span.start.saturating_add("return".len()))
+                    == Some("return");
+                let comment_free = self
+                    .single_stmt_braces(&f.body[0])
+                    .is_some_and(|(open, close)| !self.span_has_comment(open, close));
+                if is_authored_return && comment_free {
+                    let saved_out = self.out.len();
+                    let saved_col = self.col;
+                    let saved_line_start = self.at_line_start;
+                    let saved_pending_blank = self.pending_blank;
+                    let saved_comment_i = self.comment_i;
+                    self.write(" :: ");
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+                        return;
+                    }
+                    self.out.truncate(saved_out);
+                    self.col = saved_col;
+                    self.at_line_start = saved_line_start;
+                    self.pending_blank = saved_pending_blank;
+                    self.comment_i = saved_comment_i;
+                }
             }
         }
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single

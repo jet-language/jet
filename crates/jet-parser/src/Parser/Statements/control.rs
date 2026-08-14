@@ -2504,6 +2504,10 @@ impl<'a> Parser<'a> {
             // exactly like on any other name (S27).
             TokKind::Ident(_) | TokKind::KwSelf => {
                 let expr = self.expr()?;
+                if let Some(binding) = self.try_refutable_test_binding(expr.clone()) {
+                    self.finish_stmt()?;
+                    return Ok(Stmt::Val(binding));
+                }
                 let next = &self.peek().kind;
                 if matches!(next, TokKind::Eq) || next.compound_op().is_some() {
                     let op_tok = self.bump();

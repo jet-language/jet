@@ -709,26 +709,71 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
     s
 }
 
-fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
+fn emit_numeric_op(
+    recv: &str,
+    op: &TNumericOp,
+    recv_ty: Option<&Type>,
+    result_ty: Option<&Type>,
+    cx: &Cx,
+) -> String {
     match op {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
-        TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
+        TNumericOp::BitCount { method: m, width } => {
+            if matches!(recv_ty, Some(Type::Int)) {
+                format!(
+                    "{}jet_std::jet_int_bit_count({}, {}, {:?})",
+                    cx.root_prefix, recv, width, m
+                )
+            } else {
+                format!("(({recv}).{m}() as i64)")
+            }
+        }
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
         TNumericOp::Origin { origin } => format!(
             "{{ let _ = ({recv}); jet_float_origin(Some({:?})) }}",
             origin
         ),
-        TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
+        TNumericOp::CastAs { dst_rust } => {
+            if matches!(recv_ty, Some(Type::Int)) && matches!(dst_rust.as_str(), "f32" | "f64") {
+                let value = format!("{}jet_std::jet_int_to_f64({recv})", cx.root_prefix);
+                if dst_rust == "f32" {
+                    format!("(({value}) as f32)")
+                } else {
+                    value
+                }
+            } else if matches!(result_ty, Some(Type::Int)) {
+                match recv_ty {
+                    Some(Type::IntN { signed: true, .. }) => format!(
+                        "{}jet_std::jet_int_from_i64(({recv}) as i64)",
+                        cx.root_prefix
+                    ),
+                    Some(Type::IntN { signed: false, .. }) => format!(
+                        "{}jet_std::jet_int_from_u64(({recv}) as u64)",
+                        cx.root_prefix
+                    ),
+                    _ => format!("(({recv}) as {dst_rust})"),
+                }
+            } else {
+                format!("(({recv}) as {dst_rust})")
+            }
+        }
         TNumericOp::CheckedIntToFloat {
             source_signed,
             target_f32,
             line,
         } => {
-            let checked = format!(
-                "match jet_numeric_checked_widen(({recv}) as u64, {source_signed}, {target_f32}) {{ \
-                 Some(value) => value, None => jet_panic({:?}, {line}, JET_NUMERIC_WIDEN_TRAP) }}",
-                cx.file
-            );
+            let checked = if matches!(recv_ty, Some(Type::Int)) {
+                format!(
+                    "{}jet_std::jet_int_checked_widen({}, {}, {:?}, {})",
+                    cx.root_prefix, recv, target_f32, cx.file, line
+                )
+            } else {
+                format!(
+                    "match jet_numeric_checked_widen(({recv}) as u64, {source_signed}, {target_f32}) {{ \
+                     Some(value) => value, None => jet_panic({:?}, {line}, JET_NUMERIC_WIDEN_TRAP) }}",
+                    cx.file
+                )
+            };
             if *target_f32 {
                 format!("(({checked}) as f32)")
             } else {
@@ -738,11 +783,22 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,
-            ..
-        } => format!(
-            "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
-             \"value doesn't fit in {dst_spelling}\".to_string())"
-        ),
+            host_kind,
+        } => {
+            if matches!(recv_ty, Some(Type::Int)) {
+                format!(
+                    "match {}jet_std::jet_int_try_from({}, {host_kind}) {{ \
+                     Some(value) => <{dst_rust}>::try_from(value).map_err(|_| \"value doesn't fit in {dst_spelling}\".to_string()), \
+                     None => Err(\"value doesn't fit in {dst_spelling}\".to_string()) }}",
+                    cx.root_prefix, recv
+                )
+            } else {
+                format!(
+                    "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
+                     \"value doesn't fit in {dst_spelling}\".to_string())"
+                )
+            }
+        }
         TNumericOp::FloatToInt {
             dst_rust,
             dst_spelling,
@@ -796,6 +852,18 @@ fn emit_zip_fill_value(raw: String, source: &Type, target: Option<&Type>, cx: &C
     if source.numeric_widening_to(target).is_none() {
         return format!("({raw}).clone()");
     }
+    if matches!(source, Type::Int) && matches!(target, Type::Float | Type::Float32) {
+        let target_f32 = matches!(target, Type::Float32);
+        let value = format!(
+            "{}jet_std::jet_int_checked_widen(({raw}), {target_f32}, {:?}, 0)",
+            cx.root_prefix, cx.file
+        );
+        return if target_f32 {
+            format!("(({value}) as f32)")
+        } else {
+            value
+        };
+    }
     if let Some(source_signed) = zip_integer_signed(source) {
         if matches!(target, Type::Float | Type::Float32) {
             let target_f32 = matches!(target, Type::Float32);
@@ -839,6 +907,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             match resolved {
                 Some((signed, bits)) => {
                     format!("{}{}{}", n, if signed { 'i' } else { 'u' }, bits)
+                }
+                None if matches!(e.ty, Type::Int)
+                    && (*n < -(1i64 << 62) || *n > (1i64 << 62) - 1) => {
+                    format!("{}jet_std::jet_int_from_i64({})", cx.root_prefix, n)
                 }
                 None => format!("{}i64", n),
             }
@@ -925,16 +997,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // instead; the harness flushes it right before reporting the result, so
             // a test's own output always lands directly above its status line, in
             // slot order, exactly as it did when tests ran one at a time.
-            if cx.test_mode {
+            let shown = if matches!(arg.ty, Type::Int) {
                 format!(
-                    "jet_test_print(({}).jet_show())",
+                    "{}jet_std::jet_int_to_string({})",
+                    cx.root_prefix,
                     emit_tir_expr(arg, cx)
                 )
             } else {
+                format!("({}).jet_show()", emit_tir_expr(arg, cx))
+            };
+            if cx.test_mode {
+                format!("jet_test_print({shown})")
+            } else {
                 format!(
-                    "{{ let _ = {}jet_term_write_stdout(&format!(\"{{}}\\n\", ({}).jet_show()), false); }}",
-                    cx.root_prefix,
-                    emit_tir_expr(arg, cx)
+                    "{{ let _ = {}jet_term_write_stdout(&format!(\"{{}}\\n\", {shown}), false); }}",
+                    cx.root_prefix
                 )
             }
         }
@@ -1006,7 +1083,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             range,
             fallible,
         } => {
-            let converted = emit_numeric_op(&emit_tir_expr(arg, cx), op, cx);
+            let converted = emit_numeric_op(&emit_tir_expr(arg, cx), op, Some(&arg.ty), None, cx);
             let conversion_fallible = matches!(
                 op,
                 TNumericOp::TryFrom { .. }
@@ -1077,9 +1154,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
         } => {
             let parts: Vec<String> = args.iter().map(|a| emit_tir_expr(a, cx)).collect();
-            let prefix = if type_name == "BigInt" {
-                "jet_bigint"
-            } else if type_name == "Fraction" {
+            let prefix = if type_name == "Fraction" {
                 "jet_fraction"
             } else {
                 "jet_decimal"
@@ -1551,8 +1626,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // same bare-call convention as `jet_iter_string_split`).
                 TBuiltinOp::Lines => format!("jet_string_lines(&({}))", recv),
                 TBuiltinOp::ParseInt => jet_format!(
-                    "{{ let {jet_prefix}text = &({recv}); {jet_prefix}text.trim().parse::<i64>()\
-                     .map_err(|_| format!(\"cannot parse `{{}}` as an integer\", {jet_prefix}text)) }}"
+                    "{{ let {jet_prefix}text = &({recv}); {root_prefix}jet_std::jet_int_parse({jet_prefix}text)\
+                     .map_err(|_| format!(\"cannot parse `{{}}` as an integer\", {jet_prefix}text)) }}",
+                    root_prefix = cx.root_prefix
                 ),
                 TBuiltinOp::ParseFloat => jet_format!(
                     "{{ let {jet_prefix}text = &({recv}); {jet_prefix}text.trim().parse::<f64>()\
@@ -1667,7 +1743,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Keys => format!("jet_map_keys(&({}))", recv),
                 TBuiltinOp::Values => format!("jet_map_values(&({}))", recv),
                 TBuiltinOp::ContainsKey => format!("({}).contains_key(&{})", recv, a(0)),
-                TBuiltinOp::ToString => format!("({}).jet_show()", recv),
+                TBuiltinOp::ToString => {
+                    if matches!(recv_expr.ty, Type::Int) {
+                        format!("{}jet_std::jet_int_to_string({})", cx.root_prefix, recv)
+                    } else {
+                        format!("({}).jet_show()", recv)
+                    }
+                }
                 // D-REGEXENGINE1=A: `Match.group(n)` on the std-only match value.
                 TBuiltinOp::MatchGroup => {
                     format!("({}).group({})", recv, a(0))
@@ -1801,6 +1883,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::ByteBufferToBytes => format!("({}).to_bytes()", recv),
                 TBuiltinOp::ByteBufferMethod { method } => match method.as_str() {
+                    "parse" => format!(
+                        "{}jet_std::jet_int_parse(&({}).to_string())",
+                        cx.root_prefix, recv
+                    ),
                     "clone" | "copy" => format!("({}).clone()", recv),
                     "contains" | "starts_with" | "ends_with" | "split" | "index_of"
                     | "last_index_of" | "join" => {
@@ -2215,7 +2301,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // + numeric conversion arms byte-for-byte.
         TExprKind::NumericMethod { recv, op } => {
             let rendered_recv = emit_tir_expr(recv, cx);
-            emit_numeric_op(&rendered_recv, op, cx)
+            if matches!(recv.ty, Type::Int) && matches!(op, TNumericOp::ToShow) {
+                return format!(
+                    "{}jet_std::jet_int_to_string({})",
+                    cx.root_prefix, rendered_recv
+                );
+            }
+            emit_numeric_op(&rendered_recv, op, Some(&recv.ty), Some(&e.ty), cx)
         }
         // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
         // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.
@@ -2267,12 +2359,81 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
+            let packed_int = matches!((&lhs.ty, &rhs.ty, &e.ty),
+                (Type::Int, Type::Int, Type::Int)
+            );
+            let packed_compare = matches!((&lhs.ty, &rhs.ty), (Type::Int, Type::Int));
+            if packed_int {
+                let helper = match op {
+                    BinOp::Add => Some("jet_int_add"),
+                    BinOp::Sub => Some("jet_int_sub"),
+                    BinOp::Mul => Some("jet_int_mul"),
+                    BinOp::Div => Some("jet_int_div"),
+                    BinOp::Pow => Some("jet_int_pow"),
+                    BinOp::FloorDiv => Some("jet_int_floor_div"),
+                    BinOp::Mod => Some("jet_int_mod"),
+                    BinOp::Rem => Some("jet_int_rem"),
+                    BinOp::BitAnd => Some("jet_int_bit_and"),
+                    BinOp::BitOr => Some("jet_int_bit_or"),
+                    BinOp::BitXor => Some("jet_int_bit_xor"),
+                    BinOp::Shl => Some("jet_int_shl"),
+                    BinOp::Shr => Some("jet_int_shr"),
+                    _ => None,
+                };
+                if let Some(helper) = helper {
+                    let needs_location = matches!(
+                        op,
+                        BinOp::Div
+                            | BinOp::Pow
+                            | BinOp::FloorDiv
+                            | BinOp::Mod
+                            | BinOp::Rem
+                            | BinOp::Shl
+                            | BinOp::Shr
+                    );
+                    return if needs_location {
+                        format!(
+                            "{}jet_std::{}({}, {}, {:?}, {})",
+                            cx.root_prefix, helper, ls, rs, cx.file, line
+                        )
+                    } else {
+                        format!("{}jet_std::{}({}, {})", cx.root_prefix, helper, ls, rs)
+                    };
+                }
+            }
             if *op == BinOp::Compare {
+                if packed_compare {
+                    return format!(
+                        "match {}jet_std::jet_int_compare({}, {}) {{ -1 => {}Ordering::Less, 1 => {}Ordering::Greater, _ => {}Ordering::Equal }}",
+                        cx.root_prefix,
+                        ls,
+                        rs,
+                        cx.root_prefix,
+                        cx.root_prefix,
+                        cx.root_prefix,
+                    );
+                }
                 return jet_name_format!(
                     "{name_prefix}Comparable::compare(&({}), &({}))",
                     ls,
                     rs,
                 );
+            }
+            if packed_compare && matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge) {
+                let cmp = format!(
+                    "{}jet_std::jet_int_compare({}, {})",
+                    cx.root_prefix, ls, rs
+                );
+                let test = match op {
+                    BinOp::Eq => "== 0",
+                    BinOp::Ne => "!= 0",
+                    BinOp::Lt => "< 0",
+                    BinOp::Gt => "> 0",
+                    BinOp::Le => "<= 0",
+                    BinOp::Ge => ">= 0",
+                    _ => unreachable!(),
+                };
+                return format!("({cmp} {test})");
             }
             if matches!((&lhs.ty, &rhs.ty), (Type::String, Type::String))
                 && matches!(op, BinOp::Add)
@@ -2418,6 +2579,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::Unary { op, operand } => {
             let i = emit_tir_expr(operand, cx);
+            if matches!((&operand.ty, &e.ty), (Type::Int, Type::Int)) && matches!(op, UnOp::Neg) {
+                return format!("{}jet_std::jet_int_neg({})", cx.root_prefix, i);
+            }
+            if matches!((&operand.ty, &e.ty), (Type::Int, Type::Int)) && matches!(op, UnOp::Not) {
+                return format!("{}jet_std::jet_int_not({})", cx.root_prefix, i);
+            }
             match op {
                 UnOp::Neg => format!("(-({}))", i),
                 UnOp::Not => format!("(!({}))", i),
@@ -3808,9 +3975,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_duration_difference(&({}), &({}))", root, recv, a(0))
                 }
                 THandleOp::PreciseMethod { type_name, method } => {
-                    let prefix = if type_name == "BigInt" {
-                        "jet_bigint"
-                    } else if type_name == "Fraction" {
+                    let prefix = if type_name == "Fraction" {
                         "jet_fraction"
                     } else {
                         "jet_decimal"

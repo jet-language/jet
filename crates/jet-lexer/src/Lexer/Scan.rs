@@ -484,7 +484,6 @@ impl<'a> Lexer<'a> {
                         span,
                     },
                     Err(_) => {
-                        self.diags.push(self.too_big(span));
                         Token {
                             kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
                             span,
@@ -569,7 +568,6 @@ impl<'a> Lexer<'a> {
             }
             Err(_) => {
                 let span = Span::new(start, self.pos(self.i));
-                self.diags.push(self.too_big(span));
                 Token {
                     kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
                     span,
@@ -613,16 +611,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-    }
-
-    fn too_big(&self, span: Span) -> Diagnostic {
-        Diagnostic::error(
-            "E0007",
-            "this number is too big".to_string(),
-            "numbers currently top out at 9223372036854775807 (a 64-bit integer)".to_string(),
-            "use a smaller number".to_string(),
-            Some(span),
-        )
     }
 
     /// S41: `'a'` or `'\n'` — exactly one Unicode scalar.

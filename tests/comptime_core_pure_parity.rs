@@ -149,15 +149,15 @@ const LRU_DECLS: &str = r#"fn lru_view() => String {
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
 }"#;
 const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
-const MAP_DECLS: &str = r#"fn add_map(values: &[String: Int], key: String, value: Int) => Int {
+const MAP_DECLS: &str = r#"fn add_map(values: &[String:Int], key: String, value: Int) => Int {
     return values.add(key, value) ?? -1
 }
-fn counted_map(hits: &Int) => [String: Int] {
+fn counted_map(hits: &Int) => [String:Int] {
     hits += 1
     return ["a": 1]
 }
 fn map_view() => String {
-    values := [String: Int].{ "b": 2, "a": 1 }
+    values := [String:Int].{ "b": 2, "a": 1 }
     empty_before :: values.is_empty()
     fresh_c :: values.add("c", 3) ?? -1
     displaced_b :: add_map(&values, "b", 20)
@@ -200,7 +200,7 @@ const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() => String {
     values.each((shadow: Int) => { each_seen.push(shadow) })
     predicate_seen := Set.from([0])
     has_three :: values.any((n: Int) => predicate_seen.add(n) && n == 3)
-    fold_seen := [Int: Int].{ 0: 0 }
+    fold_seen := [Int:Int].{ 0: 0 }
     total :: values.fold(0, (acc: Int, n: Int) => fold_seen.add(n, n) ?? (acc + n))
     partition_seen := Set.from([0])
     partition_shadow := 88

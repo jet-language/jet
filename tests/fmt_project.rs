@@ -566,6 +566,69 @@ fn idempotent_format() {
     );
 }
 
+/// `--simplify` rewrites the approved concise body and stays stable on the
+/// second project pass.
+#[test]
+fn simplify_mode_is_stable_across_a_project() {
+    let dir = tmpdir(&line!().to_string());
+    let f = write(
+        &dir,
+        "main.jet",
+        "fn answer() => Int {\n    return 42\n}\n",
+    );
+
+    let first = Command::new(jet())
+        .args(["fmt", "--simplify"])
+        .arg(&f)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(read(&f), "fn answer() => Int :: 42\n");
+
+    let second = Command::new(jet())
+        .args(["fmt", "--simplify", "--check"])
+        .arg(&f)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(0));
+    assert_eq!(read(&f), "fn answer() => Int :: 42\n");
+}
+
+/// Map type spacing is canonical and remains byte-stable across project passes.
+#[test]
+fn map_type_spacing_is_project_stable() {
+    let dir = tmpdir(&line!().to_string());
+    let f = write(
+        &dir,
+        "main.jet",
+        "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n",
+    );
+
+    let first = Command::new(jet())
+        .arg("fmt")
+        .arg(&f)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(
+        read(&f),
+        "fn read(values: [String:Int]) => [String:Int] { return [\"key\": 1] }\n"
+    );
+
+    let before = read(&f);
+    let second = Command::new(jet())
+        .args(["fmt", "--check"])
+        .arg(&f)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(0));
+    assert_eq!(read(&f), before);
+}
+
 /// `jet fmt --check --json` emits a machine-readable JSON result.
 #[test]
 fn check_json_output() {

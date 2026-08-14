@@ -123,7 +123,7 @@ fn or_err_lifts_a_clean_absence_into_a_failure() {
     let rust = compile(
         "or_err",
         r#"
-fn birth_year(book: [String: String], name: String) => String ? Err {
+fn birth_year(book: [String:String], name: String) => String ? Err {
     return book.get(name).or_err("nobody in the book is called that")
 }
 

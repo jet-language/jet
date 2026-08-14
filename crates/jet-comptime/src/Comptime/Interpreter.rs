@@ -479,6 +479,12 @@ impl<'a> Interp<'a> {
                     scope.insert(e.name.clone(), v);
                 }
             }
+            BindPattern::Refutable { span, .. } => {
+                return Err(comptime_panic(
+                    "refutable statement bindings are runtime-only",
+                    *span,
+                ));
+            }
         }
         Ok(())
     }

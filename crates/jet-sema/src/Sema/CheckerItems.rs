@@ -2579,16 +2579,29 @@ impl<'a> Checker<'a> {
         pattern: &mut Pattern,
         span: Span,
     ) -> HashMap<String, Type> {
+        self.check_pattern_test_typed(subject, pattern, span).1
+    }
+
+    /// The typed form is shared by ordinary conditions and statement-level
+    /// refutable bindings. Returning the subject type keeps the fallback route
+    /// checker on the same validated pattern-test path without inferring the
+    /// subject a second time.
+    pub(crate) fn check_pattern_test_typed(
+        &mut self,
+        subject: &mut Box<Expr>,
+        pattern: &mut Pattern,
+        span: Span,
+    ) -> (Option<Type>, HashMap<String, Type>) {
         let subj_ty = self.infer(subject);
         let Some(st) = subj_ty else {
-            return HashMap::new();
+            return (None, HashMap::new());
         };
         super::CheckerCore::normalize_contextual_pattern(pattern, &st);
         let bindings = self.validate_pattern(&st, pattern, span);
         if !matches!(pattern, Pattern::Struct { .. }) {
             self.mark_pattern_subject_moved(subject, &bindings);
         }
-        bindings
+        (Some(st), bindings)
     }
 
     /// Binding a non-copy payload out of a pattern gives the subject away in

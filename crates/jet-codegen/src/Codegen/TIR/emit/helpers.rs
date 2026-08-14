@@ -187,6 +187,15 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                 fmt.push_str(&escaped[1..escaped.len() - 1]);
             }
             TStrPart::Interp(e, format) => {
+                if matches!(e.ty, crate::AST::Type::Int) {
+                    fmt.push_str("{}");
+                    args.push(format!(
+                        "{}jet_std::jet_int_to_string({})",
+                        cx.root_prefix,
+                        emit_tir_expr(e, cx)
+                    ));
+                    continue;
+                }
                 let method = match format {
                     crate::AST::StrFormat::Display => "jet_display",
                     crate::AST::StrFormat::Debug => "jet_debug",

@@ -22,7 +22,7 @@ fn run() {
     loop (list_index, list_item), xs {
         print("{list_index}:{list_item}")
     }
-    counts := [String: Int].{}
+    counts := [String:Int].{}
     counts[k] = value
     loop (map_key, map_value), counts {
         print("{map_key}={map_value}")
@@ -137,7 +137,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn run() {
-    counts := [String: Int].{}
+    counts := [String:Int].{}
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -160,7 +160,7 @@ fn run() {
 fn map_get_update_is_total_for_missing_key() {
     let src = r#"
 fn run() {
-    counts := [String: Int].{}
+    counts := [String:Int].{}
     counts["missing"] = (counts.get("missing") ?? 0) + 1
     counts["other"] = (counts.get("other") ?? 0) - 1
     print(counts["missing"])
@@ -331,7 +331,7 @@ fn map_literal_with_entries() {
         return;
     }
     let src = "\
-fn scores() => [String: Int] {
+fn scores() => [String:Int] {
     return [\"a\": 1, \"b\": 2]
 }
 fn run() {
@@ -774,10 +774,10 @@ fn run() {
 fn map_builtin_methods() {
     let src = r#"
 fn run() {
-    probe := [String: Int].{ "k": 41 }
+    probe := [String:Int].{ "k": 41 }
     print(probe.add("k", 5) ?? 0)
     print(probe.add("new", 9) ?? -99)
-    m := [String: Int].{}
+    m := [String:Int].{}
     print(m.add("banana", 3) ?? 0)
     print(m.add("apple", 5) ?? 0)
     print(m.add("apple", 7) ?? 0)
@@ -812,7 +812,7 @@ fn run() {
     xs := [10, 20, 30]
     print(xs.pop() ?? -1)
     print(xs.replace(0, 99))
-    counts := [String: Int].{ \"words\": 4 }
+    counts := [String:Int].{ \"words\": 4 }
     print(counts.pop(\"words\") ?? -1)
     seen := Set.from([7, 8])
     print(seen.pop(8) ?? -1)
@@ -900,14 +900,14 @@ fn drop_first(xs: [Int]) => Int {
     r := ys.remove(0, .Slot)
     return ys.len()
 }
-fn drop_key(m: [String: Int]) => Int {
+fn drop_key(m: [String:Int]) => Int {
     m2 := ~m
     r := m2.remove(\"a\")
     return m2.len()
 }
 fn run() {
     print(drop_first([10, 20, 30]))
-    counts := [String: Int].{}
+    counts := [String:Int].{}
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))

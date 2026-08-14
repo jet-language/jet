@@ -186,7 +186,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) => DataTree {
-        m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
+        m :: [String:DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
@@ -566,7 +566,7 @@ struct Wire {
 fn run() {
     absent := Wire.{ first: "a", second: "b", maybe: None, last: 4 }
     present := Wire.{ first: "a", second: "b", maybe: Val("c"), last: 4 }
-    arbitrary := [String: Int].{ "z": 1, "a": 2 }
+    arbitrary := [String:Int].{ "z": 1, "a": 2 }
     print(json.to_string(absent))
     print(json.to_string(present))
     print(json.to_string(arbitrary))
@@ -706,7 +706,7 @@ pub struct Order {
     pub shipping: Address
     pub quantities: [Int]
     pub coupon: String?
-    pub labels: [String: Int]
+    pub labels: [String:Int]
 }
 
 "#;

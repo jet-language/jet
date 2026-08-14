@@ -861,7 +861,7 @@ fn mk() {
     #[test]
     fn covers_map_literal_and_param() {
         // An empty and a non-empty map literal, plus a map-typed param.
-        let src = "fn empty() => [String: Int] {\n return []\n}\nfn one() => [String: Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String: Int]) => Int {\n return 0\n}\n";
+        let src = "fn empty() => [String:Int] {\n return []\n}\nfn one() => [String:Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String:Int]) => Int {\n return 0\n}\n";
         assert!(covers(src, "empty"));
         assert!(covers(src, "one"));
         assert!(covers(src, "accept"));
@@ -877,7 +877,7 @@ fn mk() {
     #[test]
     fn covers_two_binding_map_iteration() {
         // `loop (k, v), <map>` (the two-binding map form) is covered.
-        let src = "fn f(m: [String: Int]) {\n loop (k, v), m {\n print(\"{k}={v}\")\n }\n}\n";
+        let src = "fn f(m: [String:Int]) {\n loop (k, v), m {\n print(\"{k}={v}\")\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -1189,7 +1189,7 @@ fn mk() {
         // add/len/keys/values/has_key/clear on a map-typed param. Run the full
         // front end so this coverage proof cannot drift onto a list-only or
         // otherwise invalid method spelling that sema would reject before TIR.
-        let src = "fn f(m: [String: Int]) => Int {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
+        let src = "fn f(m: [String:Int]) => Int {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
         assert!(covers_after_sema(src, "f"));
     }
 
@@ -1197,7 +1197,7 @@ fn mk() {
     fn rejects_unsupported_map_builtin_handoff() {
         // `contains_key` is not Jet's Map surface. The TIR gate must hand the
         // unsupported shape back instead of guessing from its Rust spelling.
-        let src = "fn f(m: [String: Int]) => Bool {\n return m.contains_key(\"a\")\n}\n";
+        let src = "fn f(m: [String:Int]) => Bool {\n return m.contains_key(\"a\")\n}\n";
         assert!(!covers(src, "f"));
     }
 
@@ -2162,14 +2162,14 @@ fn run() {
     #[test]
     fn covers_indexed_map_assign_through_field() {
         // c109: an indexed map-assign whose base is a FIELD read (`s.scores["a"] = 1`,
-        // `scores: [String: Int]`). The `LValue::Index` gate already admits a
+        // `scores: [String:Int]`). The `LValue::Index` gate already admits a
         // field-read base + sema-resolved `IndexKind`; the only blocker was the
         // single-uppercase-letter struct name `S` (covered by the type-var-heuristic
         // guard). The whole `main` routes through the TIR; the assign emits
         // `{ let __jet_v = 1i64; jet_map_insert(&mut ((user_s).user_scores), …); }`.
         let src = r#"
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {
@@ -2195,7 +2195,7 @@ fn run() {
         // through the TIR.
         let src = r#"
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {

@@ -42,6 +42,23 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
+pub fn exact_big(value: &CtValue) -> Option<crate::Numeric::CtBigInt> {
+    match value {
+        CtValue::Int(value) => Some(crate::Numeric::CtBigInt::from_int(*value)),
+        CtValue::BigInt(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+pub fn exact_int_value(value: crate::Numeric::CtBigInt) -> CtValue {
+    const SMALL_MIN: i64 = -(1i64 << 62);
+    const SMALL_MAX: i64 = (1i64 << 62) - 1;
+    match value.try_i64().filter(|value| (SMALL_MIN..=SMALL_MAX).contains(value)) {
+        Some(value) => CtValue::Int(value),
+        None => CtValue::BigInt(value),
+    }
+}
+
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -54,12 +71,15 @@ fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     match (left, right) {
         (CtValue::Bytes(bytes), CtValue::List(values))
         | (CtValue::List(values), CtValue::Bytes(bytes)) => bytes_equal_list(bytes, values),
+        (left, right) if exact_big(left).is_some() && exact_big(right).is_some() => {
+            exact_big(left).expect("whole-number equality")
+                == exact_big(right).expect("whole-number equality")
+        }
         _ => left == right,
     }
 }
 
-/// Binary operators with runtime-identical semantics (i64 wrapping is
-/// rejected: debug-profile rustc panics on overflow, so comptime does too).
+/// Binary operators with runtime-identical semantics.
 pub fn eval_binop(
     op: BinOp,
     l: CtValue,
@@ -71,61 +91,142 @@ pub fn eval_binop(
         (BinOp::Add, Str(left), Str(right)) => Ok(Str(
             string_concat_semantics::jet_string_concat(&left, &right),
         )),
-        (BinOp::Add, Int(a), Int(b)) => a
-            .checked_add(b)
-            .map(Int)
-            .ok_or_else(|| overflow("add", span)),
-        (BinOp::Sub, Int(a), Int(b)) => a
-            .checked_sub(b)
-            .map(Int)
-            .ok_or_else(|| overflow("subtract", span)),
-        (BinOp::Mul, Int(a), Int(b)) => a
-            .checked_mul(b)
-            .map(Int)
-            .ok_or_else(|| overflow("multiply", span)),
+        // D-INTBIG1: default-Int arithmetic is exact. Small answers return to
+        // CtValue::Int; only values outside the machine-word representation
+        // remain in the shared limb carrier.
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number addend");
+            let right = exact_big(&right).expect("whole-number addend");
+            Ok(exact_int_value(match op {
+                BinOp::Add => left.add(&right),
+                BinOp::Sub => left.sub(&right),
+                BinOp::Mul => left.mul(&right),
+                _ => unreachable!("whole-number arithmetic guard"),
+            }))
+        }
         // D-INTDIV1=A: `/` answers the true quotient, so two whole numbers give
         // a Float. Sema has already moved both sides to Float in ordinary code;
         // this arm catches the comptime paths that reach the raw values.
-        (BinOp::Div, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Div, Int(a), Int(b)) => Ok(Float(crate::AST::CtFloat::F64(a as f64 / b as f64))),
+        (BinOp::Div, left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number dividend");
+            let right = exact_big(&right).expect("whole-number divisor");
+            if right.is_zero() {
+                Err(divide_by_zero(span))
+            } else {
+                let left = left.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
+                    if left.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                });
+                let right = right.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
+                    if right.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                });
+                Ok(Float(crate::AST::CtFloat::F64(left / right)))
+            }
+        }
         // D-FLOORDIV1=A: `/%` rounds the answer down, so a signed answer that
         // came out one too high is corrected. Dividing by zero traps like `/`.
-        (BinOp::FloorDiv, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::FloorDiv, Int(a), Int(b)) => {
-            crate::Comptime::MathLayout::floor_div(a as i128, b as i128)
-                .and_then(|value| i64::try_from(value).ok())
-                .map(Int)
-                .ok_or_else(|| overflow("divide", span))
+        (BinOp::FloorDiv, left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number dividend");
+            let right = exact_big(&right).expect("whole-number divisor");
+            let Some((mut quotient, remainder)) = left.div_rem(&right) else {
+                return Err(divide_by_zero(span));
+            };
+            if !remainder.is_zero() && left.negative != right.negative {
+                quotient = quotient.sub(&crate::Numeric::CtBigInt::from_int(1));
+            }
+            Ok(exact_int_value(quotient))
         }
         // D-MODSEM1=A: `%` is the floored modulo, whose answer takes the
         // divisor's sign; `%%` below is Rust's truncated remainder.
-        (BinOp::Mod, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Mod, Int(a), Int(b)) => {
-            crate::Comptime::MathLayout::floored_mod(a as i128, b as i128)
-                .and_then(|value| i64::try_from(value).ok())
-                .map(Int)
-                .ok_or_else(|| overflow("take the remainder of", span))
+        (BinOp::Mod, left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number dividend");
+            let right = exact_big(&right).expect("whole-number divisor");
+            let Some((_, mut remainder)) = left.div_rem(&right) else {
+                return Err(divide_by_zero(span));
+            };
+            if !remainder.is_zero() && left.negative != right.negative {
+                remainder = remainder.add(&right);
+            }
+            Ok(exact_int_value(remainder))
         }
-        (BinOp::Rem, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Rem, Int(a), Int(b)) => a
-            .checked_rem(b)
-            .map(Int)
-            .ok_or_else(|| overflow("take the remainder of", span)),
+        (BinOp::Rem, left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number dividend");
+            let right = exact_big(&right).expect("whole-number divisor");
+            let Some((_, remainder)) = left.div_rem(&right) else {
+                return Err(divide_by_zero(span));
+            };
+            Ok(exact_int_value(remainder))
+        }
         // D-EXPSEM1=A: `^` on whole numbers is exact, and a result outside the
         // range stops the build the way a multiplication does. A negative
         // exponent has no whole-number answer; sema types a written one as
         // Float, so one that reaches here came from a value it could not read.
-        (BinOp::Pow, Int(_), Int(b)) if b < 0 => Err(comptime_panic(
-            crate::Comptime::MathLayout::INTEGER_POWER_NEGATIVE,
-            span,
-        )),
-        (BinOp::Pow, Int(a), Int(b)) => u32::try_from(b)
-            .ok()
-            .and_then(|exponent| a.checked_pow(exponent))
-            .map(Int)
-            .ok_or_else(|| {
-                comptime_panic(crate::Comptime::MathLayout::INTEGER_POWER_OVERFLOW, span)
-            }),
+        (BinOp::Pow, left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number base");
+            let right = exact_big(&right).expect("whole-number exponent");
+            let Some(exponent) = right.try_i64() else {
+                return Err(comptime_panic(
+                    crate::Comptime::MathLayout::INTEGER_POWER_OVERFLOW,
+                    span,
+                ));
+            };
+            if exponent < 0 {
+                return Err(comptime_panic(
+                    crate::Comptime::MathLayout::INTEGER_POWER_NEGATIVE,
+                    span,
+                ));
+            }
+            let mut exponent = exponent as u64;
+            let mut base = left;
+            let mut result = crate::Numeric::CtBigInt::from_int(1);
+            while exponent != 0 {
+                if exponent & 1 != 0 {
+                    result = result.mul(&base);
+                }
+                exponent >>= 1;
+                if exponent != 0 {
+                    base = base.mul(&base);
+                }
+            }
+            Ok(exact_int_value(result))
+        }
+        (op @ (BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor), left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number bit operand");
+            let right = exact_big(&right).expect("whole-number bit operand");
+            Ok(exact_int_value(match op {
+                BinOp::BitAnd => left.bit_and(&right),
+                BinOp::BitOr => left.bit_or(&right),
+                BinOp::BitXor => left.bit_xor(&right),
+                _ => unreachable!("whole-number bitwise guard"),
+            }))
+        }
+        (op @ (BinOp::Shl | BinOp::Shr), left, right)
+            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
+        {
+            let left = exact_big(&left).expect("whole-number shift operand");
+            let right = exact_big(&right).expect("whole-number shift count");
+            let shifted = match op {
+                BinOp::Shl => left.shl(&right),
+                BinOp::Shr => left.shr(&right),
+                _ => unreachable!("whole-number shift guard"),
+            };
+            shifted
+                .map(exact_int_value)
+                .ok_or_else(|| overflow("shift", span))
+        }
         (BinOp::BitAnd, Int(a), Int(b)) => Ok(Int(a & b)),
         (BinOp::BitOr, Int(a), Int(b)) => Ok(Int(a | b)),
         (BinOp::BitXor, Int(a), Int(b)) => Ok(Int(a ^ b)),
@@ -140,11 +241,6 @@ pub fn eval_binop(
             .binop(op, b)
             .map(Float)
             .ok_or_else(|| unsupported("mixing float widths", span)),
-        // D-BIGINT1: arbitrary-precision arithmetic never overflows (that's
-        // the whole point), so no `checked_*`/`overflow()` path here.
-        (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
-        (BinOp::Sub, BigInt(a), BigInt(b)) => Ok(BigInt(a.sub(&b))),
-        (BinOp::Mul, BigInt(a), BigInt(b)) => Ok(BigInt(a.mul(&b))),
         // D-SIMD2 / D-LINALG1: element-wise / matmul / Mat*Vec.
         (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), left, right)
             if super::MathLayout::lanes(&left).is_some()
@@ -326,7 +422,11 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
         (Bool(a), Bool(b)) => Ok(a.cmp(&b)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
-        (BigInt(a), BigInt(b)) => Ok(a.compare(&b)),
+        (left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => Ok(
+            exact_big(&left)
+                .expect("whole-number comparison")
+                .compare(&exact_big(&right).expect("whole-number comparison")),
+        ),
         _ => Err(unsupported("comparing these values", span)),
     }
 }
@@ -430,8 +530,8 @@ pub fn apply_static_type_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Some(Err(unsupported("Int.parse with a non-text argument", span))),
             };
-            Some(Ok(match s.trim().parse::<i64>() {
-                Ok(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+            Some(Ok(match crate::Numeric::CtBigInt::from_str(s.trim()) {
+                Ok(n) => CtValue::Present(Box::new(exact_int_value(n))),
                 Err(_) => CtValue::failed(Box::new(CtValue::Str(format!(
                     "cannot parse `{}` as an integer",
                     s
@@ -860,23 +960,6 @@ pub fn apply_method(
     match (recv, method) {
         // Universal
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
-        // D-BIGINT1: explicit method-call form of the same arithmetic the
-        // `+`/`-`/`*` operators reach in `eval_binop` (mirrors AOT's
-        // `bigint_method_return` table in `jet-foundation/Numeric.rs`).
-        // parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
-        (CtValue::BigInt(a), "add") => match args.into_iter().next() {
-            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.add(&b))),
-            _ => Err(unsupported("`BigInt.add` with a non-BigInt argument", span)),
-        },
-        (CtValue::BigInt(a), "sub") => match args.into_iter().next() {
-            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.sub(&b))),
-            _ => Err(unsupported("`BigInt.sub` with a non-BigInt argument", span)),
-        },
-        (CtValue::BigInt(a), "mul") => match args.into_iter().next() {
-            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.mul(&b))),
-            _ => Err(unsupported("`BigInt.mul` with a non-BigInt argument", span)),
-        },
-        (CtValue::BigInt(a), "neg") => Ok(CtValue::BigInt(a.neg())),
         // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
         // Distinct types have zero runtime representation difference from
         // their base — the interpreter never wraps one, so unwrapping is
@@ -985,10 +1068,13 @@ pub fn apply_method(
                 None => CtValue::absent(Type::Float),
             })
         }
-        (CtValue::Int(n), "abs") => n
-            .checked_abs()
-            .map(CtValue::Int)
-            .ok_or_else(|| overflow("take the absolute value of", span)),
+        (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => {
+            Ok(exact_int_value(
+                exact_big(value)
+                    .expect("whole-number absolute value")
+                    .abs(),
+            ))
+        }
         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
         (CtValue::Float(f), "is_nan") => Ok(CtValue::Bool(f.is_nan())),
         (CtValue::Float(f), "is_infinite") => Ok(CtValue::Bool(f.is_infinite())),

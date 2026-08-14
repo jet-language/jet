@@ -11,6 +11,7 @@
 use super::unsupported;
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::THandleOp;
+use crate::Comptime::Builtins::exact_int_value;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MatchScan::{
@@ -263,7 +264,11 @@ fn str_tuple(canonical: &[(String, Type)], binds: &[(String, Type, String)]) -> 
         .iter()
         .zip(binds.iter())
         .map(|((_, ty), (_, _, raw))| match ty {
-            Type::Int | Type::IntN { .. } => CtValue::Int(raw.parse::<i64>().unwrap_or(0)),
+            Type::Int => exact_int_value(
+                crate::Numeric::CtBigInt::from_str(raw)
+                    .unwrap_or_else(|_| crate::Numeric::CtBigInt::from_int(0)),
+            ),
+            Type::IntN { .. } => CtValue::Int(raw.parse::<i64>().unwrap_or(0)),
             Type::Float | Type::Float32 => {
                 CtValue::Float(CtFloat::f64(raw.parse::<f64>().unwrap_or(0.0)))
             }

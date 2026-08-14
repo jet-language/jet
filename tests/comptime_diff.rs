@@ -87,16 +87,14 @@ const CASES: &[&str] = &[
     "Set.from([1, 2]).is_subset(Set.from([1, 2, 3]))",
     "Set.from([1, 2, 3]).is_superset(Set.from([1, 2]))",
     "Set.from([1, 2]).is_disjoint(Set.from([3, 4]))",
-    // D-BIGINT1 (card #392): arbitrary-precision arithmetic — no overflow,
-    // no auto-promotion. comptime must match AOT's limb-based `JetBigInt`
-    // byte-for-byte (R12 parity).
-    // parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
-    "(BigInt(9223372036854775807) + BigInt(1)).to_string()",
-    "(BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")).to_string()",
-    "(BigInt(100) - BigInt(1)).to_string()",
-    "(BigInt(7) * BigInt(6)).to_string()",
-    "BigInt(5).sub(BigInt(3)).to_string()",
-    "BigInt(3).neg().to_string()",
+    // D-INTBIG1: exact default Int keeps the machine-word path for small
+    // values and spills only when a result needs more than the resident word.
+    "(9223372036854775807 + 1).to_string()",
+    "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
+    "(100 - 1).to_string()",
+    "(7 * 6).to_string()",
+    "(2 ^ 200).to_string()",
+    "(0 - 3).to_string()",
 ];
 
 const F32_VALUE_FLOW: &str = r#"
@@ -441,27 +439,37 @@ fn run() {
 }
 
 #[test]
-fn comptime_bigint_matches_runtime() {
+fn comptime_exact_int_matches_runtime() {
     if !have_rustc() {
-        eprintln!("note: rustc not found; skipping BigInt differential battery");
+        eprintln!("note: rustc not found; skipping exact Int differential battery");
         return;
     }
     let cases = CASES
         .iter()
         .enumerate()
-        .filter(|(_, expr)| expr.contains("BigInt"))
+        .filter(|(_, expr)| {
+            matches!(
+                **expr,
+                "(9223372036854775807 + 1).to_string()"
+                    | "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()"
+                    | "(100 - 1).to_string()"
+                    | "(7 * 6).to_string()"
+                    | "(2 ^ 200).to_string()"
+                    | "(0 - 3).to_string()"
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         cases.iter().map(|(_, expr)| **expr).collect::<Vec<_>>(),
         [
-            "(BigInt(9223372036854775807) + BigInt(1)).to_string()",
-            "(BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")).to_string()",
-            "(BigInt(100) - BigInt(1)).to_string()",
-            "(BigInt(7) * BigInt(6)).to_string()",
-            "BigInt(5).sub(BigInt(3)).to_string()",
-            "BigInt(3).neg().to_string()",
+            "(9223372036854775807 + 1).to_string()",
+            "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
+            "(100 - 1).to_string()",
+            "(7 * 6).to_string()",
+            "(2 ^ 200).to_string()",
+            "(0 - 3).to_string()",
         ],
-        "BigInt differential cases must stay exact"
+        "exact Int differential cases must stay exact"
     );
     for (i, expr) in cases {
         check_comptime_case(i, expr);
@@ -578,10 +586,10 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
             jet::render_diagnostics("comptime_diff.jet", &src, &diags)
         ),
     };
-    // D-BIGINT1 (card #392): a `BigInt` case pulls the Top-tier prelude
-    // module, which shares a file with `jet_atomic_windows`'s vetted FFI
-    // internals (I1 gate, `JET_VETTED_UNSAFE_BEGIN/END` markers) — strip it
-    // before the I1 check, same as `golden.rs::strip_vetted_prelude_modules`.
+    // Exact Int cases can pull the Top-tier prelude module, which shares a file
+    // with `jet_atomic_windows`'s vetted FFI internals (I1 gate,
+    // `JET_VETTED_UNSAFE_BEGIN/END` markers) — strip it before the I1 check,
+    // same as `golden.rs::strip_vetted_prelude_modules`.
     let user_code = common::strip_vetted_prelude_modules(&compiled.rust);
     assert!(
         !user_code.contains("unsafe"),

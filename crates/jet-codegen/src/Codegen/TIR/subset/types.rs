@@ -651,7 +651,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_shared_weak_ty(ty, cx)
 }
 
-/// c109 Phase 5: `ty` is a list `[E]` or map `[K: V]` the subset can lower. The
+/// c109 Phase 5: `ty` is a list `[E]` or map `[K:V]` the subset can lower. The
 /// element/key/value types must themselves be covered *value* types — scalar,
 /// Char, String, a covered distinct/struct/enum, or a nested covered collection — so the
 /// literal/index/iteration lowerings reproduce the AST path without any clone/box
@@ -698,7 +698,7 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // `cx.rust_type` to `Box<dyn __jet_<Trait>>`, byte-identical to the AST path.
         || is_covered_trait_object_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
-        // `[String: JSON]`) OR a cross-module imported user struct/enum (`[String: Note]`
+        // `[String:JSON]`) OR a cross-module imported user struct/enum (`[String:Note]`
         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
         // own Rust head ({root}jet_std::JSON / {root}{mod}::__jet_<Name>), and a foreign
         // element is moved/cloned by its own sub-expression (a construction or a bound

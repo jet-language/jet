@@ -4687,21 +4687,18 @@ fn lower_method_call_impl(
             },
         };
     }
-    // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics → the same
-    // `PreciseBuiltin` nodes as constructors/binops (emit uses jet_bigint_* /
-    // jet_decimal_*). Fragment lowers (empty Cx) never see method_sigs, so this
+    // D-DECIMAL1 / D-NUMTYPE1: instance methods on precise numerics → the same
+    // `PreciseBuiltin` nodes as constructors/binops. Fragment lowers (empty Cx)
+    // never see method_sigs, so this
     // must not fall through to the user-method Todo path.
     if let Some(handle) = recv_type {
-        if (handle == Syntax::TYPE_BIGINT
-            || handle == Syntax::TYPE_DECIMAL
+        if (handle == Syntax::TYPE_DECIMAL
             || handle == Syntax::TYPE_FRACTION)
             && !cx.type_names.contains(handle)
         {
             let known = matches!(
                 (handle.as_str(), method, args.len()),
-                ("BigInt", "add" | "sub" | "mul", 1)
-                    | ("BigInt", "neg" | "to_string", 0)
-                    | ("Decimal", "add" | "sub" | "mul", 1)
+                ("Decimal", "add" | "sub" | "mul", 1)
                     | ("Decimal", "to_string", 0)
                     | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
                     | ("Fraction", "numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 0)
@@ -6106,16 +6103,13 @@ fn lower_method_call_impl(
         // numeric methods from the lowered receiver type.
         let recv_lowered = lower_expr(receiver, cx, env);
         if let Type::Named(n) = &recv_lowered.ty {
-            if (n == Syntax::TYPE_BIGINT
-                || n == Syntax::TYPE_DECIMAL
+            if (n == Syntax::TYPE_DECIMAL
                 || n == Syntax::TYPE_FRACTION)
                 && !cx.type_names.contains(n)
             {
                 let known = matches!(
                     (n.as_str(), method, args.len()),
-                    ("BigInt", "add" | "sub" | "mul", 1)
-                        | ("BigInt", "neg" | "to_string", 0)
-                        | ("Decimal", "add" | "sub" | "mul", 1)
+                    ("Decimal", "add" | "sub" | "mul", 1)
                         | ("Decimal", "to_string", 0)
                         | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
                         | (

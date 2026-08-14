@@ -39,6 +39,7 @@ fn prelude_compound_call(
     place: &str,
     value: &str,
     ty: &Type,
+    root_prefix: &str,
     file: &str,
     line: u32,
 ) -> Option<String> {
@@ -47,11 +48,50 @@ fn prelude_compound_call(
         BinOp::Add if matches!(ty, Type::String) => {
             format!("jet_string_concat(&({place}), &({value}))")
         }
+        BinOp::Add if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_add({place}, {value})")
+        }
+        BinOp::Sub if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_sub({place}, {value})")
+        }
+        BinOp::Mul if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_mul({place}, {value})")
+        }
+        BinOp::Div if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_div({place}, {value}, {file:?}, {line})")
+        }
+        BinOp::BitAnd if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_bit_and({place}, {value})")
+        }
+        BinOp::BitOr if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_bit_or({place}, {value})")
+        }
+        BinOp::BitXor if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_bit_xor({place}, {value})")
+        }
+        BinOp::Shl if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_shl({place}, {value}, {file:?}, {line})")
+        }
+        BinOp::Shr if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_shr({place}, {value}, {file:?}, {line})")
+        }
         BinOp::Pow if float => format!("({place}).jet_pow({value})"),
+        BinOp::Pow if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_pow({place}, {value}, {file:?}, {line})")
+        }
         BinOp::Pow => format!("({place}).jet_pow(({value}) as i128, {file:?}, {line})"),
         BinOp::FloorDiv if float => format!("({place}).jet_floordiv({value})"),
+        BinOp::FloorDiv if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_floor_div({place}, {value}, {file:?}, {line})")
+        }
         BinOp::FloorDiv => format!("({place}).jet_floordiv({value}, {file:?}, {line})"),
+        BinOp::Mod if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_mod({place}, {value}, {file:?}, {line})")
+        }
         BinOp::Mod => format!("({place}).jet_mod({value}, {file:?}, {line})"),
+        BinOp::Rem if matches!(ty, Type::Int) => {
+            format!("{root_prefix}jet_std::jet_int_rem({place}, {value}, {file:?}, {line})")
+        }
         BinOp::Rem => format!("({place}).jet_trunc_rem({value}, {file:?}, {line})"),
         _ => return None,
     })
@@ -807,7 +847,15 @@ fn emit_tir_stmt(
                         cx.root_prefix, pointer
                     );
                     let next = match op {
-                        Some(op) => prelude_compound_call(*op, &read, &v, &value.ty, &cx.file, *line)
+                        Some(op) => prelude_compound_call(
+                            *op,
+                            &read,
+                            &v,
+                            &value.ty,
+                            &cx.root_prefix,
+                            &cx.file,
+                            *line,
+                        )
                             .unwrap_or_else(|| format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))),
                         None => v,
                     };
@@ -823,7 +871,15 @@ fn emit_tir_stmt(
             // the result back.
             let prelude_of = |target: &str| {
                 op.and_then(|op| {
-                    prelude_compound_call(op, target, &v, &value.ty, &cx.file, *line)
+                    prelude_compound_call(
+                        op,
+                        target,
+                        &v,
+                        &value.ty,
+                        &cx.root_prefix,
+                        &cx.file,
+                        *line,
+                    )
                 })
             };
             if let TPlace::Local(local) = place {
@@ -1378,6 +1434,7 @@ fn emit_tir_stmt(
                         &jet_format!("(*{jet_prefix}t)"),
                         &mangle_generated("v"),
                         &assign.field_ty,
+                        &cx.root_prefix,
                         &cx.file,
                         assign.line as u32,
                     )

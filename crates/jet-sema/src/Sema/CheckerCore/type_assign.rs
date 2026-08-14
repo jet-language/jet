@@ -329,7 +329,7 @@ impl<'a> Checker<'a> {
                             | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
                             // D-ITERTOOLS1=A: expanded generic collection handles.
                             | Syntax::TYPE_RANK | "PriorityQueue" | "Cache"
-                            | "BigInt" | "Decimal"
+                            | "Decimal"
                             // D-REACT1=B: reactive handle types.
                             | "Signal" | "Derived" | "Computed"
                             // D-EVENT1=D: first-party typed event/hook handles.

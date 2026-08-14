@@ -1608,7 +1608,6 @@ impl TraitRegistry {
         for ty in [
             "ArgsSpec",
             "AriaRole",
-            "BigInt",
             crate::Syntax::TYPE_BITS,
             "BrowserError",
             crate::Syntax::TYPE_BYTES,

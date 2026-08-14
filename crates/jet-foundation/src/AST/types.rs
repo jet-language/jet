@@ -713,10 +713,10 @@ pub enum Type {
     /// S41 (M5): Unicode scalar value.
     Char,
     List(Box<Type>),
-    /// S38/D-LISTMAP-CANON1=A: keyed collection `[K: V]`.
+    /// S38/D-LISTMAP-CANON1=A / D-MAPSPACE1=A: keyed collection `[K:V]`.
     Map {
         key: Box<Type>,
-        /// Parser-owned boundary of the key inside `[K: V]`.
+        /// Parser-owned boundary of the key inside `[K:V]`.
         /// Synthesized map types carry `None`; diagnostics then fall back to
         /// the enclosing type span.
         key_span: Option<Span>,
@@ -788,13 +788,8 @@ pub enum Type {
         /// sema evaluates the fixed-list length.
         len_expr: Option<Box<Expr>>,
     },
-    /// D-SG9/S42: explicit fixed-width integer. The default 64-bit *signed*
-    /// integer is spelled `Int` (and equivalently `I64`) and lives in
-    /// `Type::Int`, so it never appears here — `I64` canonicalises to
-    /// `Type::Int` at parse time. Every other width is an `IntN`: `bits` ∈
-    /// {8,16,32,64}, and `(signed: true, bits: 64)` is excluded by construction
-    /// because that *is* `Int`. So `U8` = `{signed:false, bits:8}`,
-    /// `U64` = `{signed:false, bits:64}`, `I32` = `{signed:true, bits:32}`.
+    /// D-SG9/S42: explicit fixed-width integer. `Int` is exact and arbitrary
+    /// precision; every fixed width, including `I64`, is an `IntN`.
     IntN {
         signed: bool,
         bits: u8,
@@ -861,12 +856,16 @@ pub fn int_spelling(signed: bool, bits: u8) -> String {
     format!("{}{}", if signed { 'I' } else { 'U' }, bits)
 }
 
-/// D-SG9: parse a numeric type spelling to its `Type` — `Int`/`Float` and the
-/// fixed widths, with `I64`/`F64` folding to the 64-bit defaults. `None` for any
-/// non-numeric name. Inverse of `Type::name` for the numeric types.
+/// D-SG9/D-INTBIG1: parse an exact default numeric spelling or a fixed width.
+/// `I64` is fixed-width like the other integer spellings; `None` means the name
+/// is not numeric.
 pub fn numeric_type_from_name(name: &str) -> Option<Type> {
     match name {
-        "Int" | "I64" => Some(Type::Int),
+        "Int" => Some(Type::Int),
+        "I64" => Some(Type::IntN {
+            signed: true,
+            bits: 64,
+        }),
         "Float" | "F64" => Some(Type::Float),
         "F32" => Some(Type::Float32),
         _ => {
@@ -1469,7 +1468,7 @@ impl Type {
         match self {
             Type::List(inner) => format!("[{}]", inner.carrier_identity_name()),
             Type::Map { key, value, .. } => format!(
-                "[{}: {}]",
+                "[{}:{}]",
                 key.carrier_identity_name(),
                 value.carrier_identity_name()
             ),
@@ -1682,7 +1681,7 @@ impl Type {
             Type::String => "String (text)".to_string(),
             Type::Char => "Char (one character)".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value, .. } => format!("[{}: {}]", key.name(), value.name()),
+            Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -1762,7 +1761,7 @@ impl Type {
             Type::String => "String".to_string(),
             Type::Char => "Char".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value, .. } => format!("[{}: {}]", key.name(), value.name()),
+            Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -1879,10 +1878,11 @@ impl Type {
         }
     }
 
-    /// Bounds projected from the interval plane for an integer carrier.
+    /// Bounds projected from the interval plane for a fixed-width integer
+    /// carrier. Exact `Int` has no finite static bounds.
     pub fn integer_range(&self) -> Option<(i128, i128)> {
         match self {
-            Type::Int => Some(int_range(true, 64)),
+            Type::Int => None,
             Type::IntN { .. } => self.knowledge_vector().interval_i128(),
             Type::Tagged { inner, .. } => inner.integer_range(),
             _ => None,
@@ -1929,7 +1929,13 @@ impl Type {
         }
 
         match (self, target) {
+            // Exact Int can cross into a fixed width only through the checked
+            // destination conversion. Every fixed width widens exactly into
+            // the arbitrary-precision carrier.
+            (Type::IntN { .. }, Type::Int) => Some(false),
+            (Type::Int, Type::IntN { .. }) => Some(true),
             (Type::Float32, Type::Float) => Some(false),
+            (Type::Int, Type::Float | Type::Float32) => Some(true),
             (source, Type::Float | Type::Float32) if source.is_integer() => {
                 let (signed, bits) = source.integer_layout()?;
                 let precision = if matches!(target, Type::Float32) {
@@ -2335,7 +2341,7 @@ mod tests {
         assert_eq!(i8.numeric_widening_to(&i16), Some(false));
         assert_eq!(u8.numeric_widening_to(&i16), Some(false));
         assert_eq!(i16.numeric_widening_to(&u32), None);
-        assert_eq!(u64.numeric_widening_to(&Type::Int), None);
+        assert_eq!(u64.numeric_widening_to(&Type::Int), Some(false));
         assert_eq!(Type::Float32.numeric_widening_to(&Type::Float), Some(false));
         assert_eq!(Type::Float.numeric_widening_to(&Type::Float32), None);
 
@@ -2360,19 +2366,24 @@ mod tests {
                 let source_ty = ty(source);
                 let target_ty = ty(target);
                 let (source_signed, source_bits) = match source_ty {
-                    Type::Int => (true, 64),
+                    Type::Int => (true, 127),
                     Type::IntN { signed, bits } => (signed, bits),
                     _ => unreachable!(),
                 };
                 let (target_signed, target_bits) = match target_ty {
-                    Type::Int => (true, 64),
+                    Type::Int => (true, 127),
                     Type::IntN { signed, bits } => (signed, bits),
                     _ => unreachable!(),
                 };
-                let (source_min, source_max) = super::int_range(source_signed, source_bits);
-                let (target_min, target_max) = super::int_range(target_signed, target_bits);
-                let expected =
-                    (target_min <= source_min && source_max <= target_max).then_some(false);
+                let expected = match (&source_ty, &target_ty) {
+                    (Type::Int, Type::IntN { .. }) => Some(true),
+                    (Type::IntN { .. }, Type::Int) => Some(false),
+                    _ => {
+                        let (source_min, source_max) = super::int_range(source_signed, source_bits);
+                        let (target_min, target_max) = super::int_range(target_signed, target_bits);
+                        (target_min <= source_min && source_max <= target_max).then_some(false)
+                    }
+                };
                 assert_eq!(
                     ty(source).numeric_widening_to(&ty(target)),
                     expected,

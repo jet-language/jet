@@ -1,6 +1,59 @@
 use super::super::*;
 
 impl<'a> Parser<'a> {
+    /// D-CHOOSE-TEST1=A: a pattern test with a diverging fallback is a
+    /// statement binding. Keep the source subject in `Binding::init`; the
+    /// refutable pattern and fallback stay together in the binding target so
+    /// sema and every execution tier consume one canonical operation.
+    pub(crate) fn try_refutable_test_binding(&self, expr: Expr) -> Option<Binding> {
+        let Expr::OrFallback {
+            value,
+            fallback,
+            span,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        let Expr::PatternTest {
+            subject,
+            pattern,
+            span: pattern_span,
+        } = *value
+        else {
+            return None;
+        };
+        let names = pattern.binding_names();
+        if names.is_empty() {
+            return None;
+        }
+        Some(Binding {
+            mutable: false,
+            markers: Vec::new(),
+            reactive_upgrade: false,
+            meta: None,
+            name: String::new(),
+            name_span: pattern_span,
+            sigil_span: None,
+            pattern: Some(BindPattern::Refutable {
+                pattern,
+                fallback,
+                names,
+                span,
+            }),
+            ty: None,
+            ty_span: None,
+            init: *subject,
+            is_comptime: false,
+            ct: None,
+            uninit: false,
+            arena_view: false,
+            string_view: false,
+            gc_promotion: None,
+            gc_transferred: false,
+        })
+    }
+
     /// D-BIND-BARE1: a binding starting with the target (no keyword), written
     /// `name (:: | :=) expr`. The sigil chooses mutability.
     /// Typed forms `name: Type :: expr` / `name: Type := expr` are retired —

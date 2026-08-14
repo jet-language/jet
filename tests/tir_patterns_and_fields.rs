@@ -625,7 +625,7 @@ fn run() {
 }
 
 /// c109: an indexed map-assign whose index BASE is a struct field read
-/// (`s.scores["a"] = 1`, `scores: [String: Int]`). The `LValue::Index` gate
+/// (`s.scores["a"] = 1`, `scores: [String:Int]`). The `LValue::Index` gate
 /// admits a field-read base + the sema-resolved `IndexKind::Map`; `main` routes
 /// through the TIR and the assign emits the `jet_map_insert` helper form
 /// byte-for-byte. Runs (insert then index-read prints the value).
@@ -636,7 +636,7 @@ fn indexed_map_assign_through_field() {
     }
     let src = "\
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {
@@ -669,7 +669,7 @@ fn map_builtin_on_struct_field_receiver() {
     }
     let src = "\
 struct S {
-    scores: [String: Int]
+    scores: [String:Int]
 }
 
 fn run() {

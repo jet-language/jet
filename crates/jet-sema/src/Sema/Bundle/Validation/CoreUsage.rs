@@ -476,8 +476,7 @@ pub(crate) fn collect_core_expr(
             note_core_usage(used, spans, "core.math::__mathtypes__", Some(c.name_span));
         }
         Expr::Call(c)
-            if c.name == crate::Syntax::TYPE_BIGINT
-                || c.name == crate::Syntax::TYPE_DECIMAL
+            if c.name == crate::Syntax::TYPE_DECIMAL
                 || c.name == crate::Syntax::TYPE_FRACTION =>
         {
             note_core_usage(used, spans, "core.math::__precise__", Some(c.name_span));
@@ -565,8 +564,7 @@ pub(crate) fn collect_core_expr(
             }
             if matches!(
                 recv_type.as_deref(),
-                Some(crate::Syntax::TYPE_BIGINT)
-                    | Some(crate::Syntax::TYPE_DECIMAL)
+                Some(crate::Syntax::TYPE_DECIMAL)
                     | Some(crate::Syntax::TYPE_FRACTION)
             ) {
                 note_core_usage(

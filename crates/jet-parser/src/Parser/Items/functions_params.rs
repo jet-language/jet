@@ -665,7 +665,7 @@ impl<'a> Parser<'a> {
                         self.bump();
                         // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
                         // trait-bound list. `[` never starts a legal *concrete* variadic
-                        // element type here (list `[T]` and map `[K: V]` types don't make
+                        // element type here (list `[T]` and map `[K:V]` types don't make
                         // sense as a rest-parameter's own element type spelled this way),
                         // so this position always means a bound list. Bare `...Trait` /
                         // `...T` both go through `type_()` unchanged — sema tells a

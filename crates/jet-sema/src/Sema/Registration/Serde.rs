@@ -1339,11 +1339,9 @@ fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
         CtValue::Bool(value) => Expr::Bool(*value, span),
         CtValue::Char(value) => Expr::Char(*value, span),
         CtValue::Str(value) => string_expr(value, span),
-        CtValue::BigInt(value) => Expr::Call(Call {
-            name: "BigInt".to_string(), name_span: span, type_args: Vec::new(),
-            args: vec![call_arg(string_expr(&value.to_string_rep(), span), span)],
-            resolved_ret: None, range_checked: false, widen_approx: false,
-        }),
+        // Exact default `Int` values keep their decimal source spelling so the
+        // ordinary literal pipeline owns parsing and lowering on every tier.
+        CtValue::BigInt(value) => Expr::Int(0, span, None, Some(value.to_string_rep())),
         CtValue::Bytes(values) => list_literal(values.iter().map(|value| Expr::Int(i64::from(*value), span, None, None)).collect(), span),
         CtValue::List(values) => list_literal(values.iter().map(|value| serde_ct_expr(value, span)).collect::<Option<Vec<_>>>()?, span),
         CtValue::Map(values) => map_literal(values.iter().map(|(key, value)| Some((serde_ct_expr(&key.to_value(), span)?, serde_ct_expr(value, span)?))).collect::<Option<Vec<_>>>()?, span),

@@ -746,6 +746,152 @@ impl<'a> Checker<'a> {
         result
     }
 
+    /// D-CHOOSE-TEST1=A: the miss route of a refutable statement binding must
+    /// leave the statement. Value and block fallbacks are checked for useful
+    /// follow-on diagnostics but rejected with the registered E0405.
+    pub(crate) fn check_diverging_fallback(
+        &mut self,
+        fallback: &mut OrFallback,
+        subject_ty: &Type,
+        span: Span,
+    ) {
+        let saved_fallback_has_err = self.fallback_has_err;
+        let has_err = matches!(subject_ty, Type::Result { .. });
+        self.fallback_has_err = Some(has_err);
+        if has_err {
+            let Type::Result { err, .. } = subject_ty else {
+                unreachable!("result fallback marker changed shape")
+            };
+            self.push_scope();
+            self.declare_in_scope(
+                Syntax::AMBIENT_ERR,
+                LocalInfo {
+                    def_span: span,
+                    binding_sigil_span: None,
+                    ty: (**err).clone(),
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    interrupt_sendable: false,
+                    reactive_local: false,
+                    reactive_shared: false,
+                    single_use_span: None,
+                    constant_value: None,
+                    invalid: false,
+                },
+            );
+        }
+
+        match fallback {
+            OrFallback::Value(value) => {
+                self.infer(value);
+                self.diags.push(Diagnostic::error(
+                    "E0405",
+                    format!("`{}` must diverge after a refutable binding", Syntax::OP_FALLBACK),
+                    "a failed pattern match cannot continue without defining the captures"
+                        .to_string(),
+                    "use `return`, `panic(...)`, `break`, or `next` as the fallback".to_string(),
+                    Some(value.span()),
+                ));
+            }
+            OrFallback::Block {
+                body,
+                value,
+                span: fallback_span,
+            } => {
+                self.check_block(body, false);
+                self.infer(value);
+                self.diags.push(Diagnostic::error(
+                    "E0405",
+                    format!("`{}` fallback blocks cannot continue after a refutable binding", Syntax::OP_FALLBACK),
+                    "a refutable binding needs one direct diverging miss route".to_string(),
+                    "replace the block with `return`, `panic(...)`, `break`, or `next`".to_string(),
+                    Some(*fallback_span),
+                ));
+            }
+            OrFallback::Return(ret_expr, ret_span) => {
+                let ret = self.ret.clone();
+                match (&ret, ret_expr.as_mut()) {
+                    (Some(ret_ty), Some(expr)) => {
+                        let saved = self.expected_type.clone();
+                        self.expected_type = Some(ret_ty.clone());
+                        let expr_ty = self.infer(expr);
+                        self.expected_type = saved;
+                        if let Some(expr_ty) = expr_ty {
+                            self.check_type_assignable(ret_ty, &expr_ty, expr.span());
+                        }
+                    }
+                    (Some(ret_ty), None) => self.diags.push(Diagnostic::error(
+                        "E0405",
+                        format!("`{} return` here needs a value", Syntax::OP_FALLBACK),
+                        format!("this function returns {}, so its return route needs a value", ret_ty.show()),
+                        format!("write `{} return <value>`", Syntax::OP_FALLBACK),
+                        Some(*ret_span),
+                    )),
+                    (None, Some(expr)) => self.diags.push(Diagnostic::error(
+                        "E0405",
+                        format!("`{} return` cannot return a value here", Syntax::OP_FALLBACK),
+                        "this function returns nothing".to_string(),
+                        "drop the value from the return route".to_string(),
+                        Some(expr.span()),
+                    )),
+                    (None, None) => {}
+                }
+            }
+            OrFallback::Panic { name_span, args } => {
+                let mut call = Call {
+                    name: Syntax::BUILTIN_PANIC.to_string(),
+                    name_span: *name_span,
+                    type_args: Vec::new(),
+                    args: std::mem::take(args),
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                self.check_panic_call(&mut call);
+                *args = call.args;
+            }
+            OrFallback::Break(route_span) => self.check_break_without_value(None, *route_span),
+            OrFallback::Continue(route_span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_NEXT, *route_span));
+                }
+            }
+            OrFallback::BreakLabel(name, route_span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_BREAK, *route_span));
+                } else if !self.loop_labels.iter().any(|label| label == name) {
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        name,
+                        &self.loop_labels,
+                        *route_span,
+                    ));
+                } else {
+                    self.check_break_without_value(Some((name, *route_span)), *route_span);
+                }
+            }
+            OrFallback::ContinueLabel(name, route_span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_NEXT, *route_span));
+                } else if !self.loop_labels.iter().any(|label| label == name) {
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        name,
+                        &self.loop_labels,
+                        *route_span,
+                    ));
+                }
+            }
+        }
+
+        if has_err {
+            self.pop_scope();
+        }
+        self.fallback_has_err = saved_fallback_has_err;
+    }
+
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);

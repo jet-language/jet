@@ -671,7 +671,7 @@ module.exports = grammar({
         seq("[", $._type, "#", $.integer_literal, "]"),
       ),
 
-    // `[K: V]` map (D-LISTMAP-CANON1=A).
+    // `[K:V]` map (D-LISTMAP-CANON1=A / D-MAPSPACE1=A).
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 

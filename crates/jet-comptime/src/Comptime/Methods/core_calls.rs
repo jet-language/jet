@@ -4,7 +4,7 @@ use std::cell::Cell;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
-use super::super::Builtins::as_int;
+use super::super::Builtins::{as_int, exact_big, exact_int_value};
 use super::super::Diagnostics::unsupported;
 use crate::AST::{CtReport, CtValue};
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
@@ -1135,7 +1135,10 @@ pub fn apply_core_call_with_type(
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
         ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
         ("core.math", "abs") => match one(0)? {
-            CtValue::Int(n) => Ok(CtValue::Int(math_lib_pure::jet_std_math_abs_i64(*n))),
+            value if exact_big(&value).is_some() => {
+                let value = exact_big(&value).expect("whole-number abs");
+                Ok(exact_int_value(value.abs()))
+            }
             CtValue::Float(f) => Ok(CtValue::Float(core_math_float_abs(*f))),
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
@@ -1232,40 +1235,172 @@ pub fn apply_core_call_with_type(
                 unsupported("mixing float widths", span)
             })?))
         }
-        ("core.math", "isqrt" | "factorial" | "checked_abs" | "checked_neg") => {
-            let value = match one(0)? {
-                CtValue::Int(value) => *value,
-                _ => return Err(unsupported("this operation on a value that is not a whole number", span)),
-            };
-            match method {
-                "isqrt" => Ok(match math_lib_pure::jet_std_math_isqrt(value) {
-                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
-                    None => CtValue::absent(Type::Int),
-                }),
-                "factorial" => Ok(match math_lib_pure::jet_std_math_factorial(value) {
-                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
-                    None => CtValue::absent(Type::Int),
-                }),
-                "checked_abs" => Ok(match value.checked_abs() {
-                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
-                    None => CtValue::absent(Type::Int),
-                }),
-                _ => Ok(match value.checked_neg() {
-                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
-                    None => CtValue::absent(Type::Int),
-                }),
+        ("core.math", "factorial") => {
+            let value = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("this operation on a value that is not a whole number", span)
+            })?;
+            if value.negative {
+                return Ok(CtValue::absent(Type::Int));
             }
+            let mut current = crate::Numeric::CtBigInt::from_int(2);
+            let mut result = crate::Numeric::CtBigInt::from_int(1);
+            while current.compare(&value) != std::cmp::Ordering::Greater {
+                result = result.mul(&current);
+                current = current.add(&crate::Numeric::CtBigInt::from_int(1));
+            }
+            Ok(CtValue::Present(Box::new(exact_int_value(result))))
         }
-        ("core.math", "is_even" | "is_odd") => {
-            let value = match one(0)? {
-                CtValue::Int(value) => *value,
-                _ => return Err(unsupported("parity of a value that is not a whole number", span)),
+        ("core.math", method @ ("isqrt" | "checked_abs" | "checked_neg")) => {
+            let value = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("this operation on a value that is not a whole number", span)
+            })?;
+            let result = match method {
+                "isqrt" => value.isqrt(),
+                "checked_abs" => Some(value.abs()),
+                _ => Some(value.neg()),
             };
+            Ok(match result {
+                Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
+                None => CtValue::absent(Type::Int),
+            })
+        }
+        ("core.math", method @ ("is_even" | "is_odd")) => {
+            let value = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("parity of a value that is not a whole number", span)
+            })?;
             Ok(CtValue::Bool(if method == "is_even" {
-                value % 2 == 0
+                value.is_even()
             } else {
-                value % 2 != 0
+                value.is_odd()
             }))
+        }
+        ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
+            let value = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("this operation needs a whole number", span)
+            })?;
+            Ok(CtValue::Int(if method == "leading_ones" {
+                value.leading_ones()
+            } else if method == "trailing_ones" {
+                value.trailing_ones()
+            } else {
+                value.digits()
+            }))
+        }
+        ("core.math", "binomial") => {
+            let n = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("binomial needs whole numbers", span)
+            })?;
+            let k = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("binomial needs whole numbers", span)
+            })?;
+            Ok(match crate::Numeric::CtBigInt::binomial(&n, &k) {
+                Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
+                None => CtValue::absent(Type::Int),
+            })
+        }
+        ("core.math", method @ ("checked_add" | "checked_sub" | "checked_mul")) => {
+            let left = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("checked arithmetic needs whole numbers", span)
+            })?;
+            let right = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("checked arithmetic needs whole numbers", span)
+            })?;
+            let value = match method {
+                "checked_add" => left.add(&right),
+                "checked_sub" => left.sub(&right),
+                _ => left.mul(&right),
+            };
+            Ok(CtValue::Present(Box::new(exact_int_value(value))))
+        }
+        ("core.math", method @ ("checked_div" | "checked_rem")) => {
+            let left = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("checked division needs whole numbers", span)
+            })?;
+            let right = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("checked division needs whole numbers", span)
+            })?;
+            Ok(match left.div_rem(&right) {
+                Some((quotient, remainder)) => CtValue::Present(Box::new(exact_int_value(
+                    if method == "checked_div" {
+                        quotient
+                    } else {
+                        remainder
+                    },
+                ))),
+                None => CtValue::absent(Type::Int),
+            })
+        }
+        ("core.math", "checked_pow") => {
+            let base = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("checked power needs whole numbers", span)
+            })?;
+            let exponent = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("checked power needs whole numbers", span)
+            })?;
+            Ok(match base.pow(&exponent) {
+                Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
+                None => CtValue::absent(Type::Int),
+            })
+        }
+        ("core.math", method @ ("saturating_add" | "saturating_sub" | "saturating_mul"))
+        | ("core.math", method @ ("wrapping_add" | "wrapping_sub" | "wrapping_mul")) => {
+            let left = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("arithmetic needs whole numbers", span)
+            })?;
+            let right = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("arithmetic needs whole numbers", span)
+            })?;
+            let value = match method {
+                "saturating_add" | "wrapping_add" => left.add(&right),
+                "saturating_sub" | "wrapping_sub" => left.sub(&right),
+                "saturating_mul" | "wrapping_mul" => left.mul(&right),
+                _ => unreachable!("whole-number arithmetic guard"),
+            };
+            Ok(exact_int_value(value))
+        }
+        ("core.math", "int_pow") => {
+            let base = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("integer power needs whole numbers", span)
+            })?;
+            let exponent = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("integer power needs whole numbers", span)
+            })?;
+            Ok(exact_int_value(
+                base.pow(&exponent)
+                    .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(0)),
+            ))
+        }
+        ("core.math", method @ ("gcd" | "lcm")) => {
+            let left = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("number theory needs whole numbers", span)
+            })?;
+            let right = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("number theory needs whole numbers", span)
+            })?;
+            Ok(exact_int_value(if method == "gcd" {
+                crate::Numeric::CtBigInt::gcd(&left, &right)
+            } else {
+                crate::Numeric::CtBigInt::lcm(&left, &right)
+            }))
+        }
+        ("core.math", "div_mod" | "div_rem") => {
+            let left = exact_big(one(0)?).ok_or_else(|| {
+                unsupported("division needs whole numbers", span)
+            })?;
+            let right = exact_big(one(1)?).ok_or_else(|| {
+                unsupported("division needs whole numbers", span)
+            })?;
+            let Some((mut quotient, mut remainder)) = left.div_rem(&right) else {
+                return Err(unsupported("division by zero", span));
+            };
+            if method == "div_mod" && !remainder.is_zero() && left.negative != right.negative {
+                quotient = quotient.sub(&crate::Numeric::CtBigInt::from_int(1));
+                remainder = remainder.add(&right);
+            }
+            Ok(named_tuple(&[
+                ("quot", exact_int_value(quotient)),
+                ("rem", exact_int_value(remainder)),
+            ]))
         }
         ("core.math", "is_normal") => {
             Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_normal()))
@@ -1306,41 +1441,6 @@ pub fn apply_core_call_with_type(
         }
         ("core.math", "zero") => Ok(CtValue::Float(CtFloat::f64(0.0))),
         ("core.math", "radix") => Ok(CtValue::Int(2)),
-        ("core.math", "leading_ones") => {
-            let value = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("leading_ones needs a whole number", span)),
-            };
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_leading_ones(value)))
-        }
-        ("core.math", "trailing_ones") => {
-            let value = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("trailing_ones needs a whole number", span)),
-            };
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_trailing_ones(value)))
-        }
-        ("core.math", "digits") => {
-            let value = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("digits needs a whole number", span)),
-            };
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_digits(value)))
-        }
-        ("core.math", "binomial") => {
-            let n = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("binomial needs whole numbers", span)),
-            };
-            let k = match one(1)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("binomial needs whole numbers", span)),
-            };
-            Ok(match math_lib_pure::jet_std_math_binomial(n, k) {
-                Some(v) => CtValue::Present(Box::new(CtValue::Int(v))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
         ("core.math", "cmp") => {
             let a = as_ct_float(one(0)?, span)?.as_f64();
             let b = as_ct_float(one(1)?, span)?.as_f64();
@@ -1429,25 +1529,6 @@ pub fn apply_core_call_with_type(
                 ("exp", CtValue::Int(exp)),
             ]))
         }
-        ("core.math", "div_mod" | "div_rem") => {
-            let a = match one(0)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("div_mod needs whole numbers", span)),
-            };
-            let b = match one(1)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("div_mod needs whole numbers", span)),
-            };
-            if b == 0 {
-                return Err(unsupported("division by zero", span));
-            }
-            let (q, r) = if method == "div_mod" {
-                (a.div_euclid(b), a.rem_euclid(b))
-            } else {
-                (a / b, a % b)
-            };
-            Ok(named_tuple(&[("quot", CtValue::Int(q)), ("rem", CtValue::Int(r))]))
-        }
         ("core.math", "hypot") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
@@ -1471,96 +1552,6 @@ pub fn apply_core_call_with_type(
         ("core.math", "from_bits") => Ok(CtValue::Float(CtFloat::f64(f64::from_bits(
             as_int(one(0)?, span)? as u64,
         )))),
-        ("core.math", "checked_add") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(match a.checked_add(b) {
-                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "checked_div") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(match a.checked_div(b) {
-                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "checked_rem") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(match a.checked_rem(b) {
-                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "checked_sub") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(match a.checked_sub(b) {
-                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "checked_mul") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(match a.checked_mul(b) {
-                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "checked_pow") => {
-            let base = as_int(one(0)?, span)?;
-            let exp = as_int(one(1)?, span)?;
-            Ok(if exp < 0 {
-                CtValue::absent(Type::Int)
-            } else {
-                match base.checked_pow(exp as u32) {
-                    Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                    None => CtValue::absent(Type::Int),
-                }
-            })
-        }
-        ("core.math", "saturating_add") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.saturating_add(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "saturating_sub") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.saturating_sub(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "saturating_mul") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.saturating_mul(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "wrapping_add") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.wrapping_add(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "wrapping_sub") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.wrapping_sub(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "wrapping_mul") => Ok(CtValue::Int(
-            as_int(one(0)?, span)?.wrapping_mul(as_int(one(1)?, span)?),
-        )),
-        ("core.math", "int_pow") => {
-            let base = as_int(one(0)?, span)?;
-            let exp = as_int(one(1)?, span)?;
-            Ok(CtValue::Int(if exp < 0 {
-                0
-            } else {
-                base.saturating_pow(exp as u32)
-            }))
-        }
-        ("core.math", "gcd") => {
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_gcd(
-                as_int(one(0)?, span)?,
-                as_int(one(1)?, span)?,
-            )))
-        }
-        ("core.math", "lcm") => {
-            let a = as_int(one(0)?, span)?;
-            let b = as_int(one(1)?, span)?;
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_lcm(a, b)))
-        }
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was

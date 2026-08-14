@@ -373,41 +373,25 @@ pub fn layout_method_arg_ty(method: &str, arg_index: usize) -> Option<Type> {
     }
 }
 
-/// D-BIGINT1 / D-DECIMAL1: binary ops on precise numeric types (no Int promotion).
+/// D-DECIMAL1: binary ops on exact decimal values.
 pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
-    use crate::Numeric::{is_bigint_type_name, is_decimal_type_name};
+    use crate::Numeric::is_decimal_type_name;
     use crate::AST::BinOp;
     let same = lt == rt;
     match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_bigint_type_name(lt) => {
-            Some(Type::Named(crate::Syntax::TYPE_BIGINT.to_string()))
-        }
         BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_decimal_type_name(lt) => {
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
         }
-        BinOp::Eq | BinOp::Ne if same && (is_bigint_type_name(lt) || is_decimal_type_name(lt)) => {
+        BinOp::Eq | BinOp::Ne if same && is_decimal_type_name(lt) => {
             Some(Type::Bool)
         }
         _ => None,
     }
 }
 
-/// D-BIGINT1: mixing fixed `Int` with `BigInt` is rejected — no silent promotion.
+/// D-DECIMAL1: decimal values do not mix implicitly with other numeric kinds.
 pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, String)> {
-    use crate::Numeric::{type_is_bigint, type_is_decimal};
-    let li = lt.is_integer();
-    let ri = rt.is_integer();
-    if (type_is_bigint(lt) && ri) || (type_is_bigint(rt) && li) {
-        return Some((
-            "E0130",
-            format!(
-                "`Int` and `BigInt` can't be mixed — got `{}` and `{}`",
-                lt.show(),
-                rt.show()
-            ),
-            "fixed-width `Int` never promotes to `BigInt`; construct a `BigInt` explicitly with `BigInt(…)` or `BigInt(\"…\")`".to_string(),
-        ));
-    }
+    use crate::Numeric::type_is_decimal;
     if (type_is_decimal(lt) && rt.is_float()) || (type_is_decimal(rt) && lt.is_float()) {
         return Some((
             "E0131",
@@ -418,17 +402,6 @@ pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, 
             ),
             "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"
                 .to_string(),
-        ));
-    }
-    if (type_is_bigint(lt) && type_is_decimal(rt)) || (type_is_bigint(rt) && type_is_decimal(lt)) {
-        return Some((
-            "E0132",
-            format!(
-                "`BigInt` and `Decimal` can't be mixed — got `{}` and `{}`",
-                lt.show(),
-                rt.show()
-            ),
-            "convert explicitly with `to_string()` / `Decimal(\"…\")` at a boundary".to_string(),
         ));
     }
     None

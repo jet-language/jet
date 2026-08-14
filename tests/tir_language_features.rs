@@ -706,7 +706,7 @@ fn run() {
 /// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
 /// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
 /// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::JSON::…`), a Map
-/// index over `[String: JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
+/// index over `[String:JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
 #[test]
 fn json_value_construct_match_render() {
     if !have_rustc() {
@@ -720,7 +720,7 @@ fn run() {
     if data == .Object(entries) {
         print(entries.len())
     }
-    obj := [String: JSON].{}
+    obj := [String:JSON].{}
     obj[\"name\"] = JSON.Text(\"jet\")
     obj[\"ok\"] = JSON.Bool(true)
     obj[\"none\"] = JSON.Null

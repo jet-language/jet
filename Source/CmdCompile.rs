@@ -2411,7 +2411,12 @@ fn fmt_json_dirty_diffs(entries: &[(&str, &str)]) -> String {
 
 /// `jet fmt - [--stdin-path=<label>]`: read from stdin, format, write to stdout.
 /// Ignore rules do NOT apply. Exit 2 on parse error.
-fn run_fmt_stdin(stdin_path: Option<&str>, explicit_copies: bool, mode: OutputMode) {
+fn run_fmt_stdin(
+    stdin_path: Option<&str>,
+    explicit_copies: bool,
+    simplify: bool,
+    mode: OutputMode,
+) {
     use std::io::Read;
     let mut src = String::new();
     if std::io::stdin().read_to_string(&mut src).is_err() {
@@ -2424,7 +2429,12 @@ fn run_fmt_stdin(stdin_path: Option<&str>, explicit_copies: bool, mode: OutputMo
         jet::Formatter::retired_interpolation_selector_edits(&src).len();
     let retired_print_count = jet::Formatter::retired_print_family_edits(&src).len();
     let retired_type_count = jet::Formatter::retired_type_edits(&src).len();
-    match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>"), explicit_copies) {
+    match format_source_for_fmt(
+        &src,
+        stdin_path.unwrap_or("<stdin>"),
+        explicit_copies,
+        simplify,
+    ) {
         Ok(formatted) => {
             print!("{}", formatted);
             if retired_target_count > 0 {
@@ -2476,6 +2486,7 @@ fn format_source_for_fmt(
     src: &str,
     origin: &str,
     explicit_copies: bool,
+    simplify: bool,
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
     let materialized = if explicit_copies
         && Path::new(origin).is_file()
@@ -2501,7 +2512,10 @@ fn format_source_for_fmt(
     } else {
         rewrite_retired_package_targets(src, origin).0
     };
-    match jet::format_source(&materialized) {
+    match jet::format_source_with_options(
+        &materialized,
+        jet::Formatter::FormatOptions { simplify },
+    ) {
         Ok(formatted) => Ok(formatted),
         Err(diagnostics) if is_typed_package_source(&materialized, origin) => {
             match jet::Package::format_source(&materialized, origin) {
@@ -2671,6 +2685,7 @@ fn is_typed_package_source(src: &str, origin: &str) -> bool {
 /// `check_only`     — `--check`: exit 1 if any file would change, list paths.
 /// `show_diff`      — `--diff`: with `--check`, also print unified diffs.
 /// `changed_only`   — `--changed`: limit to VCS-changed `.jet` files (git).
+/// `simplify`       — `--simplify`: enable ratified simplest-spelling rewrites.
 /// `mode`           — output mode (`--json`, color).
 pub(crate) fn run_fmt(
     explicit_paths: &[String],
@@ -2680,10 +2695,11 @@ pub(crate) fn run_fmt(
     show_diff: bool,
     changed_only: bool,
     explicit_copies: bool,
+    simplify: bool,
     mode: OutputMode,
 ) {
     if stdin_mode {
-        run_fmt_stdin(stdin_path, explicit_copies, mode);
+        run_fmt_stdin(stdin_path, explicit_copies, simplify, mode);
         return;
     }
 
@@ -2738,7 +2754,12 @@ pub(crate) fn run_fmt(
                 continue;
             }
         };
-        match format_source_for_fmt(&src, &path.display().to_string(), explicit_copies) {
+        match format_source_for_fmt(
+            &src,
+            &path.display().to_string(),
+            explicit_copies,
+            simplify,
+        ) {
             Ok(formatted) => {
                 let changed = formatted != src;
                 let retired_interpolation_selectors =

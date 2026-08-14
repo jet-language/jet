@@ -3551,7 +3551,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     loop i, 0..3, 2 {
         total += i
     }
-    counts := [String: Int].{ "one": 1 }
+    counts := [String:Int].{ "one": 1 }
     loop entry, counts {
         total += entry.value
     }
