@@ -1058,7 +1058,7 @@ pub fn apply_method(
         (CtValue::List(xs), "skip") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
             Ok(CtValue::List(super::CollectionEval::iter_skip(
-                xs,
+                xs.clone(),
                 n as i64,
             )))
         }
@@ -1210,7 +1210,7 @@ pub fn apply_method(
                     .collect(),
             ))
         }
-        (CtValue::List(xs), "first") => Ok(match super::CollectionEval::iter_first(xs) {
+        (CtValue::List(xs), "first") => Ok(match super::CollectionEval::iter_first(xs.clone()) {
             Some(v) => CtValue::Present(Box::new(v)),
             None => CtValue::absent(Type::Int),
         }),
