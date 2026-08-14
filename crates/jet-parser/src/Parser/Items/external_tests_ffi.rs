@@ -51,13 +51,9 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
             let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Test)?;
             if matches!(self.peek().kind, TokKind::KwFn) {
-                if !marker.args.is_empty() {
-                    return Err(crate::Policy::marker_argument_shape_error(
-                        Syntax::KW_TEST,
-                        marker.span,
-                    ));
-                }
-                let test = self.test_def_after_kw()?;
+                let arguments = self.bound_registered_rule_arguments(&marker)?;
+                let faults_expr = arguments.parameter(1).cloned();
+                let test = self.test_def_after_kw(faults_expr)?;
                 self.bind_rule_fact(
                     marker.name_span,
                     Some(test.span),
@@ -79,6 +75,7 @@ impl<'a> Parser<'a> {
                 },
                 other => (None, other.span()),
             };
+            let faults_expr = arguments.parameter(1).cloned();
             let item_start = marker.span.start;
             self.expect(TokKind::LBrace, "to open the test body")?;
             let body = self.block_stmts();
@@ -86,6 +83,8 @@ impl<'a> Parser<'a> {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_expr: Some(name_argument.clone()),
+                faults_expr,
+                faults: Vec::new(),
                 name_prefix: None,
                 name_span,
                 params: Vec::new(),
@@ -100,7 +99,10 @@ impl<'a> Parser<'a> {
             Ok(test)
         }
     
-        pub(super) fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+        pub(super) fn test_def_after_kw(
+            &mut self,
+            faults_expr: Option<crate::AST::Expr>,
+        ) -> Result<crate::AST::TestDef, Diagnostic> {
             let item_start = self.toks[self.pos.saturating_sub(1)].span.start;
             // D-TEST1 (ratified 2026-06-22, option B): the property-test form is
             // `#Test fn name(params) { … }`. A parameter list means inputs are
@@ -119,6 +121,8 @@ impl<'a> Parser<'a> {
                     span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                     name: Some(name),
                     name_expr: None,
+                    faults_expr,
+                    faults: Vec::new(),
                     name_prefix: None,
                     name_span,
                     params,
@@ -133,6 +137,8 @@ impl<'a> Parser<'a> {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name: Some(name),
                 name_expr: None,
+                faults_expr,
+                faults: Vec::new(),
                 name_prefix: None,
                 name_span,
                 params: Vec::new(),

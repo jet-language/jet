@@ -874,6 +874,11 @@ pub struct TestDef {
     pub name: Option<String>,
     /// Raw `#Test(...)` name expression; sema resolves it to `name`.
     pub name_expr: Option<Expr>,
+    /// D-TESTFAULT1=A: raw effect-root selector list from `faults: […]`.
+    /// Sema validates and canonicalizes it into `faults`.
+    pub faults_expr: Option<Expr>,
+    /// D-TESTFAULT1=A: canonical effect operation paths used by codegen.
+    pub faults: Vec<String>,
     /// Generic-module instance prefix applied to the resolved identity.
     pub name_prefix: Option<String>,
     pub name_span: Span,

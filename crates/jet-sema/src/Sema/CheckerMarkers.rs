@@ -170,6 +170,7 @@ fn validate_rule_arguments(
                 && marker_name != Syntax::MARKER_DEFAULT
             || binding.ty == crate::Policy::RuleArgType::DurationOrString
                 && matches!(argument, crate::AST::Expr::UnitLit { .. })
+            || binding.ty == crate::Policy::RuleArgType::EffectRoots
         {
             RuleArgumentObservation {
                 ty: None,
@@ -209,6 +210,9 @@ fn validate_rule_arguments(
                     || matches!(observation.ty, Some(crate::AST::Type::String))
                     || matches!(observation.ty, Some(crate::AST::Type::Named(ref name))
                         if name == crate::Syntax::DURATION_TYPE)
+            }
+            crate::Policy::RuleArgType::EffectRoots => {
+                matches!(argument, crate::AST::Expr::ListLit(..))
             }
         };
         mismatch |= !matches;
@@ -328,6 +332,54 @@ fn materialize_static_marker_values(
     }
 }
 
+/// D-TESTFAULT1=A: resolve a test's closed effect-root selector list once in
+/// sema. Codegen receives canonical paths only; engines never validate or
+/// reinterpret the user's marker argument.
+fn materialize_test_faults(items: &mut [Item], diags: &mut Vec<Diagnostic>) {
+    fn path(expression: &crate::AST::Expr) -> Option<(String, crate::Diagnostics::Span)> {
+        match expression {
+            crate::AST::Expr::Ident(name, span) => Some((name.clone(), *span)),
+            crate::AST::Expr::Field(base, member, _) => {
+                let (base, root_span) = path(base)?;
+                Some((format!("{base}.{member}"), root_span))
+            }
+            _ => None,
+        }
+    }
+
+    for item in items {
+        let Item::Test(test) = item else { continue };
+        let Some(crate::AST::Expr::ListLit(values, _)) = test.faults_expr.as_ref() else {
+            continue;
+        };
+        let mut faults = Vec::new();
+        for value in values {
+            let Some((written, root_span)) = path(value) else {
+                diags.push(crate::Policy::marker_argument_shape_error(
+                    Syntax::KW_TEST,
+                    value.span(),
+                ));
+                continue;
+            };
+            let (root, tail) = written
+                .split_once('.')
+                .map_or((written.as_str(), None), |(root, tail)| (root, Some(tail)));
+            let canonical_root = Syntax::respell_acronym_name(root);
+            let canonical = tail
+                .map(|tail| format!("{canonical_root}.{tail}"))
+                .unwrap_or(canonical_root);
+            if crate::Sema::Effects::parse_effect_name(&canonical).is_none() {
+                diags.push(crate::Sema::Effects::unknown_effect(root, root_span));
+                continue;
+            }
+            if !faults.contains(&canonical) {
+                faults.push(canonical);
+            }
+        }
+        test.faults = faults;
+    }
+}
+
 pub(crate) fn resolve_static_rule_products(
     module: &mut crate::AST::LoadedModule,
     base_dir: &std::path::Path,
@@ -352,14 +404,32 @@ pub(crate) fn resolve_static_rule_products(
         .cloned()
         .collect::<Vec<_>>();
     for item in &module.items {
-        let (name, expression, span) = match item {
+        let (name, args, arg_labels, span) = match item {
             Item::Test(test) => {
-                let Some(expression) = &test.name_expr else {
+                let mut args = Vec::new();
+                let mut arg_labels = Vec::new();
+                if let Some(expression) = &test.name_expr {
+                    args.push(expression.clone());
+                    arg_labels.push(None);
+                }
+                if let Some(expression) = &test.faults_expr {
+                    args.push(expression.clone());
+                    arg_labels.push(Some((
+                        Syntax::TEST_FAULTS_PARAM.to_string(),
+                        expression.span(),
+                    )));
+                }
+                if args.is_empty() {
                     continue;
-                };
-                (Syntax::KW_TEST, expression.clone(), test.span)
+                }
+                (Syntax::KW_TEST, args, arg_labels, test.span)
             }
-            Item::Bench(bench) => (Syntax::KW_BENCH, bench.name_expr.clone(), bench.span),
+            Item::Bench(bench) => (
+                Syntax::KW_BENCH,
+                vec![bench.name_expr.clone()],
+                vec![None],
+                bench.span,
+            ),
             _ => continue,
         };
         facts.push(crate::AST::AppliedRuleApplication {
@@ -367,8 +437,8 @@ pub(crate) fn resolve_static_rule_products(
                 name: name.to_string(),
                 negated: false,
                 name_span: span,
-                args: vec![expression],
-                arg_labels: vec![None],
+                args,
+                arg_labels,
                 span,
                 ct: None,
             },
@@ -467,6 +537,7 @@ pub(crate) fn resolve_static_rule_products(
         validated.insert(marker.name_span.start, arguments);
     }
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
+    materialize_test_faults(&mut module.items, diags);
     // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T = expr`.
     for item in &mut module.items {
         let Item::Struct(item) = item else { continue };

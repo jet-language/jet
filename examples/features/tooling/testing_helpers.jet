@@ -1,4 +1,5 @@
 use core.testing as testing
+use core.files as fs
 
 module perf.testing {
     budgets: [Budget.{
@@ -20,6 +21,14 @@ fn run() {
     rng := testing.fake_rng(7)
     print(clock.now())
     print(rng.int(1, 3) >= 1)
+}
+
+// D-TESTFAULT1=A: the test runner fails each reachable FS.Write site once;
+// ordinary fallible returns make every injected iteration graceful.
+#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+    path :: testing.temp_dir("sqlite-fault")
+    fs.write(path, "journal") ?? return
+    fs.remove(path) ?? return
 }
 
 #Bench("parse") {

@@ -127,6 +127,7 @@ pub(crate) mod text_rt {
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use crate::fault_injection::jet_fault_should_fail;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
 
     pub(crate) fn lower(s: &str) -> String {
@@ -758,7 +759,6 @@ host_fns! {
             q
         };
 }
-
 
 
 

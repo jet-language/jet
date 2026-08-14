@@ -833,15 +833,43 @@ fn jet_text_char_indices(s: &String) -> Vec<String> {
 }
 
 fn jet_std_fs_read(path: &String) -> Result<String, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     std::fs::read_to_string(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
 }
 fn jet_std_fs_read_bytes(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     std::fs::read(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
 }
 fn jet_std_fs_write(path: &String, text: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::write(path, text).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -855,10 +883,24 @@ fn jet_std_fs_exists(path: &String) -> bool {
     std::path::Path::new(path).exists()
 }
 fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::remove_file(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 // D-LSDIR1=A: returns DirEntry values with name, full path, and is_dir flag.
 fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let mut out = Vec::new();
     let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     for entry in rd {
@@ -879,18 +921,46 @@ fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std:
     Ok(out)
 }
 fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_is_dir(path: &String) -> bool {
     std::path::Path::new(path).is_dir()
 }
 fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::remove_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     let p = std::path::Path::new(path);
     if p.is_dir() {
         std::fs::remove_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
@@ -899,6 +969,20 @@ fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
     }
 }
 fn jet_std_fs_copy(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(from.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))

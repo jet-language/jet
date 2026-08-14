@@ -30,8 +30,104 @@ mod progress_semantics {
 // nested `jet_std` mirrors only the IOError shape these functions construct
 // via `.other(...)`; it carries no behavior of its own.
 mod io_line_stream {
-    use super::term_prelude::jet_term_write_stdout;
-
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
     #[allow(dead_code)]
     mod jet_std {
         #[derive(Debug)]
@@ -174,6 +270,12 @@ fn write_prompt_with_sink(
     prompt: &str,
     sink: &mut Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Result<(), String> {
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return Err("fault injected: IO.Write".to_string());
+    }
+    if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+        return Err("fault injected: IO.Flush".to_string());
+    }
     if term_prelude::jet_term_stdout_is_terminal() || sink.is_none() {
         return runtime_host::write_jit_stdout(prompt, true);
     }
@@ -185,6 +287,9 @@ fn write_prompt_with_sink(
 }
 
 fn read_line() -> Result<String, String> {
+    if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+        return Err("fault injected: IO.Read".to_string());
+    }
     let mut line = String::new();
     std::io::stdin()
         .read_line(&mut line)
@@ -268,6 +373,9 @@ extern "C" fn jet_jit_io_stdin() -> i64 {
 
 extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     match runtime_host::write_jit_stdout(&s, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -277,6 +385,9 @@ extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
 extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     match runtime_host::write_jit_stdout(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -284,6 +395,9 @@ extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     let bytes = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
@@ -300,6 +414,9 @@ extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_stdout_flush(_h: i64) -> i64 {
+    if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+        return result_err_msg("fault injected: IO.Flush");
+    }
     match runtime_host::write_jit_stdout("", true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -312,6 +429,9 @@ extern "C" fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
 
 extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     match runtime_host::write_jit_stderr(&s, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -321,6 +441,9 @@ extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
 extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     match runtime_host::write_jit_stderr(&text, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -328,6 +451,9 @@ extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
+    if crate::fault_injection::jet_fault_should_fail("IO.Write") {
+        return result_err_msg("fault injected: IO.Write");
+    }
     let bytes = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
@@ -344,6 +470,9 @@ extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_stderr_flush(_h: i64) -> i64 {
+    if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
+        return result_err_msg("fault injected: IO.Flush");
+    }
     match runtime_host::write_jit_stderr("", true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -1055,6 +1184,9 @@ extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
 
 /// Materialize stdin lines into a string list (for-in walk).
 extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
+    if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+        return result_err_msg("fault injected: IO.Read");
+    }
     let mut lines = Vec::new();
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
@@ -1069,6 +1201,9 @@ extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
 /// Materialize FileReader lines into a string list without consuming the handle.
 extern "C" fn jet_jit_file_lines(handle: i64) -> i64 {
     use super::enc_stream::FileReaderSlot;
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg("fault injected: FS.Read");
+    }
     let lines = Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         let Some(FileReaderSlot::Live(reader)) = rt.file_readers.get_mut(idx) else {
@@ -1100,6 +1235,9 @@ extern "C" fn jet_jit_file_lines(handle: i64) -> i64 {
 extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
     use std::io::Write;
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg("fault injected: FS.Write");
+    }
     let text = clone_string(line);
     let err = Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
@@ -1123,6 +1261,9 @@ extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
 extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
     use std::io::Write;
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg("fault injected: FS.Write");
+    }
     let err = Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         let Some(FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(idx) else {

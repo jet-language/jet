@@ -689,6 +689,17 @@ fn marker_arg_path(expression: &crate::AST::Expr) -> Option<String> {
 }
 
 fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue {
+    if source_type == "[Effect]" {
+        if let crate::AST::Expr::ListLit(values, _) = expression {
+            return CtValue::List(
+                values
+                    .iter()
+                    .filter_map(marker_arg_path)
+                    .map(CtValue::Str)
+                    .collect(),
+            );
+        }
+    }
     if jet_foundation::Policy::rule_arg_declaration(source_type).is_some() {
         if let Some(path) = marker_arg_path(expression) {
             return CtValue::Enum {

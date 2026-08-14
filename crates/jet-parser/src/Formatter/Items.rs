@@ -383,14 +383,23 @@ impl<'a> Fmt<'a> {
                 );
                 self.write("\"");
             }
+            if let Some(faults) = &t.faults_expr {
+                self.write(", ");
+                self.write(Syntax::TEST_FAULTS_PARAM);
+                self.write(": ");
+                self.fmt_expr(faults, Prec::OrFallback);
+            }
             self.write(")");
         } else {
+            if let Some(faults) = &t.faults_expr {
+                self.write("(");
+                self.write(Syntax::TEST_FAULTS_PARAM);
+                self.write(": ");
+                self.fmt_expr(faults, Prec::OrFallback);
+                self.write(")");
+            }
             self.write(" fn ");
-            self.write(
-                t.name
-                    .as_deref()
-                    .expect("property tests have a parsed name"),
-            );
+            self.write(t.name.as_deref().expect("property tests have a parsed name"));
             self.write("(");
             self.fmt_param_list(&t.params);
             self.write(")");

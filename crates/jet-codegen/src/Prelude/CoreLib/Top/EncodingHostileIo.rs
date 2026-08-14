@@ -222,6 +222,9 @@ fn jet_encoding_hostile_io_apply_interrupt(
 }
 
 fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io::Result<usize> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(std::io::Error::other("fault injected: FS.Read"));
+    }
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Read;
         return reader.inner.read(buf);
@@ -255,6 +258,9 @@ fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io
 }
 
 fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std::io::Result<()> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(std::io::Error::other("fault injected: FS.Write"));
+    }
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Write;
         return writer.inner.write_all(bytes);
@@ -299,6 +305,9 @@ fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std:
 }
 
 fn jet_encoding_file_flush(writer: &mut JetFileWriter) -> std::io::Result<()> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(std::io::Error::other("fault injected: FS.Write"));
+    }
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Write;
         return writer.inner.flush();

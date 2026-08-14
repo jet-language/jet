@@ -7,6 +7,8 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+// D-TESTFAULT1=A: TEST_FAULTS_PARAM is the named configuration slot on the
+// existing KW_TEST marker; it introduces no token or new grammar category.
 // D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A: KW_MARKER is the one
 // declaring word, and `Registry::rows` is the one registration table behind it —
 // a marker rule, a knowledge plane, a right, and a build fact are rows of the

@@ -856,6 +856,9 @@ pub enum RuleArgType {
     Bool,
     Int,
     DurationOrString,
+    /// D-TESTFAULT1=A: a closed list of effect-root operation paths used by
+    /// the test harness. This is a marker contract shape, not a runtime type.
+    EffectRoots,
 }
 
 /// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler vocabulary is published as
@@ -968,6 +971,7 @@ impl RuleArgType {
             Self::Bool => "Bool",
             Self::Int => "Int",
             Self::DurationOrString => "Duration | String",
+            Self::EffectRoots => "[Effect]",
         }
     }
 
@@ -1655,7 +1659,7 @@ mod tests {
             for param in row.signature.params {
                 if matches!(
                     param.source_type,
-                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String" | "T.default"
+                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String" | "[Effect]" | "T.default"
                 ) {
                     continue;
                 }

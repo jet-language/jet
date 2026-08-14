@@ -157,6 +157,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-FAIL-CARRIER1=A: the one carrier under `T?` and `T ? E`. First, because
     // every other part builds outcomes on top of it.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
+    include_str!("../Prelude/FaultInjection.rs"),
     include_str!("../Prelude/Job.rs"),
     include_str!("../Prelude/Core/Option.rs"),
     include_str!("../Prelude/Core/FixedList.rs"),
@@ -2440,6 +2441,8 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let outcome =
             std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
+        let fault_injection =
+            std::fs::read_to_string(root.join("src/Prelude/FaultInjection.rs")).unwrap();
         let job = std::fs::read_to_string(root.join("src/Prelude/Job.rs")).unwrap();
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
@@ -2506,6 +2509,7 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
+            ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
             ("src/Prelude/Job.rs", job.as_str()),
             ("src/Prelude/Core/Option.rs", option.as_str()),
             ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
@@ -2578,6 +2582,9 @@ mod tests {
         let production_codegen = codegen.split("#[cfg(test)]\nmod tests").next().unwrap();
         let outcome_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
+            .unwrap();
+        let fault_injection_pos = production_codegen
+            .find("include_str!(\"../Prelude/FaultInjection.rs\")")
             .unwrap();
         let job_pos = production_codegen
             .find("include_str!(\"../Prelude/Job.rs\")")
@@ -2675,6 +2682,8 @@ mod tests {
         assert!(
             outcome_pos < unicode_pos
                 && outcome_pos < job_pos
+                && outcome_pos < fault_injection_pos
+                && fault_injection_pos < job_pos
                 && job_pos < option_pos
                 && outcome_pos < option_pos
                 && option_pos < fixed_list_pos
@@ -2716,6 +2725,7 @@ mod tests {
             PRELUDE_PARTS,
             [
                 outcome.as_str(),
+                fault_injection.as_str(),
                 job.as_str(),
                 option.as_str(),
                 fixed_list.as_str(),
@@ -2760,6 +2770,7 @@ mod tests {
         push_prelude(&mut emitted);
         let expected = [
             outcome.as_str(),
+            fault_injection.as_str(),
             job.as_str(),
             option.as_str(),
             fixed_list.as_str(),
@@ -2802,10 +2813,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 426_020, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 429_720, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "7bd5eb8a9c8e09afe9b4fc48e57049c1076f858bdcaf24ca07692d94c82e1a53",
+            "fe5a40539ea1f9b909b7c1ea6033d0fde59c02cbc3f216b80042934b76d9712d",
             "split changed prelude bytes, order, or boundary newline"
         );
     }
@@ -3340,6 +3351,16 @@ fn any_property_test(tests: &[TestCase<'_>]) -> bool {
     tests.iter().any(|t| !t.test.params.is_empty())
 }
 
+fn fault_selector_literal(test: &TestDef) -> String {
+    let selectors = test
+        .faults
+        .iter()
+        .map(|fault| escape_rust_str(fault))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("&[{selectors}]")
+}
+
 /// D-DOTSCOPE1: is this test whole-test-skipped — i.e. does a `.skip` scope
 /// member appear as its FIRST statement? The whole test is then not run and
 /// reports `name: skip`. A `.skip` later in the body is a region-skip instead.
@@ -3374,8 +3395,18 @@ fn emit_test_fns(
         if test.params.is_empty() {
             *cx.current_fn.borrow_mut() = format!("jet_test_{}", i);
             out.push_str(&format!("{visibility}fn jet_test_{}() -> Result<(), String> {{\n", i));
-            emit_test_body(cx, &test.body, out);
-            out.push_str("    Ok(())\n");
+            if test.faults.is_empty() {
+                emit_test_body(cx, &test.body, out);
+                out.push_str("    Ok(())\n");
+            } else {
+                out.push_str(&format!(
+                    "    jet_fault_test_loop({}, || {{\n",
+                    fault_selector_literal(test)
+                ));
+                emit_test_body(cx, &test.body, out);
+                out.push_str("        Ok(())\n");
+                out.push_str("    }})\n");
+            }
             out.push_str("}\n\n");
             continue;
         }
@@ -3393,8 +3424,22 @@ fn emit_test_fns(
             sig.join(", ")
         ));
         *cx.current_fn.borrow_mut() = format!("jet_prop_{}", i);
-        TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
-        out.push_str("    Ok(())\n");
+        if test.faults.is_empty() {
+            TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
+            out.push_str("    Ok(())\n");
+        } else {
+            out.push_str(&format!(
+                "    jet_fault_test_loop({}, || {{\n",
+                fault_selector_literal(test)
+            ));
+            for parameter in &test.params {
+                let name = mangle(&parameter.name);
+                out.push_str(&format!("        let {name} = {name}.clone();\n"));
+            }
+            TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
+            out.push_str("        Ok(())\n");
+            out.push_str("    })\n");
+        }
         out.push_str("}\n\n");
 
         // Driver: generate a tuple of inputs per case; on the first failing case,
@@ -3859,6 +3904,7 @@ fn emit_bundle_tests_cov_inner(
         let module_path = mangle(&module.alias);
         out.push_str(&format!("mod {} {{\n", module_path));
         out.push_str(MOD_USE);
+        out.push_str("use super::jet_fault_test_loop;\n");
         if coverage {
             out.push_str("use super::{jet_cov, jet_cov_branch};\n");
         }

@@ -1957,6 +1957,25 @@ fn run() {}
 }
 
 #[test]
+fn fmt_test_faults_stability() {
+    // D-TESTFAULT1=A: the typed effect-root list is part of the Test marker
+    // contract and must survive both property-test formatting passes.
+    let src = "\
+#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+    require(true)
+}
+fn run() {}
+";
+    let once = jet::format_source(src).expect("fault-configured test should format");
+    assert!(
+        once.contains("#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"),
+        "formatter dropped the fault selector: {once}"
+    );
+    let twice = jet::format_source(&once).expect("fault-configured test should reformat");
+    assert_eq!(once, twice, "fault-configured Test must be fmt-idempotent");
+}
+
+#[test]
 fn fmt_scope_members_stability() {
     // D-DOTSCOPE1: `.setup` / `.expect_fail` / `.timeout(dur)` / `.skip("why")`
     // scope-member statements must survive fmt byte-for-byte, including the

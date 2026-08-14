@@ -436,6 +436,7 @@ pub(crate) mod runtime {
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use crate::fault_injection::jet_fault_should_fail;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -1104,6 +1105,13 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
+            if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+                return Some(Ok(ambient_failed(ambient_io_error(
+                    "Write",
+                    &path,
+                    "fault injected: FS.Write",
+                ))));
+            }
             let file = if method == "append" {
                 std::fs::OpenOptions::new()
                     .create(true)
@@ -1129,6 +1137,13 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
+            if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+                return Some(Ok(ambient_failed(ambient_io_error(
+                    "Read",
+                    &path,
+                    "fault injected: FS.Read",
+                ))));
+            }
             Some(Ok(match std::fs::File::open(&path) {
                 Ok(file) => ambient_ok(CtValue::Int(ambient_stream_insert(
                     AmbientStream::FileReader(runtime::JetFileReader {
@@ -1429,6 +1444,27 @@ pub(crate) fn ambient_handle(
     }) else {
         return Some(Err(ambient_unsupported("stream handle receiver", span)));
     };
+    if op == "FileReaderReadLine" && crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return Some(Ok(ambient_failed(ambient_io_error(
+            "Read",
+            "",
+            "fault injected: FS.Read",
+        ))));
+    }
+    if matches!(op, "FileWriterWriteLine" | "FileWriterFlush")
+        && crate::fault_injection::jet_fault_should_fail("FS.Write")
+    {
+        let operation = if op == "FileWriterFlush" {
+            "Flush"
+        } else {
+            "Write"
+        };
+        return Some(Ok(ambient_failed(ambient_io_error(
+            operation,
+            "",
+            "fault injected: FS.Write",
+        ))));
+    }
     use std::io::{BufRead, Write};
 
     let result: Result<CtValue, String> = match op {
@@ -2060,6 +2096,9 @@ fn option_bits(opt: Option<i64>) -> u64 {
 
 pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     match std::fs::File::create(&p) {
         Ok(f) => {
             let w = runtime::JetFileWriter {
@@ -2078,6 +2117,9 @@ pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
 
 pub(crate) extern "C" fn jet_jit_fs_open(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     match std::fs::File::open(&p) {
         Ok(f) => {
             let r = runtime::JetFileReader {

@@ -114,6 +114,8 @@ module.exports = grammar({
     // `distinct_def`) carry their own leading markers; the rest take none.
     _item: ($) =>
       choice(
+        $.test_block,
+        $.bench_block,
         $.function_def,
         $.struct_def,
         $.enum_def,
@@ -126,8 +128,6 @@ module.exports = grammar({
         $.use_stmt,
         $.module_def,
         $.extern_block,
-        $.test_block,
-        $.bench_block,
         $.marker_decl,
         $.migration_block,
         $.config_field,
@@ -518,8 +518,26 @@ module.exports = grammar({
       ),
 
     // ── Test / Bench blocks (S43, D-BENCH1, D-CASING1) ─────────────────────
-    test_block: ($) => seq("@", "Test", "(", $.string_literal, ")", $.block),
-    bench_block: ($) => seq("@", "Bench", "(", $.string_literal, ")", $.block),
+    // D-TESTFAULT1=A: the generic marker reader already owns
+    // `#Test(faults: [Fs.Write])`; this production only gives the editor the
+    // two test declaration tails (`{ … }` and `fn name(…) { … }`).
+    test_block: ($) =>
+      seq(
+        $.test_marker,
+        choice(
+          seq(
+            "fn",
+            field("name", $.identifier),
+            optional($.type_params),
+            $.param_list,
+            $.block,
+          ),
+          $.block,
+        ),
+      ),
+    bench_block: ($) => seq($.bench_marker, $.block),
+    test_marker: ($) => seq("#", "Test", optional($.marker_args)),
+    bench_marker: ($) => seq("#", "Bench", optional($.marker_args)),
 
     // ── Type params / generics ─────────────────────────────────────────────
     // `<T>`, `<T, U>`, ordinary trait bounds, and the ratified physical-unit

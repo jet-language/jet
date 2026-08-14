@@ -220,6 +220,13 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
     use std::io::Write;
 
     let path_s = p.inner.to_string_lossy();
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path_s.to_string()),
+            "fault injected: FS.Write",
+        ));
+    }
     let parent = p.inner.parent().ok_or_else(|| {
         jet_std::io_error_at(
             jet_std::IOOperation::Write,
@@ -270,6 +277,13 @@ fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     Ok(JetFileReader {
         inner: std::io::BufReader::new(f),
@@ -277,6 +291,13 @@ fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> 
     })
 }
 fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     let f = std::fs::File::create(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(f),
@@ -284,6 +305,13 @@ fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError
     })
 }
 fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     let f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -298,6 +326,13 @@ fn jet_std_file_reader_read_line(
     r: &mut JetFileReader,
 ) -> Result<Option<String>, jet_std::IOError> {
     use std::io::BufRead;
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(r.path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let mut line = String::new();
     match r.inner.read_line(&mut line) {
         Ok(0) => Ok(None),
@@ -315,6 +350,13 @@ fn jet_std_file_writer_write_line(
     line: &String,
 ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(w.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     w.inner
         .write_all(line.as_bytes())
         .and_then(|_| w.inner.write_all(b"\n"))
@@ -322,5 +364,12 @@ fn jet_std_file_writer_write_line(
 }
 fn jet_std_file_writer_flush(w: &mut JetFileWriter) -> Result<(), jet_std::IOError> {
     use std::io::Write;
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(w.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     w.inner.flush().map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Flush, &w.path, e))
 }

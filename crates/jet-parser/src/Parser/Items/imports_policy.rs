@@ -1132,7 +1132,7 @@ impl<'a> Parser<'a> {
                     {
                         let t = self.bump();
                         self.diags.push(self.foreign_test_diag(t.span));
-                        self.test_def_after_kw().map(Item::Test)
+                        self.test_def_after_kw(None).map(Item::Test)
                     }
                     TokKind::KwModule if self.is_code_module_at(1) => self.code_module(false),
                     TokKind::KwModule => self.module_decl().map(Item::Module),

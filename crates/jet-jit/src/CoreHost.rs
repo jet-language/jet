@@ -880,6 +880,9 @@ extern "C" fn jet_jit_fs_exists(path: i64) -> i8 {
 
 extern "C" fn jet_jit_fs_read(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     match std::fs::read_to_string(&p) {
         Ok(text) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
@@ -891,6 +894,9 @@ extern "C" fn jet_jit_fs_read(path: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_read_bytes(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     match std::fs::read(&p) {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&format!("read_bytes {p}: {e}")),
@@ -900,6 +906,9 @@ extern "C" fn jet_jit_fs_read_bytes(path: i64) -> i64 {
 extern "C" fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     let p = clone_string(path);
     let t = clone_string(text);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     match std::fs::write(&p, t) {
         Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("write {p}: {e}")),
@@ -908,6 +917,9 @@ extern "C" fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     match std::fs::create_dir_all(&p) {
         Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
@@ -982,6 +994,9 @@ extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     let rd = match std::fs::read_dir(&p) {
         Ok(rd) => rd,
         Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
@@ -1216,6 +1231,9 @@ fn jet_temp_path(prefix: &str) -> String {
 
 extern "C" fn jet_jit_fs_remove(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     let res = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p));
     match res {
         Ok(()) => result_ok(0),
@@ -1225,6 +1243,9 @@ extern "C" fn jet_jit_fs_remove(path: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     let path = std::path::Path::new(&p);
     let res = if path.is_dir() {
         std::fs::remove_dir_all(&p)
@@ -1239,6 +1260,9 @@ extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_stat(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     let meta = match std::fs::symlink_metadata(&p) {
         Ok(m) => m,
         Err(e) => return result_err_msg(&format!("stat {p}: {e}")),
@@ -1278,6 +1302,9 @@ extern "C" fn jet_jit_fs_stat(path: i64) -> i64 {
 extern "C" fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
     use std::io::{Read, Seek, SeekFrom};
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     let mut f = match std::fs::File::open(&p) {
         Ok(f) => f,
         Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
@@ -1298,6 +1325,9 @@ extern "C" fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
     use std::io::{Seek, SeekFrom, Write};
     let p = clone_string(path);
     let data = clone_bytes(bytes);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     let mut f = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -1317,6 +1347,9 @@ extern "C" fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_fsync(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     match std::fs::OpenOptions::new()
         .read(true)
         .open(&p)
@@ -1330,6 +1363,9 @@ extern "C" fn jet_jit_fs_fsync(path: i64) -> i64 {
 extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
     let p = clone_string(path);
     let data = clone_bytes(bytes);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     let path = std::path::Path::new(&p);
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
@@ -1358,6 +1394,9 @@ extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_walk(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     let entries = match walk_entries(std::path::Path::new(&p)) {
         Ok(e) => e,
         Err(e) => return result_err_msg(&format!("walk {p}: {e}")),
@@ -1381,6 +1420,9 @@ extern "C" fn jet_jit_fs_walk(path: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_glob(pattern: i64) -> i64 {
     let pat = clone_string(pattern);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {pat}"));
+    }
     let split = pat.find(['*', '?']).unwrap_or(pat.len());
     let base = pat[..split]
         .rsplit_once(std::path::MAIN_SEPARATOR)
@@ -1410,6 +1452,9 @@ extern "C" fn jet_jit_fs_glob(pattern: i64) -> i64 {
 extern "C" fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
     let src = clone_string(from);
     let dst = clone_string(to);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+    }
     #[cfg(unix)]
     let res = std::os::unix::fs::symlink(&src, &dst);
     #[cfg(windows)]
@@ -1428,6 +1473,9 @@ extern "C" fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_read_link(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     match std::fs::read_link(&p) {
         Ok(target) => {
             let sid = Concurrency::with_runtime_mut(|rt| {
@@ -1443,6 +1491,9 @@ extern "C" fn jet_jit_fs_read_link(path: i64) -> i64 {
 extern "C" fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
     let src = clone_string(from);
     let dst = clone_string(to);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+    }
     match std::fs::hard_link(&src, &dst) {
         Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("hard_link {dst}: {e}")),
@@ -1451,6 +1502,9 @@ extern "C" fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_canonicalize(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
     match std::fs::canonicalize(&p) {
         Ok(abs) => {
             let sid = Concurrency::with_runtime_mut(|rt| {
@@ -1482,6 +1536,12 @@ extern "C" fn jet_jit_fs_absolute(path: i64) -> i64 {
 extern "C" fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
     let src = clone_string(from);
     let dst = clone_string(to);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {src}"));
+    }
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+    }
     fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
         for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -1506,6 +1566,9 @@ extern "C" fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
 extern "C" fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
     let path = jet_temp_path(&pref);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {path}"));
+    }
     match std::fs::create_dir(&path) {
         Ok(()) => result_ok(path_record(path) as u64),
         Err(e) => result_err_msg(&format!("temp_dir {path}: {e}")),
@@ -1515,6 +1578,9 @@ extern "C" fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
 extern "C" fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
     let path = jet_temp_path(&pref);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {path}"));
+    }
     match std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -1527,6 +1593,9 @@ extern "C" fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
 
 extern "C" fn jet_jit_fs_lock(path: i64) -> i64 {
     let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
     match std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)

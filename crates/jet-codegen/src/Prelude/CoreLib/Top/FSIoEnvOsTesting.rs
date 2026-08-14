@@ -1,4 +1,11 @@
 fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
@@ -14,17 +21,45 @@ fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError
     }
 }
 fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     std::fs::read_link(path)
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
 }
 fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
 }
 fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::rename(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
 }
 fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let meta = std::fs::symlink_metadata(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     let ft = meta.file_type();
     let modified_ms = meta.modified().ok().and_then(system_time_ms).unwrap_or(0);
@@ -55,6 +90,13 @@ fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     std::fs::canonicalize(path)
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Resolve, path, e))
@@ -71,6 +113,20 @@ fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
     Ok(abs.to_string_lossy().to_string())
 }
 fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(from.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     fn copy_tree(
         src: &std::path::Path,
         dst: &std::path::Path,
@@ -93,6 +149,13 @@ fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOErro
     copy_tree(std::path::Path::new(from), std::path::Path::new(to), from)
 }
 fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let root = std::path::PathBuf::from(path);
     let mut out = Vec::new();
     fn walk_dir(
@@ -161,6 +224,13 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 }
 fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::{Read, Seek, SeekFrom};
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let mut f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     f.seek(SeekFrom::Start(offset.max(0) as u64))
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
@@ -175,6 +245,13 @@ fn jet_std_fs_write_at(
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     use std::io::{Seek, SeekFrom, Write};
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -185,6 +262,13 @@ fn jet_std_fs_write_at(
     f.write_all(bytes).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
 fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::OpenOptions::new()
         .read(true)
         .open(path)
@@ -196,6 +280,13 @@ fn jet_std_fs_write_atomic(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std
 }
 fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOError> {
     let path = jet_temp_path(prefix);
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::create_dir(&path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
     Ok(jet_std::TempDir {
         path,
@@ -204,6 +295,13 @@ fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOE
 }
 fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::IOError> {
     let path = jet_temp_path(prefix);
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -215,6 +313,13 @@ fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::I
     })
 }
 fn jet_std_fs_lock(path: &String) -> Result<jet_std::FileLock, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
     std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -310,8 +415,108 @@ fn jet_std_io_secret_error(error: JetTermSecretError) -> jet_std::IOError {
 fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> {
     jet_term_input_secret(
         prompt,
-        |text| jet_term_write_stdout(text, true).map_err(|error| error.to_string()),
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
         || {
+            if jet_fault_should_fail("IO.Read") {
+                return Err("fault injected: IO.Read".to_string());
+            }
             let mut secret = String::new();
             std::io::stdin()
                 .read_line(&mut secret)
@@ -324,6 +529,13 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
 
 fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
     use std::io::Read;
+    if jet_fault_should_fail("IO.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            "fault injected: IO.Read",
+        ));
+    }
     let mut s = String::new();
     std::io::stdin()
         .read_to_string(&mut s)
@@ -342,6 +554,13 @@ fn jet_std_io_stdin() -> JetStdinReader {
 }
 fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IOError> {
     use std::io::BufRead;
+    if jet_fault_should_fail("IO.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            "fault injected: IO.Read",
+        ));
+    }
     let mut line = String::new();
     match r.inner.read_line(&mut line) {
         Ok(0) => Ok(None),
@@ -385,41 +604,809 @@ fn jet_std_io_stderr() -> JetStderr {
     JetStderr
 }
 fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     jet_term_write_stdout(text, false)
-        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
-}
-fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     let text = format!("{text}\n");
     jet_term_write_stdout(&text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
-}
-fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     jet_term_write_stdout_bytes(bytes, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
-}
-fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
     jet_term_write_stdout("", true)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+}
+fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+}
+fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+}
+fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
 }
 fn jet_std_io_stdout_is_tty(_s: &JetStdout) -> bool {
     jet_term_stdout_is_terminal()
 }
 fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     jet_term_write_stderr(text, false)
-        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
-}
-fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     let text = format!("{text}\n");
     jet_term_write_stderr(&text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
-}
-fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
     jet_term_write_stderr_bytes(bytes, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
-}
-fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
     jet_term_write_stderr("", true)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+}
+fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+}
+fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
+}
+fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
+1853:         |text| {
+            if jet_fault_should_fail("IO.Write") {
+                return Err("fault injected: IO.Write".to_string());
+            }
+            if jet_fault_should_fail("IO.Flush") {
+                return Err("fault injected: IO.Flush".to_string());
+            }
+            jet_term_write_stdout(text, true).map_err(|error| error.to_string())
+        },
+1854:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout(text, false)
+1855:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1856:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stdout".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+1857:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stdout".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+1858:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr(text, false)
+1859:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1860:     if jet_fault_should_fail("IO.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("stderr".to_string()),
+            "fault injected: IO.Write",
+        ));
+    }
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+1861:     if jet_fault_should_fail("IO.Flush") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Flush,
+            Some("stderr".to_string()),
+            "fault injected: IO.Flush",
+        ));
+    }
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+1862:         if jet_fault_should_fail("IO.Write") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some("stdout".to_string()),
+                "fault injected: IO.Write",
+            ));
+        }
+        if jet_fault_should_fail("IO.Flush") {
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Flush,
+                Some("stdout".to_string()),
+                "fault injected: IO.Flush",
+            ));
+        }
+        jet_term_write_stdout(p, true)
+1863:     use super::term_prelude::jet_term_write_stdout;
+    use crate::fault_injection::jet_fault_should_fail;
 }
 fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
     jet_term_stderr_is_terminal()

@@ -15,6 +15,40 @@ fn codes(src: &str) -> Vec<String> {
 }
 
 #[test]
+fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+    let root = common::unique_tmp("jet_test_fault_loop");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    fs::write(
+        &entry,
+        r#"
+use core.files as fs
+
+#Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
+    fs.write("fault-loop.txt", "x") ?? return
+    require(true)
+}
+
+fn run() {}
+"#,
+    )
+    .unwrap();
+    let (first, _) = jet::compile_tests_with_path("", entry.to_str().unwrap())
+        .expect("fault-configured test should compile");
+    let (second, _) = jet::compile_tests_with_path("", entry.to_str().unwrap())
+        .expect("fault-configured test should compile twice");
+    assert_eq!(first, second, "fault schedules must be deterministic");
+    assert!(
+        first.contains("jet_fault_test_loop(&[\"FS.Write\"]"),
+        "test harness must carry the sema-canonical selector:\n{first}"
+    );
+    assert!(
+        first.contains("while fail_nth <= max_counts[selector_index]"),
+        "test harness must enumerate each reachable fail-nth call:\n{first}"
+    );
+}
+
+#[test]
 fn cross_module_same_name_effects_keep_qualified_rows() {
     let root = common::unique_tmp("jet_effect_collision");
     fs::create_dir_all(&root).unwrap();

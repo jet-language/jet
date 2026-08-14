@@ -652,9 +652,12 @@ pub const BUILTIN_FETCH: &str = "fetch";
 /// top-level test-declaration block, written as the marker `#Test("name") { … }`.
 /// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
 /// argument, matching the `#Caps(…)` / `#Grant(…)` marker family.
+/// D-TESTFAULT1=A (ratified 2026-08-12): the optional `faults: [Effect]`
+/// argument names effect-root call sites for the deterministic test harness.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
 /// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
 pub const KW_TEST: &str = "Test";
+pub const TEST_FAULTS_PARAM: &str = "faults";
 
 /// D-BENCH1 + D-BENCH-MARKER1=A: top-level region-benchmark block, written as
 /// the marker `#Bench("name") { … }` — the exact sibling of `#Test("name") { … }`.
