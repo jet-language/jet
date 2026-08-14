@@ -776,7 +776,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     };
     assert_eq!(edits.len(), 1);
     let edit = match &edits[0] {
-        jet_foundation::JSON::JSONValue::Object(edit) => edit,
+        jet_foundation::JSON::JSONValue::Object(_) => &edits[0],
         _ => panic!("fix edit is not an object"),
     };
     let edit_file = jet_foundation::JSON::json_str(
@@ -785,7 +785,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     .unwrap();
     assert_eq!(fix_file, edit_file);
     let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
-        jet_foundation::JSON::JSONValue::Object(span) => span,
+        span @ jet_foundation::JSON::JSONValue::Object(_) => span,
         _ => panic!("fix span is not an object"),
     };
     let start = jet_foundation::JSON::json_int(
