@@ -97,11 +97,17 @@ const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
 /// vendored package tree. Skipping all three keeps the count stable whatever a
 /// working tree happens to hold: worktrees, scratch, caches and build output
 /// are not the repository.
-fn is_skipped_dir(name: &str) -> bool {
-    name.starts_with('.')
-        || name.starts_with("target")
-        || name == "build"
-        || name == "node_modules"
+fn is_skipped_dir(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        let name = name.to_string_lossy();
+        name.starts_with('.')
+            || name.starts_with("target")
+            || name == "build"
+            || name == "node_modules"
+    })
 }
 
 fn walk(root: &Path, out: &mut Vec<PathBuf>) {
@@ -110,9 +116,11 @@ fn walk(root: &Path, out: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {
-            if !is_skipped_dir(&name) {
+            let relative = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .unwrap_or(&path);
+            if !is_skipped_dir(relative) {
                 walk(&path, out);
             }
         } else {
@@ -124,7 +132,8 @@ fn walk(root: &Path, out: &mut Vec<PathBuf>) {
 /// Every file in the repository, for the rows that count file names.
 fn all_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    walk(Path::new("."), &mut out);
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    walk(root, &mut out);
     out
 }
 
@@ -132,10 +141,11 @@ fn all_files() -> Vec<PathBuf> {
 /// trees are left out; they hold retired forms on purpose.
 fn content_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for root in CONTENT_ROOTS {
-        walk(Path::new(root), &mut out);
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for content_root in CONTENT_ROOTS {
+        walk(&repo_root.join(content_root), &mut out);
     }
-    for entry in fs::read_dir(".").into_iter().flatten().flatten() {
+    for entry in fs::read_dir(repo_root).into_iter().flatten().flatten() {
         let path = entry.path();
         if path.is_file() && path.extension().is_some_and(|ext| ext == "jet") {
             out.push(path);
@@ -168,9 +178,11 @@ fn contains_word(text: &str, word: &str) -> bool {
 }
 
 #[test]
-fn retirement_walk_skips_build_output_but_keeps_live_source_visible() {
-    assert!(is_skipped_dir("build"));
-    assert!(!is_skipped_dir("examples"));
+fn retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visible() {
+    assert!(is_skipped_dir(Path::new("build")));
+    assert!(is_skipped_dir(Path::new(".claude/worktrees/worker/examples")));
+    assert!(is_skipped_dir(Path::new(".agent-worktrees/worker/examples")));
+    assert!(!is_skipped_dir(Path::new("examples")));
     let live_type = concat!("De", "que");
     let live_source = format!("let queue: {live_type}<Int> = {live_type}.new()");
     assert!(contains_word(&live_source, live_type));
