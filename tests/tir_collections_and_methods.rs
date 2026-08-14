@@ -580,14 +580,14 @@ struct Profile {
     handle: (String?)
 }
 struct Account {
-    profile: Profile
+    details: Profile
 }
 fn handle_of(a: (Account?)) => (String?) {
-    return a?.profile?.handle
+    return a?.details?.handle
 }
 fn run() {
     p :: Profile.{ handle: Val(\"jay\") }
-    acct :: Account.{ profile: p }
+    acct :: Account.{ details: p }
     print(handle_of(Val(acct)) ?? \"none\")
     print(handle_of(None) ?? \"none\")
 }
