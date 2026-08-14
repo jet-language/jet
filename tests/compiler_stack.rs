@@ -205,6 +205,7 @@ fn tir_func(
         is_main: name == "run",
         line: 1,
         is_unsafe: false,
+        unsafe_gate: None,
         is_pure: true,
         memo_bound: None,
         is_reactive: false,
@@ -255,6 +256,7 @@ fn nested_tir_program(
         struct_fields: std::collections::HashMap::new(),
         struct_field_types: std::collections::HashMap::new(),
         memo_dependencies: std::collections::HashMap::new(),
+        reflection_fields: std::collections::HashMap::new(),
         reflect_paths: std::collections::HashMap::new(),
         struct_type_params: std::collections::HashMap::new(),
         enum_variants: std::collections::HashMap::new(),
@@ -283,7 +285,7 @@ fn run_tir_program(
                 &mut jet::Comptime::DevSink::new(),
                 std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
-                false,
+                jet::Policy::GateSet::default(),
             )
         })
         .expect("spawn TIR boundary evaluator")

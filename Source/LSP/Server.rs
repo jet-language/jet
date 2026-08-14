@@ -2992,7 +2992,7 @@ mod project_part_tests {
             json.contains(r#""fix":"replace `#[Codable]` with `#Codable`""#),
             "{json}"
         );
-        assert!(json.contains(r#""new_text":"#Codable""#), "{json}");
+        assert!(json.contains(r##""new_text":"#Codable""##), "{json}");
     }
 
     #[test]
