@@ -357,6 +357,15 @@ but the user-facing artifact does not meet a Python converter's meaning of a
 notebook. Reopen it or create a narrowly scoped successor for authoring,
 execution, output inspection, plots, keyboard flow, and recovery.
 
+Closeout note (2026-08-14): the preceding finding is the audit snapshot that
+motivated #1413. The first-party page now has editable Jet and Markdown cells,
+run/inspect/debug/profile/interrupt controls, stdin queueing, save/open/reopen,
+stable-ID merge, and both exports. `tests/notebook.rs` runs the shared Prelude
+file/input journey, while `scripts/notebook-test/acceptance.mjs` drives the
+production loopback server through the real browser client and all three client
+lenses. The first-hour path and its explicit `#Grant`/`Path` example are
+documented in [`docs/first-hour.md`](../first-hour.md).
+
 ### Deployment
 
 Jet wins when it emits one native artifact that runs without a Python

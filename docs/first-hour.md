@@ -107,6 +107,26 @@ Open the printed local URL. Add a Jet cell, edit it, and run it. Add a
 Markdown cell to explain the result. The same session provides inspect,
 debug, profile, interrupt, completion, and queued `input()` controls.
 
+Input and file access are explicit. Queue `Ada` in the browser's **Input**
+control, then run this cell:
+
+```jet
+#Grant(caps: IO, FS) {
+    name :: input("name: ") ?? "world"
+    assert(name == "Ada")
+    write_file("notes.txt", name) ?? panic("write failed")
+    assert(file_exists("notes.txt"))
+    assert_eq(file_exists("notes.txt"), true)
+    print(read_file(Path.from("notes.txt")) ?? panic("read failed"))
+}
+```
+
+The grant is the cell's explicit authority. `input`, `write_file`,
+`file_exists`, and `read_file` are the same Prelude ambients used by the
+terminal REPL; the relative file stays inside the notebook directory. The
+`Path.from` call also shows the expert form used when a Core file operation
+needs a `Path` value.
+
 Save the document, stop the process, and run the same command again. **Reopen**
 restores the cells and source. **Merge** combines another `.jetnb` by stable
 cell ID. Export to `ipynb` or `.jet` shows an explicit loss report; imported

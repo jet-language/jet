@@ -9,6 +9,10 @@ use jet::REPL::Notebook::{
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[test]
 fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
@@ -345,4 +349,161 @@ fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
     assert!(out.contains("debug_attached"), "{out}");
     assert!(out.contains("perf_attached"), "{out}");
     assert!(kernel.debug_attached() && kernel.perf_attached());
+}
+
+#[test]
+fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
+    let scratch = common::Scratch::new("notebook-first-hour");
+    let document = scratch.join("journey.jetnb");
+    let source = r#"#Grant(caps: IO, FS) {
+    eprint("ambient-eprint")
+    name :: input("name: ") ?? "fallback"
+    assert(name == "Ada")
+    write_file("notes.txt", name) ?? panic("write failed")
+    assert(file_exists("notes.txt"))
+    assert_eq(file_exists("notes.txt"), true)
+    print(read_file(Path.from("notes.txt")) ?? panic("read failed"))
+}"#;
+    let environment = Kernel::environment_hash(&scratch.path);
+    let mut kernel = Kernel::open(Some(&document), environment.clone()).unwrap();
+    let cell_id = kernel.notebook.add_cell(CellKind::Jet, source).id.clone();
+    kernel.push_stdin("Ada");
+
+    let result = kernel
+        .execute_cell(ClientKind::FirstParty, &cell_id)
+        .unwrap();
+    assert!(result.ok(), "shared Prelude cell failed: {}", result.eval.text);
+    assert!(result.bundle.text_plain.contains("ambient-eprint"));
+    assert!(result.bundle.text_plain.contains("Ada"));
+    assert_eq!(std::fs::read_to_string(scratch.join("notes.txt")).unwrap(), "Ada");
+
+    kernel.save_document(Some(&document)).unwrap();
+    let reopened = Kernel::open(Some(&document), environment).unwrap();
+    assert_eq!(reopened.document_path.as_deref(), Some(document.as_path()));
+    assert_eq!(reopened.notebook.cells[0].source, source);
+}
+
+struct RunningNotebook(Child);
+
+impl Drop for RunningNotebook {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn command_available(name: &str, environment_name: &str) -> bool {
+    let executable = std::env::var_os(environment_name).unwrap_or_else(|| name.into());
+    Command::new(executable).arg("--version").output().is_ok()
+}
+
+fn free_loopback_port() -> u16 {
+    TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn wait_for_notebook_server(port: u16, token: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "notebook server did not become ready");
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+            let request = format!(
+                "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+            );
+            let _ = stream.write_all(request.as_bytes());
+            let mut response = String::new();
+            let _ = stream.read_to_string(&mut response);
+            if response.starts_with("HTTP/1.1 200") && response.contains("\"ok\":true") {
+                return;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn notebook_browser_matrix_uses_production_server() {
+    if !command_available("node", "NODE") {
+        eprintln!("skipping notebook browser matrix: node is unavailable");
+        return;
+    }
+    let browsers = [
+        ("chromium", command_available("chromium", "CHROMIUM")),
+        (
+            "firefox",
+            command_available("firefox", "FIREFOX")
+                && command_available("geckodriver", "GECKODRIVER"),
+        ),
+    ];
+    if !browsers.iter().any(|(_, available)| *available) {
+        eprintln!("skipping notebook browser matrix: no supported browser is available");
+        return;
+    }
+
+    let scratch = common::Scratch::new("notebook-browser");
+    let mut ran = 0;
+    for (browser, available) in browsers {
+        if !available {
+            continue;
+        }
+        let browser_root = scratch.join(browser);
+        std::fs::create_dir_all(&browser_root).unwrap();
+        let document = browser_root.join("journey.jetnb");
+        let merge_document = browser_root.join("merge.jetnb");
+        let mut merge = JetNotebook::new(Kernel::environment_hash(&browser_root));
+        merge.add_cell(CellKind::Markdown, "# merged from another document");
+        save_jetnb(&merge, &merge_document).unwrap();
+
+        let port = free_loopback_port();
+        let token = "notebook-browser-test-token";
+        let bind = format!("127.0.0.1:{port}");
+        let port_text = port.to_string();
+        let child = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&browser_root)
+            .args([
+                "notebook",
+                document.to_str().unwrap(),
+                "--bind",
+                bind.as_str(),
+                "--token",
+                token,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _server = RunningNotebook(child);
+        wait_for_notebook_server(port, token);
+
+        let output = Command::new("node")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args([
+                "scripts/notebook-test/acceptance.mjs",
+                "--browser",
+                browser,
+                "--port",
+                port_text.as_str(),
+                "--token",
+                token,
+                "--save-path",
+                document.to_str().unwrap(),
+                "--merge-path",
+                merge_document.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{browser} notebook browser journey failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        ran += 1;
+    }
+    assert!(ran > 0);
 }

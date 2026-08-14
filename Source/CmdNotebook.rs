@@ -38,7 +38,9 @@ pub(crate) fn run_notebook(raw: &[String]) {
         }
     };
 
-    if protocol || !io::stdin().is_terminal() {
+    // An explicit bind is the production browser entry point. It must remain a
+    // server even when launched by a non-TTY harness or a service manager.
+    if protocol || (bind.is_none() && !io::stdin().is_terminal()) {
         run_headless(&mut kernel);
         exit(ExitCodes::OK);
     }
