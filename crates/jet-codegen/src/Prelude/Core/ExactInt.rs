@@ -532,6 +532,22 @@ impl std::ops::Rem for JetWasmInt {
     }
 }
 
+fn jet_wasm_int_abs(value: JetWasmInt) -> JetWasmInt {
+    value.abs_ref()
+}
+
+fn jet_wasm_int_min(left: JetWasmInt, right: JetWasmInt) -> JetWasmInt {
+    left.min(right)
+}
+
+fn jet_wasm_int_max(left: JetWasmInt, right: JetWasmInt) -> JetWasmInt {
+    left.max(right)
+}
+
+fn jet_wasm_int_clamp(value: JetWasmInt, low: JetWasmInt, high: JetWasmInt) -> JetWasmInt {
+    value.clamp(low, high)
+}
+
 fn jet_wasm_int_div(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.div_rem_ref(&right).map(|pair| pair.0).unwrap_or_else(|| {
         jet_arithmetic_stop(file, line, "division by zero")

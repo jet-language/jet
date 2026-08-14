@@ -2618,11 +2618,11 @@ fn web_grouped_use_list_wasm_bridge_roundtrip() {
         return;
     }
     let src = r#"#Target(Web)
-use core.math.[abs, min]
+use core.math.[abs, min, max, clamp]
 
 #WasmExport
 pub fn compute() => Int {
-    return abs(-8) + min(9, 4)
+    return abs(-8) + min(9, 4) + max(0, 0) + clamp(0, 0, 0)
 }
 
 #Target(JS)

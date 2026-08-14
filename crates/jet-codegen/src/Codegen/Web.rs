@@ -6744,6 +6744,15 @@ fn wasm_math_core_helper(
     if args.iter().any(|arg| &arg.ty != scalar_ty) || ret_ty != scalar_ty {
         return None;
     }
+    if matches!(scalar_ty, Type::Int) {
+        return Some(match method {
+            "abs" => "jet_wasm_int_abs",
+            "min" => "jet_wasm_int_min",
+            "max" => "jet_wasm_int_max",
+            "clamp" => "jet_wasm_int_clamp",
+            _ => return None,
+        });
+    }
     TIR::core_math_scalar_helper(method, scalar_ty)
 }
 
