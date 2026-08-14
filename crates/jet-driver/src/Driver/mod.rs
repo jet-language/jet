@@ -1617,12 +1617,12 @@ fn setting_value_from_fact(
                 variant: variant.clone(),
             })
         }
-        _ => Err(setting_value_diagnostic(
+        _ => Err(vec![setting_value_diagnostic(
             key,
             ty,
             &raw,
             "the computed value does not match the declared setting type".to_string(),
-        )),
+        )]),
     };
     result
 }
