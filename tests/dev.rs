@@ -9080,6 +9080,43 @@ fn run() {
 }
 
 #[test]
+fn value_position_enum_patterns_match_all_execution_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    for stem in [
+        "tooling/branch_dispatch_bench",
+        "types/enum_dot",
+        "types/enum_dot_patterns",
+        "types/enums",
+    ] {
+        let file = example_path(stem);
+        let expected = golden_program_output(stem);
+        let interpreted = match dev_iteration(&file, false, true) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("{stem} must run in the TIR interpreter: {diags:?}")
+            }
+        };
+        let default_dev = run_default_dev_resident(&file, &format!("{stem}_default"));
+        let cli_run = run_cli_default_resident("run", &file, &format!("{stem}_cli"));
+        let dir = common::unique_tmp(&format!("jet_{stem}_aot"));
+        let aot = compiled_binary_output(&dir, "value_pattern", 0, stem, &file);
+
+        assert_eq!(interpreted, expected, "interpreter drifted for {stem}");
+        assert_eq!(default_dev, expected, "default resident JIT drifted for {stem}");
+        assert_eq!(cli_run, expected, "default `jet run` drifted for {stem}");
+        assert_eq!(aot, expected, "AOT drifted for {stem}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn multi_head_payload_range_checks_each_slot_across_runtime_tiers() {
     require_multi_head_parity_prereqs();
     let src = r#"enum Pair {
