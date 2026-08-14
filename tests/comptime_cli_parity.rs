@@ -4,10 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const TIER_PARITY_STEMS: [&str; 6] = [
+const TIER_PARITY_STEMS: [&str; 5] = [
     "comptime/embed",
     "comptime/embed_bytes",
-    "comptime/fact_plane",
     "comptime/find",
     "comptime/find_empty",
     "tooling/declared_text_head",
@@ -70,108 +69,119 @@ fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
         .unwrap_or_else(|error| panic!("spawn `{}`: {error}", args.join(" ")))
 }
 
+fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
+    let case_dir = scratch.join(&stem.replace('/', "_"));
+    fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
+    let file_name = copy_comptime_fixture(root, &case_dir, stem);
+    let expected_path = root.join(format!("examples/features/expected/{stem}.out"));
+    let expected = fs::read(&expected_path)
+        .unwrap_or_else(|error| panic!("missing golden for `{stem}`: {error}"));
+    let cache = case_dir.join("cache");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", &file_name])
+        .current_dir(&case_dir)
+        .env("JET_CACHE_DIR", cache.join("aot"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to spawn AOT build for `{stem}`: {error}"));
+    assert!(
+        build.status.success(),
+        "AOT build failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary_name = file_name.strip_suffix(".jet").expect("Jet fixture extension");
+    let aot = Command::new(case_dir.join("build").join(binary_name))
+        .current_dir(&case_dir)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run AOT binary for `{stem}`: {error}"));
+    assert!(
+        aot.status.success(),
+        "AOT run failed for `{stem}`:\n{}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        aot.stdout, expected,
+        "AOT output differs from the checked-in golden for `{stem}`"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", &file_name, "--trace-tiers"])
+        .current_dir(&case_dir)
+        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to spawn `jet run` for `{stem}`: {error}"));
+    let trace = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "default `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{trace}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        trace
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "default `jet run` did not report resident native execution for `{stem}`:\n{trace}"
+    );
+    assert!(
+        !trace.contains("tier0 interp"),
+        "default `jet run` deopted to the interpreter for `{stem}`:\n{trace}"
+    );
+    assert_eq!(
+        output.stdout, expected,
+        "default `jet run` output differs from the checked-in golden for `{stem}`"
+    );
+
+    let interpreted_cache = cache.join("interpret");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--interpret", &file_name, "--trace-tiers"])
+        .current_dir(&case_dir)
+        .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
+        .env("JET_CACHE_DIR", interpreted_cache.join("build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}"));
+    let interpreted_trace = String::from_utf8_lossy(&interpreted.stderr);
+
+    assert!(
+        interpreted.status.success(),
+        "interpreted `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{interpreted_trace}",
+        String::from_utf8_lossy(&interpreted.stdout)
+    );
+    assert!(
+        interpreted_trace.contains("tier0 interp"),
+        "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}"
+    );
+    assert!(
+        !interpreted_trace.contains("E2201"),
+        "forced interpreter deopted for `{stem}`:\n{interpreted_trace}"
+    );
+    assert_eq!(
+        interpreted.stdout, expected,
+        "interpreter output differs from the checked-in golden for `{stem}`"
+    );
+}
+
 #[test]
 fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("comptime_effect_parity");
 
     for stem in TIER_PARITY_STEMS {
-        let case_dir = scratch.join(&stem.replace('/', "_"));
-        fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
-        let file_name = copy_comptime_fixture(&root, &case_dir, stem);
-        let expected_path = root.join(format!("examples/features/expected/{stem}.out"));
-        let expected = fs::read(&expected_path)
-            .unwrap_or_else(|error| panic!("missing golden for `{stem}`: {error}"));
-        let cache = case_dir.join("cache");
-
-        let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["build", &file_name])
-            .current_dir(&case_dir)
-            .env("JET_CACHE_DIR", cache.join("aot"))
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap_or_else(|error| panic!("failed to spawn AOT build for `{stem}`: {error}"));
-        assert!(
-            build.status.success(),
-            "AOT build failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&build.stdout),
-            String::from_utf8_lossy(&build.stderr)
-        );
-        let binary_name = file_name.strip_suffix(".jet").expect("Jet fixture extension");
-        let aot = Command::new(case_dir.join("build").join(binary_name))
-            .current_dir(&case_dir)
-            .output()
-            .unwrap_or_else(|error| panic!("failed to run AOT binary for `{stem}`: {error}"));
-        assert!(
-            aot.status.success(),
-            "AOT run failed for `{stem}`:\n{}",
-            String::from_utf8_lossy(&aot.stderr)
-        );
-        assert_eq!(
-            aot.stdout, expected,
-            "AOT output differs from the checked-in golden for `{stem}`"
-        );
-
-        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", &file_name, "--trace-tiers"])
-            .current_dir(&case_dir)
-            .env("JET_RUN_CACHE_DIR", cache.join("run"))
-            .env("JET_CACHE_DIR", cache.join("build"))
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap_or_else(|error| panic!("failed to spawn `jet run` for `{stem}`: {error}"));
-        let trace = String::from_utf8_lossy(&output.stderr);
-
-        assert!(
-            output.status.success(),
-            "default `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{trace}",
-            String::from_utf8_lossy(&output.stdout)
-        );
-        assert!(
-            trace
-                .lines()
-                .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-            "default `jet run` did not report resident native execution for `{stem}`:\n{trace}"
-        );
-        assert!(
-            !trace.contains("tier0 interp"),
-            "default `jet run` deopted to the interpreter for `{stem}`:\n{trace}"
-        );
-        assert_eq!(
-            output.stdout, expected,
-            "default `jet run` output differs from the checked-in golden for `{stem}`"
-        );
-
-        let interpreted_cache = cache.join("interpret");
-        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", "--interpret", &file_name, "--trace-tiers"])
-            .current_dir(&case_dir)
-            .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
-            .env("JET_CACHE_DIR", interpreted_cache.join("build"))
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap_or_else(|error| panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}"));
-        let interpreted_trace = String::from_utf8_lossy(&interpreted.stderr);
-
-        assert!(
-            interpreted.status.success(),
-            "interpreted `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{interpreted_trace}",
-            String::from_utf8_lossy(&interpreted.stdout)
-        );
-        assert!(
-            interpreted_trace.contains("tier0 interp"),
-            "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}"
-        );
-        assert!(
-            !interpreted_trace.contains("E2201"),
-            "forced interpreter deopted for `{stem}`:\n{interpreted_trace}"
-        );
-        assert_eq!(
-            interpreted.stdout, expected,
-            "interpreter output differs from the checked-in golden for `{stem}`"
-        );
-
+        assert_tier_parity_case(&root, &scratch, stem);
     }
+}
+
+#[test]
+fn fact_plane_runs_through_aot_jit_and_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("fact_plane_parity");
+
+    assert_tier_parity_case(&root, &scratch, "comptime/fact_plane");
 }
 
 #[test]
