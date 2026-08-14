@@ -66,6 +66,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         heap: jet_rt::JetArena::default(),
         compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
+        zip_plans: Vec::new(),
         invocations: 0,
         channels: Vec::new(),
         senders: Vec::new(),

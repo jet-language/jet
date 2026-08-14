@@ -20,7 +20,8 @@ use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, Un
 use std::collections::{HashMap, HashSet};
 
 use super::runtime_host::{
-    HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
+    HostFns, JitZipColumn, JitZipPlan, JitZipValueKind, INTN_MODE_CHECKED, INTN_MODE_SATURATING,
+    INTN_MODE_TRAP, INTN_MODE_WRAPPING,
     INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
     INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
@@ -10113,6 +10114,161 @@ impl LowerCtx<'_, '_> {
         self.call_host(self.host.struct_new, &[count])
     }
 
+    fn zip_value_kind(&self, ty: &Type) -> Option<JitZipValueKind> {
+        match self.erase_distinct_ty(ty) {
+            Type::Int | Type::IntN { .. } => Some(JitZipValueKind::Int),
+            Type::Float | Type::Float32 => Some(JitZipValueKind::Float),
+            Type::Bool => Some(JitZipValueKind::Bool),
+            Type::Char => Some(JitZipValueKind::Char),
+            Type::String => Some(JitZipValueKind::String),
+            Type::Option(_) => Some(JitZipValueKind::Opaque),
+            ty if clif_ty(&ty) == Some(types::I64) => Some(JitZipValueKind::Opaque),
+            _ => None,
+        }
+    }
+
+    fn zip_input_kind(&self, ty: &Type) -> Option<JitZipValueKind> {
+        let elem = jit_list_iter_elem_type(ty).or_else(|| jit_closure_elem_type(ty))?;
+        self.zip_value_kind(&elem)
+    }
+
+    fn zip_field_column(
+        &self,
+        input_ty: &Type,
+        field_ty: &Type,
+    ) -> Result<JitZipColumn, String> {
+        let input = self.zip_input_kind(input_ty).ok_or_else(|| {
+            format!("jit zip input element unsupported: {input_ty:?}")
+        })?;
+        let field_ty = self.erase_distinct_ty(field_ty);
+        let (field_ty, optional) = match field_ty {
+            Type::Option(inner) => (inner.as_ref().clone(), true),
+            other => (other, false),
+        };
+        let field = self.zip_value_kind(&field_ty).ok_or_else(|| {
+            format!("jit zip output field unsupported: {field_ty:?}")
+        })?;
+        Ok(JitZipColumn {
+            input,
+            field,
+            optional,
+        })
+    }
+
+    fn lower_zip_word(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
+        Ok(match self.b.func.dfg.value_type(value) {
+            types::F64 => self
+                .b
+                .ins()
+                .bitcast(types::I64, Self::scalar_bitcast_memflags(), value),
+            types::F32 => {
+                let value = self.b.ins().fpromote(types::F64, value);
+                self.b
+                    .ins()
+                    .bitcast(types::I64, Self::scalar_bitcast_memflags(), value)
+            }
+            types::I8 | types::I32 => self.b.ins().uextend(types::I64, value),
+            types::I64 => value,
+            other => return Err(format!("jit zip fill unsupported: {ty:?} ({other})")),
+        })
+    }
+
+    fn lower_zip_family(
+        &mut self,
+        recv_ty: &Type,
+        recv_val: Value,
+        mode: &TIR::TZipMode,
+        input_count: usize,
+        flatten: bool,
+        fill_mode: &TZipFillMode,
+        field_types: &[Type],
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        if flatten || input_count == 1 {
+            return Err("jit zip family shape unsupported".to_string());
+        }
+        let input_args = input_count.saturating_sub(1);
+        let fill_args = match fill_mode {
+            TZipFillMode::DefaultNone => 0,
+            TZipFillMode::Common | TZipFillMode::Columns => 1,
+        };
+        if args.len() != input_args + fill_args || field_types.len() != input_count {
+            return Err("jit zip family arity metadata mismatch".to_string());
+        }
+
+        let mut columns = Vec::with_capacity(input_count);
+        if input_count > 0 {
+            columns.push(self.zip_field_column(recv_ty, &field_types[0])?);
+            for (arg, field_ty) in args
+                .iter()
+                .take(input_args)
+                .zip(field_types.iter().skip(1))
+            {
+                columns.push(self.zip_field_column(&arg.ty, field_ty)?);
+            }
+        }
+
+        let mode = match mode {
+            TIR::TZipMode::Short => 0,
+            TIR::TZipMode::Strict => 1,
+            TIR::TZipMode::Pad => 2,
+        };
+        let fill_mode_tag = match fill_mode {
+            TZipFillMode::DefaultNone => 0,
+            TZipFillMode::Common => 1,
+            TZipFillMode::Columns => 2,
+        };
+        // The plan is process-local host metadata referenced by the emitted
+        // iconst plan id. A tier-cache artifact carries machine code and
+        // strings only, so it must not replay this function without its plan.
+        super::tier_cache::abort_capture();
+        let plan_id = self.runtime.zip_plans.len() as i64;
+        self.runtime.zip_plans.push(JitZipPlan {
+            mode,
+            fill_mode: fill_mode_tag,
+            columns,
+        });
+
+        let column_values = self.call_host(self.host.coll.list_new, &[]);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        if input_count > 0 {
+            self.b.ins().call(push, &[column_values, recv_val]);
+        }
+        for arg in args.iter().take(input_args) {
+            let value = self.lower_expr(arg)?;
+            if self.b.func.dfg.value_type(value) != types::I64 {
+                return Err(format!("jit zip input handle unsupported: {:?}", arg.ty));
+            }
+            self.b.ins().call(push, &[column_values, value]);
+        }
+
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let (common_fill, column_fills) = match fill_mode {
+            TZipFillMode::DefaultNone => (zero, zero),
+            TZipFillMode::Common => {
+                let fill = &args[input_args];
+                let value = self.lower_expr(fill)?;
+                (self.lower_zip_word(value, &fill.ty)?, zero)
+            }
+            TZipFillMode::Columns => {
+                let fills = self.lower_expr(&args[input_args])?;
+                if self.b.func.dfg.value_type(fills) != types::I64 {
+                    return Err("jit zip column fills handle unsupported".to_string());
+                }
+                (zero, fills)
+            }
+        };
+        let plan = self.b.ins().iconst(types::I64, plan_id);
+        let value = self.call_host(
+            self.host.coll.iter_zip_family,
+            &[plan, column_values, common_fill, column_fills],
+        );
+        self.emit_trap_check()?;
+        Ok(value)
+    }
+
     fn record_slot(&mut self, handle: Value, index: usize, ty: &Type) -> Result<Value, String> {
         let index = self.b.ins().iconst(types::I64, index as i64);
         let host = match ty {
@@ -18542,32 +18698,22 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip {
+                mode,
                 input_count,
                 flatten,
                 fill_mode,
+                field_types,
                 ..
-            } => {
-                // `self.host.coll.list_zip` only implements the plain 2-input,
-                // no-pad case (unlabeled pairwise zip). The free zero-arg
-                // `zip()` lowers to `input_count: 0, args: []` (`TIR::
-                // lower_empty_zip_family`) — indexing `args[0]` there panicked
-                // (D-ZIPPAD1's own AOT path handles it via a dedicated empty
-                // constructor). N-ary (`input_count > 2`), `flatten`, and any
-                // `zip_pad` fill mode need richer host support this JIT layer
-                // doesn't have yet — decline instead of mis-zipping or
-                // panicking.
-                if *input_count != 2 || *flatten || !matches!(fill_mode, TZipFillMode::DefaultNone)
-                {
-                    return Err(
-                        "jit builtin method unsupported: n-ary/padded/empty zip".to_string(),
-                    );
-                }
-                let Some(arg0) = args.first() else {
-                    return Err("jit builtin method unsupported: empty zip".to_string());
-                };
-                let other = self.lower_expr(arg0)?;
-                Ok(self.call_host(self.host.coll.list_zip, &[recv_val, other]))
-            }
+            } => self.lower_zip_family(
+                &recv_ty,
+                recv_val,
+                mode,
+                *input_count,
+                *flatten,
+                fill_mode,
+                field_types,
+                args,
+            ),
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
                 let other = args
                     .first()

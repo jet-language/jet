@@ -7684,6 +7684,25 @@ fn resident_jit_safe_named_tuples() {
 }
 
 #[test]
+fn resident_jit_safe_zip_family() {
+    let file = "examples/features/collections/zip_family.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("zip family example");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "zip family example must type-check: {errors:#?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "zip family must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("zip family must JIT-compile: {reason}"));
+}
+
+#[test]
 fn resident_jit_safe_chained_comparison() {
     let file = "examples/features/operators/chained_comparison.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");

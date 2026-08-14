@@ -16,6 +16,9 @@ const SOURCE: &str = r#"fn run() {
     loop row, zip(a: [1, 2], b: ["x", "y"]) {
         print(row.b)
     }
+    loop row, zip(a: [1, 2], b: [10, 20], c: [100, 200]) {
+        print(row.c)
+    }
     loop row, zip(a: [1, 2], b: [10, 20], c: [100, 200], d: [1000, 2000]) {
         print(row.d)
     }
@@ -36,7 +39,7 @@ const SOURCE: &str = r#"fn run() {
 }
 "#;
 
-const EXPECTED: &str = "0\n[1, 2, 3]\n[1, 2, 3]\n[10, 20]\nx\ny\n1000\n2000\n10\n20\nnull\n10\n20\nnull\n10\n20\n0\n10\n20\n9\n";
+const EXPECTED: &str = "0\n[1, 2, 3]\n[1, 2, 3]\n[10, 20]\nx\ny\n100\n200\n1000\n2000\n10\n20\nnull\n10\n20\nnull\n10\n20\n0\n10\n20\n9\n";
 
 #[test]
 fn zip_family_matches_aot_default_and_forced_interpreter() {

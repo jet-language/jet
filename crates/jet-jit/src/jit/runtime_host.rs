@@ -97,6 +97,30 @@ pub(crate) struct JitCallableSlot {
     pub has_env: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JitZipValueKind {
+    Int,
+    Float,
+    Bool,
+    Char,
+    String,
+    Opaque,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct JitZipColumn {
+    pub(crate) input: JitZipValueKind,
+    pub(crate) field: JitZipValueKind,
+    pub(crate) optional: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JitZipPlan {
+    pub(crate) mode: u8,
+    pub(crate) fill_mode: u8,
+    pub(crate) columns: Vec<JitZipColumn>,
+}
+
 pub(crate) struct JitRuntime {
     pub(crate) source_file: String,
     pub(crate) source_text: String,
@@ -110,6 +134,10 @@ pub(crate) struct JitRuntime {
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
     /// them leaves warm `jet run` hits with empty panic/require text (I9).
     pub(crate) compile_strings: Vec<(usize, String)>,
+    /// Compile-time zip row schemas referenced by resident Cranelift code. The
+    /// host receives only handles at run time; this table supplies the checked
+    /// column representation and remains stable across heap resets.
+    pub(crate) zip_plans: Vec<JitZipPlan>,
     pub(crate) invocations: u64,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,

@@ -186,6 +186,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/ByteBuffer.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
@@ -2437,6 +2438,7 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/Progress.rs")).unwrap();
         let byte_buffer =
             std::fs::read_to_string(root.join("src/Prelude/Core/ByteBuffer.rs")).unwrap();
+        let iter = std::fs::read_to_string(root.join("src/Prelude/CoreLib/JetStd/Iter.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
         let shared_protocol =
@@ -2489,6 +2491,7 @@ mod tests {
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
             ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
+            ("src/Prelude/CoreLib/JetStd/Iter.rs", iter.as_str()),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
             ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
             (
@@ -2588,8 +2591,14 @@ mod tests {
         let view_access_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ViewAccess.rs\")")
             .unwrap();
+        let byte_buffer_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ByteBuffer.rs\")")
+            .unwrap();
         let collections_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Collections.rs\")")
+            .unwrap();
+        let iter_pos = production_codegen
+            .find("include_str!(\"../Prelude/CoreLib/JetStd/Iter.rs\")")
             .unwrap();
         let control_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
@@ -2633,6 +2642,8 @@ mod tests {
                 && sketch_pos < core_pos
                 && core_pos < view_access_pos
                 && view_access_pos < collections_pos
+                && byte_buffer_pos < iter_pos
+                && iter_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
@@ -2671,6 +2682,7 @@ mod tests {
                 typed_text.as_str(),
                 progress.as_str(),
                 byte_buffer.as_str(),
+                iter.as_str(),
                 collections.as_str(),
                 shared_protocol.as_str(),
                 runtime_control.as_str(),
@@ -2712,6 +2724,7 @@ mod tests {
             typed_text.as_str(),
             progress.as_str(),
             byte_buffer.as_str(),
+            iter.as_str(),
             collections.as_str(),
             shared_protocol.as_str(),
             runtime_control.as_str(),
@@ -2726,10 +2739,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 407_169, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 408_326, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "4c8f22c0585ae088291188c5c78b656e7ae91d886cc9b22d96bcf7a336eb80f2",
+            "5fff8c291fa0ad356f4c39e91ddabec03b286613673267f470ddc28110fc76bf",
             "split changed prelude bytes, order, or boundary newline"
         );
     }

@@ -428,45 +428,6 @@ fn jet_map_pop_first_kernel<K: Ord + Clone, V: Clone>(
     jet_outcome_of(m.remove(&key))
 }
 
-/// Build resident rows from homogeneous scalar columns. `mode`: 0 = short,
-/// 1 = strict, 2 = pad. Strict length mismatch returns `None` so each engine
-/// can keep its own trap boundary while sharing row-count and fill semantics.
-fn jet_iter_zip_many<T: Clone, F>(
-    columns: Vec<Vec<T>>,
-    mode: u8,
-    mut fill: F,
-) -> Option<Vec<Vec<T>>>
-where
-    F: FnMut(usize) -> T,
-{
-    if columns.is_empty() {
-        return Some(Vec::new());
-    }
-    if mode == 1 && columns.iter().any(|column| column.len() != columns[0].len()) {
-        return None;
-    }
-    let row_count = match mode {
-        2 => columns.iter().map(Vec::len).max().unwrap_or(0),
-        _ => columns.iter().map(Vec::len).min().unwrap_or(0),
-    };
-    Some(
-        (0..row_count)
-            .map(|row| {
-                columns
-                    .iter()
-                    .enumerate()
-                    .map(|(column, values)| {
-                        values
-                            .get(row)
-                            .cloned()
-                            .unwrap_or_else(|| fill(column))
-                    })
-                    .collect()
-            })
-            .collect(),
-    )
-}
-
 // ── D-ITER1 / D-ITERTOOLS1=A: true lazy iterator fusion ──────────────────────
 // Adapters return `JetIter<T>` = boxed `dyn Iterator`. No intermediate Vec until
 // `to_list` / `collect` / a terminal reducer. Closures are `'static` (Jet emits
@@ -798,12 +759,10 @@ where
     F: FnMut(A, B) -> O,
 {
     JetIter(Box::new(std::iter::from_fn(move || {
-        match (a.0.next(), b.0.next()) {
-            (Some(x), Some(y)) => Some(f(x, y)),
-            (None, None) => None,
-            (None, Some(_)) | (Some(_), None) => {
-                jet_panic("<core.collections>", 0, "zip length mismatch")
-            }
+        match jet_zip_strict_step(a.0.next(), b.0.next()) {
+            Ok(Some((x, y))) => Some(f(x, y)),
+            Ok(None) => None,
+            Err(()) => jet_panic("<core.collections>", 0, "zip length mismatch"),
         }
     })))
 }
@@ -818,11 +777,9 @@ where
     F: FnMut(A, B) -> O,
 {
     JetIter(Box::new(std::iter::from_fn(move || {
-        match (a.0.next(), b.0.next()) {
-            (Some(x), Some(y)) => Some(f(x, y)),
-            (Some(x), None) => Some(f(x, fill_b.clone())),
-            (None, Some(y)) => Some(f(fill_a.clone(), y)),
-            (None, None) => None,
+        match jet_zip_pad_step(a.0.next(), b.0.next(), fill_a.clone(), fill_b.clone()) {
+            Some((x, y)) => Some(f(x, y)),
+            None => None,
         }
     })))
 }

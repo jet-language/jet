@@ -281,6 +281,31 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     }
 }
 
+fn jit_zip_elem_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::IntN { .. }
+            | Type::Float
+            | Type::Float32
+            | Type::Bool
+            | Type::Char
+            | Type::String
+    ) || jit_optional_scalar_type(ty)
+        || jit_value_type(ty)
+}
+
+fn jit_zip_sequence_elem_type(ty: &Type) -> Option<Type> {
+    jit_list_iter_elem_type(ty).or_else(|| jit_closure_elem_type(ty))
+}
+
+fn jit_zip_field_type(ty: &Type) -> bool {
+    match ty {
+        Type::Option(inner) => jit_zip_elem_type(inner),
+        _ => jit_zip_elem_type(ty),
+    }
+}
+
 /// Closure adapter receivers: scalar list/Iter/View elems, or user struct handles.
 pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
     if let Some(elem) = jit_list_iter_elem_type(ty) {
@@ -2651,6 +2676,11 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(recv_ty)
                 || jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
+                || matches!(
+                    recv_ty,
+                    Type::List(inner) | Type::FixedList { elem: inner, .. }
+                        if matches!(inner.as_ref(), Type::Named(name) if name == "Unit")
+                )
                 || jit_float_view_type(recv_ty)
                 || jit_map_resident_type(recv_ty)
                 || matches!(
@@ -2805,7 +2835,14 @@ fn resident_safe_builtin_op(
         TBuiltinOp::IterToList | TBuiltinOp::IterCollect | TBuiltinOp::ListLazy => {
             (jit_list_iter_elem_type(recv_ty).is_some()
                 || jit_closure_elem_type(recv_ty).is_some()
-                || jit_list_native_type(recv_ty))
+                || jit_list_native_type(recv_ty)
+                || matches!(
+                    recv_ty,
+                    Type::Apply { name, args }
+                        if name == jet_foundation::Syntax::TYPE_ITER
+                            && args.len() == 1
+                            && matches!(&args[0], Type::Named(unit) if unit == "Unit")
+                ))
                 && args.is_empty()
         }
         TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
@@ -2830,23 +2867,49 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::Zip { mode, input_count, .. } => {
-            // The resident host ABI is the two-input short zip for scalar list
-            // handles. All other
-            // policies/shapes deopt to the canonical TIR evaluator, which
-            // owns heterogeneous rows and fill values.
-            *mode == TIR::TZipMode::Short
-                && *input_count == 2
-                && matches!(
-                    jit_list_iter_elem_type(recv_ty),
-                    Some(Type::Int | Type::String)
-                )
-                && args.len() == 1
-                && matches!(
-                    jit_list_iter_elem_type(&args[0].ty),
-                    Some(Type::Int | Type::String)
-                )
-                && resident_safe_expr(&args[0], callees)
+        TBuiltinOp::Zip {
+            input_count,
+            fill_mode,
+            field_types,
+            flatten,
+            ..
+        } => {
+            if *flatten {
+                return false;
+            }
+            let input_args = (*input_count).checked_sub(1);
+            let fill_args = match fill_mode {
+                TIR::TZipFillMode::DefaultNone => 0,
+                TIR::TZipFillMode::Common | TIR::TZipFillMode::Columns => 1,
+            };
+            let Some(input_args) = input_args else {
+                return false;
+            };
+            if args.len() != input_args + fill_args {
+                return false;
+            }
+            if *input_count == 0 {
+                return args.is_empty() && field_types.is_empty();
+            }
+            if *input_count < 2 || field_types.len() != *input_count {
+                return false;
+            }
+            let Some(recv_elem) = jit_zip_sequence_elem_type(recv_ty) else {
+                return false;
+            };
+            if !jit_zip_elem_type(&recv_elem)
+                || !args
+                    .iter()
+                    .take(input_args)
+                    .all(|arg| {
+                        jit_zip_sequence_elem_type(&arg.ty)
+                            .is_some_and(|elem| jit_zip_elem_type(&elem))
+                    })
+            {
+                return false;
+            }
+            field_types.iter().all(jit_zip_field_type)
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TBuiltinOp::Unzip { .. } => args.is_empty(),
         TBuiltinOp::TryCollect => {

@@ -106,7 +106,31 @@ mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    pub(super) fn zip_fill_at<T: Clone>(
+        fill_mode: u8,
+        common_fills: &[T],
+        column_fills: &[T],
+        default: T,
+        column: usize,
+    ) -> T {
+        jet_zip_fill_at(fill_mode, common_fills, column_fills, default, column)
+    }
+
+    pub(super) fn zip_rows<T: Clone, Read, Fill>(
+        lengths: &[usize],
+        mode: u8,
+        read: Read,
+        fill: Fill,
+    ) -> Option<Vec<Vec<T>>>
+    where
+        Read: FnMut(usize, usize) -> Option<T>,
+        Fill: FnMut(usize) -> T,
+    {
+        jet_zip_rows(lengths, mode, read, fill)
+    }
 
     fn show<T: JetShow>(value: &T) -> String {
         value.jet_show()
@@ -233,10 +257,6 @@ mod collection_semantics {
         jet_iter_split_at(jet_iter_from_vec(xs), n, |left, right| (left, right))
     }
 
-    pub(super) fn iter_zip_i64(left: Vec<i64>, right: Vec<i64>) -> Vec<(i64, i64)> {
-        jet_iter_zip(jet_iter_from_vec(left), jet_iter_from_vec(right), |a, b| (a, b)).to_list()
-    }
-
     fn map_from_pairs(entries: Vec<(String, i64)>) -> JetMap<String, i64> {
         entries.into_iter().collect()
     }
@@ -341,16 +361,6 @@ mod collection_semantics {
         let key = map.keys().next().cloned();
         let value = jet_map_pop_first_kernel(&mut map).ok();
         (key, value, map_pairs(&map))
-    }
-
-    pub(super) fn iter_zip_many_i64(
-        columns: Vec<Vec<i64>>,
-        mode: u8,
-        fills: Vec<i64>,
-    ) -> Option<Vec<Vec<i64>>> {
-        jet_iter_zip_many(columns, mode, |column| {
-            fills.get(column).copied().unwrap_or_default()
-        })
     }
 
     pub(super) fn list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
@@ -1439,26 +1449,207 @@ extern "C" fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
     out
 }
 
-extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
-    let (left_values, right_values) = Concurrency::with_runtime_mut(|rt| {
-        (
-            rt.heap.clone_int_list(left).unwrap_or_default(),
-            rt.heap.clone_int_list(right).unwrap_or_default(),
-        )
-    });
-    let pairs = collection_semantics::iter_zip_i64(left_values, right_values);
-    let out = Concurrency::with_runtime_mut(|rt| {
+#[derive(Clone, Copy)]
+enum JitZipValue {
+    Bits(i64),
+    Float(f64),
+    Absent,
+}
+
+fn jit_zip_read_value(
+    heap: &jet_rt::JetArena,
+    list: i64,
+    kind: crate::runtime_host::JitZipValueKind,
+    index: usize,
+) -> Option<JitZipValue> {
+    let index = i64::try_from(index).ok()?;
+    match kind {
+        crate::runtime_host::JitZipValueKind::Float => {
+            heap.list_get_float(list, index).map(JitZipValue::Float)
+        }
+        crate::runtime_host::JitZipValueKind::Int
+        | crate::runtime_host::JitZipValueKind::Bool
+        | crate::runtime_host::JitZipValueKind::Char
+        | crate::runtime_host::JitZipValueKind::String
+        | crate::runtime_host::JitZipValueKind::Opaque => {
+            heap.list_get_int(list, index).map(JitZipValue::Bits)
+        }
+    }
+}
+
+fn jit_zip_column_fill_value(
+    heap: &mut jet_rt::JetArena,
+    kind: crate::runtime_host::JitZipValueKind,
+    column_fills_handle: i64,
+    index: usize,
+) -> JitZipValue {
+    let Some(index) = i64::try_from(index).ok() else {
+        return JitZipValue::Absent;
+    };
+    match kind {
+        crate::runtime_host::JitZipValueKind::Float => heap
+            .record_get_float(column_fills_handle, index)
+            .map_or(JitZipValue::Absent, JitZipValue::Float),
+        crate::runtime_host::JitZipValueKind::Bool => heap
+            .record_get_bool(column_fills_handle, index)
+            .map_or(JitZipValue::Absent, |value| JitZipValue::Bits(i64::from(value))),
+        crate::runtime_host::JitZipValueKind::Char => heap
+            .record_get_char(column_fills_handle, index)
+            .map_or(JitZipValue::Absent, |value| {
+                JitZipValue::Bits(i64::from(u32::from(value)))
+            }),
+        crate::runtime_host::JitZipValueKind::Int
+        | crate::runtime_host::JitZipValueKind::Opaque => heap
+            .record_get_int(column_fills_handle, index)
+            .map_or(JitZipValue::Absent, JitZipValue::Bits),
+        crate::runtime_host::JitZipValueKind::String => heap
+            .record_get_string(column_fills_handle, index)
+            .map_or(JitZipValue::Absent, JitZipValue::Bits),
+    }
+}
+
+fn jit_zip_common_fill_value(
+    kind: crate::runtime_host::JitZipValueKind,
+    common_fill: i64,
+) -> JitZipValue {
+    match kind {
+        crate::runtime_host::JitZipValueKind::Float => {
+            JitZipValue::Float(f64::from_bits(common_fill as u64))
+        }
+        _ => JitZipValue::Bits(common_fill),
+    }
+}
+
+fn jit_zip_pack_value(value: JitZipValue) -> i64 {
+    match value {
+        JitZipValue::Bits(value) => value.wrapping_add(1),
+        JitZipValue::Float(value) => (value.to_bits() as i64).wrapping_add(1),
+        JitZipValue::Absent => 0,
+    }
+}
+
+fn jit_zip_set_value(
+    heap: &mut jet_rt::JetArena,
+    record: i64,
+    index: usize,
+    column: crate::runtime_host::JitZipColumn,
+    value: JitZipValue,
+) -> Option<()> {
+    let index = i64::try_from(index).ok()?;
+    if column.optional {
+        return heap.record_set_int(record, index, jit_zip_pack_value(value));
+    }
+    match (column.field, value) {
+        (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Float(value)) => {
+            heap.record_set_float(record, index, value)
+        }
+        (crate::runtime_host::JitZipValueKind::Int, JitZipValue::Bits(value))
+        | (crate::runtime_host::JitZipValueKind::Opaque, JitZipValue::Bits(value)) => {
+            heap.record_set_int(record, index, value)
+        }
+        (crate::runtime_host::JitZipValueKind::Bool, JitZipValue::Bits(value)) => {
+            heap.record_set_bool(record, index, value != 0)
+        }
+        (crate::runtime_host::JitZipValueKind::Char, JitZipValue::Bits(value)) => heap
+            .record_set_char(record, index, char::from_u32(value as u32).unwrap_or('\0')),
+        (crate::runtime_host::JitZipValueKind::String, JitZipValue::Bits(value)) => {
+            heap.record_set_string(record, index, value)
+        }
+        (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Bits(value)) => heap
+            .record_set_float(record, index, f64::from_bits(value as u64)),
+        (_, JitZipValue::Absent) => None,
+        (_, _) => None,
+    }
+}
+
+extern "C" fn jet_jit_iter_zip_family(
+    plan_id: i64,
+    column_handles: i64,
+    common_fill: i64,
+    column_fills: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
-        for (a, b) in pairs {
-            let pair = rt.heap.alloc_record(2);
-            let _ = rt.heap.record_set_int(pair, 0, a);
-            let _ = rt.heap.record_set_int(pair, 1, b);
-            let _ = rt.heap.list_push_int(out, pair);
+        let Some(plan_id) = usize::try_from(plan_id).ok() else {
+            rt.set_runtime_stop("E3001", 0, "zip plan missing");
+            return out;
+        };
+        let Some(plan) = rt.zip_plans.get(plan_id).cloned() else {
+            rt.set_runtime_stop("E3001", 0, "zip plan missing");
+            return out;
+        };
+        let Some(handles) = rt.heap.clone_int_list(column_handles) else {
+            rt.set_runtime_stop("E3001", 0, "zip columns handle invalid");
+            return out;
+        };
+        if handles.len() != plan.columns.len() {
+            rt.set_runtime_stop("E3001", 0, "zip columns arity mismatch");
+            return out;
+        }
+        let Some(lengths) = handles
+            .iter()
+            .map(|handle| rt.heap.list_len(*handle))
+            .collect::<Option<Vec<_>>>()
+            .map(|lengths| {
+                lengths
+                    .into_iter()
+                    .map(|length| usize::try_from(length).unwrap_or(0))
+                    .collect::<Vec<_>>()
+            })
+        else {
+            rt.set_runtime_stop("E3001", 0, "zip column handle invalid");
+            return out;
+        };
+        let common_fills = if plan.fill_mode == 1 {
+            plan.columns
+                .iter()
+                .map(|column| jit_zip_common_fill_value(column.field, common_fill))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let column_fills = if plan.fill_mode == 2 {
+            plan.columns
+                .iter()
+                .enumerate()
+                .map(|(index, column)| {
+                    jit_zip_column_fill_value(&mut rt.heap, column.field, column_fills, index)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let Some(rows) = collection_semantics::zip_rows(
+            &lengths,
+            plan.mode,
+            |column, index| {
+                jit_zip_read_value(&rt.heap, handles[column], plan.columns[column].input, index)
+            },
+            |column| {
+                collection_semantics::zip_fill_at(
+                    plan.fill_mode,
+                    &common_fills,
+                    &column_fills,
+                    JitZipValue::Absent,
+                    column,
+                )
+            },
+        ) else {
+            rt.set_runtime_stop("E3001", 0, "zip length mismatch");
+            return out;
+        };
+        for values in rows {
+            let record = rt.heap.alloc_record(plan.columns.len());
+            for (column_index, (column, value)) in plan.columns.iter().zip(values).enumerate() {
+                if jit_zip_set_value(&mut rt.heap, record, column_index, *column, value).is_none() {
+                    rt.set_runtime_stop("E3001", 0, "zip value representation mismatch");
+                    return out;
+                }
+            }
+            let _ = rt.heap.list_push_int(out, record);
         }
         out
-    });
-    crate::IO::progress_transfer_zip_state(left, right, out);
-    out
+    })
 }
 
 extern "C" fn jet_jit_list_unzip(pairs: i64) -> i64 {
@@ -3720,6 +3911,11 @@ host_fns! {
         let cc = module.target_config().default_call_conv;
         let mut sig_new = Signature::new(cc);
         sig_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_zip_family = Signature::new(cc);
+        sig_zip_family
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_zip_family.returns.push(AbiParam::new(types::I64));
         let mut sig_sorted_set_new = sig_new.clone();
         sig_sorted_set_new.params.push(AbiParam::new(types::I64));
         let mut sig_uninit = Signature::new(cc);
@@ -3947,7 +4143,7 @@ host_fns! {
     list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
     list_flatten: "jet_jit_list_flatten" => jet_jit_list_flatten: sig_len;
     list_intersperse: "jet_jit_list_intersperse" => jet_jit_list_intersperse: sig_get_opt;
-    list_zip: "jet_jit_list_zip" => jet_jit_list_zip: sig_get_opt;
+    iter_zip_family: "jet_jit_iter_zip_family" => jet_jit_iter_zip_family: sig_zip_family;
     list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_len;
     list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
