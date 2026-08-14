@@ -59,9 +59,10 @@ blocks the Nix daemon socket unless `network_access` is set (probed 2026-08-13 o
 access-discipline note: work only inside the assigned worktree; never touch the main
 checkout, sibling worktrees, or `plugins/tower`.
 
-Workers run cargo/jet through `scripts/agent/jet-env` wrapped in `timeout 900` (cold
-builds 1800) and commit explicit paths to their assigned branch. The orchestrator
-pre-creates lanes, verifies claims, integrates, and writes the board.
+Implementation workers normally skip cargo/jet builds, tests, and formatters and commit
+source-only patches. They may run only cheap non-build checks unless they own the reusable
+`.claude/worktrees/builder` for the build. The orchestrator pre-creates lanes, verifies
+claims, and writes the board.
 
 ## Milestone stream
 
@@ -70,9 +71,12 @@ pre-creates lanes, verifies claims, integrates, and writes the board.
 2. Give each worker the card's full criteria, exact writable paths, applicable invariants,
    and the required evidence shape. Workers implement and return evidence; they do not
    write the board.
-3. Inspect each return. Integrate a ready patch promptly. After integration, record
-   concrete evidence for every robust observable criterion and close the card when the
-   criteria are met and no known blocker contradicts the evidence.
+3. Inspect each return. Integrate a ready patch promptly and remove its disposable
+   worktree immediately. Between correction waves, advance the persistent
+   `.claude/worktrees/builder` once and run targeted verification there. Never let
+   disposable `target/` caches accumulate. After integration, record concrete evidence
+   for every robust observable criterion and close the card when the criteria are met and
+   no known blocker contradicts the evidence.
 4. Keep a card open when evidence is missing or a known blocker contradicts it. Route the
    fix to the owning worker and integrate the resulting patch.
 5. Do not hold a card for a per-card reviewer, duplicate proof, or repeated fresh-context
