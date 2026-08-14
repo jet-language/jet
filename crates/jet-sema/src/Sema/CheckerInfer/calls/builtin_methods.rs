@@ -741,6 +741,23 @@ impl<'a> Checker<'a> {
                 }
                 return ret;
             }
+            if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT)
+                && method == "generate"
+            {
+                let template_count = args
+                    .iter()
+                    .filter(|arg| arg.flags.template_items.is_some())
+                    .count();
+                if args.len() != 2 || template_count != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E3502",
+                        "`b.generate` requires a name followed by a typed item block".to_string(),
+                        "generated bodies are Jet items checked by the ordinary semantic path".to_string(),
+                        "write `b.generate(\"name\") { ... }?`; source strings are retired".to_string(),
+                        Some(span),
+                    ));
+                }
+            }
             let mut refined_ret = ret.clone();
             let build_expected = if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT) {
                 Collections::build_context_method_arg_types(method, args.len())

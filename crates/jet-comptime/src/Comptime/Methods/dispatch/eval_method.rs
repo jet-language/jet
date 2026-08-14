@@ -2123,10 +2123,9 @@ impl<'a> Interp<'a> {
         let mut argv = Vec::new();
         for a in args {
             if a.flags.template_items.is_some() {
-                argv.push(CtValue::Str(template_source.clone().unwrap_or_default()));
-            } else {
-                argv.push(self.eval(&a.expr, scope)?);
+                continue;
             }
+            argv.push(self.eval(&a.expr, scope)?);
         }
         let arg_labels = args
             .iter()
@@ -2234,6 +2233,7 @@ impl<'a> Interp<'a> {
                 &recv,
                 method,
                 argv.clone(),
+                template_source.as_deref(),
                 span,
                 self.impure_depth > 0,
             )

@@ -6558,13 +6558,12 @@ impl<'a> EvalCtx<'a> {
                         Ok::<_, Diagnostic>(crate::Comptime::format_template_items(expanded))
                     })
                     .transpose()?;
-                let mut argv = Vec::with_capacity(args.len());
+                let mut argv = Vec::with_capacity(args.len().saturating_sub(1));
                 for a in args {
                     if a.template_items.is_some() {
-                        argv.push(CtValue::Str(template_source.clone().unwrap_or_default()));
-                    } else {
-                        argv.push(self.eval_expr_child(&a.value, scope)?);
+                        continue;
                     }
+                    argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
                 if method.name == "clone" {
                     return self.clone_structural_value(r, &recv.ty);
@@ -6680,6 +6679,7 @@ impl<'a> EvalCtx<'a> {
                     &r,
                     &method.name,
                     argv.clone(),
+                    template_source.as_deref(),
                     self.span(),
                     self.impure_depth > 0,
                 ) {

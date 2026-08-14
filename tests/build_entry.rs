@@ -513,7 +513,14 @@ fn workspace_build_uses_batteries_for_missing_member_and_root_entries() {
     write(&packages.join("a/run.jet"), "fn run() {}\n");
     write(
         &packages.join("a/tools/build.jet"),
-        "fn build(b: BuildContext) => BuildPlan ? { b.generate(\"a_generated\", \"fn a_generated() => String {{ return \\\"a\\\" }}\")?; target :: b.add_library(\"a\", [\"run.jet\", \".jet/generated/a/a_generated.jet\"], [])?; return b.plan(target) }\n",
+        r#"fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("a_generated") {
+        fn a_generated() => String :: "a";
+    }?
+    target :: b.add_library("a", ["run.jet", ".jet/generated/a/a_generated.jet"], [])?
+    return b.plan(target)
+}
+"#,
     );
     write(
         &packages.join("b/package.jet"),
@@ -1084,7 +1091,14 @@ fn jet_build_positional_name_resolves_one_workspace_member() {
     fs::create_dir_all(member.join("tools")).unwrap();
     write(
         &member.join("tools/build.jet"),
-        "fn build(b: BuildContext) => BuildPlan ? { b.generate(\"member_generated\", \"fn member_generated() => String {{ return \\\"one\\\" }}\")?; app :: b.add_executable(\"one\", [\"run.jet\", \".jet/generated/one/member_generated.jet\"], [])?; return b.plan(app) }\n",
+        r#"fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("member_generated") {
+        fn member_generated() => String :: "one";
+    }?
+    app :: b.add_executable("one", ["run.jet", ".jet/generated/one/member_generated.jet"], [])?
+    return b.plan(app)
+}
+"#,
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))

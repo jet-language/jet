@@ -567,7 +567,8 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
     let targets = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())));
     let probes = || Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string())));
     match (method, arg_count) {
-        ("generate", 2) => Some(vec![Type::String, Type::String]),
+        // D-META-BODY1=A: the typed item block is AST metadata, not a value arg.
+        ("generate", 2) => Some(vec![Type::String]),
         ("plugin", 2) => Some(vec![Type::String, Type::String]),
         ("find" | "embed", 1) => Some(vec![Type::String]),
         ("fetch", 2) => Some(vec![Type::String, Type::String]),
@@ -2226,7 +2227,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" => Some(vec![]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
-            "generate" => Some(vec![Type::String, Type::String]),
+            // D-META-BODY1=A: the typed item block is AST metadata, not a value arg.
+            "generate" => Some(vec![Type::String]),
             "find" | "embed" => Some(vec![Type::String]),
             "fetch" => Some(vec![Type::String, Type::String]),
             "plugin" => Some(vec![Type::String, Type::String]),

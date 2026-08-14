@@ -2296,8 +2296,8 @@ pub fn auto_derive_requested(
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
-    let mut fields = s.reflection_fields();
-    fields.next().is_some() && fields.all(|f| field_auto_ok(&f.ty, &s.name))
+    s.reflection_fields()
+        .all(|field| field_auto_ok(&field.ty, &s.name))
 }
 
 pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {

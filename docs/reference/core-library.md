@@ -2375,10 +2375,11 @@ named severity would emit under the active `set_level` threshold.
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
-Mark a type `#Codable` and it crosses the wire in any format. `#Codable` is
-both directions; the one-way markers are `#Encode` (write-only) and `#Decode`
-(read-only). The derive is compiler-owned (like `derive Comparable`) — no macros,
-no runtime reflection.
+Structs and enums whose fields qualify are Codable by default and cross the wire
+in any format. Write `#Codable` to request both directions explicitly; the
+one-way markers are `#Encode` (write-only) and `#Decode` (read-only). Write
+`#!Codable` to refuse automatic codec generation for one type. The derive is
+compiler-owned — no macros, no runtime reflection.
 
 ```jet
 use core.encoding.csv as csv

@@ -115,6 +115,7 @@ pub fn eval_program_build_method(
     receiver: &CtValue,
     method: &str,
     args: Vec<CtValue>,
+    generated_source: Option<&str>,
     span: Span,
     in_impure_gate: bool,
 ) -> Option<Result<CtValue, Diagnostic>> {
@@ -124,7 +125,15 @@ pub fn eval_program_build_method(
         let session = sessions
             .get_mut(&id)
             .ok_or_else(|| build_diag("build context expired", span))?;
-        eval_session_method(id, session, method, args, span, in_impure_gate)
+        eval_session_method(
+            id,
+            session,
+            method,
+            args,
+            generated_source,
+            span,
+            in_impure_gate,
+        )
     }))
 }
 
@@ -178,6 +187,7 @@ fn eval_session_method(
     session: &mut ProgramBuildSession,
     method: &str,
     args: Vec<CtValue>,
+    generated_source: Option<&str>,
     span: Span,
     in_impure_gate: bool,
 ) -> Result<CtValue, Diagnostic> {
@@ -218,10 +228,24 @@ fn eval_session_method(
                 .map(|_| CtValue::Unit)
         }
         "generate" => {
+            if args.len() != 1 {
+                return Err(build_diag(
+                    "`b.generate` requires a name and typed item block",
+                    span,
+                ));
+            }
             let name = string_arg(&args, 0, span)?;
-            let source = string_arg(&args, 1, span)?;
+            let source = generated_source.ok_or_else(|| {
+                build_diag(
+                    "`b.generate` requires a typed item block; source strings are retired",
+                    span,
+                )
+            })?;
             let path = format!(".jet/generated/{}/{}.jet", session.package, safe_name(&name));
-            session.context.generate(name, path, source).map(|_| CtValue::Unit)
+            session
+                .context
+                .generate(name, path, source.to_string())
+                .map(|_| CtValue::Unit)
         }
         "action" => {
             let name = string_arg(&args, 0, span)?;
