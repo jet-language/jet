@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claim-manifest.json");
 const REGISTRY_PATH = join(ROOT, "docs/reference/feature-claims.md");
-const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/capability-ledger-report.json");
+const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/feature-claim-report.json");
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/feature-claims/hostile-cases.json");
 const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
 const DEFAULT_HISTORY_PATH = join(ROOT, ".tower/history.json");

@@ -139,7 +139,7 @@ Confirmed defects that fall out of the fragmentation:
   ten-root vocabulary; the compiler accepts 28. D-FFI-PY1 promised a `Py`
   root that was never added.
 - **Six meanings of "capability".** Grant handle; marker-argument enum;
-  `&`/`^` diagnostic copy ("write capability"); product capability-claim
+  `&`/`^` diagnostic copy ("write capability"); product feature-claim
   manifest; capability ledger card #1499; remote-builder capability model
   card #422.
 
