@@ -2472,30 +2472,36 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
     let middleware_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let wrapper_calls = middleware_calls.clone();
     let wrapper_events = middleware_events.clone();
-    jet_http_mux_middleware(&mux, move |next| {
-        let calls = wrapper_calls.clone();
-        let events = wrapper_events.clone();
-        std::sync::Arc::new(move |req| {
-            calls.fetch_add(1, Ordering::AcqRel);
-            events.lock().unwrap().push(format!("{}:{}", req.method, req.path));
-            next(req).map(|response| {
-                jet_http_srv_response_header(
-                    response,
-                    &"X-Middleware".to_string(),
-                    &"observed".to_string(),
-                )
+    jet_http_mux_middleware(
+        &mux,
+        std::sync::Arc::new(move |next: JetHTTPHandler| -> JetHTTPHandler {
+            let calls = wrapper_calls.clone();
+            let events = wrapper_events.clone();
+            std::sync::Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                calls.fetch_add(1, Ordering::AcqRel);
+                events.lock().unwrap().push(format!("{}:{}", req.method, req.path));
+                next(req).map(|response| {
+                    jet_http_srv_response_header(
+                        response,
+                        &"X-Middleware".to_string(),
+                        &"observed".to_string(),
+                    )
+                })
             })
-        })
-    });
-    jet_http_mux_middleware(&mux, move |next| {
-        std::sync::Arc::new(move |req| {
-            if jet_http_srv_req_header(&req, &"X-Block".to_string()).is_some() {
-                Ok(jet_http_srv_response(403, &"blocked".to_string()))
-            } else {
-                next(req)
-            }
-        })
-    });
+        }) as JetHTTPMiddleware,
+    );
+    jet_http_mux_middleware(
+        &mux,
+        std::sync::Arc::new(move |next: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                if jet_http_srv_req_header(&req, &"X-Block".to_string()).is_some() {
+                    Ok(jet_http_srv_response(403, &"blocked".to_string()))
+                } else {
+                    next(req)
+                }
+            })
+        }) as JetHTTPMiddleware,
+    );
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
     let mut options = JetHTTPServerOptions::safe();
@@ -3015,16 +3021,19 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     let mux = jet_http_mux_new();
     for name in ["outer", "inner"] {
         let events = events.clone();
-        jet_http_mux_middleware(&mux, move |next| {
-            let events = events.clone();
-            let name = name.to_string();
-            std::sync::Arc::new(move |req| {
-                events.lock().unwrap().push(format!("{name}:before:{}", req.path));
-                let response = next(req.clone());
-                events.lock().unwrap().push(format!("{name}:after:{}", req.path));
-                response
-            })
-        });
+        jet_http_mux_middleware(
+            &mux,
+            std::sync::Arc::new(move |next: JetHTTPHandler| -> JetHTTPHandler {
+                let events = events.clone();
+                let name = name.to_string();
+                std::sync::Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                    events.lock().unwrap().push(format!("{name}:before:{}", req.path));
+                    let response = next(req.clone());
+                    events.lock().unwrap().push(format!("{name}:after:{}", req.path));
+                    response
+                })
+            }) as JetHTTPMiddleware,
+        );
     }
     jet_http_mux_add(&mux, "GET", "/ok/:id", |req| {
         jet_http_srv_response(200, &jet_http_srv_req_param(&req, &"id".to_string()).unwrap())
@@ -3044,7 +3053,14 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 
     let short = jet_http_mux_new();
     let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    jet_http_mux_middleware(&short, |_| std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"blocked".to_string()))));
+    jet_http_mux_middleware(
+        &short,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(|_: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                Ok(jet_http_srv_response(403, &"blocked".to_string()))
+            })
+        }) as JetHTTPMiddleware,
+    );
     let calls = handler_calls.clone();
     jet_http_mux_add(&short, "GET", "/", move |_| {
         calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -3054,9 +3070,14 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     assert_eq!(handler_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
 
     let short_before_id = jet_http_mux_new();
-    jet_http_mux_middleware(&short_before_id, |_| {
-        std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"outer short".to_string())))
-    });
+    jet_http_mux_middleware(
+        &short_before_id,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(|_: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                Ok(jet_http_srv_response(403, &"outer short".to_string()))
+            })
+        }) as JetHTTPMiddleware,
+    );
     jet_http_srv_install_request_id(&short_before_id);
     jet_http_mux_add(&short_before_id, "GET", "/", |_| {
         jet_http_srv_response(200, &"must not run".to_string())
@@ -3067,9 +3088,14 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 
     let id_before_short = jet_http_mux_new();
     jet_http_srv_install_request_id(&id_before_short);
-    jet_http_mux_middleware(&id_before_short, |_| {
-        std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"inner short".to_string())))
-    });
+    jet_http_mux_middleware(
+        &id_before_short,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(|_: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                Ok(jet_http_srv_response(403, &"inner short".to_string()))
+            })
+        }) as JetHTTPMiddleware,
+    );
     jet_http_mux_add(&id_before_short, "GET", "/", |_| {
         jet_http_srv_response(200, &"must not run".to_string())
     });
@@ -3082,13 +3108,16 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 
     let runtime_error = jet_http_mux_new();
     jet_http_srv_install_request_id(&runtime_error);
-    jet_http_mux_middleware(&runtime_error, |_| {
-        std::sync::Arc::new(|_| {
-            Err(JetHTTPError::Internal {
-                incident_id: "private-middleware-error".to_string(),
+    jet_http_mux_middleware(
+        &runtime_error,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(|_: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                Err(JetHTTPError::Internal {
+                    incident_id: "private-middleware-error".to_string(),
+                })
             })
-        })
-    });
+        }) as JetHTTPMiddleware,
+    );
     jet_http_mux_add(&runtime_error, "GET", "/", |_| {
         jet_http_srv_response(200, &"must not run".to_string())
     });
@@ -3102,9 +3131,14 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 
     let runtime_panic = jet_http_mux_new();
     jet_http_srv_install_request_id(&runtime_panic);
-    jet_http_mux_middleware(&runtime_panic, |_| {
-        std::sync::Arc::new(|_| panic!("private middleware runtime panic"))
-    });
+    jet_http_mux_middleware(
+        &runtime_panic,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(|_: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                panic!("private middleware runtime panic")
+            })
+        }) as JetHTTPMiddleware,
+    );
     jet_http_mux_add(&runtime_panic, "GET", "/", |_| {
         jet_http_srv_response(200, &"must not run".to_string())
     });
@@ -3180,13 +3214,16 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
 fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
     let mux = jet_http_mux_new();
     jet_http_srv_install_request_id(&mux);
-    jet_http_mux_middleware(&mux, |next| {
-        std::sync::Arc::new(move |request| {
-            let mut response = next(request)?;
-            response.headers.set("x-middleware", "seen").unwrap();
-            Ok(response)
-        })
-    });
+    jet_http_mux_middleware(
+        &mux,
+        std::sync::Arc::new(|next: JetHTTPHandler| -> JetHTTPHandler {
+            std::sync::Arc::new(move |request: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+                let mut response = next(request)?;
+                response.headers.set("x-middleware", "seen").unwrap();
+                Ok(response)
+            })
+        }) as JetHTTPMiddleware,
+    );
     jet_http_mux_add(&mux, "GET", "/id", |req| {
         let id = req
             .headers
@@ -3278,9 +3315,12 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
 
     let factory_panic = jet_http_mux_new();
     jet_http_srv_install_request_id(&factory_panic);
-    jet_http_mux_middleware(&factory_panic, |_| {
-        panic!("private middleware factory panic")
-    });
+    jet_http_mux_middleware(
+        &factory_panic,
+        std::sync::Arc::new(|_: JetHTTPHandler| -> JetHTTPHandler {
+            panic!("private middleware factory panic")
+        }) as JetHTTPMiddleware,
+    );
     jet_http_mux_add(&factory_panic, "GET", "/", |_| {
         jet_http_srv_response(200, &"must not run".to_string())
     });
