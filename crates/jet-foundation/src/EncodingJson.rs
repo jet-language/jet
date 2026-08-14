@@ -1,4 +1,4 @@
-//! One JSON parser for the embedded Prelude and comptime adapters.
+// One JSON parser for the embedded Prelude and comptime adapters.
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
