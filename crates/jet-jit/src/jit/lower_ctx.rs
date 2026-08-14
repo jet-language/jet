@@ -1463,7 +1463,7 @@ impl LowerCtx<'_, '_> {
     fn serde_codec_key(&self, ty: &Type, method: &str) -> Option<String> {
         let base = user_type_name(ty)?;
         if matches!(ty, Type::Apply { .. }) {
-            let concrete = format!("{}::{method}", ty.name());
+            let concrete = TIR::generic_method_instance_key(ty, method, &[]);
             if self.func_ids.contains_key(&concrete) {
                 return Some(concrete);
             }

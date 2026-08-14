@@ -719,7 +719,7 @@ fn demand_serde_codec(
 ) {
     if matches!(ty, Type::Apply { .. }) {
         demands.insert(
-            format!("{}::{method}", ty.name()),
+            generic_method_instance_key(ty, method, &[]),
             (ty.clone(), method.to_string(), Vec::new()),
         );
     }
@@ -759,6 +759,12 @@ fn collect_serde_codec_demands(
         expr: &TExpr,
         demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
     ) {
+        // Keep the concrete owner type alive at every TIR node. A generic value
+        // can be constructed in one statement and consumed by a later CoreCall;
+        // collecting only the operation node loses the `Owner<Args>` identity
+        // before the demand worklist runs.
+        demand_serde_codec(demands, &expr.ty, "encode");
+        demand_serde_codec(demands, &expr.ty, "decode");
         match &expr.kind {
             TExprKind::Print(inner) | TExprKind::DistinctCtor { arg: inner, .. } => {
                 walk_expr(inner, demands);

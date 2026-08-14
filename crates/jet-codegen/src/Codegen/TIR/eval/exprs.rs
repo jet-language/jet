@@ -2059,7 +2059,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
-        let concrete = format!("{}::{method}", ty.name());
+        let concrete = crate::Codegen::TIR::generic_method_instance_key(ty, method, &[]);
         self.funcs.get(&concrete).copied().or_else(|| match ty {
             Type::Apply { name, .. } => self.funcs.get(&format!("{name}::{method}")).copied(),
             _ => None,

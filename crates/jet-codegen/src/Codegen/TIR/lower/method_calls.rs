@@ -643,7 +643,7 @@ fn lower_crypto_instance_fast(
 fn lower_serde_encode_node(recv: TExpr, cx: &Cx) -> TExpr {
     if matches!(&recv.ty, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
-            format!("{}::encode", recv.ty.name()),
+            crate::Codegen::TIR::generic_method_instance_key(&recv.ty, "encode", &[]),
             (recv.ty.clone(), "encode".to_string(), Vec::new()),
         );
     }
@@ -665,7 +665,7 @@ fn lower_datatree_decode_node(
 ) -> TExpr {
     if matches!(&target, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
-            format!("{}::decode", target.name()),
+            crate::Codegen::TIR::generic_method_instance_key(&target, "decode", &[]),
             (target.clone(), "decode".to_string(), Vec::new()),
         );
     }
@@ -6453,7 +6453,7 @@ fn demand_generic_serde_codec(
         if let Some(arg) = args.first() {
             if matches!(&arg.ty, Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
-                    format!("{}::encode", arg.ty.name()),
+                    crate::Codegen::TIR::generic_method_instance_key(&arg.ty, "encode", &[]),
                     (arg.ty.clone(), "encode".to_string(), Vec::new()),
                 );
             }
@@ -6468,7 +6468,7 @@ fn demand_generic_serde_codec(
             }
             if matches!(ok.as_ref(), Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
-                    format!("{}::decode", ok.name()),
+                    crate::Codegen::TIR::generic_method_instance_key(ok, "decode", &[]),
                     ((**ok).clone(), "decode".to_string(), Vec::new()),
                 );
             }
