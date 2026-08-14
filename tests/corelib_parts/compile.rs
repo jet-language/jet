@@ -99,6 +99,7 @@ fn run() {
     wait :: 500ms
     origin :: time.instant()
     later :: origin + 5min
+    speed :: 12meter / 2s
     print(wait.in(.Milliseconds) ?? panic("wait"))
     print((later - origin).in(.Minutes) ?? panic("delta"))
 }

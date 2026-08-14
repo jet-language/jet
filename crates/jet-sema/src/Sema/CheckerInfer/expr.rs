@@ -1489,18 +1489,24 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } => {
-                if let Some(unit) = self.registry.time_literal(suffix) {
+                if let Some(unit) = self.registry.unit_literal("Time", suffix) {
                     let is_float = float.is_some();
                     let mut value = match (int, float) {
                         (Some(value), _) => Expr::Int(*value, *span, None, None),
                         (_, Some(value)) => Expr::Float(*value, *span, false),
                         _ => Expr::Int(0, *span, None, None),
                     };
-                    if unit.constructor_multiplier != 1 {
+                    let scale = unit
+                        .scale
+                        .num
+                        .to_string()
+                        .parse::<i64>()
+                        .expect("canonical Time scales fit the Int carrier");
+                    if scale != 1 {
                         let multiplier = if is_float {
-                            Expr::Float(unit.constructor_multiplier as f64, *span, false)
+                            Expr::Float(scale as f64, *span, false)
                         } else {
-                            Expr::Int(unit.constructor_multiplier, *span, None, None)
+                            Expr::Int(scale, *span, None, None)
                         };
                         value = Expr::Binary(
                             BinOp::Mul,
@@ -1514,7 +1520,7 @@ impl<'a> Checker<'a> {
                             Syntax::DURATION_TYPE.to_string(),
                             *suffix_span,
                         )),
-                        method: unit.constructor.to_string(),
+                        method: "nanoseconds".to_string(),
                         method_span: *suffix_span,
                         owner_type_args: Vec::new(),
                         type_args: Vec::new(),

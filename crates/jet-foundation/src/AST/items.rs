@@ -1331,7 +1331,7 @@ pub struct StateTransition {
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the raw `#Every(…)`
 /// argument as the parser saw it — a duration literal (`#Every(5min)`) or a
 /// quoted daily wall-clock time (`#Every("03:00")`). Sema resolves this
-/// (`Syntax::resolve_every_schedule`) into a checked `EverySchedule`,
+/// through the registered Time-family facts into a checked `EverySchedule`,
 /// pushing E0926 on a bad value; codegen never reads it (I3, erased).
 #[derive(Debug, Clone)]
 pub enum EveryArg {
@@ -1356,12 +1356,14 @@ pub enum EveryArg {
 pub struct EveryMarker {
     pub arg: EveryArg,
     pub span: Span,
+    /// Sema's checked projection of `arg`. Runtime schedule consumers read
+    /// this value; they never parse a duration suffix again.
+    pub resolved: Option<EverySchedule>,
 }
 
-/// D-SCHEDULE1: a resolved, checked `#Every(…)` schedule — what
-/// `Syntax::resolve_every_schedule` produces from a valid `EveryArg`. One
-/// value; every consumer (`jet dev`, the service runtime, a jetos timer
-/// projection) derives from the same `EveryArg` instead of re-parsing it.
+/// D-SCHEDULE1: a resolved, checked `#Every(…)` schedule. Sema writes this
+/// projection once from the registered Time-family facts; every runtime
+/// consumer reads the same value instead of re-parsing source text.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EverySchedule {
     /// Re-run every `nanos` nanoseconds since the job last ran.
@@ -1370,8 +1372,8 @@ pub enum EverySchedule {
     DailyAt { hour: u8, minute: u8 },
 }
 
-/// D-SCHEDULE1: why `resolve_every_schedule` rejected an `EveryArg` — sema
-/// turns each into the matching E0926 What/Why/Fix row.
+/// D-SCHEDULE1: why sema rejected an `EveryArg` — sema turns each into the
+/// matching E0926 What/Why/Fix row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EveryScheduleError {
     /// The duration suffix isn't in the canonical Time vocabulary
@@ -1389,57 +1391,6 @@ pub enum EveryScheduleError {
     /// A runtime expression has the right type but cannot define a static
     /// job schedule.
     DynamicValue,
-}
-
-impl EveryArg {
-    /// D-SCHEDULE1: resolve this raw `#Every(…)` argument into a checked
-    /// schedule. Sema calls this once to decide E0926; a runtime consumer
-    /// (`jet dev`, …) calls it again to get the identical answer — one
-    /// function, nothing cached to drift between the two callers.
-    pub fn resolve(&self) -> Result<EverySchedule, EveryScheduleError> {
-        match self {
-            EveryArg::Duration { int, float, suffix, .. } => {
-                let Some(unit) = UnitFamilyDef::canonical_time_unit(suffix)
-                else {
-                    return Err(EveryScheduleError::UnknownDurationUnit);
-                };
-                let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
-                if value <= 0.0 {
-                    return Err(EveryScheduleError::NonPositiveDuration);
-                }
-                let nanos = (value * unit.nanos as f64) as u128;
-                if nanos == 0 {
-                    return Err(EveryScheduleError::NonPositiveDuration);
-                }
-                Ok(EverySchedule::Interval { nanos })
-            }
-            EveryArg::WallClock { text, .. } => {
-                let bytes = text.as_bytes();
-                let digits_ok = bytes.len() == 5
-                    && bytes[2] == b':'
-                    && bytes[0].is_ascii_digit()
-                    && bytes[1].is_ascii_digit()
-                    && bytes[3].is_ascii_digit()
-                    && bytes[4].is_ascii_digit();
-                if !digits_ok {
-                    return Err(EveryScheduleError::BadWallClockFormat);
-                }
-                let hour: u32 = text[0..2].parse().unwrap_or(99);
-                let minute: u32 = text[3..5].parse().unwrap_or(99);
-                if hour > 23 {
-                    return Err(EveryScheduleError::HourOutOfRange);
-                }
-                if minute > 59 {
-                    return Err(EveryScheduleError::MinuteOutOfRange);
-                }
-                Ok(EverySchedule::DailyAt {
-                    hour: hour as u8,
-                    minute: minute as u8,
-                })
-            }
-            EveryArg::Expression(_) => Err(EveryScheduleError::DynamicValue),
-        }
-    }
 }
 
 /// D-APILABEL1=A: which call forms a parameter accepts. `/` closes the
@@ -1791,15 +1742,6 @@ pub struct UnitFamilyMember {
     pub offset: UnitRatio,
 }
 
-/// D-TYPE2-TIME1=A: canonical Time suffix metadata shared by unit literals
-/// and static schedule resolution. Neither surface owns a private table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CanonicalTimeUnit {
-    pub nanos: u128,
-    pub constructor: &'static str,
-    pub constructor_multiplier: i64,
-}
-
 pub type UnitRatio = crate::PerformanceBudget::Rational;
 
 /// D-UNIT-SCALE-PROVENANCE1=A: source truth behind a unit's runtime scale.
@@ -1823,49 +1765,6 @@ pub enum UnitScaleProvenance {
 }
 
 impl UnitFamilyDef {
-    /// The one canonical Time family vocabulary. `d` projects to the existing
-    /// checked hours constructor instead of adding a second duration API.
-    pub fn canonical_time_unit(suffix: &str) -> Option<CanonicalTimeUnit> {
-        match suffix {
-            "ns" => Some(CanonicalTimeUnit {
-                nanos: 1,
-                constructor: "nanoseconds",
-                constructor_multiplier: 1,
-            }),
-            "us" => Some(CanonicalTimeUnit {
-                nanos: 1_000,
-                constructor: "microseconds",
-                constructor_multiplier: 1,
-            }),
-            "ms" => Some(CanonicalTimeUnit {
-                nanos: 1_000_000,
-                constructor: "milliseconds",
-                constructor_multiplier: 1,
-            }),
-            "s" => Some(CanonicalTimeUnit {
-                nanos: 1_000_000_000,
-                constructor: "seconds",
-                constructor_multiplier: 1,
-            }),
-            "min" => Some(CanonicalTimeUnit {
-                nanos: 60_000_000_000,
-                constructor: "minutes",
-                constructor_multiplier: 1,
-            }),
-            "h" => Some(CanonicalTimeUnit {
-                nanos: 3_600_000_000_000,
-                constructor: "hours",
-                constructor_multiplier: 1,
-            }),
-            "d" => Some(CanonicalTimeUnit {
-                nanos: 86_400_000_000_000,
-                constructor: "hours",
-                constructor_multiplier: 24,
-            }),
-            _ => None,
-        }
-    }
-
     /// Standard Prelude Time uses the core Duration/Instant pair. It must not
     /// mint a second Float-based unit family.
     pub fn is_canonical_time(&self) -> bool {

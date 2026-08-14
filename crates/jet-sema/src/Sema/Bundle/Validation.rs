@@ -1803,7 +1803,7 @@ fn check_func_body_bundle_scoped(
         ck.diags.extend(check_inline_always_fn(f));
     }
     // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
-    ck.diags.extend(check_every_marker(f));
+    ck.diags.extend(check_every_marker(f, &st.registry));
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
     // into the whole-bundle accumulator for `jet inspect expand --facts refs`.

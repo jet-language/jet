@@ -1013,6 +1013,21 @@ fn time_duration_edges() => String {
     difference :: left.difference(right)
     zero :: Duration.nanoseconds(0) ?? panic("zero")
     return "{clamped.to_string()}|{leap_end.to_string()}|{negative_time.to_timestamp()}|{negative_time.to_unix_ms()}|{negative_time.format_rfc3339()}|{fractional.in(.Milliseconds) ?? panic("fractional read")}|{negative.in(.Seconds) ?? panic("negative read")}|{difference.in(.Milliseconds) ?? panic("difference read")}|{zero.is_zero()}"
+                }"#,
+            ),
+        ),
+        (
+            "time-plane-literal-kernel",
+            parity_source(
+                "time_plane_view()",
+                r#"use core.time as time
+fn time_plane_view() => String {
+    wait :: 500ms
+    origin :: time.instant()
+    point :: origin + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}"
 }"#,
             ),
         ),
@@ -1047,6 +1062,9 @@ fn xml_edges() => String {
                 expected,
                 "2023-02-28|2024-02-29|-1|-1|1969-12-31T23:59:59.999000000Z|1750|-1|-1000|true"
             );
+        }
+        if label == "time-plane-literal-kernel" {
+            assert_eq!(expected, "500|5");
         }
         if label == "xml-edge-kernel" {
             assert_eq!(

@@ -318,8 +318,9 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
 /// with no `#Every(…)`, i.e. manual-invocation-only). Scoped to the entry
 /// module's top-level items only (D-JPK-TASKRUN1: a job lives "beside `fn
 /// run()`" — the same file, not an imported one). Sema has already rejected
-/// a bad `#Every(…)` value (E0926) by the time a bundle reaches `jet dev`,
-/// so `resolve()` failing here is defensive, not a real path.
+/// a bad `#Every(…)` value (E0926) by the time a bundle reaches `jet dev`.
+/// Sema stores the checked schedule on the marker, so this path never
+/// re-parses a duration suffix.
 pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EverySchedule)> {
     let Some(entry) = bundle.modules.get(bundle.entry) else {
         return Vec::new();
@@ -337,7 +338,7 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
                 }).is_some() {
                     return None;
                 }
-                let schedule = f.every.as_ref()?.arg.resolve().ok()?;
+                let schedule = f.every.as_ref()?.resolved?;
                 Some((f.name.clone(), schedule))
             }
             _ => None,

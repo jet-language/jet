@@ -48,7 +48,7 @@ truthful seam and replay the latest bounded topic event on reconnect.
 ### D-SCHEDULE1
 
 The shipped `jet dev` path consumes `Interpreter::scheduled_tasks` and
-`EverySchedule`, which comes from the checked `EveryArg::resolve` law. The
+`EverySchedule`, which sema writes from the registered Time-family facts. The
 authorized service/jetos path has no equivalent typed input: `DevServicePlan`
 has service-process metadata, `ServicePlan` captures only `enable` plus untyped
 `extra` fields, and the jetos systemd projection reads raw service

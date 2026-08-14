@@ -725,6 +725,11 @@ fn repl_zoned_exact_transcript() {
 }
 
 #[test]
+fn repl_time_plane_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/time.txt"));
+}
+
+#[test]
 fn repl_decimal_exact_transcript() {
     run_transcript_file_strict(include_str!("repl/decimal.txt"));
 }

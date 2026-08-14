@@ -1244,6 +1244,7 @@ impl<'a> Parser<'a> {
                         function.every = Some(crate::AST::EveryMarker {
                             arg,
                             span: marker.span,
+                            resolved: None,
                         });
                     }
                     Syntax::MARKER_MUST_USE if marker.args.is_empty() => {

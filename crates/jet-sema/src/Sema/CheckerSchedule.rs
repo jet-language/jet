@@ -6,11 +6,9 @@
 //! paired with `#Job` on the same function (E0925, pushed directly by
 //! `jet-parser` — a placement question, not a value question). This module
 //! owns the one thing left for schedules: is the VALUE a real schedule?
-//! `EveryArg::resolve` (`crates/jet-foundation/src/AST/items.rs`) is the
-//! single source of truth for that arithmetic/range check — `jet dev`, the
-//! service runtime, and a jetos timer projection all call the same function
-//! later to get the same answer, so this checker and every runtime consumer
-//! can never disagree.
+//! This module resolves the raw marker through the registered unit-plane
+//! facts and writes one checked `EverySchedule` projection onto the marker.
+//! Runtime consumers read that projection; they never parse source suffixes.
 //!
 //! D-JPK-TASKRUN1 / D-CMD-OVERRIDE1=C also lives here: a `#Job fn` must not
 //! reuse the reserved lifecycle verbs `run`/`dev`/`build`/`test`/`bench` (E0928).
@@ -18,9 +16,62 @@
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
 
-use crate::AST::{EveryScheduleError, Func, Item, JobScope, LoadedModule};
+use crate::AST::{EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+
+fn resolve_every_arg(
+    arg: &EveryArg,
+    registry: &super::TypeRegistry,
+) -> Result<EverySchedule, EveryScheduleError> {
+    match arg {
+        EveryArg::Duration { int, float, suffix, .. } => {
+            let Some(unit) = registry.unit_literal("Time", suffix) else {
+                return Err(EveryScheduleError::UnknownDurationUnit);
+            };
+            let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+            if !value.is_finite() || value <= 0.0 {
+                return Err(EveryScheduleError::NonPositiveDuration);
+            }
+            let scale = unit
+                .scale
+                .num
+                .to_string()
+                .parse::<f64>()
+                .map_err(|_| EveryScheduleError::UnknownDurationUnit)?;
+            let nanos = (value * scale) as u128;
+            if nanos == 0 {
+                return Err(EveryScheduleError::NonPositiveDuration);
+            }
+            Ok(EverySchedule::Interval { nanos })
+        }
+        EveryArg::WallClock { text, .. } => {
+            let bytes = text.as_bytes();
+            let digits_ok = bytes.len() == 5
+                && bytes[2] == b':'
+                && bytes[0].is_ascii_digit()
+                && bytes[1].is_ascii_digit()
+                && bytes[3].is_ascii_digit()
+                && bytes[4].is_ascii_digit();
+            if !digits_ok {
+                return Err(EveryScheduleError::BadWallClockFormat);
+            }
+            let hour: u32 = text[0..2].parse().unwrap_or(99);
+            let minute: u32 = text[3..5].parse().unwrap_or(99);
+            if hour > 23 {
+                return Err(EveryScheduleError::HourOutOfRange);
+            }
+            if minute > 59 {
+                return Err(EveryScheduleError::MinuteOutOfRange);
+            }
+            Ok(EverySchedule::DailyAt {
+                hour: hour as u8,
+                minute: minute as u8,
+            })
+        }
+        EveryArg::Expression(_) => Err(EveryScheduleError::DynamicValue),
+    }
+}
 
 /// E0926: `#Every(…)`'s value isn't a real schedule — a bad duration unit,
 /// a non-positive duration, or a malformed/out-of-range `"HH:MM"`.
@@ -146,14 +197,18 @@ pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> 
 /// call sites in `Registration.rs`/`Bundle.rs`) — E0925 placement is already
 /// handled by the parser, so this is the value check alone. Also runs the
 /// D-JPK-TASKRUN1 reserved-name check for `#Job`.
-pub(crate) fn check_every_marker(f: &Func) -> Vec<Diagnostic> {
+pub(crate) fn check_every_marker(f: &mut Func, registry: &super::TypeRegistry) -> Vec<Diagnostic> {
     let mut diags = check_job_marker(f);
-    let Some(every) = &f.every else {
+    let Some(every) = &mut f.every else {
         return diags;
     };
-    match every.arg.resolve() {
-        Ok(_) => diags,
+    match resolve_every_arg(&every.arg, registry) {
+        Ok(schedule) => {
+            every.resolved = Some(schedule);
+            diags
+        }
         Err(reason) => {
+            every.resolved = None;
             let span = match &every.arg {
                 crate::AST::EveryArg::Duration { suffix_span, .. } => *suffix_span,
                 crate::AST::EveryArg::WallClock { text_span, .. } => *text_span,

@@ -45,6 +45,7 @@ fn specialize_func(
     if let Some(every) = &mut func.every {
         if let crate::AST::EveryArg::Expression(expression) = &mut every.arg {
             substitute_expr(expression, &types, &values);
+            every.resolved = None;
         }
     }
     for param in &mut func.params {
@@ -71,6 +72,7 @@ pub fn specialize_function_types(mut func: Func, types: &HashMap<String, Type>) 
     if let Some(every) = &mut func.every {
         if let crate::AST::EveryArg::Expression(expression) = &mut every.arg {
             substitute_expr(expression, types, &values);
+            every.resolved = None;
         }
     }
     for param in &mut func.params {

@@ -32,7 +32,8 @@ use crate::AST::{
 /// Validate every scope-member statement in the program. Runs in every mode
 /// (not just `jet test`): a malformed member is a structural error that `jet
 /// check` / `jet run` should surface too, even though the members only *run*
-/// under `jet test`. The check needs no type information.
+/// under `jet test`. The check reads the injected unit family declaration for
+/// `.timeout`, but does not duplicate its vocabulary.
 pub fn check(
     items: &[Item],
     vocabulary: &crate::Policy::MarkerVocabulary,
@@ -42,8 +43,20 @@ pub fn check(
     check_assertionless_tests(items, &mut diags);
     for item in items {
         match item {
-            Item::Test(t) => check_marker_body(Syntax::KW_TEST, &t.body, vocabulary, &mut diags),
-            Item::Bench(b) => check_marker_body(Syntax::KW_BENCH, &b.body, vocabulary, &mut diags),
+            Item::Test(t) => check_marker_body(
+                Syntax::KW_TEST,
+                &t.body,
+                vocabulary,
+                items,
+                &mut diags,
+            ),
+            Item::Bench(b) => check_marker_body(
+                Syntax::KW_BENCH,
+                &b.body,
+                vocabulary,
+                items,
+                &mut diags,
+            ),
             Item::Func(f) => reject_all(&f.body, vocabulary, &mut diags),
             Item::Impl(i) => {
                 for m in &i.methods {
@@ -414,6 +427,7 @@ fn check_marker_body(
     marker: &str,
     body: &[Stmt],
     vocabulary: &crate::Policy::MarkerVocabulary,
+    items: &[Item],
     diags: &mut Vec<Diagnostic>,
 ) {
     for (i, s) in body.iter().enumerate() {
@@ -439,6 +453,7 @@ fn check_marker_body(
                     i == 0,
                     *dot_span,
                     *span,
+                    items,
                     diags,
                 );
                 // Members inside a member's body are nested → E0618.
@@ -670,6 +685,7 @@ fn validate_member(
     is_first: bool,
     dot_span: Span,
     span: Span,
+    items: &[Item],
     diags: &mut Vec<Diagnostic>,
 ) {
     let vocab = match Syntax::scope_members(marker) {
@@ -702,7 +718,7 @@ fn validate_member(
         ));
         return;
     }
-    validate_args(name, args, args_span, span, diags);
+    validate_args(name, args, args_span, span, items, diags);
     if name == Syntax::SCOPE_TEST_SETUP && !is_first {
         diags.push(Diagnostic::error(
             "E0616",
@@ -722,6 +738,7 @@ fn validate_args(
     args: &[Expr],
     args_span: &Option<Span>,
     span: Span,
+    items: &[Item],
     diags: &mut Vec<Diagnostic>,
 ) {
     let at = args_span.unwrap_or(span);
@@ -756,7 +773,7 @@ fn validate_args(
             }
         }
         n if n == Syntax::SCOPE_TEST_TIMEOUT => {
-            let ok = args.len() == 1 && is_duration(&args[0]);
+            let ok = args.len() == 1 && is_duration(&args[0], items);
             if !ok {
                 diags.push(Diagnostic::error(
                     "E0617",
@@ -784,10 +801,20 @@ fn validate_args(
     }
 }
 
-/// A duration literal usable by `.timeout` — a bare literal in the canonical
-/// Time family (D-TYPE2-TIME1; no private timeout suffix table).
-fn is_duration(e: &Expr) -> bool {
-    matches!(e, Expr::UnitLit { suffix, .. } if crate::AST::UnitFamilyDef::canonical_time_unit(suffix).is_some())
+/// A `.timeout` argument must name a member of the injected canonical Time
+/// family. The family declaration is the source fact; this pass does not
+/// maintain a second suffix table.
+fn is_duration(e: &Expr, items: &[Item]) -> bool {
+    let Expr::UnitLit { suffix, .. } = e else {
+        return false;
+    };
+    items.iter().any(|item| match item {
+        Item::UnitFamily(family) if family.is_canonical_time() => family
+            .members
+            .iter()
+            .any(|member| member.name == *suffix),
+        _ => false,
+    })
 }
 
 fn vocab_list(vocab: &[&str]) -> String {
