@@ -125,6 +125,22 @@ pub(crate) fn jet_term_height(get: impl Fn(&str) -> Option<String>) -> i64 {
         .unwrap_or(24)
 }
 
+// D-CLI-GLOBAL1=E: the Standard CLI pack supplies one process-local color
+// override. The terminal policy remains here so AOT, JIT, and interpreter
+// adapters do not each invent a color decision.
+thread_local! {
+    static JET_TERM_COLOR_MODE: std::cell::Cell<u8> = std::cell::Cell::new(0);
+}
+
+pub(crate) fn jet_term_set_color_mode(mode: &str) {
+    let value = match mode {
+        "always" => 1,
+        "never" => 2,
+        _ => 0,
+    };
+    JET_TERM_COLOR_MODE.with(|current| current.set(value));
+}
+
 fn jet_term_positive_env_int(value: Option<String>) -> Option<i64> {
     value?.parse::<i64>().ok().filter(|value| *value > 0)
 }
@@ -149,7 +165,11 @@ pub(crate) fn jet_term_style_enabled(
     term_is_dumb: bool,
     stdout_is_terminal: bool,
 ) -> bool {
-    !no_color && !term_is_dumb && stdout_is_terminal
+    JET_TERM_COLOR_MODE.with(|mode| match mode.get() {
+        1 => true,
+        2 => false,
+        _ => !no_color && !term_is_dumb && stdout_is_terminal,
+    })
 }
 
 pub(crate) fn jet_term_style(style: &str, text: &str, enabled: bool) -> String {

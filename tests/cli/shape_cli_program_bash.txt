@@ -1,15 +1,15 @@
-# bash completion from JetCommandSchema v4
+# bash completion from JetCommandSchema v5
 __jet_program_completion() {
     local cur flags
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W '--help serve import' -- "$cur") )
+        COMPREPLY=( $(compgen -W '--help --verbose -v --quiet -q --color --version --config -c serve import' -- "$cur") )
         return 0
     fi
-    flags='--help'
+    flags='--help --verbose -v --quiet -q --color --version --config -c'
     case "${COMP_WORDS[1]}" in
-        'serve') flags='--help --port -p' ;;
+        'serve') flags='--help --port' ;;
         'import') flags='--help file --file' ;;
     esac
     if [[ "$cur" == -* ]]; then

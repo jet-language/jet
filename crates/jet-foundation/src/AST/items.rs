@@ -1618,6 +1618,10 @@ pub struct StructDef {
     pub type_params: Vec<TypeParam>,
     pub fields: Vec<Field>,
     pub methods: Vec<Func>,
+    /// D-CLI-GLOBAL1=E: callable members bound with `name = function` are
+    /// commands, not stored data. They stay separate from fields so ordinary
+    /// construction, reflection, and Codable never see them.
+    pub cli_bindings: Vec<CLICommandBinding>,
     /// S28: in-type `impl Trait { … }` blocks.
     pub trait_impls: Vec<TraitImplBlock>,
     /// D-ONCE-DERIVE1=A: marker-derived capabilities lowered into ordinary rows.
@@ -1662,6 +1666,15 @@ pub struct StructDef {
     /// `validate { }` block.
     pub validate_block: Vec<Stmt>,
     pub validate_span: Option<Span>,
+}
+
+/// D-CLI-GLOBAL1=E: one bound callable member in a `#CLI` program struct.
+#[derive(Debug, Clone)]
+pub struct CLICommandBinding {
+    pub name: String,
+    pub name_span: Span,
+    pub markers: Vec<Marker>,
+    pub target: Expr,
 }
 
 impl StructDef {

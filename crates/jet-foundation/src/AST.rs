@@ -38,7 +38,7 @@ pub use items::{
     TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, JobScope, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
     DEFAULT_MEMO_BOUND, memo_bound_from_markers,
     EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,
-    Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, CanonicalTimeUnit, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
+    Marker, StructDef, CLICommandBinding, TypeAliasDef, DistinctDef, QuantityKind, CanonicalTimeUnit, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
     EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field, SerdeWireShape,
     resolved_decode_wire_shapes,
 };

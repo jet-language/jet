@@ -1,43 +1,38 @@
-// D-CLIFLAG1: an `enum` entry parameter derives subcommands. The first
-// positional token picks the variant by its lowercased name; the rest of
-// argv re-parses against that variant's own `#CLI` struct (its own flags
-// and positionals per D-CLI-POS1=A, its own `--help`). Every variant's
-// payload must itself be `#CLI`-derived (E1307 otherwise).
+// D-CLI-GLOBAL1=E: one program struct owns root flags and callable commands.
+// Root flags are legal before or after the command. Command methods receive
+// the read-only shared value; a binding can target an existing function.
 //
-// Run a subcommand:  jet run examples/features/cli/subcommands.jet -- serve --port 8080
-//                    jet run examples/features/cli/subcommands.jet -- import data.csv
-//                    jet run examples/features/cli/subcommands.jet -- import --file data.csv
+// Run a subcommand:  jet run examples/features/cli/subcommands.jet -- serve --config prod --port 8080
+//                    jet run examples/features/cli/subcommands.jet -- --config prod import data.csv
 // Run --help:        jet run examples/features/cli/subcommands.jet -- serve --help
 // Golden test (no extra args) exercises the bare-invocation shape: zero
 // arguments prints the command list and exits 0 (docs/spec/spec.md — a bare
 // invocation asking "what can this program do" isn't a mistake).
-#CLI
-struct ServeArgs {
-    port: Int = 3000
-}
+#CLI(Standard)
+struct Commands {
+    #[Doc("configuration file"), Env("COMMANDS_CONFIG")] config: String = "default"
 
-#CLI
-struct ImportArgs {
-    file: String
-}
+    #Doc("preview changes") plan = plan_impl
 
-#Doc("Manage the service.\n\nExamples:\n  commands serve\n  commands import data.csv")
-enum Cmd {
     #Doc("Start the service and listen for requests")
-    Serve(ServeArgs)
+    fn serve(self, port: Int = 3000) {
+        print("serve")
+        print(self.config)
+        print(port)
+    }
+
     #Doc("Import one data file")
-    Import(ImportArgs)
+    fn import(self, file: String) {
+        print("import")
+        print(self.config)
+        print(file)
+    }
 }
 
-fn run(cmd: Cmd) {
-    if cmd == {
-        .Serve(a) -> {
-            print("serve")
-            print(a.port)
-        }
-        .Import(a) -> {
-            print("import")
-            print(a.file)
-        }
-    }
+fn plan_impl(args: Commands) {
+    print("plan")
+    print(args.config)
+}
+
+fn run(args: Commands) {
 }

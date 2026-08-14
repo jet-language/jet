@@ -1548,6 +1548,27 @@ fn run(args: ServeArgs) {
 }
 
 #[test]
+fn fmt_keeps_cli_command_bindings() {
+    let src = "\
+#CLI
+struct Commands {
+    #Doc(\"preview changes\") plan = plan_impl
+
+    fn serve(self) {}
+}
+
+fn plan_impl(args: Commands) {}
+fn run(args: Commands) {}
+";
+    assert_fmt_keeps(
+        src,
+        &["#Doc(\"preview changes\")", "plan = plan_impl", "#CLI"],
+        "cli command binding",
+    );
+    assert_fmt_stable(src, "cli command binding");
+}
+
+#[test]
 fn fmt_keeps_container_rename_all() {
     // Derive and container serde rules share one applied-rule group.
     let src = "\

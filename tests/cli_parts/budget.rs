@@ -822,17 +822,15 @@ fn run(args: RunArgs) {
 }
 
 #[test]
-fn typed_cli_entry_accepts_an_imported_subcommand_type() {
-    let dir = isolated_cwd("shape_cli_imported_subcommand_type");
+fn typed_cli_entry_accepts_an_imported_program_struct() {
+    let dir = isolated_cwd("shape_cli_imported_program_struct");
     fs::write(
         dir.join("commands.jet"),
         r#"#CLI
-pub struct ServeArgs { pub port: Int }
-
-#CLI
-pub struct ImportArgs { pub file: String }
-
-pub enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
+pub struct Commands {
+    pub fn serve(self, port: Int) {}
+    pub fn import(self, file: String) {}
+}
 "#,
     )
     .unwrap();
@@ -840,7 +838,7 @@ pub enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
         dir.join("run.jet"),
         r#"use "commands"
 
-fn run(cmd: Cmd) {}
+fn run(args: Commands) {}
 "#,
     )
     .unwrap();
@@ -852,7 +850,7 @@ fn run(cmd: Cmd) {}
         .unwrap();
     assert!(
         run.status.success(),
-        "imported subcommand entry failed: {}",
+        "imported program entry failed: {}",
         String::from_utf8_lossy(&run.stderr)
     );
 
@@ -864,13 +862,13 @@ fn run(cmd: Cmd) {}
     assert!(dossier.status.success());
     let dossier = String::from_utf8(dossier.stdout).unwrap();
     for fact in [
-        "\"entry_type\":\"Cmd\"",
+        "\"entry_type\":\"Commands\"",
         "\"name\":\"serve\"",
         "\"flag\":\"--port\"",
         "\"name\":\"import\"",
         "\"flag\":\"--file\"",
     ] {
-        assert!(dossier.contains(fact), "imported subcommand dossier omitted {fact}: {dossier}");
+        assert!(dossier.contains(fact), "imported program command dossier omitted {fact}: {dossier}");
     }
 }
 

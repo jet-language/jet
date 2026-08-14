@@ -13,14 +13,14 @@
 //! order unless `#[Flag]` opts them out. Bool / optional / defaulted stay
 //! flag-only; every field still accepts `--field`, and named input wins.
 //!
-//! Also validates `enum Cmd { Variant(Payload) … }` subcommand parameters
-//! (E1307) and the `fn run` entry-parameter shape (E1308, invoked from
-//! `Bundle.rs`'s entry-point check next to the existing `run` checks).
+//! Also validates program-struct callable members and the `fn run` entry-
+//! parameter shape (E1308, invoked from the entry-point check beside the
+//! existing `run` checks).
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
-use crate::AST::{Expr, Field, Item, StrPart, Type};
+use crate::AST::{AccessConvention, Expr, Field, Func, Item, StrPart, Type};
 
 /// D-CLIFLAG1: the dashed `--flag` name for a snake_case Jet field name.
 /// `config_file` -> `config-file`. Pure textual transform, no rename markers
@@ -41,11 +41,8 @@ fn is_cli_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::Named(n) if n == "Path")
 }
 
-/// D-CLIFLAG1: does `f` carry a `#[Default(expr)]` marker (D-SERDE5's
-/// existing field-default mechanism, reused here rather than inventing a
-/// second one — Jet's only *inline* `= expr` default lives on function
-/// parameters, S61, a different grammar slot; struct fields, CLI or not, use
-/// `#[Default(...)]`)?
+/// D-FIELDDEF1: does `f` carry the declaration-owned `= expr` field default?
+/// The retired `#Default` marker remains visible only to the diagnostic path.
 fn has_default_marker(f: &Field) -> bool {
     f.default.is_some()
         || f.serde_markers
@@ -81,8 +78,8 @@ pub(crate) enum CLIFieldKind {
     Flag,
     /// `T?` field (T a supported scalar) -> optional `.option(...)`, default `null`.
     OptionalOption,
-    /// A supported scalar field with `#[Default(expr)]` -> optional `.option(...)`,
-    /// default = the marker's expression.
+    /// A supported scalar field with an inline `= expr` -> optional `.option(...)`,
+    /// default = the declaration's expression.
     DefaultedOption,
     /// A supported scalar field, no `Option`/`Default` -> required value; absent
     /// at runtime is a `core.args`-style parse error (no new diagnostic code).
@@ -145,9 +142,9 @@ fn e1309(field_name: &str, span: Span) -> Diagnostic {
             field_name
         ),
         "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields \
-         (`T?`), and fields with `#[Default(...)]` already stay flag-only."
+         (`T?`), and fields with a `= expr` default already stay flag-only."
             .to_string(),
-        "remove `#[Flag]`, or make the field a required scalar without `#[Default]`"
+        "remove `#[Flag]`, or make the field a required scalar without a `= expr` default"
             .to_string(),
         Some(span),
     )
@@ -187,48 +184,186 @@ fn e1319(marker: &str, field: &str, why: &str, fix: &str, span: Span) -> Diagnos
     )
 }
 
-/// E1307: an `enum` used as a `fn run` subcommand parameter has a variant
-/// whose payload isn't a `#[CLI]`-derived struct.
-pub(crate) fn e1307(variant_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E1307",
-        format!(
-            "subcommand variant `{}` doesn't carry a `#[CLI]` struct",
-            variant_name
-        ),
-        "each subcommand variant's payload is a single `#[CLI]`-derived struct — that struct \
-         is where the subcommand's own flags come from."
-            .to_string(),
-        format!(
-            "give `{}` a single `#[CLI]` struct payload, e.g. `{}(SomeArgs)`",
-            variant_name, variant_name
-        ),
-        Some(span),
-    )
-}
-
 /// E1308: `fn run`'s parameter isn't a shape D-CLIFLAG1 recognizes.
 pub(crate) fn e1308(span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E1308",
         "`run`'s parameter isn't a CLI-derived type".to_string(),
-        "a typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived struct, or \
-         an `enum` whose every variant carries a `#[CLI]` struct payload."
+        "a typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived program struct."
             .to_string(),
-        "mark the struct `#[CLI]`, or give the enum's variants `#[CLI]` struct payloads"
+        "mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)"
             .to_string(),
         span,
     )
 }
 
-/// D-CLIFLAG1 / D-CLI-POS1: validate every `#[CLI]`-derived struct in `items`
-/// (E1305/E1306/E1309). Mirrors `validate_serde_items`'s shape (same call site
-/// in `Bundle.rs`) but for the CLI-derive plane instead of the wire-serde plane.
+fn e1344(command: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1344",
+        format!("CLI command `{command}` collides with another command or root flag"),
+        "a program struct has one command namespace and one root flag namespace; a word cannot name both."
+            .to_string(),
+        "rename the command or the root field so every command word is unique".to_string(),
+        Some(span),
+    )
+}
+
+fn e1345(name: &str, span: Span, why: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1345",
+        format!("CLI command member `{name}` has no callable shape"),
+        why.to_string(),
+        "bind a visible function with scalar parameters and, at most, one first read-only parameter of the program-struct type".to_string(),
+        Some(span),
+    )
+}
+
+fn e1346(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1346",
+        "callable CLI members cannot be declared on a Codable struct".to_string(),
+        "CLI commands are behavior, while Codable structs contain only serializable data fields."
+            .to_string(),
+        "split the command program struct from the Codable data struct".to_string(),
+        Some(span),
+    )
+}
+
+fn e1347(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1347",
+        "a CLI method receiver must be read-only".to_string(),
+        "shared root flags are parsed into one program value and command dispatch must not mutate that value."
+            .to_string(),
+        "change the receiver to read-only `self`".to_string(),
+        Some(span),
+    )
+}
+
+fn callable_param_shape(ty: &Type) -> bool {
+    is_cli_scalar(ty) || matches!(ty, Type::Option(inner) if is_cli_scalar(inner))
+}
+
+fn validate_callable_params(
+    function: &Func,
+    command_name: &str,
+    shared_type: Option<&str>,
+    out: &mut Vec<Diagnostic>,
+) {
+    let shared = shared_type.map(|shared_type| {
+        function
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, param)| named_leaf(&param.ty) == Some(shared_type))
+            .collect::<Vec<_>>()
+    });
+    if let Some(shared) = shared.as_ref() {
+        if shared.len() > 1 || shared.first().is_some_and(|(index, _)| *index != 0) {
+            out.push(e1345(
+                command_name,
+                function.name_span,
+                "a bound function may receive the shared program struct only once, as its first parameter",
+            ));
+        }
+    }
+    for (index, param) in function.params.iter().enumerate() {
+        if param.name == Syntax::KW_SELF {
+            if shared_type.is_some() {
+                out.push(e1345(
+                    command_name,
+                    param.name_span,
+                    "a bound function receives shared state as an ordinary first program-struct parameter, not as a method receiver",
+                ));
+            }
+            continue;
+        }
+        if shared
+            .as_ref()
+            .is_some_and(|params| params.iter().any(|(shared_index, _)| *shared_index == index))
+        {
+            if param.convention != AccessConvention::Read {
+                out.push(e1345(
+                    command_name,
+                    param.name_span,
+                    "the shared program-struct parameter must be read-only",
+                ));
+            }
+            continue;
+        }
+        if param.variadic || param.variadic_bound_list.is_some() {
+            out.push(e1345(
+                command_name,
+                param.name_span,
+                "command parameters cannot be variadic; use one scalar or optional scalar parameter per input",
+            ));
+            continue;
+        }
+        if !callable_param_shape(&param.ty) {
+            out.push(e1345(
+                command_name,
+                param.ty_span,
+                "every command parameter must be a CLI scalar or optional scalar",
+            ));
+        }
+        if param.default.is_some()
+            && !param.default.as_deref().is_some_and(|expr| {
+                matches!(
+                    expr.without_parens(),
+                    Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Str(..)
+                )
+            })
+        {
+            out.push(e1345(
+                command_name,
+                param.name_span,
+                "a command default must be a CLI compile-time scalar value",
+            ));
+        }
+    }
+}
+
+fn named_leaf(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) => Some(name.rsplit('.').next().unwrap_or(name)),
+        _ => None,
+    }
+}
+
+fn has_codable_shape(s: &crate::AST::StructDef) -> bool {
+    s.derives.iter().any(|(name, _)| {
+        matches!(name.as_str(), Syntax::MARKER_CODABLE | "Encode" | "Decode")
+    })
+}
+
+fn binding_target<'a>(
+    items: &'a [Item],
+    binding: &crate::AST::CLICommandBinding,
+) -> Option<&'a Func> {
+    let Expr::Ident(name, _) = binding.target.without_parens() else {
+        return None;
+    };
+    items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == *name => Some(function),
+        _ => None,
+    })
+}
+
+/// D-CLIFLAG1 / D-CLI-GLOBAL1=E / D-CLI-POS1: validate every `#[CLI]`-
+/// derived program struct in `items` (E1305/E1306/E1308/E1309/E1344-E1347).
+/// This is the CLI-derive plane, not the wire-serde plane.
 pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for item in items {
         let Item::Struct(s) = item else { continue };
         if !s.derives.iter().any(|(t, _)| t == "CLI") {
+            for binding in &s.cli_bindings {
+                out.push(e1345(
+                    &binding.name,
+                    binding.name_span,
+                    "a callable member is only valid inside a `#CLI` program struct",
+                ));
+            }
             for field in &s.fields {
                 for marker in &field.serde_markers {
                     if matches!(
@@ -253,6 +388,19 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
         let mut seen_shorts: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         seen_flags.insert("help".to_string(), s.name_span);
+        let standard = s.type_markers.iter().any(|marker| {
+            marker.name == Syntax::MARKER_CLI
+                && marker.args.iter().any(|arg| {
+                    matches!(arg, Expr::Ident(name, _) if name == "Standard")
+                })
+        });
+        if standard {
+            for name in ["verbose", "quiet", "color", "version"] {
+                seen_flags.insert(name.to_string(), s.name_span);
+            }
+            seen_shorts.insert("v".to_string(), "standard --verbose".to_string());
+            seen_shorts.insert("q".to_string(), "standard --quiet".to_string());
+        }
         for f in &s.fields {
             let kind = classify_cli_field(f);
             if kind.is_none() {
@@ -290,6 +438,69 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
                     ));
                 }
             }
+        }
+        let mut seen_commands: std::collections::HashMap<String, Span> =
+            std::collections::HashMap::new();
+        let mut command_count = 0usize;
+        for function in &s.methods {
+            if s.fields.iter().any(|field| {
+                field.computed.is_some() && field.name == function.name
+            }) {
+                continue;
+            }
+            command_count += 1;
+            let command = function.name.to_lowercase();
+            if seen_flags.contains_key(&command)
+                || seen_commands
+                    .insert(command.clone(), function.name_span)
+                    .is_some()
+            {
+                out.push(e1344(&command, function.name_span));
+            }
+            if let Some(self_param) = function
+                .params
+                .iter()
+                .find(|param| param.name == Syntax::KW_SELF)
+            {
+                if self_param.convention != AccessConvention::Read {
+                    out.push(e1347(self_param.name_span));
+                }
+            }
+            validate_callable_params(function, &command, None, &mut out);
+        }
+        for binding in &s.cli_bindings {
+            command_count += 1;
+            let command = binding.name.to_lowercase();
+            if seen_flags.contains_key(&command)
+                || seen_commands
+                    .insert(command.clone(), binding.name_span)
+                    .is_some()
+            {
+                out.push(e1344(&command, binding.name_span));
+            }
+            if binding
+                .markers
+                .iter()
+                .any(|marker| marker.name != Syntax::MARKER_DOC)
+            {
+                out.push(e1345(
+                    &binding.name,
+                    binding.name_span,
+                    "a callable member accepts `#Doc`, but field-only CLI markers do not apply to bindings",
+                ));
+            }
+            let Some(function) = binding_target(items, binding) else {
+                out.push(e1345(
+                    &binding.name,
+                    binding.target.span(),
+                    "the binding target must be a function declared in the same program module",
+                ));
+                continue;
+            };
+            validate_callable_params(function, &binding.name, Some(&s.name), &mut out);
+        }
+        if command_count > 0 && has_codable_shape(s) {
+            out.push(e1346(s.name_span));
         }
     }
     out

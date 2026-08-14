@@ -1,0 +1,22 @@
+#compdef 'commands'
+# zsh completion from JetCommandSchema v5
+if (( CURRENT == 2 )); then
+_arguments \
+    '(-v --verbose){-v,--verbose}[print extra detail]' \
+    '(-q --quiet){-q,--quiet}[suppress normal output]' \
+    '--color[control terminal color]:MODE:(auto always never)' \
+    '--version[show version]' \
+    '(-c --config){-c,--config}[shared config]:config:' \
+    '--help[show help]' \
+    '1:command:(serve import)'
+else
+    case $words[2] in
+        'serve') _arguments \
+    '--port[value for --port]:port:' \
+    '--help[show help]' ;;
+        'import') _arguments \
+    ':file:value for --file' \
+    '--file[value for --file]:file:' \
+    '--help[show help]' ;;
+    esac
+fi

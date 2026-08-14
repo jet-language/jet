@@ -4,7 +4,7 @@
 
 use crate::AST::{
     CtFloat, CtValue, Expr, Field, Func, Item, Marker, ProgramBundle, StrPart,
-    StructDef, Type, VariantPayload,
+    StructDef, Type,
 };
 use crate::Syntax;
 
@@ -150,7 +150,7 @@ pub struct CLICommandSchema {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CLISubcommandSchema {
     pub name: String,
-    /// Optional #Doc text on the enum variant.
+    /// Optional #Doc text on the callable member.
     pub description: Option<String>,
     pub inputs: Vec<CLIInputSchema>,
 }
@@ -191,10 +191,9 @@ fn selected_entry_type(items: &[Item]) -> Option<&str> {
             }
             if function.params.len() == 1 {
                 if let Type::Named(name) = &function.params[0].ty {
-                    let is_local_type = items.iter().any(|item| {
-                        matches!(item, Item::Struct(s) if s.name == name.as_str())
-                            || matches!(item, Item::Enum(e) if e.name == name.as_str())
-                    });
+                    let is_local_type = items
+                        .iter()
+                        .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
                     if is_local_type || name.contains('.') {
                         return Some(name.as_str());
                     }
@@ -216,10 +215,9 @@ fn direct_run_function(items: &[Item]) -> Option<&Func> {
         }
         if function.params.len() == 1 {
             if let Type::Named(name) = &function.params[0].ty {
-                let is_local_type = items.iter().any(|item| {
-                    matches!(item, Item::Struct(s) if s.name == name.as_str())
-                        || matches!(item, Item::Enum(e) if e.name == name.as_str())
-                });
+                let is_local_type = items
+                    .iter()
+                    .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
                 if is_local_type || name.contains('.') {
                     return None;
                 }
@@ -267,10 +265,10 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
         }
         if function.params.len() == 1 {
             if let Type::Named(name) = &function.params[0].ty {
-                let is_local_type = entry.items.iter().any(|item| {
-                    matches!(item, Item::Struct(s) if s.name == name.as_str())
-                        || matches!(item, Item::Enum(e) if e.name == name.as_str())
-                });
+                let is_local_type = entry
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
                 if is_local_type || name.contains('.') {
                     return Some((bundle.entry, name.as_str()));
                 }
@@ -282,38 +280,14 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
 
 pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
     if let Some(structure) = items.iter().find_map(|item| match item {
-        Item::Struct(structure) if structure.name == name => command_schema(structure),
+        Item::Struct(structure) if structure.name == name => {
+            command_schema_with_items(items, structure)
+        }
         _ => None,
     }) {
         return Some(structure);
     }
-    let enumeration = items.iter().find_map(|item| match item {
-        Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
-        _ => None,
-    })?;
-    let commands = enumeration.variants.iter().filter_map(|variant| {
-        let VariantPayload::Single(Type::Named(payload), _) = &variant.payload else { return None };
-        let structure = items.iter().find_map(|item| match item {
-            Item::Struct(structure) if structure.name == *payload => Some(structure),
-            _ => None,
-        })?;
-        let payload = command_schema(structure)?;
-        Some(CLISubcommandSchema {
-            name: variant.name.to_lowercase(),
-            description: marker(&variant.serde_markers, Syntax::MARKER_DOC)
-                .and_then(marker_string),
-            inputs: payload.inputs,
-        })
-    }).collect();
-    Some(CLICommandSchema {
-        entry_type: name.to_string(),
-        description: marker(&enumeration.type_markers, Syntax::MARKER_DOC)
-            .and_then(marker_string),
-        inputs: Vec::new(),
-        commands,
-        standard: cli_standard(&enumeration.type_markers),
-        version: None,
-    })
+    None
 }
 
 /// Module containing the entry parameter's checked CLI type. Local types win;
@@ -334,7 +308,6 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     if wanted_alias.is_none()
         && entry.items.iter().any(|item| match item {
             Item::Struct(structure) => structure.name == leaf,
-            Item::Enum(enumeration) => enumeration.name == leaf,
             _ => false,
         })
     {
@@ -883,19 +856,15 @@ impl CLICommandSchema {
         words
     }
 
-    /// Inputs accepted after a callable member command. Shared root inputs
-    /// remain legal after the command word, so completion must expose the
-    /// same merged projection as the Args Prelude parser.
+    /// Inputs declared by a callable member command. Shared root inputs stay
+    /// at root completion scope and are not repeated here.
     pub fn command_inputs(&self, command: &CLISubcommandSchema) -> Vec<CLIInputSchema> {
-        let mut inputs = self.inputs.clone();
-        inputs.extend(command.inputs.clone());
-        inputs
+        command.inputs.clone()
     }
 
     /// Candidates legal after a subcommand is selected.
     pub fn command_completion_words(&self, command: &CLISubcommandSchema) -> Vec<String> {
         let mut words = vec!["--help".to_string()];
-        words.extend(self.standard_completion_words());
         words.extend(Self::input_words(&self.command_inputs(command)));
         words
     }
@@ -919,6 +888,16 @@ impl CLICommandSchema {
 }
 
 pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
+    command_schema_with_items(&[], structure)
+}
+
+/// D-CLI-GLOBAL1=E: project a program struct and its local bound functions
+/// into one command schema. The root helper projection passes no item list;
+/// it still includes methods, while bundle-facing callers resolve bindings.
+pub fn command_schema_with_items(
+    items: &[Item],
+    structure: &StructDef,
+) -> Option<CLICommandSchema> {
     if !structure
         .derives
         .iter()
@@ -991,7 +970,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
         .filter(|field| field.computed.is_some())
         .map(|field| field.name.as_str())
         .collect();
-    let commands = structure
+    let mut commands = structure
         .methods
         .iter()
         .filter(|function| !computed.contains(function.name.as_str()))
@@ -1004,7 +983,27 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
                 inputs,
             })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    for binding in &structure.cli_bindings {
+        let Some(target) = binding_target_name(binding) else {
+            continue;
+        };
+        let Some(function) = items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == target => Some(function),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let Some(inputs) = function_inputs_for_binding(function, &structure.name) else {
+            continue;
+        };
+        commands.push(CLISubcommandSchema {
+            name: binding.name.to_lowercase(),
+            description: marker(&binding.markers, Syntax::MARKER_DOC)
+                .and_then(marker_string),
+            inputs,
+        });
+    }
 
     Some(CLICommandSchema {
         entry_type: structure.name.clone(),
@@ -1015,6 +1014,22 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
         standard: cli_standard(&structure.type_markers),
         version: None,
     })
+}
+
+fn binding_target_name(binding: &crate::AST::CLICommandBinding) -> Option<&str> {
+    match binding.target.without_parens() {
+        Expr::Ident(name, _) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn function_inputs_for_binding(function: &Func, shared_type: &str) -> Option<Vec<CLIInputSchema>> {
+    let mut command = function.clone();
+    command.params.retain(|param| {
+        param.name != Syntax::KW_SELF
+            && !matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == shared_type)
+    });
+    function_inputs(&command)
 }
 
 fn function_schema(function: &Func) -> Option<CLICommandSchema> {

@@ -173,6 +173,12 @@ fn style_enabled() -> bool {
     )
 }
 
+// D-CLI-GLOBAL1=E: marshal the Standard color choice into the shared Term
+// Prelude. The CLI does not duplicate terminal/NO_COLOR policy here.
+pub(crate) fn set_cli_color_mode(mode: &str) {
+    term_prelude::jet_term_set_color_mode(mode);
+}
+
 fn write_prompt_with_sink(
     prompt: &str,
     sink: &mut Option<&mut jet_codegen::Comptime::DevSink>,

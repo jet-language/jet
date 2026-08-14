@@ -1046,8 +1046,16 @@ impl<'a> Fmt<'a> {
                     });
                 f.fmt_field(field, decodes_field);
             }
-            for (i, block) in s.trait_impls.iter().enumerate() {
+            for (i, binding) in s.cli_bindings.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {
+                    f.newline();
+                    f.newline();
+                }
+                f.emit_leading(binding.name_span.start);
+                f.fmt_cli_binding(binding);
+            }
+            for (i, block) in s.trait_impls.iter().enumerate() {
+                if i > 0 || !s.fields.is_empty() || !s.cli_bindings.is_empty() {
                     f.newline();
                     f.newline();
                 }
@@ -1056,6 +1064,7 @@ impl<'a> Fmt<'a> {
             for (i, m) in s.methods.iter().enumerate() {
                 if i > 0
                     || !s.fields.is_empty()
+                    || !s.cli_bindings.is_empty()
                     || !s.trait_impls.is_empty()
                 {
                     f.newline();
@@ -1068,6 +1077,7 @@ impl<'a> Fmt<'a> {
             // in the struct body, same spacing rule as the sections above.
             if !s.validate_block.is_empty() {
                 if !s.fields.is_empty()
+                    || !s.cli_bindings.is_empty()
                     || !s.trait_impls.is_empty()
                     || !s.methods.is_empty()
                 {
@@ -1491,5 +1501,30 @@ impl<'a> Fmt<'a> {
             .map(|expr| expr.span().end)
             .unwrap_or(field.ty_span.end);
         self.emit_trailing(end);
+    }
+
+    /// D-CLI-GLOBAL1=E: format a callable program-struct member without
+    /// lowering it into a field or a method.
+    fn fmt_cli_binding(&mut self, binding: &crate::AST::CLICommandBinding) {
+        if !binding.markers.is_empty() {
+            self.write(Syntax::RULE_PREFIX);
+            if binding.markers.len() > 1 {
+                self.write("[");
+            }
+            for (index, marker) in binding.markers.iter().enumerate() {
+                if index > 0 {
+                    self.write(", ");
+                }
+                self.fmt_marker(marker);
+            }
+            if binding.markers.len() > 1 {
+                self.write("]");
+            }
+            self.write(" ");
+        }
+        self.write(&binding.name);
+        self.write(" = ");
+        self.fmt_expr(&binding.target, Prec::OrFallback);
+        self.emit_trailing(binding.target.span().end);
     }
 }

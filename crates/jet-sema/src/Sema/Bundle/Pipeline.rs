@@ -2445,7 +2445,7 @@ fn check_bundle_opts_for_output_inner(
         }) {
             // S12/D-CLIFLAG1: `run` is the only program entry name. Its
             // canonical CLI schema owns both direct scalar inputs and the
-            // one typed CLI-spec parameter (`#[CLI]` struct / enum).
+            // one typed CLI-spec parameter (`#[CLI]` program struct).
             let direct_cli = jet_foundation::CLISchema::is_direct_run_entry(entry_items);
             if direct_cli {
                 // The canonical schema producer has already classified every
@@ -2460,8 +2460,7 @@ fn check_bundle_opts_for_output_inner(
                     &param.ty,
                     &states[cli_module].trait_reg,
                 ) {
-                    CLIEntryShape::Struct | CLIEntryShape::Enum => {}
-                    CLIEntryShape::EnumBadVariants(bad) => diags.extend(bad),
+                    CLIEntryShape::Struct => {}
                     CLIEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
                 }
             } else if run_fn.params.len() > 1 {

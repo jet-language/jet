@@ -532,6 +532,12 @@ fn jit_log_set_level_str(level: &str) {
     JIT_LOG_LEVEL.with(|l| l.set(n));
 }
 
+// D-CLI-GLOBAL1=E: CLI is an adapter; the level decision comes from the
+// shared Args Prelude and lands in the existing core.log state here.
+pub(crate) fn set_cli_log_level(level: &str) {
+    jit_log_set_level_str(level);
+}
+
 fn jit_log_setup_str(format: &str) {
     let n: u8 = match format {
         "json" => 1,

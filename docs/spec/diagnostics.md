@@ -710,11 +710,14 @@ renumbered, and no new `W` code may be allocated.
 | E1304 | sema  | `ArgsSpec.parse` called with wrong arity (D-ARGS1) |
 | E1305 | sema  | `#CLI` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
 | E1306 | sema  | two `#CLI` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
-| E1307 | sema  | subcommand `enum` variant's payload isn't a `#CLI`-derived struct (D-CLIFLAG1) |
-| E1308 | sema  | `fn run`'s entry parameter isn't a `#CLI` struct or an enum of `#CLI` payloads (D-CLIFLAG1) |
+| E1308 | sema  | `fn run`'s entry parameter isn't a `#CLI` program struct (D-CLI-GLOBAL1=E) |
 | E1309 | sema  | `#Flag` on a `#CLI` field that is already flag-only (D-CLI-POS1) |
 | E1318 | sema  | a `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name (D-CLI-FIELD-MARKERS1) |
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
+| E1344 | sema  | CLI command name collides with another command or root flag (D-CLI-GLOBAL1=E) |
+| E1345 | sema  | CLI command member has no callable shape (D-CLI-GLOBAL1=E) |
+| E1346 | sema  | callable CLI members are declared on a Codable struct (D-CLI-GLOBAL1=E) |
+| E1347 | sema  | CLI method receiver is writable (D-CLI-GLOBAL1=E) |
 | E1320 | jetpack | an external hangar root changed between reading its etag and applying a requested mutation |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
@@ -982,11 +985,14 @@ the `core.args` runtime-error voice above (no new code for that).
 |------|------|-----|-----|
 | E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#CLI` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#CLI` struct. |
 | E1306 | two `#CLI` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
-| E1307 | a subcommand variant's payload isn't a `#CLI` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#CLI`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#CLI` struct payload. |
-| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#CLI`-derived, or an `enum` whose every variant carries a `#CLI` struct payload. | Mark the struct `#CLI`, or give the enum's variants `#CLI` struct payloads. |
-| E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#Default(...)` are already flag-only. | Remove `#Flag`, or make the field a required scalar without `#Default`. |
+| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct. | Mark the program struct `#CLI`, or use a direct scalar-parameter `fn run` entry. |
+| E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with a `= expr` default are already flag-only. | Remove `#Flag`, or make the field a required scalar without a `= expr` default. |
 | E1318 | `` `#Short("name")` is not a one-letter option `` or `` `#Short("n")` is used by both `first` and `second` `` | The shared command parser treats a short option as one ASCII letter, and each spelling must select only one `#CLI` field. | Use one letter and give colliding fields different values. |
 | E1319 | `` `#Short` has no CLI mapping for field `name` `` | `#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder's value-option fallback. | Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field. |
+| E1344 | CLI command `{command}` collides with another command or root flag | A program struct has one command namespace and one root flag namespace; a word cannot name both. | Rename the command or root field so every command word is unique. |
+| E1345 | CLI command member `{name}` has no callable shape | A CLI callable member needs a same-module target when bound, at most one first read-only program-struct parameter, and scalar remaining parameters. | Bind a visible scalar-parameter function, or use a method on the program struct. |
+| E1346 | callable CLI members cannot be declared on a Codable struct | CLI commands are behavior; Codable structs contain only serializable data fields. | Split the command program struct from the Codable data struct. |
+| E1347 | a CLI method receiver must be read-only | Shared root flags are parsed into one program value and command dispatch must not mutate that value. | Change the receiver to read-only `self`. |
 
 ### Checked Output callables (D-SHAPE-OUTPUT-CALLABLE1)
 

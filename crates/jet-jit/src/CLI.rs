@@ -3,7 +3,7 @@
 //! `run(args)`.
 
 use super::Concurrency;
-use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type, VariantPayload};
+use jet_foundation::AST::{CtValue, Expr, Item, ProgramBundle, StructDef, Type};
 use jet_foundation::CLISchema::{
     self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
@@ -135,6 +135,14 @@ mod runtime {
         jet_parsed_option(&parsed.0, &name.to_string()).ok()
     }
 
+    pub(super) fn standard_log_level(parsed: &Parsed) -> String {
+        jet_args_standard_log_level(&parsed.0)
+    }
+
+    pub(super) fn standard_color_mode(parsed: &Parsed) -> String {
+        jet_args_standard_color_mode(&parsed.0)
+    }
+
     pub(super) fn subcommand(parsed: &Parsed) -> Option<String> {
         jet_parsed_subcommand(&parsed.0).ok()
     }
@@ -142,21 +150,25 @@ mod runtime {
 
 use runtime::{
     empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
-    program_name, Parsed, Spec,
+    program_name, standard_color_mode, standard_log_level, Parsed, Spec,
 };
 
 mod inline_range_semantics {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
+fn apply_standard_cli(parsed: &Parsed, standard: bool) {
+    if !standard {
+        return;
+    }
+    super::CoreHost::set_cli_log_level(&standard_log_level(parsed));
+    crate::IO::set_cli_color_mode(&standard_color_mode(parsed));
+}
 #[derive(Clone)]
 pub(crate) struct CLIPlan {
     pub schema: CLICommandSchema,
     /// Field types for the entry struct, or the direct `run` parameters.
     pub field_types: Vec<(String, Type)>,
-    /// Legacy enum payload fields remain only for the checked enum schema
-    /// already accepted by this compiler; callable members never use it.
-    pub enum_payloads: Vec<(String, Vec<(String, Type)>)>,
     /// Canonical callable members. Function names are TIR keys; method
     /// commands carry the root record as their first ABI argument.
     pub commands: Vec<CLICommandPlan>,
@@ -204,7 +216,7 @@ pub(crate) fn install_cli_command_ptr(function: &str, ptr: *const u8) {
         if let Some(command) = plan
             .commands
             .iter_mut()
-        .find(|command| command.function.as_str() == function)
+            .find(|command| command.function.as_str() == function)
         {
             command.ptr = Some(ptr);
         }
@@ -226,11 +238,7 @@ pub(crate) fn cli_function_targets() -> Vec<String> {
 }
 
 pub(crate) fn cli_run_requires_adapter() -> bool {
-    CLI_PLAN.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .is_some_and(|plan| plan.enum_payloads.is_empty())
-    })
+    CLI_PLAN.with(|slot| slot.borrow().is_some())
 }
 
 pub(crate) fn cli_run_frame_is_value() -> bool {
@@ -299,41 +307,14 @@ fn cli_plan_from_schema(
     let run_returns_value = cli_run_returns_value(entry_items);
     let entry_leaf = entry.rsplit('.').next().unwrap_or(&entry);
     if !schema.commands.is_empty() {
-        let enumeration = cli_items.iter().find_map(|item| match item {
-            Item::Enum(e) if e.name == entry_leaf => Some(e),
-            _ => None,
-        });
-        let Some(enumeration) = enumeration else {
-            // A struct's `commands` are callable members and are planned below.
-            // The enum carrier is only the existing schema branch.
-            return cli_plan_from_struct_schema(
-                schema,
-                entry_items,
-                cli_items,
-                entry_leaf,
-                type_identity,
-                run_returns_value,
-            );
-        };
-        let mut enum_payloads = Vec::new();
-        for v in &enumeration.variants {
-            let VariantPayload::Single(Type::Named(payload), _) = &v.payload else {
-                continue;
-            };
-            let fields = struct_fields(cli_items, payload)?;
-            enum_payloads.push((v.name.to_lowercase(), fields));
-        }
-        if !enum_payloads.is_empty() {
-            return Some(CLIPlan {
-                schema,
-                field_types: Vec::new(),
-                enum_payloads,
-                commands: Vec::new(),
-                run_record: false,
-                run_returns_value,
-                user_run: "run".to_string(),
-            });
-        }
+        return cli_plan_from_struct_schema(
+            schema,
+            entry_items,
+            cli_items,
+            entry_leaf,
+            type_identity,
+            run_returns_value,
+        );
     }
     if entry_leaf == "run" && CLISchema::is_direct_run_entry(entry_items) {
         let function = entry_items.iter().find_map(|item| match item {
@@ -349,7 +330,6 @@ fn cli_plan_from_schema(
         return Some(CLIPlan {
             schema,
             field_types,
-            enum_payloads: Vec::new(),
             commands: Vec::new(),
             run_record: false,
             run_returns_value,
@@ -390,17 +370,37 @@ fn cli_plan_from_struct_schema(
         .commands
         .iter()
         .map(|command| {
-            let function = structure
+            let method = structure
                 .methods
                 .iter()
                 .find(|function| {
                     !computed.contains(function.name.as_str())
                         && function.name.to_lowercase() == command.name
-                })?;
+                });
+            let binding = structure
+                .cli_bindings
+                .iter()
+                .find(|binding| binding.name.to_lowercase() == command.name);
+            let function = if let Some(method) = method {
+                method
+            } else {
+                let Expr::Ident(target, _) = binding?.target.without_parens() else {
+                    return None;
+                };
+                cli_items.iter().find_map(|item| match item {
+                    Item::Func(function) if function.name == *target => Some(function),
+                    _ => None,
+                })?
+            };
+            let bound_shared = binding.is_some()
+                && function.params.first().is_some_and(|param| {
+                    matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == entry)
+                });
             let method = function
                 .params
                 .iter()
-                .any(|param| param.name == jet_foundation::Syntax::KW_SELF);
+                .any(|param| param.name == jet_foundation::Syntax::KW_SELF)
+                || bound_shared;
             let mut arg_types = if method {
                 vec![Type::Named(function_owner.to_string())]
             } else {
@@ -410,12 +410,32 @@ fn cli_plan_from_struct_schema(
                 function
                     .params
                     .iter()
-                    .filter(|param| param.name != jet_foundation::Syntax::KW_SELF)
+                    .filter(|param| {
+                        param.name != jet_foundation::Syntax::KW_SELF
+                            && !(bound_shared
+                                && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == entry))
+                    })
                     .map(|param| param.ty.clone()),
             );
+            let function_name = if function
+                .params
+                .iter()
+                .any(|param| param.name == jet_foundation::Syntax::KW_SELF)
+            {
+                // Inherent methods are lowered under their nominal owner.
+                format!("{}::{}", function_owner, function.name)
+            } else {
+                // A `name = function` binding targets a free function. Keep
+                // its module-qualified path when the CLI type is imported,
+                // but never invent an owner-qualified local function name.
+                function_owner
+                    .rsplit_once("::")
+                    .map(|(module, _)| format!("{module}::{}", function.name))
+                    .unwrap_or_else(|| function.name.clone())
+            };
             Some(CLICommandPlan {
                 name: command.name.clone(),
-                function: format!("{}::{}", function_owner, function.name),
+                function: function_name,
                 method,
                 arg_types,
                 ptr: None,
@@ -425,7 +445,6 @@ fn cli_plan_from_struct_schema(
     Some(CLIPlan {
         schema,
         field_types,
-        enum_payloads: Vec::new(),
         commands,
         run_record: true,
         run_returns_value,
@@ -543,14 +562,12 @@ fn build_command_spec(
     );
     let mut commands = Vec::new();
     for command in &schema.commands {
-        let mut nested_inputs = schema.inputs.clone();
-        nested_inputs.extend(command.inputs.clone());
         let nested_prog = format!("{} {}", program_name(prog), command.name);
         let nested = build_spec(
-            &nested_inputs,
+            &command.inputs,
             command.description.as_deref(),
-            schema.standard,
-            schema.version.as_deref(),
+            false,
+            None,
             &nested_prog,
         );
         root = runtime::subcommand_spec(
@@ -877,10 +894,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
         return 0;
     }
     let call_run = |args: i64| {
-        if plan.enum_payloads.is_empty() {
-            let run: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(run_ptr) };
-            run(args)
-        } else if plan.run_returns_value {
+        if plan.run_returns_value {
             let run: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(run_ptr) };
             run(args)
         } else {
@@ -889,80 +903,6 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
             0
         }
     };
-
-    if !plan.enum_payloads.is_empty() {
-        // Legacy enum payloads use the same root/nested Args parser as callable
-        // commands. The raw enum carrier is the only remaining difference.
-        let prog = argv.first().map(String::as_str).unwrap_or("program");
-        let (spec, command_specs) = build_command_spec(&plan.schema, prog);
-        let parsed = match parse(&spec, &argv) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                report_cli_error(&error);
-                return 0;
-            }
-        };
-        let command_name = runtime::subcommand(&parsed);
-        if flag_set(&parsed, "help") {
-            let help_spec = command_name
-                .as_deref()
-                .and_then(|name| {
-                    command_specs
-                        .iter()
-                        .find(|(candidate, _)| candidate.as_str() == name)
-                        .map(|(_, spec)| spec.clone())
-                })
-                .unwrap_or_else(|| spec.clone());
-            Concurrency::with_runtime_mut(|rt| {
-                rt.stdout.push_str(&help_text(&help_spec));
-                rt.stdout.push('\n');
-            });
-            finish_cli_success();
-            return 0;
-        }
-        if plan.schema.standard && flag_set(&parsed, "version") {
-            finish_cli_version(&plan);
-            return 0;
-        }
-        let Some(sub) = command_name else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.stdout.push_str(&help_text(&spec));
-                rt.stdout.push('\n');
-            });
-            finish_cli_success();
-            return 0;
-        };
-        let Some((disc, fields)) = plan
-            .enum_payloads
-            .iter()
-            .enumerate()
-            .find(|(_, (name, _))| name.as_str() == sub.as_str())
-            .map(|(i, (_, f))| (i as i64, f))
-        else {
-            report_cli_error(&format!("unknown command `{sub}`"));
-            return 0;
-        };
-        let cmd_schema = plan
-            .schema
-            .commands
-            .iter()
-            .find(|c| c.name.as_str() == sub.as_str())
-            .expect("schema command");
-        let command_spec = command_specs
-            .iter()
-            .find(|(candidate, _)| candidate.as_str() == sub.as_str())
-            .map(|(_, spec)| spec)
-            .expect("command parser");
-        let payload = match decode_struct(&cmd_schema.inputs, fields, &parsed, command_spec) {
-            Ok(h) => h,
-            Err(e) => {
-                report_cli_error(&e);
-                return 0;
-            }
-        };
-        let packed = (payload << 8) | (disc & 0xff);
-        return call_run(packed);
-    }
 
     let prog = argv.first().map(String::as_str).unwrap_or("program");
     if !plan.commands.is_empty() {
@@ -974,6 +914,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
                 return 0;
             }
         };
+        apply_standard_cli(&parsed, plan.schema.standard);
         let command_name = runtime::subcommand(&parsed);
         if flag_set(&parsed, "help") {
             let help_spec = command_name
@@ -1086,6 +1027,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
             return 0;
         }
     };
+    apply_standard_cli(&parsed, plan.schema.standard);
     if flag_set(&parsed, "help") {
         Concurrency::with_runtime_mut(|rt| {
             rt.stdout.push_str(&help_text(&spec));

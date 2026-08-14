@@ -809,6 +809,7 @@ mod tests {
             type_params: vec![],
             fields,
             methods: vec![],
+            cli_bindings: vec![],
             trait_impls: vec![],
             derives: vec![],
             auto_derive_default: true,

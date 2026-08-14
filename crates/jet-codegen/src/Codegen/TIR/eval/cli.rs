@@ -4,7 +4,7 @@
 //! This module only turns the checked `CLISchema` projection into Prelude
 //! handles and turns the resulting scalar values into `CtValue`s.
 
-use crate::AST::{CtReport, CtValue, EnumDef, Func, Item, Param, StructDef, Type, VariantPayload};
+use crate::AST::{CtReport, CtValue, Func, Item, Param, StructDef, Type};
 use crate::Comptime::Builtins::exact_int_value;
 use jet_foundation::CLISchema::{
     CLIDefault, CLICommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind,
@@ -198,13 +198,11 @@ fn build_command_spec(
     )?;
     let mut commands = Vec::new();
     for command in &schema.commands {
-        let mut nested_inputs = schema.inputs.clone();
-        nested_inputs.extend(command.inputs.clone());
         let nested = build_spec(
-            &nested_inputs,
+            &command.inputs,
             command.description.as_deref(),
-            schema.standard,
-            schema.version.as_deref(),
+            false,
+            None,
             &format!("{} {}", program_name(argv0), command.name),
             span,
         )?;
@@ -444,13 +442,6 @@ fn find_struct<'a>(items: &'a [Item], name: &str) -> Option<&'a StructDef> {
     })
 }
 
-fn find_enum<'a>(items: &'a [Item], name: &str) -> Option<&'a EnumDef> {
-    items.iter().find_map(|item| match item {
-        Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
-        _ => None,
-    })
-}
-
 fn find_func<'a>(items: &'a [Item], name: &str) -> Option<&'a Func> {
     items.iter().find_map(|item| match item {
         Item::Func(function) if function.name == name => Some(function),
@@ -493,6 +484,11 @@ pub(super) fn prepare(
         Err(error) => return Ok(Dispatch::Error(error)),
     };
     let mut parsed = parsed;
+    if schema.standard {
+        let color_mode = parsed_option(&mut parsed, "color", span)?
+            .unwrap_or_else(|| "auto".to_string());
+        super::term_semantics::jet_term_set_color_mode(&color_mode);
+    }
     if parsed_flag(&mut parsed, "help", span)? {
         let mut help_spec = if let Some(command) = parsed_subcommand(&mut parsed, span)? {
             command_specs
@@ -575,54 +571,42 @@ pub(super) fn prepare(
         .map(|(_, spec)| spec.clone())
         .unwrap_or_else(|| spec.clone());
     let help = spec_help(&mut help_spec, span)?;
-    if let Some(enumeration) = find_enum(items, type_name) {
-        let variant = enumeration
-            .variants
-            .iter()
-            .find(|variant| variant.name.to_lowercase() == command.as_str())
-            .ok_or_else(|| unsupported("typed CLI subcommand variant", span))?;
-        let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
-            return Err(unsupported("typed CLI subcommand payload", span));
-        };
-        let payload = find_struct(items, payload_name)
-            .ok_or_else(|| unsupported("typed CLI subcommand payload struct", span))?;
-        let value_type_name = nominal_name(payload_name);
-        let payload = decode_struct(
-            payload,
-            &value_type_name,
-            &command_schema.inputs,
-            &mut parsed,
-            &help,
-            span,
-        )
-            .map_err(|error| {
-                Diagnostic::error(
-                    "E2201",
-                    error,
-                    "typed CLI decoding failed".to_string(),
-                    "fix the command arguments".to_string(),
-                    None,
-                )
-        })?;
-        return Ok(Dispatch::Run(CtValue::Enum {
-            type_name: nominal_name(&enumeration.name),
-            variant: variant.name.clone(),
-            args: vec![(None, payload)],
-        }));
-    }
-
     let structure = find_struct(items, type_name)
         .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
+    let method_member = structure
+        .methods
+        .iter()
+        .any(|method| method.name.to_lowercase() == command.as_str());
     let method = structure
         .methods
         .iter()
-        .find(|method| method.name.to_lowercase() == command.as_str())
-        .ok_or_else(|| unsupported("typed CLI command method", span))?;
-    let receiver = if method
+        .find(|method| method.name.to_lowercase() == command.as_str());
+    let binding = structure
+        .cli_bindings
+        .iter()
+        .find(|binding| binding.name.to_lowercase() == command.as_str());
+    let function = if let Some(method) = method {
+        method
+    } else {
+        let crate::AST::Expr::Ident(target, _) = binding
+            .ok_or_else(|| unsupported("typed CLI command binding", span))?
+            .target
+            .without_parens()
+        else {
+            return Err(unsupported("typed CLI command binding target", span));
+        };
+        find_func(items, target)
+            .ok_or_else(|| unsupported("typed CLI bound function", span))?
+    };
+    let is_method = function
         .params
         .iter()
-        .any(|param| param.name == crate::Syntax::KW_SELF)
-    {
+        .any(|param| param.name == crate::Syntax::KW_SELF);
+    let bound_shared = binding.is_some()
+        && function.params.first().is_some_and(|param| {
+            matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == type_name)
+        });
+    let mut receiver = if is_method || bound_shared {
         let value_type_name = nominal_name(type_name);
         Some(
             decode_struct(
@@ -634,20 +618,29 @@ pub(super) fn prepare(
                 span,
             )
             .map_err(|error| {
-                    Diagnostic::error(
-                        "E2201",
-                        error,
-                        "typed CLI decoding failed".to_string(),
-                        "fix the command arguments".to_string(),
-                        None,
-                    )
-                }
+                Diagnostic::error(
+                    "E2201",
+                    error,
+                    "typed CLI decoding failed".to_string(),
+                    "fix the command arguments".to_string(),
+                    None,
+                )
             )?,
         )
     } else {
         None
     };
-    let args = decode_params(&method.params, &command_schema.inputs, &mut parsed, &help, span)
+    let command_params = function
+        .params
+        .iter()
+        .filter(|param| {
+            param.name != crate::Syntax::KW_SELF
+                && !(bound_shared
+                    && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == type_name))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let args = decode_params(&command_params, &command_schema.inputs, &mut parsed, &help, span)
         .map_err(|error| {
             Diagnostic::error(
                 "E2201",
@@ -657,9 +650,31 @@ pub(super) fn prepare(
                 None,
             )
         })?;
+    // Inherent methods bind their receiver through the evaluator's `self`
+    // scope. A bound free function has an ordinary first parameter, so pass
+    // the same decoded program value through its argument tuple instead.
+    let (receiver, args) = if bound_shared {
+        let mut args = args;
+        args.insert(
+            0,
+            receiver
+                .take()
+                .ok_or_else(|| unsupported("typed CLI bound receiver", span))?,
+        );
+        (None, args)
+    } else {
+        (receiver, args)
+    };
     let function_owner = nominal_name(&structure.name);
+    let function_name = if method_member {
+        format!("{}::{}", function_owner, function.name)
+    } else if let Some((module_name, _)) = function_owner.rsplit_once("::") {
+        format!("{module_name}::{}", function.name)
+    } else {
+        function.name.clone()
+    };
     Ok(Dispatch::Invoke {
-        function: format!("{}::{}", function_owner, method.name),
+        function: function_name,
         receiver,
         args,
     })

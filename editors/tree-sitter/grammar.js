@@ -335,12 +335,25 @@ module.exports = grammar({
         "{",
         repeat(
           choice(
+            $.struct_cli_binding,
             $.struct_field,
             $.function_def,
             $.trait_impl_block,
           ),
         ),
         "}",
+      ),
+
+    // D-CLI-GLOBAL1=E: callable program-struct members use the existing
+    // marker/member/`=` surface. The target is an ordinary expression so
+    // sema can require a visible same-module function without a second DSL.
+    struct_cli_binding: ($) =>
+      seq(
+        repeat($._marker),
+        field("name", $.identifier),
+        "=",
+        field("target", $._expr),
+        optional(","),
       ),
 
     struct_field: ($) =>

@@ -1062,6 +1062,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LBrace, "to open the struct body")?;
             let mut fields = Vec::new();
             let mut methods = Vec::new();
+            let mut cli_bindings = Vec::new();
             let mut trait_impls = Vec::new();
             let derives = Vec::new();
             let mut validate_block = Vec::new();
@@ -1075,10 +1076,24 @@ impl<'a> Parser<'a> {
                     methods.push(self.method_in_type()?);
                     continue;
                 }
+                if self.cli_binding_starts_here() {
+                    cli_bindings.push(self.cli_binding(Vec::new())?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
+                    }
+                    continue;
+                }
                 // D-SHAPE2: one field rule is bare; two or more share `#[…]`.
                 if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
                     let field_markers =
                         self.parse_field_markers(crate::Policy::RuleSite::Field)?;
+                    if self.cli_binding_starts_here() {
+                        cli_bindings.push(self.cli_binding(field_markers)?);
+                        if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                            self.bump();
+                        }
+                        continue;
+                    }
                     let mut f = self.field()?;
                     for marker in &field_markers {
                         self.bind_rule_fact(
@@ -1129,6 +1144,7 @@ impl<'a> Parser<'a> {
                 type_params,
                 fields,
                 methods,
+                cli_bindings,
                 trait_impls,
                 derives,
                 auto_derive_default: true,

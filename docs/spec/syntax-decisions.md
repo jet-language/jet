@@ -166,9 +166,9 @@ no `pub` required; it is fallible by default. An expert may pin
 `fn run() ? E`. **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
-(`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`);
-an entry `enum` may use `#Doc("...")` on the enum and its variants for the
-program description and subcommand summaries. There is no Jet `main` entry and no
+(`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
+The ratified program-struct command form is recorded by D-CLI-GLOBAL1 below.
+There is no Jet `main` entry and no
 variadic entry signature. Raw argv access stays explicit inside `fn run()`
 via `core.process.argv`. See docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. The
@@ -203,7 +203,7 @@ stable across reorders. Help lists positionals before flags. Marker constant:
 for a one-letter alias and `#Env("PORT")` for an environment fallback. Both
 rules use the existing field marker list and lower to the existing `core.args`
 builder. Explicit command input wins over the environment, and the environment
-wins over `#Default`. Help shows the short name, fallback, default, and
+wins over the field `= expr` default. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
 Typed-CLI markers with no builder mapping are E1319. Marker constants:
 `MARKER_SHORT` (`Short`) and `MARKER_ENV` (`Env`).
@@ -217,6 +217,22 @@ through `core.args` when typed derivation is not wanted. Jet never requires an
 entry parameter; the author adds one only when external command input belongs in
 the function signature. The public CLI type may live in the entry file or one
 directly imported module.
+
+**D-CLI-GLOBAL1=E — one program struct owns root flags and commands** *(ratified
+2026-08-10, Tower #1858)*: use one `#CLI` struct for a multi-command program.
+Scalar fields are root/shared flags and are valid before or after the command.
+Their precedence is command input > `#Env` > field default. Callable members
+are commands: a method receives read-only `self`, and a member binding
+`name = function` binds an existing function. A bound function may receive
+the program struct as its first read-only parameter; remaining command
+parameters use the existing scalar CLI shapes and `= expr` defaults.
+Command words are lowercased member names and `#Doc` supplies summaries.
+`#CLI(Standard)` adds `--verbose/-v`, `--quiet/-q`,
+`--color=auto|always|never`, and `--version`; bare `#CLI` adds only
+automatic `--help`. Callable members are not fields: they are excluded from
+construction, serialization, and positional shape. The enum subcommand form is
+deleted in this greenfield language. The surface reuses existing marker,
+member, and `=` grammar; no new token is added.
 
 **S27 — Methods**: `self` receiver with capability sigils (`^self`,
 `&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the

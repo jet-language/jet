@@ -3490,7 +3490,7 @@ entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 ```jet
 #CLI
 struct ServeArgs {
-    #[Doc("port to listen on"), Env("PORT"), Default(3000)] port: Int
+    #[Doc("port to listen on"), Env("PORT")] port: Int = 3000
     #Short("v") verbose: Bool
     config: String?
 }
@@ -3503,9 +3503,8 @@ fn run(args: ServeArgs) {
 `#CLI` is a sibling derive of `#Codable` on the same marker/derive
 machinery (D-MARKERMOVE1). On a `#CLI` struct, `#Doc("...")` gives the
 program description; on a field it gives that flag's `--help` line. A field
-with no `#Doc(...)` gets a generic "value for --name" line instead. An entry
-enum may use `#Doc("...")` on the enum for the program description and on
-each variant for its one-line subcommand summary. Descriptions preserve
+with no `#Doc(...)` gets a generic "value for --name" line instead. On a
+callable member, `#Doc("...")` gives the command summary. Descriptions preserve
 embedded line breaks.
 
 **Entry semantics.** `run` is the only reserved program entry name (S12). Plain
@@ -3560,17 +3559,15 @@ D-CLI-POS1=A adds positional filling for required value fields:
 |---|---|---|---|
 | `Bool` | `--name` (boolean flag) | — | `false` |
 | `T?` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
-| scalar with `#Default(expr)` | `--name VALUE` (optional) | — | `expr` |
+| scalar with `= expr` | `--name VALUE` (optional) | — | `expr` |
 | required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int` (including `Int(lo..hi)`), `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K:V]`, a closure, a `[T]`, a nested struct that isn't itself
-`#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults
-use the *existing* `#Default(expr)` marker (D-SERDE5) — not a second,
-inline `= expr` mechanism (that syntax is reserved for function-parameter
-defaults, S61, a different grammar slot; reusing `#Default(...)` here is
-I8: one mechanism for "this field has a default", not two). Field name
+`#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults use
+the existing inline `= expr` field form (D-FIELDDEF1), the same absence-default
+mechanism used by the checked field schema. Field name
 `snake_case` → flag `--snake-case` (underscores become dashes); no
 casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
 one). Every field always accepts its named `--field` spelling; when both a
@@ -3580,14 +3577,14 @@ to opt out of). Declaration order of required value fields is part of the
 command interface; reordering them is a breaking shape change reported through
 the checked `CLISchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
-the program description, subcommand summaries, and the struct's
+the program description, command summaries, and the struct's
 fields/types/`#Doc` text); a field named `help` collides
 with it and is **E1306**.
 
 `#Short("n")` adds the one-ASCII-letter `-n` form to the field's existing
 long form. `#Env("PORT")` reads `PORT` only when command input is absent.
 Explicit command input wins over the environment, and the environment wins
-over `#Default`. Generated help shows this precedence. The checked
+over the field default. Generated help shows this precedence. The checked
 `CLISchema`, dossier, embedded metadata, and shell completion keep both marker
 values. An invalid or duplicate short name is **E1318**. These markers outside
 a `#CLI` struct, and `#Env` on a presence-only `Bool` flag, are **E1319**.
@@ -3599,25 +3596,41 @@ onto the decode machinery under time pressure that would otherwise force a
 second, prefix-threaded code path — a real feature, not a punt: it needs
 its own worked design before it rides this derive.)
 
-**Subcommands** — an `enum` parameter dispatches by variant:
+**Program struct and commands (D-CLI-GLOBAL1=E).** The typed form has one
+`#CLI` struct for the whole program. Its scalar fields are root/shared flags.
+The same root flags are legal before or after a command. For each value,
+command input wins over `#Env`, and `#Env` wins over the field default. A
+`#CLI(Standard)` struct adds `--verbose`/`-v`, `--quiet`/`-q`,
+`--color=auto|always|never`, and `--version`; bare `#CLI` adds only
+automatic `--help`.
+
+Callable members are commands. A method receives a read-only `self` containing
+the parsed shared fields. A member binding `name = function` binds an existing
+function; that function may receive the program struct as its first read-only
+parameter, followed by scalar command parameters. The member name is the
+lowercased command word and its `#Doc` is the command summary:
 
 ```jet
-enum Cmd {
-    Serve(ServeArgs)
-    Import(ImportArgs)
+#CLI(Standard)
+struct Deploy {
+    #[Doc("configuration file"), Env("DEPLOY_CONFIG")] config: String?
+    #Doc("preview changes") plan = plan_impl
+
+    #Doc("apply the deployment")
+    fn apply(self, target: String) { ... }
 }
-fn run(cmd: Cmd) { ... }   // $ myapp import data.csv
+
+fn plan_impl(args: Deploy) { ... }
+fn run(args: Deploy) { ... }
 ```
 
-The first positional token picks the variant by its **lowercased** name;
-the rest of argv re-parses against that variant's own `#CLI` spec (its
-own `--help`, its own flags — no flag namespace is shared across
-variants). Every variant's payload must be a single `#CLI`-derived
-struct — any other payload shape is **E1307**. Given **zero** arguments (no
-subcommand token at all), or given root `--help`, the generated entry prints
-the lowercased command list to stdout and exits 0 — an invocation asking "what
-can this program do" is treated as a request for orientation, not a mistake;
-an unrecognized subcommand name is still a real error (nonzero exit, stderr).
+Callable members are behavior, not data. They are never constructed,
+serialized, or exposed as positional fields. A callable member on a
+`#Codable` struct is **E1346**. Non-callable targets, invalid parameter shapes,
+mutable receivers, duplicate command words, and command/root-flag collisions
+are **E1345**, **E1347**, and **E1344** as applicable. A program with commands
+and no command token prints the root help and command list; an unknown command
+is a real error.
 
 **Codegen** generates directly onto `core.args`'s existing `ArgsSpec`/
 `ParsedArgs` builder (D-ARGS1) — the same `.flag`/`.option`/`.parse`
@@ -3625,21 +3638,22 @@ surface a hand-written call chain uses, so there is exactly one parser
 (I8), not two. A bad flag at runtime (unknown flag, bad `--port` value, a
 missing required flag) is the same `core.args` runtime-error voice as
 `ArgsSpec.parse`'s own messages — no new diagnostic codes for that path,
-only for the compile-time shape checks above (E1305–E1308). `88_args_spec`/
+only for the compile-time shape checks above (E1305, E1306, E1308, E1309,
+E1344–E1347). `88_args_spec`/
 `64_cli_args`-style direct builder use is untouched; this feature is a
 layer generated on top of it, not a replacement.
 
 `jet inspect dossier <entry.jet> run --json` projects that same checked command
 schema as `command_schema`: the optional `#Doc` description on the entry type,
-shell flag, value type, required/default state, help text, optional `#Doc`
-summary on each subcommand, subcommands, and completion words. The human dossier
-prints the same facts. Tools consume this projection instead of reconstructing
-field-to-shell mapping.
+root/shared flags, command-local flags, value type, required/default state, help
+text, optional `#Doc` summary on each command, commands, and completion words.
+Shared flags occur once at root. The human dossier prints the same facts. Tools
+consume this projection instead of reconstructing field-to-shell mapping.
 
 **Executable command metadata (D-SHAPE-CLI-CARRIER1=A).** Every compiled
 program carries one versioned `JetCommandSchema` record inside its executable.
 The record includes the optional entry `#Doc` description and optional
-subcommand-variant `#Doc` summaries; completion words do not include these
+command `#Doc` summaries; completion words do not include these
 human descriptions. The record is inside the executable:
 `.jet_command` in ELF, `.jetcmd` in PE, `__jetcmd` in Mach-O, and the
 `jet.command` custom section in Wasm. Universal Mach-O files carry the same
@@ -3655,8 +3669,9 @@ It never executes the target program.
 `jet self completions SHELL --for PROGRAM` (D-SHAPE-CLI-COMPLETE1=A) reads that
 record and writes a bash, zsh, fish, or PowerShell script to stdout. Without
 `--for`, Jet's own completion output is unchanged. External scripts contain
-only checked schema candidates: root `--help` and lowercased enum subcommands,
-then only the selected subcommand's `--help` and derived flags. They never
+only checked schema candidates: root `--help`, root/shared flags, and
+lowercased command words, then only the selected command's `--help` and
+command-local flags. Shared flags are not repeated. They never
 query live application values. Scripts register the executable's basename,
 not its supplied path; a basename containing control characters is rejected.
 Plain `fn run()` embeds an empty application schema and therefore still
@@ -3664,14 +3679,15 @@ produces a valid built-in-only `--help` script. Metadata failures are E2103 on
 stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
-including the reserved `--help`), E1307 (subcommand payload isn't
-`#CLI`), E1308 (`run`'s one parameter isn't a `#CLI` struct or an enum
-of `#CLI` payloads), E1309 (`#Flag` on a field that is already flag-only).
-See docs/spec/diagnostics.md.
+including the reserved `--help`), E1308 (`run`'s one parameter isn't a
+`#CLI` program struct), E1309 (`#Flag` on a field that is already flag-only),
+E1344 (command/root collision), E1345 (invalid callable binding), E1346
+(callable members on a `#Codable` struct), and E1347 (mutable command
+receiver). See docs/spec/diagnostics.md.
 
-The public `#CLI` struct or subcommand enum may be declared in the entry file
-or in one directly imported module. Its generated parser/decode helpers remain
-internal projections over the same `ArgsSpec` engine.
+The public `#CLI` program struct may be declared in the entry file or in one
+directly imported module. Its generated parser/decode helpers remain internal
+projections over the same `ArgsSpec` engine.
 
 ## `jet inspect expand` — transparency command (D-EXPANDCLI1, card #183)
 

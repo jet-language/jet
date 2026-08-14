@@ -79,11 +79,14 @@
 // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#CLI` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
-// stays valid. D-CLI-POS1=A adds field marker `Flag` (`MARKER_FLAG`): required
-// value fields fill positionally by declaration order; `#[Flag]` keeps a field
-// flag-only. D-CLI-FIELD-MARKERS1=A adds `Short` (`MARKER_SHORT`) and `Env`
-// (`MARKER_ENV`) to that same field marker list. D-SHAPE6 adds no Jet source
-// token; grouped tool commands remain
+// stays valid. D-CLI-GLOBAL1=E (ratified 2026-08-10, card #1858) reuses the
+// existing struct fields, callable members, markers, and `=` binding form:
+// scalar fields are shared root flags and callable members are commands.
+// `#CLI(Standard)` selects the standard flag pack. D-CLI-POS1=A adds field
+// marker `Flag` (`MARKER_FLAG`): required value fields fill positionally by
+// declaration order; `#[Flag]` keeps a field flag-only. D-CLI-FIELD-MARKERS1=A
+// adds `Short` (`MARKER_SHORT`) and `Env` (`MARKER_ENV`) to that same field
+// marker list. D-SHAPE6 adds no Jet source token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
 // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
 // fields and D-DOTCTOR1 `Type.{ ... }` construction. D-ECO-ROOTNAME1 still

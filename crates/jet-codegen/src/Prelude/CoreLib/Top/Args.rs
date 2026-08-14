@@ -54,9 +54,14 @@ enum JetArgValueKind {
 #[derive(Clone)]
 struct JetArgsSpec {
     entries: Vec<JetArgKind>,
+    /// Root options inherited by a nested command. They parse at the command
+    /// level but stay out of command help/completion so each shared flag has
+    /// one visible declaration.
+    inherited_entries: Vec<JetArgKind>,
     prog: String,
     description: Option<String>,
     version: Option<String>,
+    inherited_version: bool,
 }
 
 /// The parse result.
@@ -66,6 +71,8 @@ struct JetParsedArgs {
     options: std::collections::HashMap<String, Vec<String>>,
     positionals: Vec<String>,
     subcommand: Option<String>,
+    explicit_flags: std::collections::HashSet<String>,
+    explicit_options: std::collections::HashSet<String>,
 }
 
 fn jet_args_program_name(prog: &str) -> String {
@@ -196,6 +203,28 @@ impl JetArgsSpec {
     }
 }
 
+fn jet_args_inherited_entries(spec: &JetArgsSpec) -> impl Iterator<Item = &JetArgKind> {
+    spec.inherited_entries.iter()
+}
+
+fn jet_args_local_entries(spec: &JetArgsSpec) -> impl Iterator<Item = &JetArgKind> {
+    spec.entries.iter()
+}
+
+fn jet_args_all_entries(spec: &JetArgsSpec) -> impl Iterator<Item = &JetArgKind> {
+    jet_args_inherited_entries(spec)
+        .chain(jet_args_local_entries(spec).filter(|entry| !matches!(entry, JetArgKind::Subcommand { .. })))
+}
+
+fn jet_args_same_input(left: &JetArgKind, right: &JetArgKind) -> bool {
+    match (left, right) {
+        (JetArgKind::Flag { name: left, .. }, JetArgKind::Flag { name: right, .. })
+        | (JetArgKind::Option { name: left, .. }, JetArgKind::Option { name: right, .. })
+        | (JetArgKind::Positional { name: left, .. }, JetArgKind::Positional { name: right, .. }) => left == right,
+        _ => false,
+    }
+}
+
 fn jet_args_label(name: &String, short: &Option<String>, meta: Option<&String>) -> String {
     let mut out = String::new();
     if let Some(s) = short {
@@ -217,9 +246,11 @@ fn jet_args_spec() -> JetArgsSpec {
     let prog = std::env::args().next().unwrap_or_default();
     JetArgsSpec {
         entries: Vec::new(),
+        inherited_entries: Vec::new(),
         prog,
         description: None,
         version: None,
+        inherited_version: false,
     }
 }
 
@@ -473,8 +504,33 @@ fn jet_args_subcommand(
     mut spec: JetArgsSpec,
     name: &String,
     help: &String,
-    sub: JetArgsSpec,
+    mut sub: JetArgsSpec,
 ) -> JetArgsSpec {
+    let mut inherited = spec.inherited_entries.clone();
+    inherited.extend(
+        spec.entries
+            .iter()
+            .filter(|entry| !matches!(entry, JetArgKind::Subcommand { .. }))
+            .cloned(),
+    );
+    sub.entries.retain(|entry| {
+        !inherited
+            .iter()
+            .any(|parent| jet_args_same_input(parent, entry))
+    });
+    for entry in inherited {
+        if !sub
+            .inherited_entries
+            .iter()
+            .any(|parent| jet_args_same_input(parent, &entry))
+        {
+            sub.inherited_entries.push(entry);
+        }
+    }
+    sub.inherited_version |= spec.inherited_version || spec.version.is_some();
+    if sub.inherited_version {
+        sub.version = None;
+    }
     spec.entries.push(JetArgKind::Subcommand {
         name: name.clone(),
         help: help.clone(),
@@ -518,11 +574,18 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         std::collections::HashMap::new();
     let mut positionals: Vec<String> = Vec::new();
     let mut subcommand: Option<String> = None;
+    let mut explicit_flags: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut explicit_options: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let root_help = argv.len() == 1
+        && spec
+            .entries
+            .iter()
+            .any(|entry| matches!(entry, JetArgKind::Subcommand { .. }));
 
     // Seed all flags as false (so .flag("name") returns false when absent).
     flags.insert("help".to_string(), false);
     flags.insert("version".to_string(), false);
-    for e in &spec.entries {
+    for e in jet_args_all_entries(spec) {
         match e {
             JetArgKind::Flag { name, .. } => {
                 flags.insert(name.clone(), false);
@@ -557,11 +620,13 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         if let Some(rest) = arg.strip_prefix("--") {
             if rest == "help" {
                 flags.insert("help".to_string(), true);
+                explicit_flags.insert("help".to_string());
                 i += 1;
                 continue;
             }
-            if rest == "version" && spec.version.is_some() {
+            if rest == "version" && (spec.version.is_some() || spec.inherited_version) {
                 flags.insert("version".to_string(), true);
+                explicit_flags.insert("version".to_string());
                 i += 1;
                 continue;
             }
@@ -571,6 +636,9 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 let val = &rest[eq + 1..];
                 if let Some(entry) = jet_args_find_option(spec, name) {
                     jet_args_store_option(&mut options, entry, val)?;
+                    if let JetArgKind::Option { name, .. } = entry {
+                        explicit_options.insert(name.clone());
+                    }
                 } else if jet_args_find_flag(spec, name).is_some() {
                     return Err(format!(
                         "--{} is a flag; it takes no value (got `={}`)\n\n{}",
@@ -583,12 +651,16 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 }
             } else if jet_args_find_flag(spec, rest).is_some() {
                 flags.insert(rest.to_string(), true);
+                explicit_flags.insert(rest.to_string());
             } else if let Some(entry) = jet_args_find_option(spec, rest) {
                 i += 1;
                 if i >= argv.len() {
                     return Err(format!("`--{}` requires a value\n\n{}", rest, spec.help()));
                 }
                 jet_args_store_option(&mut options, entry, &argv[i])?;
+                if let JetArgKind::Option { name, .. } = entry {
+                    explicit_options.insert(name.clone());
+                }
             } else {
                 return Err(jet_args_unknown(rest, spec));
             }
@@ -608,12 +680,15 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                                 }
                                 let entry = jet_args_find_option(spec, &name).unwrap();
                                 jet_args_store_option(&mut options, entry, &argv[i])?;
+                                explicit_options.insert(name.clone());
                             } else {
                                 let entry = jet_args_find_option(spec, &name).unwrap();
                                 jet_args_store_option(&mut options, entry, &value)?;
+                                explicit_options.insert(name.clone());
                             }
                             break;
                         }
+                        explicit_flags.insert(name.clone());
                         flags.insert(name, true);
                     } else {
                         return Err(format!("unknown option `-{}`\n\n{}", short, spec.help()));
@@ -627,7 +702,9 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                     }
                     let entry = jet_args_find_option(spec, &name).unwrap();
                     jet_args_store_option(&mut options, entry, &argv[i])?;
+                    explicit_options.insert(name.clone());
                 } else {
+                    explicit_flags.insert(name.clone());
                     flags.insert(name, true);
                 }
             } else {
@@ -638,12 +715,35 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 if let Some((name, nested)) = jet_args_find_subcommand(spec, arg) {
                     let mut nested_argv = vec![format!("{} {}", spec.prog, name)];
                     nested_argv.extend(argv.iter().skip(i + 1).cloned());
-                    let parsed = jet_args_parse(nested, &nested_argv)?;
-                    flags.extend(parsed.flags);
-                    options.extend(parsed.options);
+                    let parsed = jet_args_parse(&nested, &nested_argv)?;
+                    let nested_explicit_flags = parsed.explicit_flags;
+                    let nested_explicit_options = parsed.explicit_options;
+                    for (name, value) in parsed.flags {
+                        if nested_explicit_flags.contains(&name) || !flags.contains_key(&name) {
+                            flags.insert(name, value);
+                        }
+                    }
+                    for (name, value) in parsed.options {
+                        if nested_explicit_options.contains(&name) || !options.contains_key(&name) {
+                            options.insert(name, value);
+                        }
+                    }
                     positionals.extend(parsed.positionals);
+                    explicit_flags.extend(nested_explicit_flags);
+                    explicit_options.extend(nested_explicit_options);
                     subcommand = Some(name.to_string());
                     break;
+                }
+                if spec
+                    .entries
+                    .iter()
+                    .any(|entry| matches!(entry, JetArgKind::Subcommand { .. }))
+                {
+                    return Err(format!(
+                        "unknown command `{}`\n\n{}",
+                        arg,
+                        spec.help()
+                    ));
                 }
             }
             positionals.push(arg.clone());
@@ -658,7 +758,7 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
     // one path (`jet_parsed_option`) for both forms.
     let mut bare_i = 0usize;
     let mut missing: Vec<&str> = Vec::new();
-    for e in &spec.entries {
+    for e in jet_args_all_entries(spec) {
         let JetArgKind::Positional { name, .. } = e else {
             continue;
         };
@@ -683,7 +783,10 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
     for (name, value) in fallbacks {
         options.entry(name).or_insert_with(|| vec![value]);
     }
-    if !missing.is_empty() && !flags.get("help").copied().unwrap_or(false) {
+    if !missing.is_empty()
+        && !root_help
+        && !flags.get("help").copied().unwrap_or(false)
+    {
         return Err(format!(
             "missing required argument{}: {}\n\n{}",
             if missing.len() == 1 { "" } else { "s" },
@@ -691,10 +794,11 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
             spec.help()
         ));
     }
-    for e in &spec.entries {
+    for e in jet_args_all_entries(spec) {
         if let JetArgKind::Option { name, required, .. } = e {
             if *required
                 && !options.contains_key(name)
+                && !root_help
                 && !flags.get("help").copied().unwrap_or(false)
             {
                 return Err(format!("missing required option `--{}`\n\n{}", name, spec.help()));
@@ -707,6 +811,8 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         options,
         positionals,
         subcommand,
+        explicit_flags,
+        explicit_options,
     })
 }
 
@@ -725,15 +831,17 @@ fn jet_args_parse_or_exit(spec: &JetArgsSpec, argv: &Vec<String>) -> JetParsedAr
 }
 
 fn jet_args_find_flag<'a>(spec: &'a JetArgsSpec, name: &str) -> Option<&'a JetArgKind> {
-    spec.entries.iter().find(|e| matches!(e, JetArgKind::Flag { name: n, .. } if n == name))
+    jet_args_all_entries(spec)
+        .find(|e| matches!(e, JetArgKind::Flag { name: n, .. } if n == name))
 }
 
 fn jet_args_find_option<'a>(spec: &'a JetArgsSpec, name: &str) -> Option<&'a JetArgKind> {
-    spec.entries.iter().find(|e| matches!(e, JetArgKind::Option { name: n, .. } if n == name))
+    jet_args_all_entries(spec)
+        .find(|e| matches!(e, JetArgKind::Option { name: n, .. } if n == name))
 }
 
 fn jet_args_find_short(spec: &JetArgsSpec, short: &str) -> Option<(String, bool)> {
-    for e in &spec.entries {
+    for e in jet_args_all_entries(spec) {
         match e {
             JetArgKind::Flag { name, short: Some(s), .. } if s == short => {
                 return Some((name.clone(), false));
@@ -798,7 +906,7 @@ fn jet_args_store_option(
 }
 
 fn jet_args_unknown(name: &str, spec: &JetArgsSpec) -> String {
-    let known: Vec<String> = spec.entries.iter().filter_map(|e| match e {
+    let known: Vec<String> = jet_args_all_entries(spec).filter_map(|e| match e {
         JetArgKind::Flag { name, .. } | JetArgKind::Option { name, .. } => Some(name.clone()),
         _ => None,
     }).collect();
@@ -856,6 +964,33 @@ fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> JetOutcome<String,
 
 fn jet_parsed_subcommand(parsed: &JetParsedArgs) -> JetOutcome<String, JetAbsent> {
     jet_outcome_of(parsed.subcommand.clone())
+}
+
+/// D-CLI-GLOBAL1=E: the Standard pack maps verbosity onto the existing
+/// `core.log` levels. `--quiet` wins when both switches are present so a
+/// script can silence a verbose default explicitly.
+fn jet_args_standard_log_level(parsed: &JetParsedArgs) -> String {
+    if jet_parsed_flag(parsed, &"quiet".to_string()) {
+        "error".to_string()
+    } else if jet_parsed_flag(parsed, &"verbose".to_string()) {
+        "debug".to_string()
+    } else {
+        "info".to_string()
+    }
+}
+
+/// D-CLI-GLOBAL1=E: normalize the Standard color choice once. `auto` follows
+/// `NO_COLOR`; explicit `always` and `never` are expert overrides.
+fn jet_args_standard_color_mode(parsed: &JetParsedArgs) -> String {
+    let requested = jet_parsed_option(parsed, &"color".to_string())
+        .ok()
+        .unwrap_or_else(|| "auto".to_string());
+    match requested.as_str() {
+        "always" => "always".to_string(),
+        "never" => "never".to_string(),
+        _ if std::env::var_os("NO_COLOR").is_some() => "never".to_string(),
+        _ => "auto".to_string(),
+    }
 }
 
 impl JetShow for JetArgsSpec {

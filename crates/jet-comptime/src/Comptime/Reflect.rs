@@ -1984,6 +1984,7 @@ mod tests {
             }],
             fields: vec![field("x", "T", true), field("secret", "Int", false)],
             methods: vec![method("tag", true)],
+            cli_bindings: Vec::new(),
             trait_impls: Vec::new(),
             derives: vec![("Debug".to_string(), span())],
             auto_derive_default: true,

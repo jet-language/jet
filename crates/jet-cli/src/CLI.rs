@@ -1389,18 +1389,21 @@ pub fn completions_for_program(
                 ));
             }
             let commands = schema.commands.iter().map(|command| shell_single_quote(&command.name)).collect::<Vec<_>>().join(" ");
+            let mut root_specs = zsh_standard_specs(schema.standard, schema.version.is_some());
+            root_specs.extend(zsh_input_specs(&schema.inputs));
+            root_specs.push(format!("    '1:command:({commands})'"));
+            let root_args = root_specs.join(" \\\n");
             let cases = schema.commands.iter().map(|command| format!(
                 "        {}) _arguments \\\n{} ;;",
                 shell_single_quote(&command.name),
                 {
-                    let mut specs = zsh_standard_specs(schema.standard, schema.version.is_some());
-                    specs.extend(zsh_input_specs(&schema.command_inputs(command)));
+                    let specs = zsh_input_specs(&schema.command_inputs(command));
                     specs.join(" \\\n")
                 },
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
-                "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n    _values 'command' '--help[show help]' {}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
-                shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, commands, cases,
+                "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n_arguments \\\n{}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
+                shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, root_args, cases,
             ))
         }
         "fish" => {
@@ -1417,19 +1420,11 @@ pub fn completions_for_program(
             }
             for input in &schema.inputs {
                 let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
-                out.push_str(&format!("complete -c {} -l {}{} -d {}{}\n", fish_single(command_name), input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
+                out.push_str(&format!("complete -c {}{} -l {}{} -d {}{}\n", fish_single(command_name), root_condition, input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
             }
             for command in &schema.commands {
                 out.push_str(&format!("complete -c {} -n '__fish_use_subcommand' -a {}\n", fish_single(command_name), fish_single(&command.name)));
                 out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n", fish_single(command_name), command.name));
-                if schema.standard {
-                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l verbose -s v -d 'print extra detail'\n", fish_single(command_name), command.name));
-                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l quiet -s q -d 'suppress normal output'\n", fish_single(command_name), command.name));
-                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l color -r -d 'control terminal color'\n", fish_single(command_name), command.name));
-                    if schema.version.is_some() {
-                        out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l version -d 'show version'\n", fish_single(command_name), command.name));
-                    }
-                }
                 let command_inputs = schema.command_inputs(command);
                 for input in &command_inputs {
                     let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));

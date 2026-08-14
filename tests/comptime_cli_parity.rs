@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const TIER_PARITY_STEMS: [&str; 5] = [
+const TIER_PARITY_STEMS: [&str; 6] = [
+    "cli/subcommands",
     "comptime/embed",
     "comptime/embed_bytes",
     "comptime/find",
@@ -427,7 +428,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
 }
 
 #[test]
-fn documented_cli_help_matches_aot_and_default_jet_run() {
+fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("cli_docs_parity");
     let source = scratch.join("subcommands.jet");
@@ -436,6 +437,7 @@ fn documented_cli_help_matches_aot_and_default_jet_run() {
         &source,
     )
     .expect("copy CLI example");
+    let cache = scratch.join("cache");
 
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "subcommands.jet"])
@@ -467,13 +469,83 @@ fn documented_cli_help_matches_aot_and_default_jet_run() {
         assert_eq!(aot.stdout, jit.stdout, "AOT and default `jet run` help differ for {args:?}");
         let help = String::from_utf8_lossy(&aot.stdout);
         if args == ["--help"] {
-            assert!(help.contains("Manage the service."), "{help}");
-            assert!(help.contains("serve                Start the service and listen for requests"), "{help}");
-            assert!(help.contains("import               Import one data file"), "{help}");
+            for fact in [
+                "-v, --verbose",
+                "--config CONFIG",
+                "plan                     preview changes",
+                "serve                    Start the service and listen for requests",
+                "import                   Import one data file",
+            ] {
+                assert!(help.contains(fact), "root help omitted {fact}: {help}");
+            }
+            assert_eq!(help.matches("--config").count(), 1, "root help repeated shared config: {help}");
         } else {
             assert!(help.contains("Start the service and listen for requests"), "{help}");
+            assert!(!help.contains("--config"), "command help repeated the shared config: {help}");
         }
     }
+
+    for (args, golden_name) in [
+        (["--config", "prod", "serve", "--port", "8080"].as_slice(), "subcommands.serve.out"),
+        (["plan", "--config", "prod"].as_slice(), "subcommands.plan.out"),
+    ] {
+        let expected = fs::read(root.join("examples/features/expected/cli").join(golden_name))
+            .unwrap_or_else(|error| panic!("read CLI command golden `{golden_name}`: {error}"));
+        let aot = Command::new(&binary)
+            .args(args)
+            .current_dir(&scratch.path)
+            .output()
+            .expect("run AOT CLI command");
+        let mut run_args = vec!["run", "subcommands.jet", "--"];
+        run_args.extend_from_slice(args);
+        let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(&run_args)
+            .current_dir(&scratch.path)
+            .env("JET_RUN_CACHE_DIR", cache.join(format!("{golden_name}-run")))
+            .env("JET_CACHE_DIR", cache.join(format!("{golden_name}-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run default CLI command");
+        let mut interpret_args = vec!["run", "--interpret", "subcommands.jet", "--"];
+        interpret_args.extend_from_slice(args);
+        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(&interpret_args)
+            .current_dir(&scratch.path)
+            .env("JET_RUN_CACHE_DIR", cache.join(format!("{golden_name}-interpret-run")))
+            .env("JET_CACHE_DIR", cache.join(format!("{golden_name}-interpret-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run interpreted CLI command");
+        for (label, output) in [
+            ("AOT", &aot),
+            ("default `jet run`", &default),
+            ("interpreter", &interpreted),
+        ] {
+            assert!(
+                output.status.success(),
+                "{label} CLI command {args:?} failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(output.stdout, expected, "{label} CLI command {args:?} differs from golden");
+        }
+        assert_eq!(aot.stdout, default.stdout, "AOT and default CLI command {args:?} differ");
+        assert_eq!(aot.stdout, interpreted.stdout, "AOT and interpreter CLI command {args:?} differ");
+    }
+
+    let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "subcommands.jet", "--", "--confg", "prod"])
+        .current_dir(&scratch.path)
+        .env("JET_RUN_CACHE_DIR", cache.join("unknown-run"))
+        .env("JET_CACHE_DIR", cache.join("unknown-build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run CLI with an unknown flag");
+    assert!(!unknown.status.success(), "unknown CLI flag was accepted");
+    let unknown_stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(
+        unknown_stderr.contains("--config"),
+        "unknown CLI flag lost its suggestion:\n{unknown_stderr}"
+    );
 }
 
 #[test]

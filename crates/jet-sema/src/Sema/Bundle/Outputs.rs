@@ -7,22 +7,18 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type) -> bool {
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
     )
 }
-/// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
+/// D-CLI-GLOBAL1=E: what `fn run`'s single parameter type turned out to be.
 pub(super) enum CLIEntryShape {
     /// A `#[CLI]`-derived struct — flags come straight from its fields.
     Struct,
-    /// An `enum` whose every variant carries a `#[CLI]` struct payload.
-    Enum,
-    /// An `enum` parameter with at least one non-`#[CLI]` variant (E1307).
-    EnumBadVariants(Vec<Diagnostic>),
     /// Neither of the above (E1308).
     Invalid,
 }
 
-/// D-CLIFLAG1: classify `fn run`'s parameter type against its defining module.
+/// D-CLI-GLOBAL1=E: classify `fn run`'s parameter type against its defining module.
 /// The entry signature stays in the entry file; its public `#[CLI]` type may
 /// live in one directly imported module.
-pub(super) fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CLIEntryShape {
+pub(super) fn cli_entry_param_shape(_items: &[Item], ty: &Type, reg: &TraitRegistry) -> CLIEntryShape {
     let Type::Named(name) = ty else {
         return CLIEntryShape::Invalid;
     };
@@ -30,28 +26,7 @@ pub(super) fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegist
     if reg.implements_trait(name, "CLI") {
         return CLIEntryShape::Struct;
     }
-    let enum_def: Option<&EnumDef> = items.iter().find_map(|i| match i {
-        Item::Enum(e) if &e.name == name => Some(e),
-        _ => None,
-    });
-    let Some(e) = enum_def else {
-        return CLIEntryShape::Invalid;
-    };
-    let mut bad = Vec::new();
-    for v in &e.variants {
-        let ok = matches!(
-            &v.payload,
-            VariantPayload::Single(Type::Named(p), _) if reg.implements_trait(p, "CLI")
-        );
-        if !ok {
-            bad.push(e1307(&v.name, v.name_span));
-        }
-    }
-    if bad.is_empty() {
-        CLIEntryShape::Enum
-    } else {
-        CLIEntryShape::EnumBadVariants(bad)
-    }
+    CLIEntryShape::Invalid
 }
 
 /// E0101: the entry file has no canonical `fn run`.
@@ -220,11 +195,7 @@ fn resolve_output_callable(
                 param_ty,
                 &states[target].trait_reg,
             ) {
-                CLIEntryShape::Struct | CLIEntryShape::Enum => true,
-                CLIEntryShape::EnumBadVariants(bad) => {
-                    contract_diags.extend(bad);
-                    false
-                }
+                CLIEntryShape::Struct => true,
                 CLIEntryShape::Invalid => false,
             }
         }

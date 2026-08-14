@@ -147,29 +147,27 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
 }
 
 #[test]
-fn external_completion_preserves_checked_subcommands() {
-    let dir = isolated_cwd("shape_cli_subcommands");
-    fs::write(dir.join("commands.jet"), r#"#CLI
-struct ServeArgs {
-    #[Doc("port to listen on"), Short("p"), Env("JET_SERVE_PORT")] port: Int = 3000
+fn external_completion_preserves_checked_program_commands() {
+    let dir = isolated_cwd("shape_cli_program_commands");
+    fs::write(dir.join("commands.jet"), r#"#CLI(Standard)
+struct Commands {
+    #[Doc("shared config"), Short("c"), Env("JET_CONFIG")] config: String = "default"
+    #Doc("start the service") fn serve(self, port: Int = 3000) {}
+    #Doc("import one file") fn import(self, file: String) {}
 }
-#CLI
-struct ImportArgs {
-    #Doc("file to import") file: String
-}
-enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
-fn run(cmd: Cmd) {}
+fn run(args: Commands) {}
 "#).unwrap();
     let build = Command::new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap();
-    assert!(build.status.success(), "subcommand build failed: {}", String::from_utf8_lossy(&build.stderr));
+    assert!(build.status.success(), "program build failed: {}", String::from_utf8_lossy(&build.stderr));
     let help = Command::new(dir.join("build/commands"))
         .arg("--help")
         .current_dir(&dir)
         .output()
         .unwrap();
-    assert!(help.status.success(), "subcommand root help failed: {}", String::from_utf8_lossy(&help.stderr));
+    assert!(help.status.success(), "program root help failed: {}", String::from_utf8_lossy(&help.stderr));
     let help = String::from_utf8(help.stdout).unwrap();
-    assert_eq!(help, "Usage: commands <command> [options]\n\nCommands:\n  serve\n  import\n");
+    assert!(help.contains("--config CONFIG"), "root help omitted shared config: {help}");
+    assert_eq!(help.matches("--config").count(), 1, "root help repeated shared config: {help}");
     assert!(!help.contains("Serve") && !help.contains("Import"));
 
     for shell in ["bash", "zsh", "fish", "powershell"] {
@@ -181,16 +179,20 @@ fn run(cmd: Cmd) {}
         assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
         let script = String::from_utf8(completion.stdout).unwrap();
         let expected = match shell {
-            "bash" => ["serve", "import", "--port -p", "file --file"],
-            "zsh" => ["serve", "import", "{-p,--port}", ":file:file to import"],
-            "fish" => ["serve", "import", "-l port -s p", "-l file"],
-            "powershell" => ["serve", "import", "'--port','-p'", "'file','--file'"],
+            "bash" => ["serve", "import", "--port", "file --file"],
+            "zsh" => ["serve", "import", "--port", ":file:value for --file"],
+            "fish" => ["serve", "import", "-l port", "-l file"],
+            "powershell" => ["serve", "import", "'--port'", "'file','--file'"],
             _ => unreachable!(),
         };
         for fragment in expected {
             assert!(script.contains(fragment), "{shell} external completion omitted {fragment}: {script}");
         }
-        check_snapshot(&format!("shape_cli_enum_{shell}.txt"), &script);
+        assert!(script.contains("--config"), "{shell} omitted the shared root config: {script}");
+        assert!(script.contains("--verbose"), "{shell} omitted the Standard root flags: {script}");
+        assert!(script.contains("--quiet"), "{shell} omitted the Standard root flags: {script}");
+        assert!(script.contains("--color"), "{shell} omitted the Standard root flags: {script}");
+        check_snapshot(&format!("shape_cli_program_{shell}.txt"), &script);
     }
     let dossier = Command::new(jet())
         .args(["inspect", "dossier", "commands.jet", "run", "--json"])
@@ -199,7 +201,7 @@ fn run(cmd: Cmd) {}
         .unwrap();
     assert!(dossier.status.success());
     let dossier = String::from_utf8(dossier.stdout).unwrap();
-    assert!(dossier.contains("\"completion_words\":[\"--help\",\"serve\",\"import\"]"), "dossier flattened enum flags: {dossier}");
+    assert!(dossier.contains("\"completion_words\":[\"--help\",\"--verbose\",\"-v\",\"--quiet\",\"-q\",\"--color\",\"--version\",\"--config\",\"-c\",\"serve\",\"import\"]"), "dossier flattened program flags: {dossier}");
     for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
         assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
     }
@@ -212,9 +214,11 @@ fn run(cmd: Cmd) {}
     let dossier = String::from_utf8(dossier.stdout).unwrap();
     for fact in [
         "command serve",
-        "-p / --port: Int (optional, default 3000, env JET_SERVE_PORT) — port to listen on",
+        "--config",
+        "JET_CONFIG",
+        "shared config",
         "command import",
-        "--file: String (required) — file to import",
+        "--file: String (required) — value for --file",
     ] {
         assert!(dossier.contains(fact), "text dossier omitted {fact}: {dossier}");
     }
@@ -226,15 +230,11 @@ fn documented_subcommands_are_projected_into_the_dossier_schema() {
     fs::write(
         dir.join("commands.jet"),
         r#"#CLI
-struct ServeArgs {}
-#CLI
-struct ImportArgs {}
-#Doc("Manage the service")
-enum Cmd {
-    #Doc("Start the service") Serve(ServeArgs)
-    #Doc("Import one data file") Import(ImportArgs)
+struct Commands {
+    #Doc("Start the service") fn serve(self) {}
+    #Doc("Import one data file") fn import(self) {}
 }
-fn run(cmd: Cmd) {}
+fn run(args: Commands) {}
 "#,
     )
     .unwrap();
@@ -250,7 +250,6 @@ fn run(cmd: Cmd) {}
     );
     let json = String::from_utf8(dossier.stdout).unwrap();
     for fact in [
-        "\"description\":\"Manage the service\"",
         "\"name\":\"serve\",\"description\":\"Start the service\"",
         "\"name\":\"import\",\"description\":\"Import one data file\"",
         "\"completion_words\":[\"--help\",\"serve\",\"import\"]",
@@ -318,11 +317,11 @@ fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
 }
 
 #[test]
-fn derived_enum_help_uses_program_basename_for_compiled_and_jet_run_paths() {
-    let dir = isolated_cwd("shape_cli_enum_help_program_name");
+fn derived_program_help_uses_program_basename_for_compiled_and_jet_run_paths() {
+    let dir = isolated_cwd("shape_cli_program_help_program_name");
     fs::write(
         dir.join("commands.jet"),
-        "#CLI\nstruct ServeArgs { verbose: Bool }\nenum Cmd { Serve(ServeArgs) }\nfn run(cmd: Cmd) {}\n",
+        "#CLI\nstruct Commands { fn serve(self) {} }\nfn run(args: Commands) {}\n",
     )
     .unwrap();
 
@@ -333,7 +332,7 @@ fn derived_enum_help_uses_program_basename_for_compiled_and_jet_run_paths() {
         .unwrap();
     assert!(
         build.status.success(),
-        "enum build failed: {}",
+        "program build failed: {}",
         String::from_utf8_lossy(&build.stderr)
     );
     let built = dir.join("build/commands").canonicalize().unwrap();
@@ -385,7 +384,7 @@ fn derived_enum_help_uses_program_basename_for_compiled_and_jet_run_paths() {
         first_line(run_root),
         first_line(run_sub)
     );
-    check_snapshot("shape_cli_enum_help_program_names.txt", &program_names);
+    check_snapshot("shape_cli_program_help_program_names.txt", &program_names);
 }
 
 #[test]

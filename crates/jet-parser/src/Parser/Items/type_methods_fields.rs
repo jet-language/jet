@@ -1,5 +1,6 @@
 use super::super::{
-    ConstAttr, ConstDef, Diagnostic, Field, Func, Parser, Span, Syntax, TokKind, TraitMethodSig,
+    CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Field, Func, Parser, Span, Syntax, TokKind,
+    TraitMethodSig,
 };
 
 impl<'a> Parser<'a> {
@@ -177,6 +178,36 @@ impl<'a> Parser<'a> {
                 computed,
                 default,
                 default_ct: None,
+            })
+        }
+
+        /// D-CLI-GLOBAL1=E: `name = callable` is a program-struct command
+        /// binding. It uses the existing field marker plane for `#Doc` and
+        /// the ordinary expression parser for the callable target.
+        pub(super) fn cli_binding_starts_here(&self) -> bool {
+            matches!(self.peek().kind, TokKind::Ident(_))
+                && matches!(self.peek2().kind, TokKind::Eq)
+        }
+
+        pub(super) fn cli_binding(
+            &mut self,
+            markers: Vec<crate::AST::Marker>,
+        ) -> Result<CLICommandBinding, Diagnostic> {
+            let (name, name_span) = self.expect_ident("for a CLI command name")?;
+            self.expect(TokKind::Eq, "between a CLI command name and callable")?;
+            let target = self.expr()?;
+            for marker in &markers {
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(name_span),
+                    crate::Policy::RuleSite::Field,
+                );
+            }
+            Ok(CLICommandBinding {
+                name,
+                name_span,
+                markers,
+                target,
             })
         }
     

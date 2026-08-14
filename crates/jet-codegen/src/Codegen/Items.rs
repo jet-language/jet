@@ -31,6 +31,7 @@ fn cli_tuple_expr(variables: &[String]) -> String {
 
 fn emit_struct_command_entry(
     cx: &Cx,
+    items: &[Item],
     structure: &StructDef,
     schema: &jet_foundation::CLISchema::CLICommandSchema,
     helper_prefix: &str,
@@ -44,19 +45,30 @@ fn emit_struct_command_entry(
     let mut command_specs = Vec::new();
     let mut spec_defs = String::new();
     for command in &schema.commands {
-        let Some(method) = structure
+        let method = structure
             .methods
             .iter()
-            .find(|method| method.name.to_lowercase() == command.name)
-        else {
-            unreachable!("canonical CLI command has no owning method");
+            .find(|method| method.name.to_lowercase() == command.name);
+        let binding = structure
+            .cli_bindings
+            .iter()
+            .find(|binding| binding.name.to_lowercase() == command.name);
+        let function = method.or_else(|| {
+            let target = binding?.target.without_parens();
+            let Expr::Ident(target, _) = target else { return None };
+            items.iter().find_map(|item| match item {
+                Item::Func(function) if function.name == *target => Some(function),
+                _ => None,
+            })
+        });
+        let Some(function) = function else {
+            unreachable!("canonical CLI command has no owning callable");
         };
+        let is_bound = binding.is_some();
         let variable = cli_helper_name(
             "command_spec",
             &format!("{}_{}", structure.name, command.name),
         );
-        let mut inputs = schema.inputs.clone();
-        inputs.extend(command.inputs.clone());
         let mut body = String::new();
         body.push_str(&format!(
             "    let {variable} = {{\n        let __s = jet_args_program(jet_args_spec(), &format!(\"{{}} {}\", jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))));\n",
@@ -67,11 +79,13 @@ fn emit_struct_command_entry(
                 "        let __s = jet_args_description(__s, &{description:?}.to_string());\n"
             ));
         }
-        body.push_str(&cli_standard_spec_lines("", schema.standard, version, "        "));
-        body.push_str(&cli_input_spec_lines("", &inputs, "        "));
+        // Root/shared inputs are inherited by `jet_args_subcommand`; keep the
+        // local command help/spec projection command-only so shared flags are
+        // declared and displayed once at the root.
+        body.push_str(&cli_input_spec_lines("", &command.inputs, "        "));
         body.push_str("        __s\n    };\n");
         spec_defs.push_str(&body);
-        command_specs.push((command, method, variable));
+        command_specs.push((command, function, is_bound, variable));
     }
 
     let mut root_spec = String::new();
@@ -84,7 +98,7 @@ fn emit_struct_command_entry(
             "        let __s = jet_args_version(__s, &{version:?}.to_string());\n"
         ));
     }
-    for (command, _, variable) in &command_specs {
+    for (command, _, _, variable) in &command_specs {
         root_spec.push_str(&format!(
             "        let __s = jet_args_subcommand(__s, &{name:?}.to_string(), &{help:?}.to_string(), {variable}.clone());\n",
             name = command.name,
@@ -94,11 +108,15 @@ fn emit_struct_command_entry(
     root_spec.push_str("        __s\n    };\n");
 
     let mut arms = String::new();
-    for (command, method, variable) in &command_specs {
-        let params: Vec<&Param> = method
+    for (command, function, is_bound, variable) in &command_specs {
+        let params: Vec<&Param> = function
             .params
             .iter()
-            .filter(|param| param.name != crate::Syntax::KW_SELF)
+            .filter(|param| {
+                param.name != crate::Syntax::KW_SELF
+                    && !(*is_bound
+                        && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == structure.name))
+            })
             .collect();
         let inputs: Vec<&jet_foundation::CLISchema::CLIInputSchema> = params
             .iter()
@@ -123,39 +141,50 @@ fn emit_struct_command_entry(
                 "                ",
             ));
         }
-        let call_args = params
-            .iter()
-            .zip(variables.iter())
-            .map(|(param, variable)| cli_call_argument(cx, param, variable))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let self_method = method
+        let self_method = function
             .params
             .iter()
             .any(|param| param.name == crate::Syntax::KW_SELF);
-        let receiver_mut = method.params.iter().any(|param| {
-            param.name == crate::Syntax::KW_SELF
-                && matches!(param.convention, crate::AST::AccessConvention::Write)
-        });
-        let method_name = mangle(&method.name);
+        let shared_param = (*is_bound).then(|| {
+            function.params.iter().find(|param| {
+                matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == structure.name)
+            })
+        }).flatten();
+        let mut call_args = Vec::new();
+        let mut variable_index = 0usize;
+        for param in &function.params {
+            if param.name == crate::Syntax::KW_SELF {
+                continue;
+            }
+            if let Some(shared_param) = shared_param {
+                if param.name == shared_param.name {
+                    call_args.push(cli_call_argument(cx, param, "__jet_cli_receiver"));
+                    continue;
+                }
+            }
+            call_args.push(cli_call_argument(cx, param, &variables[variable_index]));
+            variable_index += 1;
+        }
+        let call_args = call_args.join(", ");
         let callable = if self_method {
-            format!("__jet_cli_receiver.{method_name}")
+            format!("__jet_cli_receiver.{}", mangle(&function.name))
+        } else if *is_bound {
+            format!("{helper_prefix}{}", mangle(&function.name))
         } else {
-            format!("{param_rust}::{method_name}")
+            format!("{param_rust}::{}", mangle(&function.name))
         };
         let invoke = emit_entry_invocation(
             &callable,
             Some(&call_args),
-            method.return_type.as_ref().and_then(|ty| entry_error(cx, ty)),
-            method.return_type.as_ref().is_some_and(returns_app),
+            function.return_type.as_ref().and_then(|ty| entry_error(cx, ty)),
+            function.return_type.as_ref().is_some_and(returns_app),
             false,
             "                    ",
         );
         let tuple = cli_tuple_expr(&variables);
-        let receiver = if self_method {
+        let receiver = if self_method || shared_param.is_some() {
             format!(
-                "                let {binding}__jet_cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                }};\n",
-                binding = if receiver_mut { "mut " } else { "" },
+                "                let __jet_cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                }};\n",
             )
         } else {
             String::new()
@@ -169,7 +198,7 @@ fn emit_struct_command_entry(
 
     let help_selection = command_specs
         .iter()
-        .map(|(command, _, variable)| {
+        .map(|(command, _, _, variable)| {
             format!(
                 "                        {name:?} => {variable}.clone(),\n",
                 name = command.name
@@ -191,6 +220,8 @@ fn emit_struct_command_entry(
             )
         })
         .unwrap_or_default();
+    let standard_init = cli_standard_runtime_init(schema.standard, "            ");
+    let version_check = format!("{standard_init}{version_check}");
     out.push_str(&format!(
         "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}{spec_defs}{root_spec}    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{\n                let __help_spec = match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{help_selection}                    _ => __spec.clone(),\n                }};\n                println!(\"{{}}\", __help_spec.help());\n                return;\n            }}\n{version_check}            match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{arms}                Some(__other) => {{ eprintln!(\"unknown command `{{}}`\", __other); std::process::exit(2); }}\n                None => {{ println!(\"{{}}\", __spec.help()); return; }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n"
     ));
@@ -706,6 +737,15 @@ fn cli_standard_spec_lines(
     lines
 }
 
+fn cli_standard_runtime_init(standard: bool, indent: &str) -> String {
+    if !standard {
+        return String::new();
+    }
+    format!(
+        "{indent}jet_ring_log_set_level(&jet_args_standard_log_level(&__parsed));\n{indent}jet_term_set_color_mode(&jet_args_standard_color_mode(&__parsed));\n"
+    )
+}
+
 fn cli_input_spec_lines(
     root: &str,
     inputs: &[jet_foundation::CLISchema::CLIInputSchema],
@@ -1108,14 +1148,16 @@ fn emit_direct_cli_entry(
     } else {
         String::new()
     };
+    let standard_init = cli_standard_runtime_init(schema.standard, "            ");
+    let version_check = format!("{standard_init}{version_check}");
     out.push_str(&format!(
         "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {{\n{spec_body}    }};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n{version_check}            let __decoded = (|| {{\n{decode_lines}                Ok::<_, String>({tuple})\n            }})();\n            match __decoded {{\n                Ok({pattern}) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n"
     ));
 }
 
-/// S12/D-CLIFLAG1: Jet's only program entry is `fn run`. Rust still needs
+/// S12/D-CLI-GLOBAL1=E: Jet's only program entry is `fn run`. Rust still needs
 /// `fn main`, so synthesize a wrapper. Zero-arg `run` calls straight through;
-/// typed `run(args: T)` / `run(cmd: Enum)` generates down onto the same
+/// typed `run(args: T)` generates down onto the same
 /// `__jet_cli_spec_*`/`__jet_cli_decode_*` functions `emit_struct_cli`
 /// produced, and the same `core.args` runtime surface a hand-written
 /// `.parse(process.argv())` call would hit (I8: no second parser).
@@ -1219,7 +1261,6 @@ pub(crate) fn emit_cli_entry_if_needed(
     let local_type = !type_name.contains('.')
         && items.iter().any(|item| match item {
             Item::Struct(structure) => structure.name == name,
-            Item::Enum(enumeration) => enumeration.name == name,
             _ => false,
         });
     let param_rust = cx.rust_type(&param_ty);
@@ -1247,11 +1288,12 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     }) {
         if s.derives.iter().any(|(t, _)| t == "CLI") {
-            let schema = jet_foundation::CLISchema::command_schema(s)
+            let schema = jet_foundation::CLISchema::command_schema_with_items(cli_items, s)
                 .expect("CLI derive has one canonical command schema");
             if !schema.commands.is_empty() {
                 emit_struct_command_entry(
                     cx,
+                    cli_items,
                     s,
                     &schema,
                     &helper_prefix,
@@ -1303,6 +1345,8 @@ pub(crate) fn emit_cli_entry_if_needed(
                     )
                 })
                 .unwrap_or_default();
+            let standard_init = cli_standard_runtime_init(schema.standard, "            ");
+            let version_check = format!("{standard_init}{version_check}");
             out.push_str(&format!(
                 "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {spec_init};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n{version_check}            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok({args_binding}__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 decode_name = decode_name,
@@ -1313,28 +1357,6 @@ pub(crate) fn emit_cli_entry_if_needed(
         return;
     }
 
-    if let Some(e) = cli_items.iter().find_map(|i| match i {
-        Item::Enum(e) if &e.name == name => Some(e),
-        _ => None,
-    }) {
-        let schema = jet_foundation::CLISchema::schema_for_type(cli_items, name)
-            .expect("sema-approved enum entry has one checked command schema");
-        emit_cli_subcommand_entry(
-            cx,
-            e,
-            &schema,
-            &helper_prefix,
-            &param_rust,
-            &callable,
-            &arg_expr,
-            entry_error,
-            serve_app,
-            service_target,
-            job_dispatch.as_deref(),
-            version,
-            out,
-        );
-    }
 }
 
 fn emit_job_dispatch(
@@ -1432,7 +1454,6 @@ fn emit_job_wrapper(
     let local_type = !type_name.contains('.')
         && items.iter().any(|item| match item {
             Item::Struct(structure) => structure.name == name,
-            Item::Enum(enumeration) => enumeration.name == name,
             _ => false,
         });
     let param_rust = cx.rust_type(&param_ty);
@@ -1477,74 +1498,7 @@ fn emit_job_wrapper(
             return;
         }
     }
-    if let Some(enumeration) = cli_items.iter().find_map(|item| match item {
-        Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
-        _ => None,
-    }) {
-        let schema = jet_foundation::CLISchema::schema_for_type(cli_items, name)
-            .expect("sema-approved enum job has one checked command schema");
-        emit_cli_subcommand_job_wrapper(
-            enumeration,
-            &schema,
-            &helper_prefix,
-            &param_rust,
-            &callable,
-            &arg_expr,
-            entry_error,
-            serve_app,
-            out,
-        );
-        return;
-    }
     out.push_str("    eprintln!(\"job entry argument has no CLI schema\");\n    std::process::exit(2);\n}\n\n");
-}
-
-fn emit_cli_subcommand_job_wrapper(
-    e: &EnumDef,
-    schema: &jet_foundation::CLISchema::CLICommandSchema,
-    helper_prefix: &str,
-    enum_rust: &str,
-    callable: &str,
-    arg_expr: &dyn Fn(&str) -> String,
-    entry_error: Option<EntryError>,
-    serve_app: bool,
-    out: &mut String,
-) {
-    let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
-    let usage_lines = cmd_names
-        .iter()
-        .map(|name| format!("  {name}"))
-        .collect::<Vec<_>>()
-        .join("\\n");
-    let mut arms = String::new();
-    for variant in &e.variants {
-        let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
-            continue;
-        };
-        let tag = mangle_path(&variant.name);
-        let call_arg = arg_expr(&format!("{enum_rust}::{tag}(__payload)"));
-        let invoke = emit_entry_invocation(
-            callable,
-            Some(&call_arg),
-            entry_error,
-            serve_app,
-            false,
-            "                        ",
-        );
-        let spec_name = cli_helper_name("spec", payload_name);
-        let decode_name = cli_helper_name("decode", payload_name);
-        arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}{spec_name}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
-            sub = variant.name.to_lowercase(),
-            spec_name = spec_name,
-            decode_name = decode_name,
-        ));
-    }
-    out.push_str(&format!(
-        "    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: {{}} <command> [options]\\n\\nCommands:\\n{usage}\", __argv.first().map(String::as_str).unwrap_or(\"\"));\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
-        usage = usage_lines,
-        arms = arms,
-    ));
 }
 
 fn emit_entry_invocation(
@@ -1627,127 +1581,6 @@ fn returns_app(ty: &Type) -> bool {
         Type::Result { ok, .. } => matches!(ok.as_ref(), Type::Named(name) if name == "App"),
         _ => false,
     }
-}
-
-/// D-CLIFLAG1: retained enum carrier path. Its command selection and argument
-/// decoding use the same root/nested Args Prelude projection as callable
-/// members; only the final enum construction differs.
-fn emit_cli_subcommand_entry(
-    cx: &Cx,
-    e: &EnumDef,
-    schema: &jet_foundation::CLISchema::CLICommandSchema,
-    helper_prefix: &str,
-    enum_rust: &str,
-    callable: &str,
-    arg_expr: &dyn Fn(&str) -> String,
-    entry_error: Option<EntryError>,
-    serve_app: bool,
-    service_target: bool,
-    job_dispatch: Option<&str>,
-    version: Option<&str>,
-    out: &mut String,
-) {
-    let mut command_specs = Vec::new();
-    let mut spec_defs = String::new();
-    for command in &schema.commands {
-        let variant = e
-            .variants
-            .iter()
-            .find(|variant| variant.name.to_lowercase() == command.name)
-            .expect("canonical CLI enum command has no owning variant");
-        let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
-            unreachable!("canonical CLI enum command has no struct payload");
-        };
-        let variable = cli_helper_name("command_spec", &format!("{}_{}", e.name, command.name));
-        let mut inputs = schema.inputs.clone();
-        inputs.extend(command.inputs.clone());
-        let mut body = String::new();
-        body.push_str(&format!(
-            "    let {variable} = {{\n        let __s = jet_args_program(jet_args_spec(), &format!(\"{{}} {}\", jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))));\n",
-            command.name
-        ));
-        if let Some(description) = &command.description {
-            body.push_str(&format!(
-                "        let __s = jet_args_description(__s, &{description:?}.to_string());\n"
-            ));
-        }
-        body.push_str(&cli_standard_spec_lines("", schema.standard, version, "        "));
-        body.push_str(&cli_input_spec_lines("", &inputs, "        "));
-        body.push_str("        __s\n    };\n");
-        spec_defs.push_str(&body);
-        command_specs.push((command, variant, payload_name, variable));
-    }
-
-    let mut root_spec = String::new();
-    root_spec.push_str("    let __spec = {\n");
-    root_spec.push_str(
-        "        let __s = jet_args_program(jet_args_spec(), &jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\")));\n",
-    );
-    if let Some(description) = &schema.description {
-        root_spec.push_str(&format!(
-            "        let __s = jet_args_description(__s, &{description:?}.to_string());\n"
-        ));
-    }
-    root_spec.push_str(&cli_standard_spec_lines("", schema.standard, version, "        "));
-    root_spec.push_str(&cli_input_spec_lines("", &schema.inputs, "        "));
-    for (command, _, _, variable) in &command_specs {
-        root_spec.push_str(&format!(
-            "        let __s = jet_args_subcommand(__s, &{name:?}.to_string(), &{help:?}.to_string(), {variable}.clone());\n",
-            name = command.name,
-            help = command.description.clone().unwrap_or_default(),
-        ));
-    }
-    root_spec.push_str("        __s\n    };\n");
-
-    let mut arms = String::new();
-    for (command, variant, payload_name, variable) in &command_specs {
-        let tag = mangle_path(&variant.name);
-        let ctor = format!("{enum_rust}::{tag}(__payload)");
-        let call_arg = arg_expr(&ctor);
-        let invoke = emit_entry_invocation(
-            callable,
-            Some(&call_arg),
-            entry_error,
-            serve_app,
-            service_target,
-            "                    ",
-        );
-        let decode_name = cli_helper_name("decode", payload_name);
-        arms.push_str(&format!(
-            "                {name:?} => {{\n                    let __spec = {variable}.clone();\n                    match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n",
-            name = command.name,
-            variable = variable,
-            decode_name = decode_name,
-        ));
-    }
-
-    let sentry_init = format!(
-        "    {}jet_mem::jet_sentry_set_hardened({});\n",
-        cx.root_prefix, cx.package_hardened
-    );
-    let dispatch = job_dispatch
-        .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
-        .unwrap_or_default();
-    let version_check = version
-        .filter(|_| schema.standard)
-        .map(|version| {
-            format!(
-                "            if jet_parsed_flag(&__parsed, &\"version\".to_string()) {{ println!({version:?}); return; }}\n"
-            )
-        })
-        .unwrap_or_default();
-    let help_selection = command_specs
-        .iter()
-        .map(|(command, _, _, variable)| {
-            format!(
-                "                        {name:?} => {variable}.clone(),\n",
-                name = command.name
-            )
-        })
-        .collect::<String>();
-    out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}{spec_defs}{root_spec}    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{\n                let __help_spec = match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{help_selection}                    _ => __spec.clone(),\n                }};\n                println!(\"{{}}\", __help_spec.help());\n                return;\n            }}\n{version_check}            match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{arms}                Some(__other) => {{ eprintln!(\"unknown command `{{}}`\", __other); std::process::exit(2); }}\n                None => {{ println!(\"{{}}\", __spec.help()); return; }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n"
-    ));
 }
 
 /// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous
