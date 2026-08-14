@@ -766,10 +766,16 @@ fn jet_args_store_option(
         match kind {
             JetArgValueKind::String => {}
             JetArgValueKind::Int => {
-                value.parse::<i64>().map_err(|_| format!("`--{}` expects an Int, got `{}`", name, value))?;
+                value.parse::<i64>().map_err(|_| format!(
+                    "`--{}` expects an Int, got `{}`\n\nfix: pass a whole number to `--{}`",
+                    name, value, name
+                ))?;
             }
             JetArgValueKind::Float => {
-                value.parse::<f64>().map_err(|_| format!("`--{}` expects a Float, got `{}`", name, value))?;
+                value.parse::<f64>().map_err(|_| format!(
+                    "`--{}` expects a Float, got `{}`\n\nfix: pass a number to `--{}`",
+                    name, value, name
+                ))?;
             }
             JetArgValueKind::Choice(choices) => {
                 if !choices.iter().any(|c| c == value) {

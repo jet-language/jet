@@ -7,7 +7,7 @@ use common::Scratch;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -69,9 +69,9 @@ fn request(port: u16, method: &str, path: &str) -> String {
     response
 }
 
-fn spawn_server(args: &[&str], port: u16) -> ServerChild {
+fn spawn_server_with_program(program: &Path, args: &[&str], port: u16) -> ServerChild {
     ServerChild(
-        Command::new(jet_bin())
+        Command::new(program)
             .current_dir(repo_root())
             .args(args)
             .env("JET_APP_PORT", port.to_string())
@@ -80,6 +80,10 @@ fn spawn_server(args: &[&str], port: u16) -> ServerChild {
             .spawn()
             .expect("spawn web app server"),
     )
+}
+
+fn spawn_server(args: &[&str], port: u16) -> ServerChild {
+    spawn_server_with_program(&jet_bin(), args, port)
 }
 
 #[test]
@@ -160,6 +164,75 @@ fn web_app_run_serves_pages_actions_and_assets() {
     let asset = request(port, "GET", "/assets/app.css");
     assert!(asset.starts_with("HTTP/1.1 200"), "{asset}");
     assert!(asset.contains("font-family"), "{asset}");
+}
+
+#[test]
+fn typed_app_args_serve_in_default_and_aot_modes() {
+    let port = free_port();
+    let _server = spawn_server(
+        &[
+            "run",
+            "examples/features/web/app_typed_args.jet",
+            "--",
+            "--port=9000",
+        ],
+        port,
+    );
+    let response = request(port, "GET", "/");
+    assert!(response.starts_with("HTTP/1.1 404"), "default typed App: {response}");
+    drop(_server);
+
+    let (code, stdout, stderr) = run_jet(&[
+        "build",
+        "examples/features/web/app_typed_args.jet",
+    ]);
+    assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
+    let port = free_port();
+    let _server = spawn_server_with_program(
+        &repo_root().join("build/app_typed_args"),
+        &["--port=9000"],
+        port,
+    );
+    let response = request(port, "GET", "/");
+    assert!(response.starts_with("HTTP/1.1 404"), "AOT typed App: {response}");
+}
+
+#[test]
+fn typed_app_args_report_invalid_port_with_shared_fix() {
+    for args in [
+        &[
+            "run",
+            "examples/features/web/app_typed_args.jet",
+            "--",
+            "--port=nine",
+        ][..],
+        &[
+            "run",
+            "--interpret",
+            "examples/features/web/app_typed_args.jet",
+            "--",
+            "--port=nine",
+        ][..],
+        &[
+            "run",
+            "--release",
+            "examples/features/web/app_typed_args.jet",
+            "--",
+            "--port=nine",
+        ][..],
+    ] {
+        let (code, stdout, stderr) = run_jet(args);
+        assert_eq!(code, 2, "args={args:?}\nstdout={stdout}\nstderr={stderr}");
+        assert!(stdout.is_empty(), "args={args:?}\nstdout={stdout}");
+        assert!(
+            stderr.contains("`--port` expects an Int, got `nine`"),
+            "args={args:?}\nstderr={stderr}"
+        );
+        assert!(
+            stderr.contains("fix: pass a whole number to `--port`"),
+            "args={args:?}\nstderr={stderr}"
+        );
+    }
 }
 
 #[test]

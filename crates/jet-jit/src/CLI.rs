@@ -119,8 +119,7 @@ pub(crate) struct CLIPlan {
     pub field_types: Vec<(String, Type)>,
     /// Enum variant order: (variant_name_lower, payload_struct_fields).
     pub variants: Vec<(String, Vec<(String, Type)>)>,
-    /// The typed entry's ABI carries a value (including the canonical Result
-    /// carrier for an omitted return type).
+    /// The typed entry's ABI carries a non-unit return value.
     pub run_returns_value: bool,
     pub user_run: String,
 }
@@ -149,17 +148,38 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
     let Some(module) = bundle.modules.get(bundle.entry) else {
         return;
     };
-    if let Some(plan) = cli_plan_from_items(&module.items) {
+    let Some(cli_module) = CLISchema::entry_type_module(bundle) else {
+        return;
+    };
+    let Some(schema) = CLISchema::entry_schema_for_bundle(bundle) else {
+        return;
+    };
+    let Some(cli_items) = bundle
+        .modules
+        .get(cli_module)
+        .map(|module| module.items.as_slice())
+    else {
+        return;
+    };
+    if let Some(plan) = cli_plan_from_schema(schema, &module.items, cli_items) {
         install_cli_plan(plan);
     }
 }
 
 pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
     let schema = CLISchema::entry_schema(items)?;
+    cli_plan_from_schema(schema, items, items)
+}
+
+fn cli_plan_from_schema(
+    schema: CLICommandSchema,
+    entry_items: &[Item],
+    cli_items: &[Item],
+) -> Option<CLIPlan> {
     let entry = schema.entry_type.clone();
-    let run_returns_value = cli_run_returns_value(items);
+    let run_returns_value = cli_run_returns_value(entry_items);
     if !schema.commands.is_empty() {
-        let enumeration = items.iter().find_map(|item| match item {
+        let enumeration = cli_items.iter().find_map(|item| match item {
             Item::Enum(e) if e.name == entry => Some(e),
             _ => None,
         })?;
@@ -168,7 +188,7 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
             let VariantPayload::Single(Type::Named(payload), _) = &v.payload else {
                 continue;
             };
-            let fields = struct_fields(items, payload)?;
+            let fields = struct_fields(cli_items, payload)?;
             variants.push((v.name.to_lowercase(), fields));
         }
         return Some(CLIPlan {
@@ -179,7 +199,7 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
             user_run: "run".to_string(),
         });
     }
-    let field_types = struct_fields(items, &entry)?;
+    let field_types = struct_fields(cli_items, &entry)?;
     Some(CLIPlan {
         schema,
         field_types,
@@ -200,7 +220,8 @@ fn cli_run_returns_value(items: &[Item]) -> bool {
         })
     {
         Some(Type::Named(name)) if name == "Unit" => false,
-        Some(_) | None => true,
+        Some(_) => true,
+        None => false,
     }
 }
 

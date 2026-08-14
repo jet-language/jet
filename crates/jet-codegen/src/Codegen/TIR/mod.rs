@@ -1165,11 +1165,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         })
     });
     let cli_run = zero_arg_entry.is_none().then(|| {
+        let has_cli_schema = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
         module.items.iter().find_map(|item| match item {
             Item::Func(function)
                 if function.name == "run"
                     && function.params.len() == 1
-                    && jet_foundation::CLISchema::entry_schema(&module.items).is_some() =>
+                    && has_cli_schema =>
             {
                 Some(function.name.clone())
             }
@@ -1177,7 +1178,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 (output.selected
                     && output.module == bundle.entry
                     && output.params.len() == 1
-                    && jet_foundation::CLISchema::entry_schema(&module.items).is_some())
+                    && has_cli_schema)
                 .then(|| output.semantic_name.clone())
             }),
             _ => None,
@@ -1968,7 +1969,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
             }
             _ => None,
         })).or_else(|| {
-            jet_foundation::CLISchema::entry_schema(&module.items)
+            jet_foundation::CLISchema::entry_schema_for_bundle(bundle)
                 .map(|_| super::mangle_generated("cli_main"))
         });
     let Some(selected) = selected else {
