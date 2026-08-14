@@ -19,6 +19,7 @@ pub enum GateKind {
     ForcePin,
     TaintScrub,
     DutyDrop,
+    StateTransition,
     PrecisionDemotion,
     Nondeterministic,
 }
@@ -35,6 +36,7 @@ impl GateKind {
             Self::ForcePin => "force_pin",
             Self::TaintScrub => "taint_scrub",
             Self::DutyDrop => "duty_drop",
+            Self::StateTransition => "state_transition",
             Self::PrecisionDemotion => "precision_demotion",
             Self::Nondeterministic => "nondeterministic",
         }
@@ -51,6 +53,7 @@ impl GateKind {
             "force" | "force_pin" => Some(Self::ForcePin),
             "scrub" | "taint" | "taint_scrub" => Some(Self::TaintScrub),
             "drop" | "detach" | "duty" | "duty_drop" => Some(Self::DutyDrop),
+            "state" | "transition" | "state_transition" => Some(Self::StateTransition),
             "approx"
             | "precision"
             | "precision_demotion"
@@ -93,7 +96,8 @@ impl GateKind {
             Self::ForcePin => 7,
             Self::TaintScrub => 8,
             Self::DutyDrop => 9,
-            Self::PrecisionDemotion => 10,
+            Self::StateTransition => 10,
+            Self::PrecisionDemotion => 11,
         }
     }
 }
@@ -426,6 +430,22 @@ fn visit_template_body(
 }
 
 fn visit_function(source: &str, function: &Func, ledger: &mut GateLedger) {
+    if let Some(transition) = &function.state_transition {
+        let from = transition.from.as_deref().unwrap_or("_");
+        let spelling = format!("#Transition({from}, {})", transition.to);
+        let detail = format!("state transition {from} -> {}", transition.to);
+        ledger.push(source_entry(
+            GateKind::StateTransition,
+            "knowledge",
+            "function",
+            source,
+            transition.span,
+            &spelling,
+            Some(spelling.clone()),
+            &detail,
+            "recorded",
+        ));
+    }
     if let Some(tag) = &function.scrub_tag {
         let span = function
             .markers

@@ -55,7 +55,7 @@ pub(crate) fn run(
 
     let kind = option_value(args, "--kind");
     let kind = kind.as_deref().map(parse_kind).transpose().unwrap_or_else(|error| {
-        crate::cli_error!(@fix "E2104", error, "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, precision_demotion, or nondeterministic");
+        crate::cli_error!(@fix "E2104", error, "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, or nondeterministic");
         exit(jet::ExitCodes::USAGE);
     });
     let scope = option_value(args, "--scope").map(|value| value.to_ascii_lowercase());

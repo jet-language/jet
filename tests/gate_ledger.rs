@@ -77,17 +77,69 @@ fn write_tier_fixture(root: &Path) {
 fn knowledge_tier_source() -> &'static str {
     r#"#Numeric Severity :: distinct Int(0..10)
 
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+
+state Reservation { Pending, Confirmed }
+
+struct Reservation {
+    guest: String
+}
+
+impl Reservation {
+    #Transition(_, Pending) fn book(guest: String) => Reservation :: .{guest: ~guest}
+
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
+        return self
+    }
+}
+
+#Scrub(Input) fn clean(raw: #Input String) => String {
+    return ~raw
+}
+
 @answer :: 40 + 2
 @gated_answer :: wrapping(4 + 5)
+
+fn exactness_value() => Bool {
+    lossy :: Int.{9007199254740993}
+    return (approx(lossy) + 0.0) == 9007199254740992.0
+}
+
+fn unit_value() => Float {
+    source :: Half.from_float(5.0)
+    value :: Meter.from_half_rounded(source, .NearestEven, digits: 0) ?? panic("unit gate")
+    return value.raw()
+}
+
+fn state_value() => String {
+    reservation := Reservation.book("state")
+    reservation = reservation.pay()
+    return reservation.guest
+}
+
+fn classification_value() => String {
+    raw :: #Input "world"
+    return clean(raw)
+}
 
 fn run() {
     left :: Severity.from_int(4)
     right :: Severity.from_int(5)
-    // The range fact is kept until this written bounded-arithmetic gate.
     total :: wrapping(left + right)
+    exactness :: exactness_value()
+    unit :: unit_value()
+    state :: state_value()
+    classification :: classification_value()
     print("{@answer}")
     print("{@gated_answer}")
-    print("{total}")
+    print("exactness={exactness}")
+    print("unit={unit}")
+    print("state={state}")
+    print("classification={classification}")
+    print("range={total}")
 }
     "#
 }
@@ -102,8 +154,57 @@ fn have_tool(name: &str) -> bool {
 
 fn assert_tier_output(output: Output) {
     let text = stdout(&output);
-    assert!(text.contains("42"), "expected tier output 42, got {text}");
-    assert!(text.contains("9"), "expected gated range output 9, got {text}");
+    assert_tier_text(&text);
+}
+
+fn assert_tier_text(text: &str) {
+    for expected in [
+        "42",
+        "9",
+        "exactness=true",
+        "unit=5.0",
+        "state=state",
+        "classification=world",
+        "range=9",
+    ] {
+        assert!(text.contains(expected), "expected {expected:?}, got {text}");
+    }
+}
+
+fn assert_knowledge_ledger(json: &str) {
+    assert!(json.starts_with("{\"schema_version\":1,\"entries\":["), "{json}");
+    for subject in [
+        "approx",
+        "wrapping",
+        "from_half_rounded",
+        ".raw",
+        "#Transition(_, Pending)",
+        "#Transition(Pending, Confirmed)",
+        "#Scrub(Input)",
+    ] {
+        assert!(
+            json.contains(&format!("\"subject\":\"{subject}\"")),
+            "missing {subject} in {json}"
+        );
+    }
+    assert_eq!(json.matches("\"kind\":\"state_transition\"").count(), 2, "{json}");
+    assert_eq!(json.matches("\"kind\":\"taint_scrub\"").count(), 1, "{json}");
+    assert_eq!(
+        json.matches("\"kind\":\"precision_demotion\"").count(),
+        5,
+        "{json}"
+    );
+    let scrub = json.find("\"kind\":\"taint_scrub\"").expect("taint row");
+    let state = json
+        .find("\"kind\":\"state_transition\"")
+        .expect("state row");
+    let precision = json
+        .find("\"kind\":\"precision_demotion\"")
+        .expect("precision row");
+    assert!(scrub < state && state < precision, "knowledge rows drifted: {json}");
+    assert!(json.contains("\"span\":{\"start\":"), "{json}");
+    assert!(json.contains("\"reason\":\"#Transition(Pending, Confirmed)\""), "{json}");
+    assert!(json.contains("tier.jet:"), "{json}");
 }
 
 #[test]
@@ -266,6 +367,20 @@ fn i9_parser_tier_keeps_the_gate_source() {
 }
 
 #[test]
+fn i9_parser_tier_keeps_all_knowledge_plane_gate_sources() {
+    let scratch = common::Scratch::new("gate-tier-parser-knowledge");
+    write_tier_fixture(&scratch.path);
+    let parsed = stdout(&run(
+        &scratch.path,
+        &["inspect", "compiler", "parse", "tier.jet"],
+    ));
+    assert!(parsed.contains("\"operation\":\"parse\""), "{parsed}");
+    for gate in ["approx", "wrapping", "from_half_rounded", "#Transition", "#Scrub"] {
+        assert!(parsed.contains(gate), "missing {gate} in {parsed}");
+    }
+}
+
+#[test]
 fn i9_sema_tier_reads_the_same_gate_ledger() {
     let scratch = common::Scratch::new("gate-tier-sema");
     write_source_gate_kinds(&scratch.path);
@@ -279,6 +394,29 @@ fn i9_sema_tier_reads_the_same_gate_ledger() {
     assert!(ledger.contains("\"subject\":\"approx\""), "{ledger}");
     assert!(ledger.contains("\"subject\":\"wrapping\""), "{ledger}");
     assert!(ledger.contains("\"subject\":\"from_meter_rounded\""), "{ledger}");
+}
+
+#[test]
+fn i9_sema_tier_records_all_knowledge_plane_gates_stably() {
+    let scratch = common::Scratch::new("gate-tier-sema-knowledge");
+    write_tier_fixture(&scratch.path);
+    let first = stdout(&run(
+        &scratch.path,
+        &["inspect", "gates", "--json", "tier.jet"],
+    ));
+    let second = stdout(&run(
+        &scratch.path,
+        &["inspect", "gates", "--json", "tier.jet"],
+    ));
+    assert_eq!(first, second, "knowledge ledger JSON is not stable");
+    assert_knowledge_ledger(&first);
+
+    let state = stdout(&run(
+        &scratch.path,
+        &["inspect", "gates", "--kind", "state_transition", "tier.jet"],
+    ));
+    assert!(state.contains("state_transition: 2"), "{state}");
+    assert!(state.contains("#Transition(Pending, Confirmed)"), "{state}");
 }
 
 #[test]
@@ -317,11 +455,15 @@ fn i9_comptime_tier_keeps_the_compile_time_value() {
     let rust = stdout(&run(&scratch.path, &["emit", "--rust", "tier.jet"]));
     assert!(rust.contains("42"), "comptime value was not emitted: {rust}");
     assert!(rust.contains("9"), "comptime knowledge gate was not emitted: {rust}");
+    for plane in ["exactness=", "unit=", "state=", "classification=", "range="] {
+        assert!(rust.contains(plane), "comptime fixture lost {plane}: {rust}");
+    }
 }
 
 #[test]
 fn i9_repl_tier_keeps_the_fixture_behavior() {
     let scratch = common::Scratch::new("gate-tier-repl");
+    write_tier_fixture(&scratch.path);
     let mut child = Command::new(jet())
         .current_dir(&scratch.path)
         .args(["repl"])
@@ -337,12 +479,12 @@ fn i9_repl_tier_keeps_the_fixture_behavior() {
         .stdin
         .as_mut()
         .expect("REPL stdin")
-        .write_all(b"40 + 2\nwrapping(1 + 2)\n:quit\n")
+        .write_all(b":load tier.jet\n:quit\n")
         .expect("write REPL input");
     let output = child.wait_with_output().expect("finish REPL");
     let text = stdout(&output);
-    assert!(text.contains("42"), "expected REPL output 42, got {text}");
-    assert!(text.contains("3"), "expected REPL gate output 3, got {text}");
+    assert_tier_text(&text);
+    assert!(text.contains("loaded"), "expected REPL fixture load, got {text}");
 }
 
 #[test]
