@@ -112,45 +112,23 @@ impl JetTestFailure {
     }
 
     pub fn json(&self) -> String {
-        let cause = self
-            .cause
-            .iter()
-            .map(|code| jet_test_json_string(code))
-            .collect::<Vec<_>>()
-            .join(",");
-        let file = if self.file.is_empty() {
-            "null".to_string()
-        } else {
-            jet_test_json_string(&self.file)
-        };
-        let line = if self.line == 0 {
-            "null".to_string()
-        } else {
-            self.line.to_string()
-        };
-        let col = if self.col == 0 {
-            "null".to_string()
-        } else {
-            self.col.to_string()
-        };
-        let detail = self
-            .detail
-            .as_deref()
-            .map(jet_test_json_string)
-            .unwrap_or_else(|| "null".to_string());
-        format!(
-            "{{\"schema\":\"jet.report/v1\",\"moment\":\"test\",\"severity\":\"stop\",\"code\":{},\"what\":{},\"why\":{},\"fix\":{},\"detail\":{detail},\"file\":{},\"line\":{},\"col\":{},\"span\":null,\"fix_edits\":[],\"cause\":[{cause}],\"clears\":{clears}}}",
-            jet_test_json_string(&self.code),
-            jet_test_json_string(&self.message),
-            jet_test_json_string("a checked test assertion evaluated false"),
-            jet_test_json_string("fix the expected value or the code under test, then rerun the test"),
-            file,
-            line,
-            col,
-            detail = detail,
-            cause = cause,
-            clears = self.clears,
-        )
+        let mut report = ReportEnvelope::new(
+            "test",
+            "stop",
+            self.code.clone(),
+            self.message.clone(),
+            "a checked test assertion evaluated false",
+            "fix the expected value or the code under test, then rerun the test",
+        );
+        report.detail = self.detail.clone();
+        if !self.file.is_empty() {
+            report.file = Some(ReportPath::from_process(&self.file));
+        }
+        report.line = (self.line != 0).then_some(self.line as usize);
+        report.col = (self.col != 0).then_some(self.col as usize);
+        report.cause = self.cause.clone();
+        report.clears = self.clears;
+        report.json()
     }
 
     pub fn with_causes(mut self, cause: Vec<String>) -> Self {
@@ -215,22 +193,4 @@ pub fn jet_test_failure(
 
 pub fn jet_test_take_failure() -> Option<JetTestFailure> {
     JET_TEST_FAILURE.with(|slot| slot.borrow_mut().take())
-}
-
-fn jet_test_json_string(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch <= '\u{1f}' => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }

@@ -477,7 +477,14 @@ fn fail(error: TraceError, mode: OutputMode) -> ! {
         None,
     );
     if mode.json {
-        print!("{}", jet::render_all_json("", "", &[diagnostic]));
+        print!(
+            "{}",
+            jet::render_all_json(
+                &jet::Diagnostics::ReportPath::from_process(""),
+                "",
+                &[diagnostic],
+            )
+        );
     } else {
         eprint!(
             "{}",

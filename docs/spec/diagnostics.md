@@ -54,18 +54,24 @@ that row. They are not alternate homes.
    templates, named holes, and structured fix. The registry, this reference,
    `jet explain`, and error pages are generated projections. Do not copy the
    row's code or words into Rust, Markdown, tests, CLI, LSP, web, or engine
-   code. Never ship a generic fallback for a known case.
+   code. Never ship a generic fallback for a known case. Use the `source_edit`
+   marker when the raise site must provide source-derived replacement text.
 3. At the raise site, supply only values for the row's named holes and attach
    any structured fix that the checker already knows. A hole is written as
    `{name}` and is rendered by the row. An emitter does not replace prose by
    hand. A structured fix can use a source marker such as `replace:;=>,`,
    `remove:->`, or `generated:missing_arms`; the marker becomes typed fix
-   metadata before the report is built. Fix prose is never parsed to recover
-   an edit.
+   metadata before the report is built. `source_edit` authorizes a dynamic
+   `TextEdit` supplied at the raise site. Use `source_edit` for a proved-safe
+   replacement and `suggested_source_edit` for an intent-dependent one. Fix
+   prose is never parsed to recover an edit.
 4. When a fix names one exact source replacement, author its `TextEdit` at the
    raise site from the source span and replacement token. The diagnostic model
    carries that typed edit unchanged; changing the human Fix sentence must not
    change `fix_edits`.
+   The registry also supplies the edit's `applicability`: `safe` means the
+   proved progress rule from D-REPORT-FIXGRADE1=D; `suggested` means an editor
+   may show it, but unattended `jet fix` does not apply it.
 5. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text. Every report row has a
@@ -1983,21 +1989,24 @@ Every diagnostic report has these fields:
 | `what` | string | One-line problem text. |
 | `why` | string | Rule that explains the problem. |
 | `fix` | string | Concrete next action. |
+| `applicability` | string | `safe` or `suggested` for a non-empty `fix_edits` array; absent when no edit exists. |
 | `detail` | string or null | Extra bounded detail. |
 | `file` | string or null | Source path when one exists. |
 | `line` / `col` | integer or null | One-based source position. |
 | `span` | object or null | Byte range with `start` and `end`. |
-| `fix_edits` | array | Machine-applicable replacements. |
+| `fix_edits` | array | Machine-projected replacements; use `applicability` to decide whether an unattended tool may apply them. |
 | `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
 | `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
-CLI source construction gives every disk-backed report one physical path. A
-workspace-relative module display is resolved against the loaded bundle's
-project root; a direct relative input is resolved from the reporting process's
-working directory. Synthetic labels do not become host-specific paths. The
-renderer keeps that supplied path exactly. It does not search for `.git`, strip
-a repository prefix, or fall back to a base name. Every `fix_edits[].file` uses
-the same path as `file`, so an agent can apply the edit to the reported source.
+CLI and LSP source construction use one `ReportPath` value for every
+disk-backed report. A workspace-relative module display is first mapped to the
+loaded bundle's physical source, then resolved lexically; a direct relative
+input is resolved from the reporting process's working directory. Synthetic
+labels do not become host-specific paths. The shared envelope keeps that path
+exactly. It does not search for `.git`, strip a repository prefix, or fall back
+to a base name. Every `fix_edits[].file` uses the same path as `file`, so an
+agent can apply the edit to the reported source. LSP keeps the document URI in
+the protocol wrapper and uses the same physical `file` inside `data`.
 
 The clean-check success object has these additional fields:
 
@@ -2010,7 +2019,7 @@ The clean-check success object has these additional fields:
 Example; real output stays on one line:
 
 ```json
-{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","detail":null,"file":"hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","applicability":"safe","detail":null,"file":"/workspace/hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"/workspace/hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
 ```
 
 A clean check prints:
@@ -2035,13 +2044,14 @@ its legacy diagnostic envelope.
 
 LSP diagnostics use the registered row's `what` as the LSP `message`. Every
 diagnostic also carries the complete `jet.report/v1` object in `data`, including
-`why`, `fix`, `fix_edits`, and `cause`. The `codeDescription.href` value is
+`why`, `fix`, `applicability`, `fix_edits`, and `cause`. The `codeDescription.href` value is
 `jet://explain/<CODE>`, so an editor can open the same explanation as `jet explain`.
 
 When a report's `cause` names another report with a source span, LSP adds that
 report as standard `relatedInformation`. LSP code actions use the same
-row-owned `fix_edits` projection as `jet fix`; they do not parse diagnostic
-prose or maintain an editor-only edit path.
+row-owned `fix_edits` projection as `jet fix`; they show both `safe` and
+`suggested` actions and do not parse diagnostic prose or maintain an
+editor-only edit path. `jet fix` applies only `safe` edits.
 
 ### E0910 — Published schema breaking change
 

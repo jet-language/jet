@@ -285,7 +285,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Syntax::BUILTIN_PRINT
                 };
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0037",
                     format!(
                         "{} calls it `{}`, not `{}`",
@@ -296,7 +296,12 @@ impl<'a> Checker<'a> {
                     "`print` writes to stdout; `io.eprint` is the stderr twin in `core.io`".to_string(),
                     format!("replace `{}` with `{}`", call.name, target),
                     Some(call.name_span),
-                ));
+                )
+                .with_edit(TextEdit {
+                    span: call.name_span,
+                    new_text: target.to_string(),
+                });
+                self.diags.push(diagnostic);
                 for arg in call.args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }

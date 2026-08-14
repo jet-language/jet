@@ -121,6 +121,7 @@ mod Web;
 /// harnesses receive below as their report prelude.
 #[allow(dead_code)]
 pub mod test_report {
+    include!("../../../jet-foundation/src/Report.rs");
     include!("../Prelude/CoreLib/Top/TestingShared.rs");
     include!("../Prelude/TestReport.rs");
 }
@@ -397,6 +398,7 @@ fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
 }
 "#;
 const TESTING_SHARED_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/TestingShared.rs");
+const REPORT_PRELUDE: &str = include_str!("../../../jet-foundation/src/Report.rs");
 const TEST_REPORT_PRELUDE: &str = include_str!("../Prelude/TestReport.rs");
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
 /// the `jet test` harness only when the file declares a parameterized `#Test fn`.
@@ -3093,6 +3095,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
+    out.push_str(REPORT_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if any_property_test(&tests) {
         out.push_str(PROP_PRELUDE);
@@ -3928,6 +3931,7 @@ fn emit_bundle_tests_cov_inner(
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
+    out.push_str(REPORT_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -4208,6 +4212,7 @@ pub fn emit_bundle_fuzz(
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
+    out.push_str(REPORT_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
     // runtime is always needed (unlike `jet test`, which only emits it when a
@@ -4540,6 +4545,7 @@ fn emit_bundle_benches_inner(
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
+    out.push_str(REPORT_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);

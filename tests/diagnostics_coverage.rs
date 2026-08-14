@@ -856,6 +856,19 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             );
             if !has_edit {
                 failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
+                continue;
+            }
+            let has_applicability = matches!(
+                jet_foundation::JSON::json_get(&report, "applicability"),
+                Some(jet_foundation::JSON::JSONValue::String(value))
+                    if value == "safe" || value == "suggested"
+            );
+            if !has_applicability {
+                failures.push(format!(
+                    "{}:{} — machine edit has no closed applicability grade",
+                    path.display(),
+                    line + 1
+                ));
             }
         }
     }

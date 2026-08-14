@@ -314,7 +314,7 @@ pub(crate) fn run_guarantees(
                 print!(
                     "{}",
                     jet::render_all_json(
-                        &file.display().to_string(),
+                        &jet::Diagnostics::ReportPath::from_path(&file),
                         "",
                         std::slice::from_ref(&diagnostic),
                     )

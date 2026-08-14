@@ -71,13 +71,21 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
             .collect::<Vec<_>>()
     };
     let expected = shape(&aot);
-    let expected_report = jet::render_all_json(&path, &src, &aot);
+    let expected_report = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_path(&path),
+        &src,
+        &aot,
+    );
     assert_eq!(expected.len(), 3);
     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
         assert_eq!(
-            jet::render_all_json(&path, &src, &diags),
+            jet::render_all_json(
+                &jet::Diagnostics::ReportPath::from_path(&path),
+                &src,
+                &diags,
+            ),
             expected_report,
             "{tier} structured report drifted from AOT"
         );
@@ -141,7 +149,11 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
             .collect::<Vec<_>>()
     };
     let expected = shape(&aot);
-    let expected_report = jet::render_all_json(&path, &src, &aot);
+    let expected_report = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_path(&path),
+        &src,
+        &aot,
+    );
     assert!(expected.iter().any(|(code, ..)| code == "E0956"));
     let e0956 = expected
         .iter()
@@ -155,7 +167,11 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
         assert_eq!(
-            jet::render_all_json(&path, &src, &diags),
+            jet::render_all_json(
+                &jet::Diagnostics::ReportPath::from_path(&path),
+                &src,
+                &diags,
+            ),
             expected_report,
             "{tier} structured report drifted from AOT"
         );
@@ -217,7 +233,11 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
             .collect::<Vec<_>>()
     };
     let expected = shape(&aot);
-    let expected_report = jet::render_all_json(&path, &src, &aot);
+    let expected_report = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_path(&path),
+        &src,
+        &aot,
+    );
     assert_eq!(expected.len(), 1);
     assert_eq!(expected[0].0, "E0999");
     assert_eq!(expected[0].5.as_ref().map(|edit| edit.new_text.as_str()), Some("#Codable"));
@@ -225,7 +245,11 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(shape(&diags), expected, "{tier} diagnostic or recovery data drifted from AOT");
         assert_eq!(
-            jet::render_all_json(&path, &src, &diags),
+            jet::render_all_json(
+                &jet::Diagnostics::ReportPath::from_path(&path),
+                &src,
+                &diags,
+            ),
             expected_report,
             "{tier} structured report drifted from AOT"
         );

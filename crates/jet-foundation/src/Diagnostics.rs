@@ -82,7 +82,10 @@ impl ReportMoment {
 }
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
-pub const REPORT_SCHEMA: &str = "jet.report/v1";
+pub use crate::Report::{
+    FixApplicability, ReportEdit, ReportEnvelope, ReportExtension, ReportPath, ReportSpan,
+    REPORT_SCHEMA,
+};
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
 pub const MAX_SOURCE_NESTING: usize = 256;
@@ -164,6 +167,8 @@ pub struct Diagnostic {
     /// Mechanical fix projected from row metadata or authored from a
     /// source-derived fact at the diagnostic raise site (S14).
     pub edit: Option<TextEdit>,
+    /// D-REPORT-FIXGRADE1=D: the registry-owned promise for `edit`.
+    pub applicability: Option<FixApplicability>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
     /// Decision-owned machine fields. Human prose never gets parsed back into
@@ -209,6 +214,7 @@ impl Diagnostic {
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
         let rendered = row.render(holes);
+        let edit = row_edit(row, span);
         Diagnostic {
             moment: row.moment,
             severity: row.severity,
@@ -218,7 +224,8 @@ impl Diagnostic {
             fix: rendered.fix,
             span,
             cause: Vec::new(),
-            edit: row_edit(row, span),
+            applicability: row_applicability(row, edit.as_ref()),
+            edit,
             detail: None,
             structured: None,
         }
@@ -243,6 +250,7 @@ impl Diagnostic {
             "diagnostic `{}` has no row-owned generated structured fix",
             self.code
         );
+        self.applicability = row_applicability(row, Some(&edit));
         self.edit = Some(edit);
     }
 
@@ -259,6 +267,7 @@ impl Diagnostic {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        let edit = row_edit(row, span);
         Diagnostic {
             moment: row.moment,
             severity: row.severity,
@@ -268,7 +277,8 @@ impl Diagnostic {
             fix,
             span,
             cause: Vec::new(),
-            edit: row_edit(row, span),
+            applicability: row_applicability(row, edit.as_ref()),
+            edit,
             detail: None,
             structured: None,
         }
@@ -277,6 +287,20 @@ impl Diagnostic {
     /// Attach a source-derived edit authored by the checker at the diagnostic
     /// raise site. Human fix prose is presentation only.
     pub fn with_edit(mut self, edit: TextEdit) -> Self {
+        let row = crate::Registry::diagnostic(&self.code)
+            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", self.code));
+        assert!(
+            matches!(
+                row.structured_fix,
+                Some(
+                    crate::Registry::StructuredFix::SourceEdit
+                        | crate::Registry::StructuredFix::SuggestedSourceEdit
+                )
+            ),
+            "diagnostic `{}` has no row-owned source edit",
+            self.code
+        );
+        self.applicability = row_applicability(row, Some(&edit));
         self.edit = Some(edit);
         self
     }
@@ -301,6 +325,7 @@ impl Diagnostic {
         }
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        let edit = row_edit(row, span);
         Ok(Self {
             moment: row.moment,
             severity: row.severity,
@@ -310,7 +335,8 @@ impl Diagnostic {
             fix,
             span,
             cause: Vec::new(),
-            edit: row_edit(row, span),
+            applicability: row_applicability(row, edit.as_ref()),
+            edit,
             detail: None,
             structured: None,
         })
@@ -338,6 +364,7 @@ impl Diagnostic {
             span,
             cause: Vec::new(),
             edit: None,
+            applicability: None,
             detail: None,
             structured: None,
         }
@@ -392,6 +419,7 @@ impl Diagnostic {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+        let edit = row_edit(row, span);
         Diagnostic {
             moment: row.moment,
             severity: row.severity,
@@ -401,7 +429,8 @@ impl Diagnostic {
             fix,
             span,
             cause: Vec::new(),
-            edit: row_edit(row, span),
+            applicability: row_applicability(row, edit.as_ref()),
+            edit,
             detail: None,
             structured: None,
         }
@@ -584,6 +613,7 @@ impl Diagnostic {
     ///   "schema": "jet.report/v1", "moment": "compile",
     ///   "severity": "error", "code": "E0102", "what": "…",
     ///   "why": "…", "fix": "…",
+    ///   "applicability": "safe" | "suggested" | absent,
     ///   "detail": "…" | null,
     ///   "file": "a.jet", "line": 2, "col": 5,
     ///   "span": { "start": 12, "end": 17 } | null,
@@ -593,70 +623,52 @@ impl Diagnostic {
     /// }
     /// ```
     ///
-    /// `fix_edits` holds the machine-applicable fix the LSP / fix engine consumes.
-    pub fn to_json(&self, file: &str, src: &str) -> String {
+    /// `fix_edits` holds the machine-projected edits the LSP / fix engine
+    /// consumes; `applicability` comes from the same registry row.
+    pub fn to_json(&self, file: &ReportPath, src: &str) -> String {
         self.to_json_with_clears(file, src, 0)
     }
 
     /// Render one report with its batch-derived dependent count.
-    pub fn to_json_with_clears(&self, file: &str, src: &str, clears: usize) -> String {
-        let report_file = file;
-        let mut o = String::from("{");
-        o.push_str(&format!("\"schema\":{}", json_str(REPORT_SCHEMA)));
-        o.push_str(&format!(",\"moment\":{}", json_str(self.moment.as_str())));
+    pub fn to_json_with_clears(&self, file: &ReportPath, src: &str, clears: usize) -> String {
         let sev = match self.severity {
             Severity::Error => "error",
             Severity::Lint => "warning",
         };
-        o.push_str(&format!(",\"severity\":{}", json_str(sev)));
-        o.push_str(&format!(",\"code\":{}", json_str(&self.code)));
-        o.push_str(&format!(",\"what\":{}", json_str(&self.what)));
-        o.push_str(&format!(",\"why\":{}", json_str(&self.why)));
-        o.push_str(&format!(",\"fix\":{}", json_str(&self.fix)));
-        match &self.detail {
-            Some(d) => o.push_str(&format!(",\"detail\":{}", json_str(d))),
-            None => o.push_str(",\"detail\":null"),
-        }
-        if report_file.is_empty() {
-            o.push_str(",\"file\":null");
-        } else {
-            o.push_str(&format!(",\"file\":{}", json_str(&report_file)));
+        let mut report = ReportEnvelope::new(
+            self.moment.as_str(),
+            sev,
+            self.code.clone(),
+            self.what.clone(),
+            self.why.clone(),
+            self.fix.clone(),
+        );
+        report.applicability = self.applicability;
+        report.detail = self.detail.clone();
+        if !file.is_empty() {
+            report.file = Some(file.clone());
         }
         match self.span {
             Some(span) => {
                 let (line, col) = line_col(src, span.start);
-                o.push_str(&format!(",\"line\":{},\"col\":{}", line, col));
-                o.push_str(&format!(
-                    ",\"span\":{{\"start\":{},\"end\":{}}}",
-                    span.start, span.end
-                ));
+                report.line = Some(line);
+                report.col = Some(col);
+                report.span = Some(ReportSpan::new(span.start, span.end));
             }
-            None => {
-                o.push_str(",\"line\":null,\"col\":null,\"span\":null");
-            }
+            None => {}
         }
-        o.push_str(",\"fix_edits\":[");
         match &self.edit {
             Some(e) => {
-                o.push_str(&format!(
-                    "{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{}}}",
-                    json_str(&report_file),
-                    e.span.start,
-                    e.span.end,
-                    json_str(&e.new_text)
+                report.fix_edits.push(ReportEdit::new(
+                    file.clone(),
+                    ReportSpan::new(e.span.start, e.span.end),
+                    e.new_text.clone(),
                 ));
             }
             None => {}
         }
-        o.push_str("],\"cause\":[");
-        for (index, cause) in self.cause.iter().enumerate() {
-            if index > 0 {
-                o.push(',');
-            }
-            o.push_str(&json_str(cause));
-        }
-        o.push(']');
-        o.push_str(&format!(",\"clears\":{clears}"));
+        report.cause = self.cause.clone();
+        report.clears = clears;
         if let Some(StructuredDiagnostic::CryptoMisuse {
             reason,
             operation,
@@ -664,17 +676,14 @@ impl Diagnostic {
             actual,
         }) = &self.structured
         {
-            o.push_str(&format!(",\"reason\":{}", json_str(reason.as_str())));
-            o.push_str(&format!(",\"operation\":{}", json_str(operation)));
-            if let Some(expected) = expected {
-                o.push_str(&format!(",\"expected\":{}", json_str(expected)));
-            }
-            if let Some(actual) = actual {
-                o.push_str(&format!(",\"actual\":{actual}"));
-            }
+            report.extension = Some(ReportExtension::Crypto {
+                reason: reason.as_str().to_string(),
+                operation: (*operation).to_string(),
+                expected: (*expected).map(|value| value.to_string()),
+                actual: *actual,
+            });
         }
-        o.push('}');
-        o
+        report.json()
     }
 }
 
@@ -690,11 +699,21 @@ fn row_edit(row: &crate::Registry::DiagnosticRow, span: Option<Span>) -> Option<
             new_text: String::new(),
         }),
         crate::Registry::StructuredFix::CryptoMisuse
+        | crate::Registry::StructuredFix::SourceEdit
+        | crate::Registry::StructuredFix::SuggestedSourceEdit
         | crate::Registry::StructuredFix::GeneratedMarkerGroup
         | crate::Registry::StructuredFix::GeneratedMissingArms
         | crate::Registry::StructuredFix::GeneratedScriptRun
         | crate::Registry::StructuredFix::GeneratedCallValue => None,
     }
+}
+
+fn row_applicability(
+    row: &crate::Registry::DiagnosticRow,
+    edit: Option<&TextEdit>,
+) -> Option<FixApplicability> {
+    edit.and_then(|_| row.structured_fix)
+        .and_then(crate::Registry::StructuredFix::applicability)
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
@@ -719,7 +738,7 @@ pub fn json_str(s: &str) -> String {
 }
 
 /// Render reports as JSON Lines. An empty batch emits no bytes.
-pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
+pub fn render_all_json(file: &ReportPath, src: &str, diags: &[Diagnostic]) -> String {
     let mut out = String::new();
     let clears = report_clear_counts(diags);
     for (d, clears) in diags.iter().zip(clears) {
@@ -730,11 +749,15 @@ pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
 }
 
 /// Render the explicit success result for a clean --json check.
-pub fn render_success_json(file: &str) -> String {
+pub fn render_success_json(file: &ReportPath) -> String {
     format!(
         "{{\"schema\":{},\"moment\":\"compile\",\"status\":\"ok\",\"ok\":true,\"diagnostics\":[],\"file\":{}}}\n",
         json_str(REPORT_SCHEMA),
-        json_str(file),
+        if file.is_empty() {
+            "null".to_string()
+        } else {
+            json_str(file.as_str())
+        },
     )
 }
 
@@ -1176,7 +1199,11 @@ mod crypto_diagnostic_contract_tests {
             "0..8160",
             8161,
         );
-        let json = render_all_json("secret-name.jet", "xxxx8161", &[diagnostic]);
+        let json = render_all_json(
+            &ReportPath::from_process("secret-name.jet"),
+            "xxxx8161",
+            &[diagnostic],
+        );
         assert_eq!(
             json,
             concat!(
@@ -1205,11 +1232,11 @@ mod crypto_diagnostic_contract_tests {
             "remove it".into(),
             None,
         );
-        let json = render_all_json("x.jet", "", &[diagnostic]);
+        let json = render_all_json(&ReportPath::from_process("x.jet"), "", &[diagnostic]);
         assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""));
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
-        assert_eq!(render_all_json("x.jet", "", &[]), "");
+        assert_eq!(render_all_json(&ReportPath::from_process("x.jet"), "", &[]), "");
     }
 
     #[test]
@@ -1245,7 +1272,11 @@ mod crypto_diagnostic_contract_tests {
             None,
         )
         .caused_by(&root);
-        let json = render_all_json("x.jet", "", &[root, middle, leaf, sibling]);
+        let json = render_all_json(
+            &ReportPath::from_process("x.jet"),
+            "",
+            &[root, middle, leaf, sibling],
+        );
         let lines = json.lines().collect::<Vec<_>>();
         assert!(lines[0].contains("\"cause\":[],\"clears\":3"), "{json}");
         assert!(lines[1].contains("\"cause\":[\"E0109\"],\"clears\":1"), "{json}");
@@ -1274,6 +1305,7 @@ mod crypto_diagnostic_contract_tests {
             diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
             Some(",")
         );
+        assert_eq!(diagnostic.applicability, Some(FixApplicability::Safe));
     }
 
     #[test]
@@ -1300,6 +1332,20 @@ mod crypto_diagnostic_contract_tests {
         )
         .with_edit(edit);
         assert_eq!(original.edit, reworded.edit);
+        assert_eq!(original.applicability, Some(FixApplicability::Safe));
+
+        let suggested = Diagnostic::error(
+            "E0311",
+            "this value has no method".to_string(),
+            "method lookup".to_string(),
+            "did you mean `copy`?".to_string(),
+            Some(span),
+        )
+        .with_edit(TextEdit {
+            span,
+            new_text: "copy".to_string(),
+        });
+        assert_eq!(suggested.applicability, Some(FixApplicability::Suggested));
     }
 
     #[test]
@@ -1349,7 +1395,11 @@ mod crypto_diagnostic_contract_tests {
                 31,
             )
         };
-        let json = render_all_json("x.jet", "x", &[diagnostic(), diagnostic()]);
+        let json = render_all_json(
+            &ReportPath::from_process("x.jet"),
+            "x",
+            &[diagnostic(), diagnostic()],
+        );
         assert_eq!(json.lines().count(), 2);
         assert_eq!(json.matches("\"schema\":\"jet.report/v1\"").count(), 2);
         assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
@@ -1373,7 +1423,7 @@ mod crypto_diagnostic_contract_tests {
             "exactly 32",
             31,
         );
-        let json = render_all_json("x.jet", "x", &[crypto, generic]);
+        let json = render_all_json(&ReportPath::from_process("x.jet"), "x", &[crypto, generic]);
         let lines = json.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 2, "{json}");
         assert!(lines.iter().all(|line| crate::JSON::parse_json(line).is_ok()));

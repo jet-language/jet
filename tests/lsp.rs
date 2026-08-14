@@ -1159,12 +1159,16 @@ fn lsp_check_json_matches_jet_check_json_for_diagnostic_fixture() {
     );
     let cli_json = String::from_utf8_lossy(&out.stderr).to_string();
 
-    let file = path.to_string_lossy();
+    let file = path.to_string_lossy().into_owned();
     let lsp_diags: Vec<_> = jet::check_document(&file, src)
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    let lsp_json = jet::render_all_json(&file, src, &lsp_diags);
+    let lsp_json = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_process(&file),
+        src,
+        &lsp_diags,
+    );
 
     assert_eq!(cli_json, lsp_json);
     let _ = std::fs::remove_file(path);
@@ -1235,7 +1239,7 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
     assert!(diagnostics.contains(r#""code":"E0999""#), "{diagnostics}");
     assert!(
         diagnostics.contains(
-            r#""fix_edits":[{"file":"lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"#
+            r#""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"#
         ),
         "{diagnostics}"
     );

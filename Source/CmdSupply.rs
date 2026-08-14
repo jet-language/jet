@@ -885,6 +885,7 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
         cwd.join(entry)
     };
     let entry_text = entry.display().to_string();
+    let report_file = crate::machine_report_path_for_process(&entry_text);
     let mut bundle = match jet::Loader::load_entry(&entry_text) {
         Ok(bundle) => bundle,
         Err(diagnostics) => {
@@ -892,7 +893,7 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
             if json {
                 eprint!(
                     "{}",
-                    jet::render_all_json(&entry_text, &source, &diagnostics)
+                    jet::render_all_json(&report_file, &source, &diagnostics)
                 );
             } else {
                 eprint!(
@@ -912,7 +913,7 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
         if json {
             eprint!(
                 "{}",
-                jet::render_all_json(&entry_text, &source, &diagnostics)
+                jet::render_all_json(&report_file, &source, &diagnostics)
             );
         } else {
             eprint!(

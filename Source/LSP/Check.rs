@@ -1,6 +1,6 @@
 //! Document check (used by LSP and tests) + unified fix engine + doctor/bench.
 
-use crate::Diagnostics::{Diagnostic, TextEdit};
+use crate::Diagnostics::{Diagnostic, FixApplicability, TextEdit};
 use crate::AST::ProgramBundle;
 use std::path::{Path, PathBuf};
 
@@ -45,7 +45,7 @@ pub fn apply_edit(src: &str, edit: &TextEdit) -> String {
 
 // ── Unified fix engine (CLI `jet fix` AND LSP code actions) ────────────────────
 
-/// One machine-applicable fix: the title a user sees and the edit that applies.
+/// One machine-projected fix: the title a user sees, the edit, and its grade.
 /// This is the single shape both `jet fix` and the LSP "quick fix" code action
 /// are built from — the SAME `edit` carried in the `--json` diagnostic schema —
 /// so the two can never drift (E2-M3 unified fix engine; D-LSP7).
@@ -55,12 +55,24 @@ pub struct Fix {
     pub title: String,
     /// The edit to apply.
     pub edit: TextEdit,
+    /// The row-owned promise used by CLI policy; editors show both grades.
+    pub applicability: FixApplicability,
 }
 
-/// Collect every machine-applicable fix for a document, in diagnostic order.
-/// Both the CLI and the LSP go through here.
+/// Collect every machine-projected fix for a document, in diagnostic order.
+/// The CLI and LSP share this projection; CLI policy filters it by grade.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
     collect_fixes_from_diagnostics(check_document(path, text), text)
+}
+
+/// Select the edits the unattended CLI is allowed to apply. The LSP keeps
+/// both safe and suggested edits as code actions for a person to choose.
+pub fn safe_fixes(fixes: &[Fix]) -> Vec<Fix> {
+    fixes
+        .iter()
+        .filter(|fix| fix.applicability == FixApplicability::Safe)
+        .cloned()
+        .collect()
 }
 
 /// Project a checked diagnostic bundle and formatter edits into the same fix
@@ -75,6 +87,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                 title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)"
                     .to_string(),
                 edit,
+                applicability: FixApplicability::Safe,
             }),
     );
     fixes.extend(
@@ -83,6 +96,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
             .map(|edit| Fix {
                 title: "rewrite retired print-family spelling (D-ONCE-PRINT1)".to_string(),
                 edit,
+                applicability: FixApplicability::Safe,
             }),
     );
     fixes.extend(
@@ -91,6 +105,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
             .map(|edit| Fix {
                 title: "rewrite retired Core container name (D-COLLNAME1=A)".to_string(),
                 edit,
+                applicability: FixApplicability::Safe,
             }),
     );
     fixes
@@ -100,9 +115,10 @@ pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
     diagnostics
         .into_iter()
         .filter_map(|d| {
-            d.edit.clone().map(|edit| Fix {
+            d.edit.clone().zip(d.applicability).map(|(edit, applicability)| Fix {
                 title: d.fix.clone(),
                 edit,
+                applicability,
             })
         })
         .collect()

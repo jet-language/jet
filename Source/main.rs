@@ -14,7 +14,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet::Diagnostics::{ColorChoice, Diagnostic};
+use jet::Diagnostics::{ColorChoice, Diagnostic, ReportPath};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
 
@@ -169,7 +169,10 @@ pub(crate) fn emit_cli_report(
 
 fn emit_cli_value(diagnostic: Diagnostic, json: bool) {
     if json {
-        print!("{}", jet::render_all_json("", "", &[diagnostic]));
+        print!(
+            "{}",
+            jet::render_all_json(&ReportPath::from_process(""), "", &[diagnostic])
+        );
     } else {
         eprint!("{}", jet::render_all_colored("", "", &[diagnostic], false));
     }
@@ -3196,22 +3199,19 @@ pub(crate) fn report_problems(
 /// Disk-backed source labels are absolute, so an agent can open them without
 /// guessing the package root. Synthetic labels stay labels: they do not name
 /// files and must not become host-specific paths in stable output.
-pub(crate) fn machine_report_path_for_process(file: &str) -> String {
-    if file.is_empty() || file.starts_with('<') {
-        return file.to_string();
-    }
-    machine_report_path_from_path(Path::new(file))
+pub(crate) fn machine_report_path_for_process(file: &str) -> ReportPath {
+    ReportPath::from_process(file)
 }
 
 /// Resolve a loader display label against the entry's package/workspace root.
 /// Loader displays are intentionally human-friendly and root-relative; JSON
 /// reports need the corresponding physical path instead.
-pub(crate) fn machine_report_path_for_entry(entry_file: &str, display: &str) -> String {
+pub(crate) fn machine_report_path_for_entry(entry_file: &str, display: &str) -> ReportPath {
     if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
-        return display.to_string();
+        return ReportPath::from_process(display);
     }
     let entry = machine_report_path_from_path(Path::new(entry_file));
-    let entry = Path::new(&entry);
+    let entry = Path::new(entry.as_str());
     let base = entry.parent().unwrap_or_else(|| Path::new("."));
     let root = jet::Loader::find_manifest_root(base).unwrap_or_else(|| base.to_path_buf());
     machine_report_path_from_path(&root.join(display))
@@ -3223,9 +3223,9 @@ pub(crate) fn machine_report_path_for_entry(entry_file: &str, display: &str) -> 
 pub(crate) fn machine_report_path_for_bundle(
     bundle: &jet::AST::ProgramBundle,
     display: &str,
-) -> String {
+) -> ReportPath {
     if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
-        return display.to_string();
+        return ReportPath::from_process(display);
     }
     let path = bundle
         .modules
@@ -3236,18 +3236,8 @@ pub(crate) fn machine_report_path_for_bundle(
     machine_report_path_from_path(&path)
 }
 
-fn machine_report_path_from_path(path: &Path) -> String {
-    let display = path.to_string_lossy();
-    if display.starts_with('<') {
-        return display.into_owned();
-    }
-    if path.is_absolute() {
-        display.into_owned()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
-            .unwrap_or_else(|_| display.into_owned())
-    }
+fn machine_report_path_from_path(path: &Path) -> ReportPath {
+    ReportPath::from_path(path)
 }
 
 /// Render a `jet`-owned toolchain diagnostic (E1249–E1252) in the standard

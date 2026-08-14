@@ -774,6 +774,13 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     fs::write(&fix, "fn run() {\n    println(\"hi\")\n}\n").unwrap();
     let fix_report = report(Path::new("../fix/bad.jet"));
     let fix_file = report_file(&fix_report);
+    assert_eq!(
+        jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(&fix_report, "applicability").unwrap(),
+        )
+        .unwrap(),
+        "safe"
+    );
     let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
         jet_foundation::JSON::JSONValue::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),

@@ -24,7 +24,7 @@
 
 use std::sync::LazyLock;
 
-use crate::Diagnostics::{ReportMoment, Severity};
+use crate::Diagnostics::{FixApplicability, ReportMoment, Severity};
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
 /// What a row attaches to. This is the whole difference between the six uses
@@ -471,6 +471,10 @@ pub struct DiagnosticRow {
 /// Fix prose is never parsed to recover one of these facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuredFix {
+    /// The raise site supplies source-derived replacement text and span.
+    SourceEdit,
+    /// The raise site supplies a useful but intent-dependent replacement.
+    SuggestedSourceEdit,
     CryptoMisuse,
     Replace {
         from: &'static str,
@@ -488,6 +492,8 @@ pub enum StructuredFix {
 impl StructuredFix {
     pub fn source_marker(self) -> String {
         match self {
+            Self::SourceEdit => "source_edit".to_string(),
+            Self::SuggestedSourceEdit => "suggested_source_edit".to_string(),
             Self::CryptoMisuse => "crypto_misuse".to_string(),
             Self::Replace { from, to } => format!("replace:{from}=>{to}"),
             Self::Remove { text } => format!("remove:{text}"),
@@ -495,6 +501,23 @@ impl StructuredFix {
             Self::GeneratedMissingArms => "generated:missing_arms".to_string(),
             Self::GeneratedScriptRun => "generated:script_run".to_string(),
             Self::GeneratedCallValue => "generated:call_value".to_string(),
+        }
+    }
+
+    /// D-REPORT-FIXGRADE1=D: every emitted edit gets its grade from this row
+    /// metadata; no caller infers it from the human Fix sentence.
+    pub const fn applicability(self) -> Option<FixApplicability> {
+        match self {
+            Self::SourceEdit
+            | Self::Replace { .. }
+            | Self::Remove { .. }
+            | Self::GeneratedMarkerGroup
+            | Self::GeneratedScriptRun
+            | Self::GeneratedCallValue => Some(FixApplicability::Safe),
+            Self::SuggestedSourceEdit | Self::GeneratedMissingArms => {
+                Some(FixApplicability::Suggested)
+            }
+            Self::CryptoMisuse => None,
         }
     }
 }
@@ -763,6 +786,12 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
 }
 
 fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix {
+    if value == "source_edit" {
+        return StructuredFix::SourceEdit;
+    }
+    if value == "suggested_source_edit" {
+        return StructuredFix::SuggestedSourceEdit;
+    }
     if value == "crypto_misuse" {
         return StructuredFix::CryptoMisuse;
     }
@@ -1682,6 +1711,18 @@ mod tests {
         assert_eq!(
             diagnostic("E0999").and_then(|row| row.structured_fix),
             Some(StructuredFix::GeneratedMarkerGroup)
+        );
+        for code in ["E0037", "E0102", "E0111"] {
+            assert_eq!(
+                diagnostic(code).and_then(|row| row.structured_fix),
+                Some(StructuredFix::SourceEdit),
+                "{code} must authorize its raise-site edit through the registry"
+            );
+        }
+        assert_eq!(
+            diagnostic("E0311").and_then(|row| row.structured_fix),
+            Some(StructuredFix::SuggestedSourceEdit),
+            "E0311 must authorize its suggested raise-site edit through the registry"
         );
         let rendered = crypto.render(&[("why", "the bound is 32 bytes"), ("fix", "pass 32 bytes")]);
         assert_eq!(rendered.why, "the bound is 32 bytes");

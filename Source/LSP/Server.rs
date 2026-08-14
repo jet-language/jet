@@ -1,6 +1,6 @@
 //! JSON-RPC transport over stdio + request/notification dispatch + handlers.
 
-use crate::Diagnostics::{report_clear_counts, Diagnostic, Severity, Span};
+use crate::Diagnostics::{report_clear_counts, Diagnostic, ReportPath, Severity, Span};
 use crate::Lexer::{TokKind, Token};
 use crate::AST::ProgramBundle;
 use jet_driver::QueryService::CompilerQueries;
@@ -671,7 +671,7 @@ fn publish_after_change_impl(
         // Always publish on open — client expects initial diagnostics.
         if let Some(doc) = server.docs.get(&uri) {
             let diags = server.check(doc);
-            let file = workspace_relative_diagnostic_path(server, &doc.path);
+            let file = ReportPath::from_process(&doc.path);
             let notif = publish_diagnostics(&uri, &file, &doc.text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
@@ -739,7 +739,7 @@ fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
         if let Some(doc) = server.docs.get(&uri) {
             let text = doc.text.clone();
             let diags = server.check(doc);
-            let file = workspace_relative_diagnostic_path(server, &doc.path);
+            let file = ReportPath::from_process(&doc.path);
             let notif = publish_diagnostics(&uri, &file, &text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
@@ -749,7 +749,7 @@ fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
 
 fn publish_diagnostics(
     uri: &str,
-    file: &str,
+    file: &ReportPath,
     src: &str,
     version: i32,
     diags: &[Diagnostic],
@@ -778,20 +778,20 @@ fn publish_diagnostics(
 }
 
 #[cfg(test)]
-fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
+fn diagnostic_json(d: &Diagnostic, file: &ReportPath, src: &str) -> String {
     diagnostic_json_with_clears(
         d,
         file,
         src,
         0,
-        &path_to_uri(file),
+        &path_to_uri(file.as_str()),
         std::slice::from_ref(d),
     )
 }
 
 fn diagnostic_json_with_clears(
     d: &Diagnostic,
-    file: &str,
+    file: &ReportPath,
     src: &str,
     clears: usize,
     uri: &str,
@@ -2931,10 +2931,8 @@ mod project_part_tests {
             "exactly 24",
             1,
         );
-        let mut server = Server::new();
-        server.workspace_roots.push("/workspace".into());
-        let file = workspace_relative_diagnostic_path(&server, "/workspace/src/main.jet");
-        assert_eq!(file, "src/main.jet");
+        let file = ReportPath::from_process("/workspace/src/main.jet");
+        assert_eq!(file.as_str(), "/workspace/src/main.jet");
         let src = "xxxx[0]";
         let compiler_data = diagnostic.to_json(&file, src);
         let json = diagnostic_json(&diagnostic, &file, src);
@@ -2949,7 +2947,7 @@ mod project_part_tests {
                 "\"code\":\"E2702\",\"what\":\"crypto API misuse\",",
                 "\"why\":\"nonce has 1 byte; this operation requires exactly 24\",",
                 "\"fix\":\"pass a 24-byte nonce\",\"detail\":null,",
-                "\"file\":\"src/main.jet\",\"line\":1,\"col\":5,",
+                "\"file\":\"/workspace/src/main.jet\",\"line\":1,\"col\":5,",
                 "\"span\":{{\"start\":4,\"end\":7}},\"fix_edits\":[],",
                 "\"cause\":[{}],\"clears\":0,",
                 "\"reason\":\"nonce_length\",\"operation\":\"xchacha20poly1305_seal\",",
@@ -2976,7 +2974,8 @@ mod project_part_tests {
             span: Span::new(0, 10),
             new_text: "#Codable".into(),
         });
-        let json = diagnostic_json(&diagnostic, "src/main.jet", "#[Codable]\n");
+        let file = ReportPath::from_process("src/main.jet");
+        let json = diagnostic_json(&diagnostic, &file, "#[Codable]\n");
 
         assert!(json.contains(r#""message":"one marker is written without brackets""#), "{json}");
         assert!(
@@ -3010,9 +3009,11 @@ mod project_part_tests {
             .expect("E0373 row owns replacement edit");
         assert_eq!(edit.new_text, ",");
 
-        let json = diagnostic_json(&diagnostic, "src/main.jet", src);
+        let file = ReportPath::from_process("src/main.jet");
+        let json = diagnostic_json(&diagnostic, &file, src);
         let fix_marker = format!(
-            r#""fix_edits":[{{"file":"src/main.jet","span":{{"start":{},"end":{}}},"new_text":","}}]"#,
+            r#""fix_edits":[{{"file":"{}","span":{{"start":{},"end":{}}},"new_text":","}}]"#,
+            json_escape(file.as_str()),
             start,
             start + 1
         );
@@ -3052,9 +3053,10 @@ mod project_part_tests {
         )
         .caused_by(&root);
         let diagnostics = vec![root, dependent.clone()];
+        let file = ReportPath::from_process("src/main.jet");
         let json = diagnostic_json_with_clears(
             &dependent,
-            "src/main.jet",
+            &file,
             "a b",
             0,
             "file:///workspace/src/main.jet",
@@ -3081,7 +3083,8 @@ mod project_part_tests {
             crate::Diagnostics::CryptoMisuseReason::RawNonce,
             "seal",
         );
-        let json = diagnostic_json(&diagnostic, "src/main.jet", "xxnonce");
+        let file = ReportPath::from_process("src/main.jet");
+        let json = diagnostic_json(&diagnostic, &file, "xxnonce");
         assert!(json.contains("\"reason\":\"raw_nonce\""), "{json}");
         assert!(json.contains("\"operation\":\"seal\""), "{json}");
         assert!(!json.contains("\"expected\":"), "{json}");
@@ -3089,15 +3092,13 @@ mod project_part_tests {
     }
 
     #[test]
-    fn e2702_lsp_never_exposes_an_absolute_path_without_a_workspace_root() {
-        let server = Server::new();
-        let file = workspace_relative_diagnostic_path(
-            &server,
+    fn e2702_lsp_uses_a_resolvable_path_without_a_workspace_root() {
+        let file = ReportPath::from_process(
             "/private/attacker-controlled/project/src/main.jet",
         );
-        assert_eq!(file, "main.jet");
-        assert!(!file.starts_with('/'));
-        assert_eq!(workspace_relative_diagnostic_path(&server, "src/main.jet"), "src/main.jet");
+        assert_eq!(file.as_str(), "/private/attacker-controlled/project/src/main.jet");
+        let relative = ReportPath::from_process("src/main.jet");
+        assert!(relative.as_str().ends_with("/src/main.jet"));
     }
 
     #[test]
@@ -3177,10 +3178,11 @@ mod project_part_tests {
         assert!(doc.apply_range_edit(range, Some(1), "\"wrong\""));
         let incremental = server.check(&doc);
         let fresh = super::super::Check::check_document(path, &doc.text);
+        let file = ReportPath::from_process(path);
 
         assert_eq!(
-            crate::render_all_json(path, &doc.text, &incremental),
-            crate::render_all_json(path, &doc.text, &fresh)
+            crate::render_all_json(&file, &doc.text, &incremental),
+            crate::render_all_json(&file, &doc.text, &fresh)
         );
         assert!(!incremental.is_empty());
     }
@@ -3793,26 +3795,6 @@ fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
                 })
                 .map(|root| normalize_path_buf(&root))
         })
-}
-
-fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
-    let normalized = normalize_path(path);
-    let Some(root) = workspace_root_for_path(server, &normalized) else {
-        let path = std::path::Path::new(&normalized);
-        return if path.is_absolute() {
-            path.file_name().map_or_else(
-                || "<source>".to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            )
-        } else {
-            normalized
-        };
-    };
-    std::path::Path::new(&normalized)
-        .strip_prefix(&root)
-        .unwrap_or(std::path::Path::new(&normalized))
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {

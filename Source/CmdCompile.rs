@@ -232,7 +232,14 @@ pub(crate) fn resolve_named_profile(name: &str, source_file: &str, mode: OutputM
         _ => {
             let diag = jet::Manifest::e1219(name);
             if mode.json {
-                eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
+                eprint!(
+                    "{}",
+                    jet::render_all_json(
+                        &jet::Diagnostics::ReportPath::from_process("<cli>"),
+                        "",
+                        &[diag],
+                    )
+                );
             } else {
                 eprint!(
                     "{}",
@@ -1277,16 +1284,27 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let retired_print_count = jet::Formatter::retired_print_family_edits(&migrated).len();
     let retired_type_count = jet::Formatter::retired_type_edits(&migrated).len();
     let fixes = jet::LSP::collect_fixes(file, &migrated);
-    let fixed = if fixes.is_empty() {
+    let safe_fixes = jet::LSP::safe_fixes(&fixes);
+    let skipped_suggestions = fixes.len().saturating_sub(safe_fixes.len());
+    let fixed = if safe_fixes.is_empty() {
         migrated
     } else {
-        jet::LSP::apply_all(&migrated, &fixes)
+        jet::LSP::apply_all(&migrated, &safe_fixes)
     };
     if fixed == src {
-        println!("{}: no changes made", file);
+        if skipped_suggestions == 0 {
+            println!("{}: no changes made", file);
+        } else {
+            println!(
+                "{}: no changes made ({} suggestion{} need review)",
+                file,
+                skipped_suggestions,
+                if skipped_suggestions == 1 { "" } else { "s" }
+            );
+        }
         return;
     }
-    let n = fixes.len();
+    let n = safe_fixes.len();
     if dry_run {
         print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
         if n == 0
@@ -1339,6 +1357,14 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
                 if retired_type_count == 1 { "" } else { "s" }
             );
         }
+        if skipped_suggestions > 0 {
+            println!(
+                "{}: skipped {} suggestion{} for review (dry run)",
+                file,
+                skipped_suggestions,
+                if skipped_suggestions == 1 { "" } else { "s" }
+            );
+        }
         return;
     }
     fs::write(file, &fixed).unwrap_or_else(|e| {
@@ -1358,6 +1384,14 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
             file,
             n,
             if n == 1 { "" } else { "es" }
+        );
+    }
+    if skipped_suggestions > 0 {
+        println!(
+            "{}: skipped {} suggestion{} for review",
+            file,
+            skipped_suggestions,
+            if skipped_suggestions == 1 { "" } else { "s" }
         );
     }
     if retired_target_count > 0 {
