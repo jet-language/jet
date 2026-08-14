@@ -471,6 +471,10 @@ impl<'a> Parser<'a> {
                 "choose a different identifier name".to_string(),
                 Some(span),
             )),
+            Token {
+                kind: TokKind::KwTag,
+                span,
+            } => Ok((Syntax::KW_TAG.to_string(), span)),
             t => Err(Diagnostic::error(
                 "E0003",
                 format!("expected a name {}, found {}", where_, describe(&t.kind)),

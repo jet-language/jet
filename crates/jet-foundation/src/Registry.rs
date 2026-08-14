@@ -620,7 +620,9 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
         _ => return None,
     };
 
-    if row(row_name).is_some_and(|registered| registered.kind() == RowKind::Fact) {
+    if row(row_name).is_some_and(|registered| {
+        matches!(registered.kind(), RowKind::Fact | RowKind::Plane)
+    }) {
         Some(read)
     } else {
         None

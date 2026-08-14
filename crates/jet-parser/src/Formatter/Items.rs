@@ -162,9 +162,11 @@ impl<'a> Fmt<'a> {
             // Stage 1a: modules are emitted verbatim (non-destructive). A
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {
-                let text = self.src[m.span.start..m.span.end].to_string();
-                self.write(&text);
-                self.skip_verbatim_comments(m.span.end);
+                if !self.fmt_perf_module(m) {
+                    let text = self.src[m.span.start..m.span.end].to_string();
+                    self.write(&text);
+                    self.skip_verbatim_comments(m.span.end);
+                }
             }
             // S59: C FFI modules are emitted verbatim (non-destructive). A
             // canonical formatter can land alongside the bind backend.
@@ -249,6 +251,92 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(ma.span.end);
             }
+        }
+    }
+
+    fn fmt_perf_module(&mut self, module: &crate::AST::ModuleDecl) -> bool {
+        if !module.sources.is_empty()
+            || !module.imports.is_empty()
+            || !module.members.is_empty()
+            || module.contributions.len() != 1
+            || self.comments.iter().any(|comment| {
+                comment.span.start >= module.span.start && comment.span.start < module.span.end
+            })
+        {
+            return false;
+        }
+        let crate::AST::Contribution {
+            namespace: crate::AST::Namespace::Perf,
+            value: crate::AST::ContribValue::Perf(perf),
+            ..
+        } = &module.contributions[0]
+        else {
+            return false;
+        };
+        let typed_budget_list = self
+            .src
+            .get(perf.list_span.start..perf.list_span.end)
+            .is_some_and(|source| source.contains("].{"));
+
+        self.write("module ");
+        self.write(&module.name);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            if !perf.compile_workloads.is_empty() {
+                f.write("compile_workloads: {");
+                for (index, workload) in perf.compile_workloads.iter().enumerate() {
+                    if index == 0 {
+                        f.write(" ");
+                    } else {
+                        f.write(", ");
+                    }
+                    f.write(&workload.name);
+                    f.write(": CompilerWorkload.Edit.{target: ");
+                    f.fmt_expr(&workload.target, Prec::OrFallback);
+                    f.write(", patch: ");
+                    f.fmt_expr(&workload.patch, Prec::OrFallback);
+                    f.write("}");
+                }
+                f.write(" }");
+                f.newline();
+            }
+            if typed_budget_list {
+                f.write("budgets: [Budget].{");
+                for (index, budget) in perf.budgets.iter().enumerate() {
+                    if index > 0 {
+                        f.write(", ");
+                    }
+                    f.write(".{");
+                    f.fmt_perf_budget_fields(&budget.fields);
+                    f.write("}");
+                }
+                f.write("}");
+            } else {
+                f.write("budgets: [");
+                for (index, budget) in perf.budgets.iter().enumerate() {
+                    if index > 0 {
+                        f.write(", ");
+                    }
+                    f.write("Budget.{");
+                    f.fmt_perf_budget_fields(&budget.fields);
+                    f.write("}");
+                }
+                f.write("]");
+            }
+        });
+        self.end_block();
+        true
+    }
+
+    fn fmt_perf_budget_fields(&mut self, fields: &[crate::AST::BudgetField]) {
+        for (index, field) in fields.iter().enumerate() {
+            if index > 0 {
+                self.write(", ");
+            }
+            self.write(&field.name);
+            self.write(": ");
+            self.fmt_expr(&field.value, Prec::OrFallback);
         }
     }
 

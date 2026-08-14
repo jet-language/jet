@@ -30,9 +30,7 @@ fn stop_after_one() => Stream<Int> {
 
 fn nested() => Stream<Int> {
     yield 10
-    loop value, count(2) {
-        print("nested: {value + 20}")
-    }
+    loop value, count(2) -> print("nested: {value + 20}")
     yield 99
 }
 
@@ -46,16 +44,12 @@ fn cleanup_after_break() => Stream<Int> {
 }
 
 fn run() {
-    loop x, count(3) {
-        print("{x}")
-    }
+    loop x, count(3) -> print("{x}")
     loop x, stop_after_one() {
         print("consumer: {x}")
         break
     }
-    loop x, nested() {
-        print("nested: {x}")
-    }
+    loop x, nested() -> print("nested: {x}")
     loop x, cleanup_after_break() {
         print("cleanup: {x}")
         break

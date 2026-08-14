@@ -15,23 +15,17 @@ fn run() {
     loop {
         // Headless: window_should_close is true immediately, so draw one frame
         // then exit. Native: keep looping until the user closes the window.
-        if frames > 0 && rl.window_should_close(window) {
-            break
-        }
+        if frames > 0 && rl.window_should_close(window) -> break
         space :: rl.key_down("Space")
         last_space = space
-        if space {
-            audio_ok = rl.play_sound(blip)
-        }
+        if space -> audio_ok = rl.play_sound(blip)
         rl.begin_drawing(window)
         rl.clear_background(dark)
         rl.draw_rectangle(24, 64, 160, 48, white)
         rl.draw_text("Jet + raylib", 24, 24, 24, white)
         rl.end_drawing()
         frames += 1
-        if !rl.window_ready(window) {
-            break
-        }
+        if !rl.window_ready(window) -> break
     }
     print("frames {frames}")
     print("input {last_space}")

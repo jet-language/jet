@@ -124,7 +124,10 @@ impl<'a> Parser<'a> {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),
-                        "write a registered fact read such as `T.@range`".to_string(),
+                        format!(
+                            "write a registered fact read such as `T.{}`",
+                            Syntax::COMPILER_FACT_LAYOUT
+                        ),
                         Some(member_span),
                     ));
                 }

@@ -573,6 +573,7 @@ impl<'a> Fmt<'a> {
                             | Expr::Float(..)
                             | Expr::Bool(..)
                             | Expr::Char(..)
+                            | Expr::Unary(..)
                     );
                     if !atomic {
                         self.write("(");
@@ -1742,7 +1743,11 @@ impl<'a> Fmt<'a> {
         match fb {
             OrFallback::Value(e) => self.fmt_expr(e, Prec::OrFallback),
             OrFallback::Block { body, value, .. } => {
-                self.fmt_value_block(body, value, false);
+                if self.fallback_value_was_return(value) {
+                    self.fmt_fallback_return_block(body, value);
+                } else {
+                    self.fmt_value_block(body, value, false);
+                }
             }
             OrFallback::Return(expr, _) => {
                 self.write("return");
@@ -1767,6 +1772,38 @@ impl<'a> Fmt<'a> {
             }
             OrFallback::ContinueLabel(name, _) => self.write(&format!("next({name})")),
         }
+    }
+
+    fn fallback_value_was_return(&self, value: &Expr) -> bool {
+        let Some(prefix) = self.src.get(..value.span().start) else {
+            return false;
+        };
+        let Some(return_start) = prefix.rfind("return") else {
+            return false;
+        };
+        let before_is_boundary = return_start == 0
+            || !prefix[..return_start]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+        before_is_boundary
+            && prefix[return_start + "return".len()..]
+                .chars()
+                .all(char::is_whitespace)
+    }
+
+    fn fmt_fallback_return_block(&mut self, body: &[Stmt], value: &Expr) {
+        self.write("{");
+        self.newline();
+        self.with_indent(|f| {
+            f.fmt_block_stmts(body);
+            if !body.is_empty() {
+                f.newline();
+            }
+            f.write("return ");
+            f.fmt_expr(value, Prec::OrFallback);
+        });
+        self.end_block();
     }
 
     pub(super) fn fmt_pattern(&mut self, pat: &Pattern) {
@@ -2084,11 +2121,30 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_call_args_or_trailing_block(&mut self, args: &[CallArg]) {
-        // D-TRAILBLOCK2=A: always emit ordinary `(args)`. Trailing-block sugar
-        // no longer parses; never resurrect `) { … }` / bare `{ … }`.
+        // D-META-BODY1=A: `b.generate(name) { … }` carries its typed template
+        // as a hidden final argument. It is source syntax, not a runtime call
+        // argument, so restore the block at this boundary before formatting
+        // the ordinary arguments.
+        let template = args
+            .last()
+            .filter(|arg| arg.flags.template_items.is_some());
+        let call_args = if template.is_some() {
+            &args[..args.len().saturating_sub(1)]
+        } else {
+            args
+        };
         self.write("(");
-        self.fmt_call_args(args);
+        self.fmt_call_args(call_args);
         self.write(")");
+        if let Some(template) = template {
+            self.write(" ");
+            if let Some(text) = self.src.get(template.span.start..template.span.end) {
+                self.write(text);
+                self.skip_verbatim_comments(template.span.end);
+            } else {
+                self.write("{}");
+            }
+        }
     }
 
     fn fmt_call_args(&mut self, args: &[CallArg]) {

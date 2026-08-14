@@ -3,17 +3,67 @@ use crate::AST::{
     BinOp, BindPattern, Binding, Expr, ForKind, LValue, Stmt, StrPart, SwitchArm,
 };
 
+fn is_loop_exit_stmt(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Break(_)
+            | Stmt::BreakValue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+            | Stmt::Continue(_)
+            | Stmt::ContinueLabel(..)
+    )
+}
+
+fn is_loop_break_stmt(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Break(_)
+            | Stmt::BreakValue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+    )
+}
+
 impl<'a> Fmt<'a> {
-    fn fmt_statement_switch_attr(&mut self, marker: &str, body: &[Stmt]) {
-        if body.len() == 1 {
-            self.write(&format!("#{} ", marker));
-            self.fmt_stmt(&body[0]);
+    fn fmt_statement_switch_attr(
+        &mut self,
+        marker: &crate::AST::Marker,
+        body: &[Stmt],
+    ) {
+        let body_start = body.first().map(stmt_start).unwrap_or(marker.span.end);
+        let body_is_block = self
+            .source_toks
+            .iter()
+            .filter(|token| {
+                token.span.start >= marker.span.end && token.span.start < body_start
+            })
+            .find(|token| {
+                !matches!(
+                    token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+            })
+            .is_some_and(|token| matches!(token.kind, TokKind::LBrace));
+        if body_is_block || body.len() != 1 {
+            self.write("#");
+            self.fmt_marker(marker);
+            self.write(" {");
+            self.newline();
+            self.with_indent(|f| f.fmt_block_stmts(body));
+            self.end_block();
             return;
         }
-        self.write(&format!("#{} {{", marker));
-        self.newline();
-        self.with_indent(|f| f.fmt_block_stmts(body));
-        self.end_block();
+        if body.len() == 1 {
+            self.write("#");
+            self.fmt_marker(marker);
+            self.write(" ");
+            let saved_force_control_braces = self.force_control_braces;
+            self.force_control_braces = true;
+            self.fmt_stmt(&body[0]);
+            self.force_control_braces = saved_force_control_braces;
+            return;
+        }
     }
 
     pub(super) fn fmt_block_stmts(&mut self, body: &[Stmt]) {
@@ -364,7 +414,11 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(e, Prec::OrFallback);
             }
             Stmt::While {
-                cond, body, label, ..
+                cond,
+                body,
+                label,
+                arrow_body,
+                ..
             } => {
                 // D-LOOPLABEL3=A: loop labels use declaration spelling.
                 if let Some((_n, _)) = label {
@@ -372,7 +426,7 @@ impl<'a> Fmt<'a> {
                 }
                 self.write("loop ");
                 self.fmt_cond(cond);
-                self.fmt_effect_loop_body(body, cond.span().end);
+                self.fmt_effect_loop_body(body, cond.span().end, *arrow_body);
             }
             Stmt::For {
                 var,
@@ -380,6 +434,7 @@ impl<'a> Fmt<'a> {
                 kind,
                 body,
                 label,
+                arrow_body,
                 ..
             } => {
                 if let Some((_n, _)) = label {
@@ -440,7 +495,7 @@ impl<'a> Fmt<'a> {
                         .as_ref()
                         .map_or(collection.span().end, |value| value.span().end),
                 };
-                self.fmt_effect_loop_body(body, header_end);
+                self.fmt_effect_loop_body(body, header_end, *arrow_body);
             }
             // D-IF3 / D-IFDIST1: multi-arm dispatch renders as
             // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
@@ -500,6 +555,7 @@ impl<'a> Fmt<'a> {
                 step,
                 body,
                 label,
+                arrow_body,
                 ..
             } => {
                 if let Some((n, _)) = label {
@@ -521,16 +577,19 @@ impl<'a> Fmt<'a> {
                 let header_end = step
                     .as_ref()
                     .map_or(cond.span().end, |statement| statement.span().end);
-                self.fmt_effect_loop_body(body, header_end);
+                self.fmt_effect_loop_body(body, header_end, *arrow_body);
             }
             Stmt::Loop {
-                body: inner, label, ..
+                body: inner,
+                label,
+                arrow_body,
+                ..
             } => {
                 if let Some((_n, _)) = label {
                     self.write(&format!("{} :: ", _n));
                 }
                 self.write("loop");
-                self.fmt_control_body_after_header(inner);
+                self.fmt_effect_loop_body(inner, 0, *arrow_body);
             }
             Stmt::Unsafe { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -542,7 +601,7 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             Stmt::Switched { marker, body, .. } => {
-                self.fmt_statement_switch_attr(&marker.name, body)
+                self.fmt_statement_switch_attr(marker, body)
             }
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
@@ -744,9 +803,29 @@ impl<'a> Fmt<'a> {
         })
     }
 
-    fn fmt_effect_loop_body(&mut self, body: &[Stmt], header_end: usize) {
+    fn fmt_effect_loop_body(&mut self, body: &[Stmt], header_end: usize, arrow_body: bool) {
         let _ = header_end;
-        self.fmt_control_body_after_header(body);
+        if arrow_body && body.len() == 1 {
+            let saved_out = self.out.len();
+            let saved_col = self.col;
+            let saved_line_start = self.at_line_start;
+            let saved_pending_blank = self.pending_blank;
+            let saved_comment_i = self.comment_i;
+            self.write(" -> ");
+            self.fmt_stmt_inline(&body[0]);
+            if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+                return;
+            }
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+        }
+        let force_braces = !arrow_body
+            && body.len() == 1
+            && is_loop_exit_stmt(&body[0]);
+        self.fmt_control_body_after_header(body, force_braces);
     }
 
     /// D-IF1/D-FMT1: render one dispatch arm. A bare-value arm
@@ -768,15 +847,26 @@ impl<'a> Fmt<'a> {
             for (index, arm) in arms.iter().enumerate() {
                 if index > 0 {
                     f.newline();
+                    f.emit_leading_statement_gap(arms[index - 1].span.end, arm.span.start);
+                } else {
+                    f.emit_leading(arm.span.start);
                 }
                 let next_starts_with_dot = arms
                     .get(index + 1)
                     .is_some_and(|next| Self::arm_head_starts_with_dot(&next.cond));
                 f.fmt_switch_arm(subject, table_op, arm, next_starts_with_dot);
+                f.emit_trailing(arm.span.end);
             }
             if let Some(else_b) = else_body {
                 if !arms.is_empty() {
                     f.newline();
+                    if let Some(last) = arms.last() {
+                        if let Some(else_start) = f.dispatch_else_start(last.span.end) {
+                            f.emit_leading_statement_gap(last.span.end, else_start);
+                        }
+                    }
+                } else if let Some(else_start) = f.dispatch_else_start(0) {
+                    f.emit_leading(else_start);
                 }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
@@ -794,15 +884,26 @@ impl<'a> Fmt<'a> {
             for (index, arm) in arms.iter().enumerate() {
                 if index > 0 {
                     f.newline();
+                    f.emit_leading_statement_gap(arms[index - 1].span.end, arm.span.start);
+                } else {
+                    f.emit_leading(arm.span.start);
                 }
                 f.fmt_expr(&arm.cond, Prec::OrFallback);
                 f.write(" ");
                 f.write(Syntax::OP_ARM_ARROW);
                 f.fmt_arm_body(&arm.body, false);
+                f.emit_trailing(arm.span.end);
             }
             if let Some(body) = else_body {
                 if !arms.is_empty() {
                     f.newline();
+                    if let Some(last) = arms.last() {
+                        if let Some(else_start) = f.dispatch_else_start(last.span.end) {
+                            f.emit_leading_statement_gap(last.span.end, else_start);
+                        }
+                    }
+                } else if let Some(else_start) = f.dispatch_else_start(0) {
+                    f.emit_leading(else_start);
                 }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
@@ -826,7 +927,11 @@ impl<'a> Fmt<'a> {
         };
         self.emit_classic_if_condition_trivia(arm.cond.span().start);
         self.fmt_cond(&arm.cond);
-        self.fmt_control_body_after_header(&arm.body);
+        let preserve_loop_exit_braces = self.authored_braced_loop_exit(&arm.body);
+        self.fmt_control_body_after_header(
+            &arm.body,
+            matches!(arm.cond, Expr::Paren(..)) || preserve_loop_exit_braces,
+        );
         match else_body {
             Some([
                 Stmt::Switch {
@@ -843,10 +948,16 @@ impl<'a> Fmt<'a> {
             }
             Some(body) => {
                 self.write(" else");
-                self.fmt_control_body_after_header(body);
+                self.fmt_control_body_after_header(body, self.authored_braced_loop_exit(body));
             }
             None => {}
         }
+    }
+
+    fn authored_braced_loop_exit(&self, body: &[Stmt]) -> bool {
+        body.len() == 1
+            && is_loop_break_stmt(&body[0])
+            && self.single_stmt_braces(&body[0]).is_some()
     }
 
     fn emit_classic_if_condition_trivia(&mut self, condition_start: usize) {
@@ -875,6 +986,13 @@ impl<'a> Fmt<'a> {
         self.write(" ");
         self.write(Syntax::OP_ARM_ARROW);
         self.fmt_arm_body(&arm.body, force_braces);
+    }
+
+    fn dispatch_else_start(&self, after: usize) -> Option<usize> {
+        self.source_toks.iter().find_map(|token| {
+            (token.span.start >= after && matches!(&token.kind, TokKind::KwElse))
+                .then_some(token.span.start)
+        })
     }
 
     /// Preserve `head -> statement` when the author chose that shape and the
@@ -934,8 +1052,13 @@ impl<'a> Fmt<'a> {
 
     /// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C: one simple effect-control
     /// statement uses `->` when it fits. Braces remain the canonical shape for
-    /// multiple statements, scoped blocks, comments, and over-width output.
-    fn fmt_control_body_after_header(&mut self, body: &[Stmt]) {
+    /// multiple statements, scoped blocks, comments, and marked controls.
+    fn fmt_control_body_after_header(&mut self, body: &[Stmt], force_braces: bool) {
+        if force_braces || self.force_control_braces {
+            self.write(" {");
+            self.fmt_control_body(body);
+            return;
+        }
         if body.len() == 1 && is_simple_stmt(&body[0]) {
             let comment_free = self
                 .single_stmt_braces(&body[0])
@@ -992,16 +1115,13 @@ impl<'a> Fmt<'a> {
         };
         let between = &prefix[arrow + Syntax::OP_ARM_ARROW.len()..];
         let source_end = self.statement_source_end(&body[0]);
-        let line_end = self.src[start..]
-            .find('\n')
-            .map_or(self.src.len(), |offset| start + offset);
         !between.contains('{')
             && !between.contains('\n')
             && self
                 .src
                 .get(start..source_end)
                 .is_some_and(|source| !source.contains('\n'))
-            && !self.span_has_comment(arrow + Syntax::OP_ARM_ARROW.len(), line_end)
+            && !self.span_has_comment(arrow + Syntax::OP_ARM_ARROW.len(), source_end)
     }
 
     fn fmt_switch_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr, prec: Prec) {

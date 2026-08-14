@@ -284,7 +284,7 @@ fn print_family_edits(
                         start: call.receiver_start,
                         end: call.close_span.end,
                     },
-                    new_text: format!("\"{{{argument}{format}}}\""),
+                    new_text: format!("print(\"{{{argument}{format}}}\")"),
                 });
             }
             RetiredPrintKind::Println
@@ -342,6 +342,12 @@ fn collect_retired_type_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
     for token in tokens {
         match &token.kind {
             TokKind::Ident(name) => {
+                // Package target migration is context-owned by the package
+                // formatter. `plugin` is also a valid module/variable name in
+                // Jet source, so it must not be treated as a core type rename.
+                if name == Syntax::RETIRED_TARGET_PLUGIN {
+                    continue;
+                }
                 let Some(canonical) = Syntax::rename_target(name) else {
                     continue;
                 };
@@ -434,6 +440,7 @@ fn format_program_with_tokens(
         policy_declarations: &prog.policy_declarations,
         fenced_statements: &prog.fenced_statements,
         simplify: options.simplify,
+        force_control_braces: false,
     };
     let mut first = true;
     let ordered_file_rules = prog
@@ -677,6 +684,10 @@ struct Fmt<'a> {
     /// D-EACH1=C authored forms corresponding to expanded AST statements.
     fenced_statements: &'a [crate::AST::FencedStatement],
     simplify: bool,
+    /// Keep a marked statement's control body scoped. Statement attributes
+    /// attach to the whole statement, so collapsing their control body to an
+    /// arrow changes the authored boundary that the marker covers.
+    force_control_braces: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1275,8 +1286,31 @@ impl<'a> Fmt<'a> {
         let start = stmt_start(stmt);
         let end = stmt_end(stmt);
         let open = self.src.get(..start)?.rfind('{')? + 1;
+        if !self.source_gap_is_trivia(open, start) {
+            return None;
+        }
         let close = end + self.src.get(end..)?.find('}')?;
         (open <= close).then_some((open, close))
+    }
+
+    fn source_gap_is_trivia(&self, start: usize, end: usize) -> bool {
+        let mut cursor = start;
+        for comment in &self.comments {
+            if comment.span.start < cursor {
+                continue;
+            }
+            if comment.span.start >= end {
+                break;
+            }
+            if !self.src[cursor..comment.span.start]
+                .chars()
+                .all(char::is_whitespace)
+            {
+                return false;
+            }
+            cursor = comment.span.end.min(end);
+        }
+        self.src[cursor..end].chars().all(char::is_whitespace)
     }
 
     /// Locate the `{ … }` bracketing an if-expression branch whose only content

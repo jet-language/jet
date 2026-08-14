@@ -36,7 +36,7 @@ fn run() {
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(first)
-    if id == "" { panic("missing receipt id") }
+    if id == "" -> panic("missing receipt id")
     print("first:enqueued")
     recovered := services.runtime(store, retention: retention)
     recovered_duplicate :: recovered.retry(id) ?? panic("recover")

@@ -25,7 +25,7 @@ fn paths_from_args() => [String] :: process.argv().skip(1).to_list()
 
 fn gather_paths() => [String] {
     from_args :: paths_from_args()
-    if from_args.len() > 0 { return from_args }
+    if from_args.len() > 0 -> return from_args
     return default_paths()
 }
 
@@ -63,7 +63,7 @@ fn run() {
     print("scanning {paths.len()} files...")
     print("")
     parallel :: scan_parallel(paths)
-    loop line, parallel { print(line) }
+    loop line, parallel -> print(line)
     print("")
     print("done — {paths.len()} files scanned in parallel")
 }

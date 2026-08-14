@@ -408,6 +408,13 @@ impl<'a> Parser<'a> {
             // consumed the target.
             self.bind_rule_fact(marker.name_span, None, site);
             let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+                // D-META-USER1=A: source-declared rules are not in the
+                // built-in registry while this file is being parsed. Keep
+                // their application in the shared fact stream; the bundle
+                // registry validates the declaration and site later.
+                if self.source_declares_marker(&marker.name) {
+                    return Ok(marker);
+                }
                 return Err(crate::Policy::marker_unknown_error(
                     &marker.name,
                     &crate::Policy::active_rule_names(),
@@ -429,6 +436,15 @@ impl<'a> Parser<'a> {
                 ));
             }
             Ok(marker)
+        }
+
+        fn source_declares_marker(&self, name: &str) -> bool {
+            self.toks.windows(3).any(|tokens| {
+                matches!(&tokens[0].kind, TokKind::Ident(marker) if marker == Syntax::KW_MARKER)
+                    && matches!(&tokens[1].kind, TokKind::Ident(declared) if declared == name)
+                    && (matches!(tokens[2].kind, TokKind::LParen)
+                        || matches!(&tokens[2].kind, TokKind::Ident(on) if on == Syntax::TEXT_HEAD_ON))
+            })
         }
 
         /// True when the current token starts a marker whose ordinary call

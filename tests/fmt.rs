@@ -1018,20 +1018,20 @@ fn fmt_is_idempotent_on_ui_fixes() {
 // --- D-ENUMDOT2=A: leading-dot enum literal stability ---
 
 #[test]
+fn fmt_canonicalizes_subject_first_refutable_test_bind() {
+    let src = "fn run(){\n    parse() == .Ok(value) ?? return\n    print(value)\n}\n";
+    let once = jet::format_source(src).expect("subject-first test-bind should format");
+    assert!(once.contains("parse() == .Ok(value) ?? return"), "{once}");
+    assert_eq!(once, jet::format_source(&once).unwrap());
+}
+
+#[test]
 fn fmt_preserves_leading_dot_enum_lit() {
     // D-ENUMDOT2=A: `.Variant` (type_name="") round-trips unchanged through fmt.
     // The formatter emits `"" + "." + variant` = `.Variant`.
     let src = r#"enum Color {
     Red
     Blue
-}
-
-#[test]
-fn fmt_canonicalizes_subject_first_refutable_test_bind() {
-    let src = "fn run(){\n    parse() == .Ok(value) ?? return\n    print(value)\n}\n";
-    let once = jet::format_source(src).expect("subject-first test-bind should format");
-    assert!(once.contains("parse() == .Ok(value) ?? return"), "{once}");
-    assert_eq!(once, jet::format_source(&once).unwrap());
 }
 
 fn paint(c: Color) {
