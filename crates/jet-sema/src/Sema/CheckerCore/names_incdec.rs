@@ -108,6 +108,7 @@ impl<'a> Checker<'a> {
                 IncDecOp::Inc => "+",
                 IncDecOp::Dec => "-",
             };
+            let operand = operand.without_parens();
             let lvalue = match operand {
                 Expr::Ident(name, name_span) => LValue::Local {
                     name: name.clone(),

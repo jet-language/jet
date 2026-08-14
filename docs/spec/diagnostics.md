@@ -302,6 +302,7 @@ renumbered, and no new `W` code may be allocated.
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
 | E0163 | sema  | `++`/`--` can't target an indexed slot (D-INCR1) |
 | E0164 | sema  | compound assignment can't target an indexed slot (S17) |
+| E0165 | parse | compound assignment target is not an assignable place (S17) |
 | E0154 | parse | protocol line does not use sender form `client:` or `server:` (D-PROTO2, D-ARROW-CONTROL1) |
 | E0805 | sema  | `yield` used outside a function declared `=> Stream<T>` (D-STREAMYIELD1) |
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
@@ -1709,6 +1710,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
 | E0163 | increment and decrement can't target an indexed slot. | An indexed read can panic when a map key is missing, so the update needs a default value. | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1`. |
 | E0164 | compound assignment can't target an indexed slot. | A compound update reads an indexed slot before it writes; that read can panic when a map key is missing. | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1`. |
+| E0165 | compound assignment needs a mutable place. | S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update. | Bind the value with `:=`, then write `name {op} value`. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
 | L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |

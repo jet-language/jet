@@ -484,7 +484,14 @@ impl<'a> Parser<'a> {
         }
     
         /// Reinterpret an already-parsed expression as an assignment target.
-        pub(in crate::Parser) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
+        /// S17 compound shape errors carry their operator so the parser can
+        /// emit the registered E0165 fix instead of generic E0003 text.
+        pub(in crate::Parser) fn expr_to_lvalue(
+            &mut self,
+            expr: Expr,
+            compound_op: Option<crate::AST::BinOp>,
+        ) -> Result<LValue, Diagnostic> {
+            let expr = expr.without_parens().clone();
             match expr {
                 Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),
                 Expr::Index {
@@ -499,17 +506,26 @@ impl<'a> Parser<'a> {
                 // `self.field = v` in a `mut self` method). Sema gates whether the root is
                 // mutable (E0205); the parser only records the place.
                 Expr::Field(base, field, span) => Ok(LValue::Field { base, field, span }),
-                other => Err(Diagnostic::error(
-                    "E0003",
-                    "this value can't be assigned to".to_string(),
-                    "only a name or an indexed slot like `items[0]` can appear on the left of `=`"
-                        .to_string(),
-                    format!(
-                        "use `name {} ...` or `map[key] = ...`",
-                        Syntax::SIGIL_BIND_MUT
-                    ),
-                    Some(other.span()),
-                )),
+                other => {
+                    if let Some(op) = compound_op {
+                        return Err(Diagnostic::from_row(
+                            "E0165",
+                            &[("op", op.compound_spell().unwrap_or(op.spell()))],
+                            Some(other.span()),
+                        ));
+                    }
+                    Err(Diagnostic::error(
+                        "E0003",
+                        "this value can't be assigned to".to_string(),
+                        "only a name or an indexed slot like `items[0]` can appear on the left of `=`"
+                            .to_string(),
+                        format!(
+                            "use `name {} ...` or `map[key] = ...`",
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        Some(other.span()),
+                    ))
+                }
             }
         }
     

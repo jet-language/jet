@@ -70,7 +70,7 @@ impl<'a> Parser<'a> {
                     let op = op_tok.kind.compound_op();
                     let value = self.expr()?;
                     Stmt::Assign {
-                        target: self.expr_to_lvalue(step_expr)?,
+                        target: self.expr_to_lvalue(step_expr, op)?,
                         op,
                         op_span: op_tok.span,
                         value,
@@ -1624,7 +1624,7 @@ impl<'a> Parser<'a> {
             let op = op_tok.kind.compound_op();
             let value = self.expr()?;
             self.finish_stmt()?;
-            let target = self.expr_to_lvalue(expression)?;
+            let target = self.expr_to_lvalue(expression, op)?;
             return Ok(Stmt::Assign {
                 target,
                 op,
@@ -2514,7 +2514,7 @@ impl<'a> Parser<'a> {
                     let op = op_tok.kind.compound_op();
                     let value = self.expr()?;
                     self.finish_stmt()?;
-                    let target = self.expr_to_lvalue(expr)?;
+                    let target = self.expr_to_lvalue(expr, op)?;
                     return Ok(Stmt::Assign {
                         target,
                         op,
@@ -2563,21 +2563,55 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Expr(expr))
             }
-            other => Err(Diagnostic::error(
-                "E0003",
-                format!(
-                    "expected a call, binding, assignment, or `return`, found {}",
-                    describe(other)
-                ),
-                "inside a function body, write a call, binding, assignment, or `return`"
-                    .to_string(),
-                format!(
-                    "e.g. {}(\"hello\") or x {} 1",
-                    Syntax::BUILTIN_PRINT,
-                    Syntax::SIGIL_BIND_IMMUT
-                ),
-                Some(self.peek().span),
-            )),
+            other => {
+                let found = describe(other);
+                let span = self.peek().span;
+                let expression_start = self.starts_expr(&self.peek().kind)
+                    || matches!(
+                        self.peek().kind,
+                        TokKind::UnitNumber { .. }
+                            | TokKind::Char(_)
+                            | TokKind::LBracket
+                            | TokKind::Star
+                            | TokKind::Amp
+                            | TokKind::PlusPlus
+                            | TokKind::MinusMinus
+                            | TokKind::Dot
+                            | TokKind::KwMove
+                    );
+                if expression_start {
+                    let expression = self.expr()?;
+                    if matches!(self.peek().kind, TokKind::Eq)
+                        || self.peek().kind.compound_op().is_some()
+                    {
+                        let op_tok = self.bump();
+                        let op = op_tok.kind.compound_op();
+                        let value = self.expr()?;
+                        self.finish_stmt()?;
+                        let target = self.expr_to_lvalue(expression, op)?;
+                        return Ok(Stmt::Assign {
+                            target,
+                            op,
+                            op_span: op_tok.span,
+                            value,
+                        });
+                    }
+                }
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a call, binding, assignment, or `return`, found {found}"
+                    ),
+                    "inside a function body, write a call, binding, assignment, or `return`"
+                        .to_string(),
+                    format!(
+                        "e.g. {}(\"hello\") or x {} 1",
+                        Syntax::BUILTIN_PRINT,
+                        Syntax::SIGIL_BIND_IMMUT
+                    ),
+                    Some(span),
+                ))
+            }
         }
     }
 

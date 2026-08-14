@@ -145,7 +145,7 @@ impl<'a> Parser<'a> {
                     let op = op_tok.kind.compound_op();
                     let value = self.expr()?;
                     let end = value.span().end.max(fallback_end);
-                    let target = self.expr_to_lvalue(expression)?;
+                    let target = self.expr_to_lvalue(expression, op)?;
                     Ok((
                         LambdaBody::Block(vec![Stmt::Assign {
                             target,
