@@ -392,9 +392,22 @@ fn run_transcript_file_strict(txt: &str) {
 }
 
 fn run_transcript_file_with_trailing_policy(txt: &str, allow_trailing: bool) {
+    run_transcript_file_with_trailing_policy_and_flags(txt, allow_trailing, &[], &[]);
+}
+
+fn run_transcript_file_strict_with_flags(txt: &str, allow: &[&str]) {
+    run_transcript_file_with_trailing_policy_and_flags(txt, false, allow, &[]);
+}
+
+fn run_transcript_file_with_trailing_policy_and_flags(
+    txt: &str,
+    allow_trailing: bool,
+    allow: &[&str],
+    deny: &[&str],
+) {
     let (inputs, expected_lines) = parse_transcript(txt);
     let input_refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
-    let actual = run_transcript(&input_refs, None);
+    let actual = run_transcript_with_flags(&input_refs, None, allow, deny);
 
     // Split actual output into lines (preserve blank lines).
     let actual_lines: Vec<&str> = actual.lines().collect();
@@ -721,12 +734,12 @@ fn repl_f32_exact_transcript() {
 
 #[test]
 fn repl_zoned_exact_transcript() {
-    run_transcript_file_strict(include_str!("repl/zoned.txt"));
+    run_transcript_file_strict_with_flags(include_str!("repl/zoned.txt"), &["time"]);
 }
 
 #[test]
 fn repl_time_plane_exact_transcript() {
-    run_transcript_file_strict(include_str!("repl/time.txt"));
+    run_transcript_file_strict_with_flags(include_str!("repl/time.txt"), &["time"]);
 }
 
 #[test]

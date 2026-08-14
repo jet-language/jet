@@ -254,6 +254,13 @@ pub(crate) fn method_call_in_subset(
             && expr_in_subset(&args[0].expr, cx, locals);
     }
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
+        && method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD
+    {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE)
         && matches!(
             method,
             Syntax::INTERNAL_TASK_ALL_METHOD

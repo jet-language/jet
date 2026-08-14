@@ -738,6 +738,33 @@ mod s61_tests {
         ));
     }
 
+    /// D-TYPE2-TIME1=A: `task.timeout(duration)` keeps the ordinary Duration
+    /// argument grammar while using the compiler-private task dispatch seam.
+    #[test]
+    fn task_timeout_parses_as_duration_method() {
+        let p = program(
+            "fn run() {\n                wait :: 500ms\n                task.timeout(wait)\n            }\n",
+        );
+        let run = p.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(function) if function.name == "run" => Some(function),
+            _ => None,
+        });
+        let expr = run
+            .expect("run")
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Stmt::Expr(expr) => Some(expr),
+                _ => None,
+            })
+            .expect("task.timeout expression");
+        let Expr::MethodCall { method, args, .. } = expr else {
+            panic!("expected task.timeout method call, got {expr:?}");
+        };
+        assert_eq!(method, Syntax::INTERNAL_TASK_TIMEOUT_METHOD);
+        assert_eq!(args.len(), 1);
+    }
+
     /// D-FFI-INLINE1=A / D-FFI-RAWBODY1=A (card #501): `#FFI(c) fn` parses into an inline foreign
     /// tier function — the signature is an ordinary Jet signature, the body is
     /// captured as foreign source and the statement body is empty.

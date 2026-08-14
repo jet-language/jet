@@ -548,6 +548,14 @@ fn emit_plain_core_call(
             duration
         ));
     }
+    if module == "core.task" && method == "timeout" {
+        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        return Some(format!(
+            "{}jet_task_timeout_duration_ns(({}).ns)",
+            helper(""),
+            duration
+        ));
+    }
     if module == "core.tasks" && method == "interval" {
         let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
         return Some(format!(

@@ -953,6 +953,25 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
 }
 
 #[test]
+fn time_plane_comptime_matches_aot_and_dev_tiers() {
+    let source = parity_source(
+        "time_plane_view()",
+        r#"use core.time as time
+fn time_plane_view() => String {
+    wait :: 500ms
+    origin :: time.instant()
+    point :: origin + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}|{speed}"
+}"#,
+    );
+    let expected = check_aot_comptime("time-plane-focused", &source);
+    assert_eq!(expected, "500|5|6 meter/ns");
+    check_dev_tiers("time-plane-focused", &source, &expected);
+}
+
+#[test]
 fn registered_shared_kernel_edges_match_all_execution_tiers() {
     let cases = [
         (

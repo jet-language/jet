@@ -2021,6 +2021,11 @@ impl<'a> Fmt<'a> {
     /// D-CONC-SPAWN1=D: restore the one-word task surface from its compiler-
     /// private method-call form.
     fn fmt_task_surface_method(&mut self, method: &str, args: &[CallArg]) -> bool {
+        if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD && args.len() == 1 {
+            self.write("task.timeout");
+            self.fmt_method_args("timeout", args);
+            return true;
+        }
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             let [CallArg {
                 expr: Expr::Lambda(lam),

@@ -62,11 +62,12 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return None;
     }
-    if same_text(module, "core.time")
+    if (same_text(module, "core.time")
         && one_of(
             method,
             &["now", "now_utc", "today", "instant", "sleep", "start"],
-        )
+        ))
+        || (same_text(module, "core.task") && same_text(method, "timeout"))
     {
         return Some(Effect::Time);
     }
@@ -658,6 +659,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.tasks", "interval", "jet_std::interval", true, &[false]),
     CoreCallRecord::new("core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[]),
     CoreCallRecord::new("core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[]),
+    CoreCallRecord::new(
+        "core.task",
+        "timeout",
+        "jet_task_timeout_duration_ns",
+        true,
+        &[false],
+    )
+    .with_jit_symbol("jet_jit_task_timeout"),
     CoreCallRecord::new("core.reactive", "signal", "jet_std::JetSignal::new", true, &[false]), // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
     CoreCallRecord::new("core.event", "scope", "jet_std::JetEventScope::new", true, &[]), // D-EVENT1=D: first-party typed Event/Hook constructors.
     CoreCallRecord::new("core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[]),

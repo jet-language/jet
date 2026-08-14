@@ -51,3 +51,14 @@ pub fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
     let saved = JET_CTX_DEADLINE_MS.with(|c| c.replace(Some(deadline_ms)));
     JetDeadlineGuard { saved }
 }
+
+/// Tighten the current task deadline without replacing an earlier, shorter
+/// budget. The task-timeout surface uses this Prelude boundary on every tier.
+pub fn jet_ctx_set_deadline_min(deadline_ms: i64) {
+    JET_CTX_DEADLINE_MS.with(|c| {
+        let deadline = c
+            .get()
+            .map_or(deadline_ms, |current| current.min(deadline_ms));
+        c.set(Some(deadline));
+    });
+}

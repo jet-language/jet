@@ -1732,6 +1732,19 @@ fn lower_method_call_impl(
     // still lower through the existing spawn/select TIR nodes. The receiver is
     // compiler-private and is never emitted or looked up as a Rust value.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_TASK_SURFACE_TYPE) {
+        if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD && args.len() == 1 {
+            let duration = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                kind: TExprKind::CoreCall {
+                    module: "core.task".to_string(),
+                    method: "timeout".to_string(),
+                    args: vec![duration],
+                    source_span: method_span,
+                    widen_to_vec: vec![false],
+                },
+            };
+        }
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 let body_ty = lambda_body_ty(lam, cx, env);

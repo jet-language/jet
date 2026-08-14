@@ -1594,6 +1594,11 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 };
             }
+            if module == "core.task" && method == "timeout" {
+                return args.len() == 1
+                    && matches!(&args[0].ty, Type::Named(name) if name == "Duration")
+                    && resident_safe_expr(&args[0], callees);
+            }
             if module == "core.game" && method == "run" {
                 return !args.is_empty()
                     && args.len() <= 3

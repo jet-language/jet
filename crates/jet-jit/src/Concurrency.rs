@@ -1120,6 +1120,11 @@ extern "C" fn jet_jit_sleep(nanos: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_task_timeout(nanos: i64) -> i64 {
+    jet_codegen::scheduler::jet_task_timeout_duration_ns(nanos);
+    0
+}
+
 host_fns! {
     struct ConcurrencyHostFns;
     register: register_concurrency_symbols;
@@ -1204,6 +1209,7 @@ host_fns! {
     pending_exit_status: "jet_jit_pending_exit_status" => jet_jit_pending_exit_status: sig_noarg_i64;
     wait_value: "jet_jit_wait_value" => jet_jit_wait_value: sig_noarg_i64;
     sleep: "jet_jit_sleep" => jet_jit_sleep: sig_i64;
+    task_timeout: "jet_jit_task_timeout" => jet_jit_task_timeout: sig_i64;
     time_now: "jet_jit_time_now" => jet_jit_time_now: sig_noarg_i64;
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;

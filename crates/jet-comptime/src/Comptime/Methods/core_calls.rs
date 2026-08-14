@@ -1986,6 +1986,21 @@ pub fn apply_core_call_with_type(
             time_deadline_kernel::jet_std_time_sleep_duration_ns(nanos);
             Ok(CtValue::Unit)
         }
+        ("core.task", "timeout") => {
+            let nanos = match one(0)? {
+                CtValue::Struct { type_name, fields }
+                    if type_name == crate::Syntax::DURATION_TYPE => fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("ns", CtValue::Int(value)) => Some(*value),
+                            _ => None,
+                        })
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                _ => return Err(unsupported("task.timeout expects a Duration", span)),
+            };
+            time_deadline_kernel::jet_task_timeout_duration_ns(nanos);
+            Ok(CtValue::Unit)
+        }
         ("core.time", "start") => Ok(CtValue::Struct {
             type_name: "Stopwatch".to_string(),
             fields: vec![(

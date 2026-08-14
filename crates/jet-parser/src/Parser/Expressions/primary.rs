@@ -627,12 +627,31 @@ impl<'a> Parser<'a> {
                         Some(selector_span),
                     ));
                 }
+                if selector == Syntax::TASK_TIMEOUT_SELECTOR {
+                    self.expect(TokKind::LParen, "after `task.timeout`")?;
+                    let arg = self.call_arg()?;
+                    self.expect(TokKind::RParen, "to finish `task.timeout`")?;
+                    return Ok(Expr::MethodCall {
+                        receiver: Box::new(Expr::Ident(
+                            Syntax::INTERNAL_TASK_RECEIVER.to_string(),
+                            task_span,
+                        )),
+                        method: Syntax::INTERNAL_TASK_TIMEOUT_METHOD.to_string(),
+                        method_span: selector_span,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
+                        args: vec![arg],
+                        recv_type: None,
+                        resolved_ret: None,
+                        checked_widen: false,
+                    });
+                }
                 if !matches!(selector.as_str(), "all" | "race" | "any") {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!("unknown task selector `{selector}`"),
-                        "task combinators use only `all`, `race`, or `any`".to_string(),
-                        "write `task.all { … }`, `task.race { … }`, or `task.any { … }`"
+                        "task selectors use `timeout`, `all`, `race`, or `any`".to_string(),
+                        "write `task.timeout(duration)`, `task.all { … }`, `task.race { … }`, or `task.any { … }`"
                             .to_string(),
                         Some(selector_span),
                     ));

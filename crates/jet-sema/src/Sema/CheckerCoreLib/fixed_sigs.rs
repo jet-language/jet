@@ -742,6 +742,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
             None,
         )),
+        ("core.task", "timeout") => Some((
+            vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
+            Some(unit),
+        )),
         ("core.tasks", "interval") => Some((
             vec![(read, Type::Named("Duration".to_string()))],
             Some(Type::Apply {

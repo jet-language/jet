@@ -48,6 +48,14 @@ pub fn jet_std_time_duration_to_millis(nanos: i64) -> i64 {
     nanos.saturating_div(1_000_000)
 }
 
+/// D-TYPE2-TIME1=A: install a task deadline from the canonical Duration
+/// carrier. The deadline policy stays in this shared Prelude kernel; engines
+/// only marshal the carrier and call this function.
+pub fn jet_task_timeout_duration_ns(nanos: i64) {
+    let millis = jet_std_time_duration_to_millis(nanos).max(0);
+    jet_ctx_set_deadline_min(jet_std_time_now().saturating_add(millis));
+}
+
 /// D-TYPE2-TIME1=A: the core sleep call receives the canonical Duration
 /// carrier and only this Prelude adapter projects it to scheduler milliseconds.
 pub fn jet_std_time_sleep_duration_ns(nanos: i64) {

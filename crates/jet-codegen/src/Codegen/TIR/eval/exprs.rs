@@ -4665,6 +4665,16 @@ impl<'a> EvalCtx<'a> {
             }
             return Ok(CtValue::Int(address as i64));
         }
+        if module == "core.task" && method == "timeout" {
+            if !self.runtime_execution {
+                return Err(unsupported("`task.timeout` at compile time", source_span));
+            }
+            let duration = self.eval_expr_child(&args[0], scope)?;
+            let duration = duration_ns(&duration)
+                .ok_or_else(|| unsupported("task.timeout duration", self.span()))?;
+            crate::scheduler::jet_task_timeout_duration_ns(duration);
+            return Ok(CtValue::Unit);
+        }
         if module == "core.tasks" && method == "channel" {
             if !self.runtime_execution {
                 return Err(unsupported("`tasks.channel` at compile time", source_span));

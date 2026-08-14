@@ -2487,6 +2487,17 @@ pub fn ambient_core_call(
     if let Some(result) = ambient_time_call(module, method, &args, span, resolved_ret.as_ref()) {
         return Some(result);
     }
+    if module == "core.task" && method == "timeout" {
+        let result = args
+            .first()
+            .and_then(duration_ns)
+            .ok_or_else(|| unsupported("task.timeout expects a Duration", span))
+            .map(|nanos| {
+                jet_codegen::scheduler::jet_task_timeout_duration_ns(nanos);
+                CtValue::Unit
+            });
+        return Some(result);
+    }
     // I9: core.http.server adapters call the same Prelude helpers as AOT/JIT.
     if module == "core.http.server" {
         return Some(ambient_http_server_call(method, &args, span));

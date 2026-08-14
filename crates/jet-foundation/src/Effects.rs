@@ -184,6 +184,7 @@ pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
             "core.time",
             "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
         )
+            | ("core.task", "timeout")
             | (
                 "core.math.random",
                 "int"
@@ -250,7 +251,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     }
     if is_nondeterministic_core(module, method) {
         return Some(match module {
-            "core.time" => Effect::Time,
+            "core.time" | "core.task" => Effect::Time,
             "core.math.random" | "core.crypto.random" => Effect::Rand,
             _ => return None,
         });

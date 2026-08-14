@@ -1760,6 +1760,7 @@ fn type_check_stmts(
     session: &Session,
     stmts: &[Stmt],
     step: usize,
+    check_src: &str,
 ) -> Result<Vec<Stmt>, Vec<Diagnostic>> {
     let base_src = format!(
         "{}{}{}",
@@ -1767,7 +1768,9 @@ fn type_check_stmts(
         session.import_src(),
         session.accumulated_src(),
     );
-    let prog_src = format!("{base_src}\nfn __repl_check_{step}__() {{}}\n");
+    let prog_src = format!(
+        "{base_src}\nfn __repl_check_{step}__() {{\n{check_src}\n}}\n"
+    );
     let mut body = session.sema_stmts.clone();
     body.extend_from_slice(stmts);
     run_sema_with_body(
@@ -2458,8 +2461,13 @@ pub(crate) fn execute_line(
             }
         }
 
-        InputKind::Stmts(stmts, suppress, _check_src) => {
-            let checked_stmts = match type_check_stmts(session, &stmts, session.step) {
+        InputKind::Stmts(stmts, suppress, check_src) => {
+            let checked_stmts = match type_check_stmts(
+                session,
+                &stmts,
+                session.step,
+                &check_src,
+            ) {
                 Ok(stmts) => stmts,
                 Err(errors) => {
                     if !quiet {
@@ -3225,8 +3233,13 @@ pub fn run_transcript_with_flags(
                 session.remember_success(trimmed);
             }
 
-            InputKind::Stmts(stmts, suppress, _check_src) => {
-                let checked_stmts = match type_check_stmts(&session, &stmts, session.step) {
+            InputKind::Stmts(stmts, suppress, check_src) => {
+                let checked_stmts = match type_check_stmts(
+                    &session,
+                    &stmts,
+                    session.step,
+                    &check_src,
+                ) {
                     Ok(stmts) => stmts,
                     Err(errors) => {
                         for d in &errors {

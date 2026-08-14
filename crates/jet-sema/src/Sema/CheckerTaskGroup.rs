@@ -115,6 +115,12 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD {
+            let ret = self.infer_task_timeout(args, span);
+            *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
+            *resolved_ret_out = ret.clone();
+            return ret;
+        }
         let active_group = self.active_taskgroup().map(|group| group.name.clone());
         if let Some(group) = active_group {
             *receiver = Box::new(Expr::Ident(group, receiver.span()));
@@ -152,6 +158,43 @@ impl<'a> Checker<'a> {
         *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
         *resolved_ret_out = ret.clone();
         ret
+    }
+
+    /// D-TYPE2-TIME1=A: `task.timeout(duration)` consumes the same canonical
+    /// Duration delta as `core.time.sleep` and timer channels.
+    fn infer_task_timeout(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`task.timeout` takes one Duration, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "a task timeout is a canonical Time delta".to_string(),
+                "write `task.timeout(500ms)` or pass a Duration binding".to_string(),
+                Some(span),
+            ));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
+        let duration_ty = self.infer(&mut args[0].expr)?;
+        if !matches!(duration_ty, Type::Named(ref name) if name == Syntax::DURATION_TYPE) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`task.timeout(duration: …)` needs a Duration, not {}",
+                    duration_ty.show()
+                ),
+                "task timeouts use the canonical Time delta".to_string(),
+                "write `task.timeout(500ms)`".to_string(),
+                Some(args[0].expr.span()),
+            ));
+        }
+        self.record_effect(crate::Sema::Effects::Effect::Time.name(), span);
+        Some(Type::Named("Unit".to_string()))
     }
 
     pub(crate) fn taskgroup_receiver_ok(&mut self, receiver: &Expr, span: Span) -> bool {

@@ -1230,6 +1230,22 @@ fn run() {
 }
 
 #[test]
+fn canonical_time_timeout_and_sleep_spellings_compile() {
+    let src = r#"
+use core.time.[sleep]
+
+fn run() {
+    #Grant(caps: Time) {
+        wait :: 500ms
+        task.timeout(wait)
+        sleep(500ms)
+    }
+}
+"#;
+    jet::compile(src).expect("canonical task timeout and direct sleep should compile");
+}
+
+#[test]
 fn quantities_display_units_styles_and_explicit_overrides() {
     let defaults = r#"
 #UnitFamily(Length, dimension, base: meter) { meter px(scale: 1) }

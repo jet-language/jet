@@ -155,6 +155,11 @@ pub const TYPE_TASKGROUP: &str = "TaskGroup";
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
 pub const INTERNAL_TASK_SPAWN_METHOD: &str = "\0jet.task.spawn";
 
+/// D-TYPE2-TIME1=A: compiler-private dispatch method for `task.timeout(duration)`.
+pub const INTERNAL_TASK_TIMEOUT_METHOD: &str = "\0jet.task.timeout";
+/// User-facing selector for the canonical task timeout surface.
+pub const TASK_TIMEOUT_SELECTOR: &str = "timeout";
+
 /// Compiler-private dispatch method for `task.all { … }`.
 pub const INTERNAL_TASK_ALL_METHOD: &str = "\0jet.task.all";
 
