@@ -1,6 +1,5 @@
 use super::*;
-use crate::AST::KnowledgeVector;
-use crate::Names::NameLedger;
+use crate::AST::{KnowledgeVector, NameLedger};
 
 pub(crate) fn name_defined(
     name: &str,
