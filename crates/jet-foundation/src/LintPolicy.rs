@@ -3,6 +3,37 @@
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Registry::DiagnosticRow;
 use crate::Syntax;
+use std::fmt;
+
+/// One parse failure from a lint-selection surface. Code/name are present only
+/// when the rejected value is a registered diagnostic code, so the caller can
+/// fill the typed diagnostic row without parsing user-facing prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LintPolicyError {
+    pub detail: String,
+    pub code: Option<String>,
+    pub name: Option<String>,
+}
+
+impl LintPolicyError {
+    fn message(detail: impl Into<String>) -> Self {
+        Self { detail: detail.into(), code: None, name: None }
+    }
+
+    fn diagnostic_code(detail: impl Into<String>, code: &str, name: Option<&str>) -> Self {
+        Self {
+            detail: detail.into(),
+            code: Some(code.to_string()),
+            name: name.map(str::to_string),
+        }
+    }
+}
+
+impl fmt::Display for LintPolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
 
 /// The complete lint-selection registry, projected from the typed diagnostic
 /// rows. No config surface owns a second code/name table.
@@ -27,21 +58,6 @@ pub fn code_for_name(name: &str) -> Option<&'static str> {
 /// Resolve a rendered diagnostic code to its stable lint name.
 pub fn name_for_code(code: &str) -> Option<&'static str> {
     crate::Registry::diagnostic(code).and_then(|lint| lint.lint_name)
-}
-
-/// Build the registered manifest fix for a lint-policy value that used a
-/// diagnostic code. The manifest loader and the driver share this wording.
-pub fn policy_error_fix(detail: &str) -> String {
-    detail
-        .split_once("use `")
-        .and_then(|(_, rest)| rest.split_once('`'))
-        .map(|(name, _)| {
-            format!("use `{name}` in `policy.lints.deny` instead of the diagnostic code")
-        })
-        .unwrap_or_else(|| {
-            "use a registered lint name in `policy.lints.deny` instead of a diagnostic code"
-                .to_string()
-        })
 }
 
 /// Build the registered refusal for a source-level lint allowance that used
@@ -73,7 +89,7 @@ pub fn selection_code_error(value: &str, surface: &str, span: Option<Span>) -> O
 }
 
 /// Parse the `lints:` part of a package policy.
-pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
+pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, LintPolicyError> {
     let Some(lints_body) = block_body(body, Syntax::POLICY_FIELD_LINTS, '{', '}') else {
         return Ok(None);
     };
@@ -82,10 +98,10 @@ pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
         if key == Syntax::LINTS_FIELD_DENY {
             deny = parse_lint_name_list(value.trim())?;
         } else {
-            return Err(format!(
+            return Err(LintPolicyError::message(format!(
                 "unknown `policy.lints` field `{key}` — allowed: `{}`",
                 Syntax::LINTS_FIELD_DENY,
-            ));
+            )));
         }
     }
     Ok(Some(deny))
@@ -94,7 +110,7 @@ pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
 /// Parse package source with the same `policy.lints.deny` reader used by the
 /// Package model. Loader validation owns malformed-package diagnostics; this
 /// read only supplies the already-validated policy to sema.
-pub fn parse_package_source(source: &str) -> Result<Option<Vec<String>>, String> {
+pub fn parse_package_source(source: &str) -> Result<Option<Vec<String>>, LintPolicyError> {
     let source = strip_comments(source);
     let Some(policy_body) = block_body(&source, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') else {
         return Ok(None);
@@ -139,16 +155,16 @@ fn e1293(original: &Diagnostic) -> Diagnostic {
     )
 }
 
-fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
+fn parse_lint_name_list(value: &str) -> Result<Vec<String>, LintPolicyError> {
     let inner = value
         .trim()
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .ok_or_else(|| {
-            format!(
+            LintPolicyError::message(format!(
                 "`{}:` must be a list like `[same_enum_guard_table, float_money]`",
                 Syntax::LINTS_FIELD_DENY
-            )
+            ))
         })?;
     let mut names = Vec::new();
     for entry in top_level_commas(inner) {
@@ -159,19 +175,27 @@ fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
         let name = unquote(entry);
         let Some(_) = code_for_name(&name) else {
             if let Some(canonical_name) = name_for_code(&name) {
-                return Err(format!(
-                    "`{name}` is a diagnostic code; use `{canonical_name}` in `policy.lints.deny`"
+                return Err(LintPolicyError::diagnostic_code(
+                    format!(
+                        "`{name}` is a diagnostic code; use `{canonical_name}` in `policy.lints.deny`"
+                    ),
+                    &name,
+                    Some(canonical_name),
                 ));
             }
             if is_diagnostic_code_shape(&name) {
-                return Err(format!(
-                    "`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values"
+                return Err(LintPolicyError::diagnostic_code(
+                    format!(
+                        "`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values"
+                    ),
+                    &name,
+                    None,
                 ));
             }
-            return Err(format!(
+            return Err(LintPolicyError::message(format!(
                 "`{name}` isn't a registered lint policy name; allowed: {}",
                 known_lint_policy_names()
-            ));
+            )));
         };
         names.push(name);
     }
@@ -396,7 +420,7 @@ mod tests {
         let code = ["L", "0302"].concat();
         let source = format!("policy: .{{ lints: .{{ deny: [{code}] }} }}");
         let error = parse_package_source(&source).unwrap_err();
-        assert!(error.contains("use `same_enum_guard_table`"));
+        assert!(error.detail.contains("use `same_enum_guard_table`"));
     }
 
     #[test]

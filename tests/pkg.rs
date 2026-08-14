@@ -1571,18 +1571,18 @@ fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "a lint code is not a policy value:\n{stderr}");
     assert!(
-        stderr.contains("Error [E1206]: `package.jet` has a shape error"),
+        stderr.contains("Error [E1206]: `package.jet` has a manifest shape error."),
         "missing diagnostic what:\n{stderr}"
     );
     assert!(
         stderr.contains(
-            "Why: `L0302` is a diagnostic code; use `same_enum_guard_table` in `policy.lints.deny`"
+            "Why: A manifest field, value, or policy form is outside the current `package.jet` grammar."
         ),
         "missing diagnostic why:\n{stderr}"
     );
     assert!(
         stderr.contains(
-            "Fix: use `same_enum_guard_table` in `policy.lints.deny` instead of the diagnostic code"
+            "Fix: For a lint selector, use `same_enum_guard_table` in `policy.lints.deny` instead of diagnostic code `L0302`; otherwise use the current `package.jet` grammar."
         ),
         "missing diagnostic fix:\n{stderr}"
     );

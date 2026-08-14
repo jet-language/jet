@@ -346,6 +346,9 @@ pub enum PackageParseError {
     InvalidValue { field: String, value: String },
     ConfigMembers,
     Composition(String),
+    /// D-LINTPOLICY1: a registered diagnostic code was used as a lint-policy
+    /// selector; Manifest turns the typed pair into the E1206 row.
+    LintPolicyCode { code: String, name: String },
     /// D-TGT1/D-TGT2/D-TGT3: a `packages:` entry names an unknown or
     /// not-yet-shipped target.
     BadTarget { name: String, value: String, reserved: bool },
@@ -379,6 +382,10 @@ impl fmt::Display for PackageParseError {
             }
             Self::ConfigMembers => f.write_str("Config cannot declare `members`"),
             Self::Composition(value) => f.write_str(value),
+            Self::LintPolicyCode { code, name } => write!(
+                f,
+                "`{code}` is a diagnostic code; use `{name}` in `policy.lints.deny`"
+            ),
             Self::BadTarget { name, value, reserved } => write!(
                 f,
                 "package `{name}` names {} target `{value}`",

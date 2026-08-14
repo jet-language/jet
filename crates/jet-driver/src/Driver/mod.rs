@@ -194,15 +194,20 @@ fn package_lints_deny(
         Err(error) => return Err(error.diagnostic()),
     };
     let source = manifest.file.text().map_err(|error| error.diagnostic())?;
-    let deny = jet_foundation::LintPolicy::parse_package_source(&source).map_err(|detail| {
-        let fix = jet_foundation::LintPolicy::policy_error_fix(&detail);
-        Diagnostic::error(
-            "E1206",
-            "invalid package manifest".to_string(),
-            detail,
-            fix,
-            None,
-        )
+    let deny = jet_foundation::LintPolicy::parse_package_source(&source).map_err(|error| {
+        let jet_foundation::LintPolicy::LintPolicyError { detail, code, name } = error;
+        match (code.as_deref(), name.as_deref()) {
+            (Some(code), Some(name)) => {
+                Diagnostic::from_row("E1206", &[("code", code), ("name", name)], None)
+            }
+            _ => Diagnostic::error(
+                "E1206",
+                "invalid package manifest".to_string(),
+                detail,
+                "fix `package.jet` before compiling the package".to_string(),
+                None,
+            ),
+        }
     })?.unwrap_or_default();
     resolver
         .revalidate_file(&manifest.file)

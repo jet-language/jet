@@ -907,7 +907,13 @@ fn parse_trust_decision(value: &str) -> Result<TrustDecision, PackageParseError>
 }
 
 pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, PackageParseError> {
-    jet_foundation::LintPolicy::parse_policy_lints(body).map_err(|detail| err(detail))
+    jet_foundation::LintPolicy::parse_policy_lints(body).map_err(|error| {
+        let jet_foundation::LintPolicy::LintPolicyError { detail, code, name } = error;
+        match (code, name) {
+            (Some(code), Some(name)) => PackageParseError::LintPolicyCode { code, name },
+            _ => err(detail),
+        }
+    })
 }
 
 pub(super) fn parse_memory_policy(

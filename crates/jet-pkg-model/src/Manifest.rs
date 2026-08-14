@@ -466,9 +466,7 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::ConfigMembers => {
             e1206(&file, "a Config file cannot declare `members`")
         }
-        PackageParseError::Composition(detail) if detail.contains("is a diagnostic code") => {
-            e1206_lint_policy(&file, detail)
-        }
+        PackageParseError::LintPolicyCode { code, name } => e1206_lint_policy(code, name),
         PackageParseError::Composition(detail) => e1206(&file, detail),
         PackageParseError::BadTarget { name, value, reserved: true } => e1210(
             &file,
@@ -570,15 +568,8 @@ fn e1206_retired_policy(_file: &str, field: &str, replacement: &str) -> Diagnost
     )
 }
 
-fn e1206_lint_policy(_file: &str, detail: &str) -> Diagnostic {
-    let fix = jet_foundation::LintPolicy::policy_error_fix(detail);
-    Diagnostic::error(
-        "E1206",
-        format!("`{}` has a shape error", Syntax::PACKAGE_FILE),
-        detail.to_string(),
-        fix,
-        None,
-    )
+fn e1206_lint_policy(code: &str, name: &str) -> Diagnostic {
+    Diagnostic::from_row("E1206", &[("code", code), ("name", name)], None)
 }
 
 pub fn e1209(_file: &str, section: &str) -> Diagnostic {
