@@ -3868,7 +3868,7 @@ impl<'a> EvalCtx<'a> {
         operation: &str,
         obligation: &str,
     ) -> Result<(), Diagnostic> {
-        if !self.runtime_execution || !cfg!(not(jet_release)) {
+        if !self.runtime_execution {
             return Ok(());
         }
         let (bytes, alignment) = sentry_layout(ty);

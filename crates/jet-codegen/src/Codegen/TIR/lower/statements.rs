@@ -2993,7 +2993,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             let scoped = clone_env(env);
             let gate = TUnsafeGate {
                 file: cx.file.clone(),
-                line: crate::Diagnostics::span_line_col(&cx.src, span.start).0,
+                line: crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32,
                 reason: audit.clone().unwrap_or_default(),
                 enabled: env.sentries_enabled,
             };

@@ -32,6 +32,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         binder_refs: env.binder_refs.clone(),
         txn_handle: env.txn_handle.clone(),
         txn_undo_needed: env.txn_undo_needed.clone(),
+        sentries_enabled: env.sentries_enabled,
     }
 }
 
