@@ -207,8 +207,9 @@ fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
     xs.to_vec()
 }
 
-// D-ALLOCFAIL1=A: collection fallibility is one Prelude path. `try_reserve`
-// is the only policy here; AOT, JIT, and TIR-eval marshal these functions.
+// D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
+// reservations stay here; map storage insertion is a representation hook.
+// AOT, JIT, and TIR-eval marshal these functions.
 fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
     Ok(Vec::new())
 }
@@ -253,10 +254,8 @@ fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
         return Ok(map.insert(key, value));
     }
     let requested = std::mem::size_of::<(K, V)>().max(1);
-    std::ops::DerefMut::deref_mut(map)
-        .try_reserve(1)
-        .map_err(|_| jet_alloc_error(requested, "Map"))?;
-    Ok(map.insert(key, value))
+    jet_map_try_insert_storage(map, key, value)
+        .map_err(|_| jet_alloc_error(requested, "Map"))
 }
 
 fn jet_string_try_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {

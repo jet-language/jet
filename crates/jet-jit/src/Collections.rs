@@ -98,6 +98,16 @@ mod collection_semantics {
         }
     }
 
+    // BTreeMap has no stable fallible reservation API. Keep this representation
+    // step at the map seam; the shared Prelude owns the AllocError projection.
+    fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
+        map: &mut JetMap<K, V>,
+        key: K,
+        value: V,
+    ) -> Result<Option<V>, ()> {
+        Ok(map.insert(key, value))
+    }
+
     fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
         crate::runtime_host::runtime_stop_unwind("E3001", line, msg)
     }

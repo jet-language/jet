@@ -1390,6 +1390,16 @@ fn jet_map_insert<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>, k: K, v: V) {
     m.insert(k, v);
 }
 
+// BTreeMap has no stable fallible reservation API. Keep this representation
+// step at the map seam; the shared Prelude owns the AllocError projection.
+fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
+    m: &mut JetMap<K, V>,
+    k: K,
+    v: V,
+) -> Result<Option<V>, ()> {
+    Ok(m.insert(k, v))
+}
+
 /// D-MAP-MERGE1=E: merge `other` into a clone of `left`. Right wins on shared keys.
 fn jet_map_merge<K: Ord + Clone, V: Clone>(
     left: &JetMap<K, V>,
