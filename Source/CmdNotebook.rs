@@ -354,7 +354,7 @@ fn inspect_message(
         ClientKind::CanvasLens => kernel.canvas_visible_output(cell_id),
         ClientKind::JupyterAdapter => kernel.jupyter_visible_output(cell_id),
     })
-        .map(|out| out.bundle.text_plain.clone())
+        .map(|out| out.text_plain.clone())
         .unwrap_or_else(|| "(no live output)".into());
     Ok(format!("inspected={};source_len={};output={}", cell.id, cell.source.len(), output))
 }
