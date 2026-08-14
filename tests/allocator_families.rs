@@ -31,15 +31,44 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
         std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
     let sentry = std::fs::read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
+    let runtime_stop = r#"
+fn jet_sentry_runtime_stop(
+    code: &str,
+    file: &str,
+    line: u32,
+    gate: &str,
+    operation: &str,
+    obligation: &str,
+    detail: &str,
+) -> ! {
+    let report = jet_render_runtime_sentry(
+        match code {
+            "R0801" => "R0801",
+            "R0802" => "R0802",
+            "R0803" => "R0803",
+            _ => "R0801",
+        },
+        file,
+        line,
+        gate,
+        operation,
+        obligation,
+        detail,
+    );
+    panic!("{}", report.rendered);
+}
+"#;
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
 {outcome}
 {fault_injection}
+{runtime_stop}
 mod jet_uninit_semantics {{
 {uninit}
 }}
 mod jet_mem {{
+    use super::jet_sentry_runtime_stop;
     mod jet_sentry {{
 {sentry}
     }}
