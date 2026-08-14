@@ -89,7 +89,9 @@ pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], flush: bool) -> std::io:
     use std::io::Write;
     let mut out = std::io::stdout().lock();
     out.write_all(bytes)?;
-    if flush || jet_term_stdout_is_terminal() {
+    // stdout and stderr may share one non-TTY sink. Flush byte-bearing writes
+    // so their Prelude order remains observable after the adapters marshal it.
+    if flush || !bytes.is_empty() || jet_term_stdout_is_terminal() {
         out.flush()?;
     }
     Ok(())
@@ -103,7 +105,9 @@ pub(crate) fn jet_term_write_stderr_bytes(bytes: &[u8], flush: bool) -> std::io:
     use std::io::Write;
     let mut out = std::io::stderr().lock();
     out.write_all(bytes)?;
-    if flush || jet_term_stderr_is_terminal() {
+    // stdout and stderr may share one non-TTY sink. Flush byte-bearing writes
+    // so their Prelude order remains observable after the adapters marshal it.
+    if flush || !bytes.is_empty() || jet_term_stderr_is_terminal() {
         out.flush()?;
     }
     Ok(())
