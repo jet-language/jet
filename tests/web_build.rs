@@ -1613,7 +1613,8 @@ process.on("unhandledRejection", (error) => {
   if (error?.name !== "JetError") throw error;
 });
 const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
-const wasm = await instantiateWasm("./app.wasm");
+const instance = await instantiateWasm("./app.wasm");
+const wasm = instance.exports;
 const status = wasm.jet_export_run();
 console.log("rawStatus=" + status);
 console.log("raw=" + JSON.stringify(takeWasmError(wasm)));
@@ -1714,7 +1715,8 @@ fn run() => Int ? {
     let wasm_ok_harness = r#"
 process.on("unhandledRejection", (error) => { throw error; });
 const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
-const wasm = await instantiateWasm("./app.wasm");
+const instance = await instantiateWasm("./app.wasm");
+const wasm = instance.exports;
 const status = wasm.jet_export_run();
 const raw = takeWasmError(wasm);
 if (status !== 0) throw new Error("fallible Wasm success returned failure status");
