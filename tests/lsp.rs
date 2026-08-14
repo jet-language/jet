@@ -1229,7 +1229,7 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
         diagnostics.contains(r#""fix":"replace `#[Codable]` with `#Codable`""#),
         "{diagnostics}"
     );
-    assert!(diagnostics.contains(r#""new_text":"#Codable""#), "{diagnostics}");
+    assert!(diagnostics.contains(r##""new_text":"#Codable""##), "{diagnostics}");
 
     send_msg(
         &mut stdin,
@@ -1244,7 +1244,7 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
         actions.contains(r#""title":"replace `#[Codable]` with `#Codable`""#),
         "{actions}"
     );
-    assert!(actions.contains(r#""newText":"#Codable""#), "{actions}");
+    assert!(actions.contains(r##""newText":"#Codable""##), "{actions}");
 
     send_msg(
         &mut stdin,
