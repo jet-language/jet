@@ -253,7 +253,8 @@ fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
         return Ok(map.insert(key, value));
     }
     let requested = std::mem::size_of::<(K, V)>().max(1);
-    map.try_reserve(1)
+    std::ops::DerefMut::deref_mut(map)
+        .try_reserve(1)
         .map_err(|_| jet_alloc_error(requested, "Map"))?;
     Ok(map.insert(key, value))
 }

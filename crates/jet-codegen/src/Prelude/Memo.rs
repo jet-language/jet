@@ -7,9 +7,56 @@ use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 #[derive(Clone)]
-struct JetMemoState<K, V> {
+struct JetLru<K, V> {
     bound: Option<usize>,
-    entries: Vec<(Option<K>, V)>,
+    entries: Vec<(K, V)>,
+}
+
+impl<K, V> JetLru<K, V> {
+    fn new(bound: Option<usize>) -> Self {
+        Self {
+            bound,
+            entries: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
+    fn put(&mut self, key: K, value: V) -> Option<V> {
+        if self.bound == Some(0) {
+            return None;
+        }
+        let displaced = self
+            .entries
+            .iter()
+            .position(|(stored, _)| stored == &key)
+            .map(|index| self.entries.remove(index).1);
+        self.entries.insert(0, (key, value));
+        if self
+            .bound
+            .is_some_and(|bound| self.entries.len() > bound)
+        {
+            self.entries.pop();
+        }
+        displaced
+    }
+
+    fn get(&mut self, key: &K) -> Option<V> {
+        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+        let (stored, value) = self.entries.remove(index);
+        let out = value.clone();
+        self.entries.insert(0, (stored, value));
+        Some(out)
+    }
+}
+
+#[derive(Clone)]
+struct JetMemoState<K, V> {
+    cache: JetLru<Option<K>, V>,
     hits: i64,
     misses: i64,
 }
@@ -17,8 +64,7 @@ struct JetMemoState<K, V> {
 impl<K, V> JetMemoState<K, V> {
     fn new(bound: Option<usize>) -> Self {
         Self {
-            bound,
-            entries: Vec::new(),
+            cache: JetLru::new(bound),
             hits: 0,
             misses: 0,
         }
@@ -58,11 +104,16 @@ impl<K, V> JetMemo<K, V> {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((_, value)) = state.entries.iter().find(|(key, _)| key.is_none()) {
+        if let Some((_, value)) = state
+            .cache
+            .entries
+            .iter()
+            .find(|(key, _)| key.is_none())
+        {
             return value.clone();
         }
         let value = build();
-        state.entries.insert(0, (None, value.clone()));
+        state.cache.entries.insert(0, (None, value.clone()));
         value
     }
 
@@ -70,6 +121,7 @@ impl<K, V> JetMemo<K, V> {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .cache
             .entries
             .retain(|(key, _)| key.is_some());
     }
@@ -81,19 +133,12 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(index) = state.entries.iter().position(|(stored, _)| {
-            stored
-                .as_ref()
-                .is_some_and(|stored_key| stored_key == key)
-        }) else {
+        let Some(value) = state.cache.get(&Some(key.clone())) else {
             state.misses += 1;
             return None;
         };
-        let (stored, value) = state.entries.remove(index);
-        let out = value.clone();
-        state.entries.insert(0, (stored, value));
         state.hits += 1;
-        Some(out)
+        Some(value)
     }
 
     pub fn put(&self, key: K, value: V) {
@@ -101,23 +146,7 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if state.bound == Some(0) {
-            return;
-        }
-        if let Some(index) = state.entries.iter().position(|(stored, _)| {
-            stored
-                .as_ref()
-                .is_some_and(|stored_key| stored_key == &key)
-        }) {
-            state.entries.remove(index);
-        }
-        state.entries.insert(0, (Some(key), value));
-        if state
-            .bound
-            .is_some_and(|bound| state.entries.len() > bound)
-        {
-            state.entries.pop();
-        }
+        state.cache.put(Some(key), value);
     }
 
     pub fn stats(&self) -> JetMemoStats {
@@ -128,8 +157,9 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
         JetMemoStats {
             hits: state.hits,
             misses: state.misses,
-            size: state.entries.len() as i64,
+            size: state.cache.len() as i64,
             bound: state
+                .cache
                 .bound
                 .map(|bound| bound.to_string())
                 .unwrap_or_else(|| "none".to_string()),
