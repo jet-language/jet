@@ -14595,21 +14595,56 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.b.ins().select(neg_mask, neg, x));
                         }
                         "max" if args.len() == 2 => {
-                            let a = self.lower_expr(&args[0])?;
-                            let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmax(a, b));
+                            let host_id = match &args[0].ty {
+                                Type::Int => self.host.math_extra.max_i64,
+                                Type::Float => self.host.math_extra.max_f64,
+                                Type::Float32 => self.host.math_extra.max_f32,
+                                other => {
+                                    return Err(format!(
+                                        "jit core.math.max unsupported type: {other:?}"
+                                    ))
+                                }
+                            };
+                            (
+                                host_id,
+                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                            )
                         }
                         "min" if args.len() == 2 => {
-                            let a = self.lower_expr(&args[0])?;
-                            let b = self.lower_expr(&args[1])?;
-                            return Ok(self.b.ins().fmin(a, b));
+                            let host_id = match &args[0].ty {
+                                Type::Int => self.host.math_extra.min_i64,
+                                Type::Float => self.host.math_extra.min_f64,
+                                Type::Float32 => self.host.math_extra.min_f32,
+                                other => {
+                                    return Err(format!(
+                                        "jit core.math.min unsupported type: {other:?}"
+                                    ))
+                                }
+                            };
+                            (
+                                host_id,
+                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                            )
                         }
                         "clamp" if args.len() == 3 => {
-                            let x = self.lower_expr(&args[0])?;
-                            let lo = self.lower_expr(&args[1])?;
-                            let hi = self.lower_expr(&args[2])?;
-                            let raised = self.b.ins().fmax(x, lo);
-                            return Ok(self.b.ins().fmin(raised, hi));
+                            let host_id = match &args[0].ty {
+                                Type::Int => self.host.math_extra.clamp_i64,
+                                Type::Float => self.host.math_extra.clamp_f64,
+                                Type::Float32 => self.host.math_extra.clamp_f32,
+                                other => {
+                                    return Err(format!(
+                                        "jit core.math.clamp unsupported type: {other:?}"
+                                    ))
+                                }
+                            };
+                            (
+                                host_id,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                    self.lower_expr(&args[2])?,
+                                ],
+                            )
                         }
                         "decimal" if args.len() == 1 => (
                             self.host.num.decimal_from_str,

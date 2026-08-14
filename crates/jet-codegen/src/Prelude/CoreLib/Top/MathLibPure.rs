@@ -1,6 +1,42 @@
 // Shared core.math helpers (I9). Included by AOT prelude, JIT math_rt, and comptime ambient.
 // Keep std-only; no jet_std / host types.
 
+pub fn jet_std_math_min_i64(left: i64, right: i64) -> i64 {
+    left.min(right)
+}
+
+pub fn jet_std_math_max_i64(left: i64, right: i64) -> i64 {
+    left.max(right)
+}
+
+pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
+    value.clamp(low, high)
+}
+
+pub fn jet_std_math_min_f64(left: f64, right: f64) -> f64 {
+    left.min(right)
+}
+
+pub fn jet_std_math_max_f64(left: f64, right: f64) -> f64 {
+    left.max(right)
+}
+
+pub fn jet_std_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
+    value.clamp(low, high)
+}
+
+pub fn jet_std_math_min_f32(left: f32, right: f32) -> f32 {
+    left.min(right)
+}
+
+pub fn jet_std_math_max_f32(left: f32, right: f32) -> f32 {
+    left.max(right)
+}
+
+pub fn jet_std_math_clamp_f32(value: f32, low: f32, high: f32) -> f32 {
+    value.clamp(low, high)
+}
+
 /// The largest whole number whose square is at most `value`, or absent when
 /// there is none. A negative number has no whole square root.
 pub fn jet_std_math_isqrt(value: i64) -> Option<i64> {
@@ -261,4 +297,3 @@ pub fn jet_std_math_lgamma(x: f64) -> f64 {
         g.ln()
     }
 }
-

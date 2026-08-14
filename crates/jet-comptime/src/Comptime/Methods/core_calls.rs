@@ -421,6 +421,47 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
     }
 }
 
+fn core_math_float_min(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
+    match (left, right) {
+        (CtFloat::F32(left), CtFloat::F32(right)) => {
+            Ok(CtFloat::F32(math_lib_pure::jet_std_math_min_f32(left, right)))
+        }
+        (CtFloat::F64(left), CtFloat::F64(right)) => {
+            Ok(CtFloat::F64(math_lib_pure::jet_std_math_min_f64(left, right)))
+        }
+        _ => Err(unsupported("mixing float widths", span)),
+    }
+}
+
+fn core_math_float_max(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
+    match (left, right) {
+        (CtFloat::F32(left), CtFloat::F32(right)) => {
+            Ok(CtFloat::F32(math_lib_pure::jet_std_math_max_f32(left, right)))
+        }
+        (CtFloat::F64(left), CtFloat::F64(right)) => {
+            Ok(CtFloat::F64(math_lib_pure::jet_std_math_max_f64(left, right)))
+        }
+        _ => Err(unsupported("mixing float widths", span)),
+    }
+}
+
+fn core_math_float_clamp(
+    value: CtFloat,
+    low: CtFloat,
+    high: CtFloat,
+    span: Span,
+) -> Result<CtFloat, Diagnostic> {
+    match (value, low, high) {
+        (CtFloat::F32(value), CtFloat::F32(low), CtFloat::F32(high)) => Ok(CtFloat::F32(
+            math_lib_pure::jet_std_math_clamp_f32(value, low, high),
+        )),
+        (CtFloat::F64(value), CtFloat::F64(low), CtFloat::F64(high)) => Ok(CtFloat::F64(
+            math_lib_pure::jet_std_math_clamp_f64(value, low, high),
+        )),
+        _ => Err(unsupported("mixing float widths", span)),
+    }
+}
+
 fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
     CtValue::Struct {
         type_name: format!(
@@ -1098,28 +1139,35 @@ pub fn apply_core_call_with_type(
                 a.powf(b).ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
-        ("core.math", "min") => {
-            let a = as_ct_float(one(0)?, span)?;
-            let b = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                a.min(b).ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "max") => {
-            let a = as_ct_float(one(0)?, span)?;
-            let b = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                a.max(b).ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "clamp") => {
-            let value = as_ct_float(one(0)?, span)?;
-            let low = as_ct_float(one(1)?, span)?;
-            let high = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(value.clamp(low, high).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
-        }
+        ("core.math", "min") => match (one(0)?, one(1)?) {
+            (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
+                math_lib_pure::jet_std_math_min_i64(*left, *right),
+            )),
+            (CtValue::Float(left), CtValue::Float(right)) => Ok(CtValue::Float(
+                core_math_float_min(*left, *right, span)?,
+            )),
+            _ => Err(unsupported("core.math.min: non-numeric arguments", span)),
+        },
+        ("core.math", "max") => match (one(0)?, one(1)?) {
+            (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
+                math_lib_pure::jet_std_math_max_i64(*left, *right),
+            )),
+            (CtValue::Float(left), CtValue::Float(right)) => Ok(CtValue::Float(
+                core_math_float_max(*left, *right, span)?,
+            )),
+            _ => Err(unsupported("core.math.max: non-numeric arguments", span)),
+        },
+        ("core.math", "clamp") => match (one(0)?, one(1)?, one(2)?) {
+            (CtValue::Int(value), CtValue::Int(low), CtValue::Int(high)) => Ok(CtValue::Int(
+                math_lib_pure::jet_std_math_clamp_i64(*value, *low, *high),
+            )),
+            (CtValue::Float(value), CtValue::Float(low), CtValue::Float(high)) => {
+                Ok(CtValue::Float(core_math_float_clamp(
+                    *value, *low, *high, span,
+                )?))
+            }
+            _ => Err(unsupported("core.math.clamp: non-numeric arguments", span)),
+        },
         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
         ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),
         // card #392 gap fix: the rest of `core.math` — mechanical ports of

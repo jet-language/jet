@@ -19,6 +19,34 @@ fn opt_i64(v: Option<i64>) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_math_min_i64(left: i64, right: i64) -> i64 {
+    math_rt::jet_std_math_min_i64(left, right)
+}
+extern "C" fn jet_jit_math_max_i64(left: i64, right: i64) -> i64 {
+    math_rt::jet_std_math_max_i64(left, right)
+}
+extern "C" fn jet_jit_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
+    math_rt::jet_std_math_clamp_i64(value, low, high)
+}
+extern "C" fn jet_jit_math_min_f64(left: f64, right: f64) -> f64 {
+    math_rt::jet_std_math_min_f64(left, right)
+}
+extern "C" fn jet_jit_math_max_f64(left: f64, right: f64) -> f64 {
+    math_rt::jet_std_math_max_f64(left, right)
+}
+extern "C" fn jet_jit_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
+    math_rt::jet_std_math_clamp_f64(value, low, high)
+}
+extern "C" fn jet_jit_math_min_f32(left: f64, right: f64) -> f64 {
+    math_rt::jet_std_math_min_f32(left as f32, right as f32) as f64
+}
+extern "C" fn jet_jit_math_max_f32(left: f64, right: f64) -> f64 {
+    math_rt::jet_std_math_max_f32(left as f32, right as f32) as f64
+}
+extern "C" fn jet_jit_math_clamp_f32(value: f64, low: f64, high: f64) -> f64 {
+    math_rt::jet_std_math_clamp_f32(value as f32, low as f32, high as f32) as f64
+}
+
 fn pair_ff(a: f64, b: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let h = rt.heap.alloc_record(2);
@@ -245,6 +273,11 @@ host_fns! {
         f64_f64_f64.params.push(AbiParam::new(types::F64));
         f64_f64_f64.params.push(AbiParam::new(types::F64));
         f64_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut f64_f64_f64_f64 = Signature::new(cc);
+        f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        f64_f64_f64_f64.returns.push(AbiParam::new(types::F64));
         let mut f64_i64_f64 = Signature::new(cc);
         f64_i64_f64.params.push(AbiParam::new(types::F64));
         f64_i64_f64.params.push(AbiParam::new(types::I64));
@@ -274,6 +307,11 @@ host_fns! {
         i64_i64_i64.params.push(AbiParam::new(types::I64));
         i64_i64_i64.params.push(AbiParam::new(types::I64));
         i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut i64_i64_i64_i64 = Signature::new(cc);
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
         let mut f64_handle = Signature::new(cc);
         f64_handle.params.push(AbiParam::new(types::F64));
         f64_handle.returns.push(AbiParam::new(types::I64));
@@ -290,6 +328,15 @@ host_fns! {
     ldexp: "jet_jit_math_ldexp" => jet_jit_math_ldexp: f64_i64_f64;
     next_after: "jet_jit_math_next_after" => jet_jit_math_next_after: f64_f64_f64;
     cmp: "jet_jit_math_cmp" => jet_jit_math_cmp: f64_f64_i64;
+    min_i64: "jet_jit_math_min_i64" => jet_jit_math_min_i64: i64_i64_i64;
+    max_i64: "jet_jit_math_max_i64" => jet_jit_math_max_i64: i64_i64_i64;
+    clamp_i64: "jet_jit_math_clamp_i64" => jet_jit_math_clamp_i64: i64_i64_i64_i64;
+    min_f64: "jet_jit_math_min_f64" => jet_jit_math_min_f64: f64_f64_f64;
+    max_f64: "jet_jit_math_max_f64" => jet_jit_math_max_f64: f64_f64_f64;
+    clamp_f64: "jet_jit_math_clamp_f64" => jet_jit_math_clamp_f64: f64_f64_f64_f64;
+    min_f32: "jet_jit_math_min_f32" => jet_jit_math_min_f32: f64_f64_f64;
+    max_f32: "jet_jit_math_max_f32" => jet_jit_math_max_f32: f64_f64_f64;
+    clamp_f32: "jet_jit_math_clamp_f32" => jet_jit_math_clamp_f32: f64_f64_f64_f64;
     ilogb: "jet_jit_math_ilogb" => jet_jit_math_ilogb: f64_i64;
     isqrt: "jet_jit_math_isqrt" => jet_jit_math_isqrt: i64_i64;
     factorial: "jet_jit_math_factorial" => jet_jit_math_factorial: i64_i64;
@@ -337,7 +384,6 @@ host_fns! {
     div_mod: "jet_jit_math_div_mod" => jet_jit_math_div_mod: i64_i64_i64;
     div_rem: "jet_jit_math_div_rem" => jet_jit_math_div_rem: i64_i64_i64;
 }
-
 
 
 

@@ -87,6 +87,21 @@ fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     format!("{name} {{ {fields} }}")
 }
 
+fn core_math_scalar_helper(method: &str, ty: &Type) -> Option<&'static str> {
+    match (method, ty) {
+        ("min", Type::Int) => Some("jet_std_math_min_i64"),
+        ("max", Type::Int) => Some("jet_std_math_max_i64"),
+        ("clamp", Type::Int) => Some("jet_std_math_clamp_i64"),
+        ("min", Type::Float) => Some("jet_std_math_min_f64"),
+        ("max", Type::Float) => Some("jet_std_math_max_f64"),
+        ("clamp", Type::Float) => Some("jet_std_math_clamp_f64"),
+        ("min", Type::Float32) => Some("jet_std_math_min_f32"),
+        ("max", Type::Float32) => Some("jet_std_math_max_f32"),
+        ("clamp", Type::Float32) => Some("jet_std_math_clamp_f32"),
+        _ => None,
+    }
+}
+
 fn compute_gradient_type(method: &str, ret_ty: &Type) -> Option<Type> {
     match method {
         "gradient" => Some(ret_ty.clone()),
@@ -2867,12 +2882,34 @@ pub(crate) fn emit_tir_core_call(
         // c109 Phase 20: the polymorphic core specials.
         // Their return type is arg-type dependent (resolved by sema's bespoke
         // `infer_core_call` and written onto the node's `resolved_ret`, read at
-        // lowering), but the EMITTED form is a fixed per-`(module, method)` string —
-        // no type decision here (I3). Args are emitted PLAINLY.
+        // lowering). Numeric scalar forms call the shared Prelude helper for
+        // their resolved type; other comparable values retain the native method.
+        // Args are emitted PLAINLY.
         ("core.math", "abs") => format!("({}).abs()", arg(0)),
-        ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
-        ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
-        ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
+        ("core.math", "min" | "max" | "clamp") => {
+            if let Some(name) = args
+                .first()
+                .and_then(|arg| core_math_scalar_helper(method, &arg.ty))
+            {
+                match method {
+                    "clamp" => format!(
+                        "{}({}, {}, {})",
+                        helper(name),
+                        arg(0),
+                        arg(1),
+                        arg(2)
+                    ),
+                    _ => format!("{}({}, {})", helper(name), arg(0), arg(1)),
+                }
+            } else {
+                match method {
+                    "min" => format!("({}).min({})", arg(0), arg(1)),
+                    "max" => format!("({}).max({})", arg(0), arg(1)),
+                    "clamp" => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
+                    _ => unreachable!("core math scalar helper method"),
+                }
+            }
+        }
         
         ("core.math.random", "shuffle") => {
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))

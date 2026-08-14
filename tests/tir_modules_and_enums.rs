@@ -337,7 +337,7 @@ fn run() {
 #[test]
 fn inline_module_core_use_list_and_pub_reexport_match_all_tiers() {
     let src = "\
-use core.math.[abs, min]
+use core.math.[abs, min, max, clamp]
 module api {
     use core.[math.abs]
     pub use core.[math.abs as exported]
@@ -348,6 +348,11 @@ module api {
 fn run() {
     print(abs(-3))
     print(min(9, 4))
+    print(max(9, 4))
+    print(clamp(12, 0, 10))
+    print(min(9.0, 4.0))
+    print(max(9.0, 4.0))
+    print(clamp(12.0, 0.0, 10.0))
     print(api.local(-7))
     print(api.exported(-5))
 }
@@ -355,7 +360,7 @@ fn run() {
     if have_rustc() {
         let (code, stdout) = build_and_run("tir_inline_core_use_list", src);
         assert_eq!(code, 0);
-        assert_eq!(stdout, "3\n4\n7\n5\n");
+        assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
     }
     let (code, stdout, stderr) = run_default_multi(
         "inline_core_use_list",
@@ -363,7 +368,7 @@ fn run() {
         &[("main.jet", src)],
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "3\n4\n7\n5\n");
+    assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
     assert!(stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
@@ -379,7 +384,7 @@ fn run() {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
             assert_eq!(exit_code, 0);
-            assert_eq!(stdout, "3\n4\n7\n5\n");
+            assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
             panic!("forced interpreter rejected inline Core imports: {diags:?}")
