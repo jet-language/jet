@@ -710,7 +710,7 @@ impl<'a> Checker<'a> {
         result
     }
 
-    fn implicit_copy_target(&mut self, e: &Expr, ty: &Type) -> Option<Type> {
+    pub(super) fn implicit_copy_target(&mut self, e: &Expr, ty: &Type) -> Option<Type> {
         if let Some(target) = owned_type_for_read_view(ty) {
             return Some(target);
         }
@@ -987,14 +987,17 @@ impl<'a> Checker<'a> {
             }
         }
         if !borrowed {
-            if !self.copies_explicit()
-                && let Some(target) = ty
+            if !self.copies_explicit() {
+                if let Some(target) = ty
                     .as_ref()
                     .and_then(|source| self.implicit_copy_target(e, source))
-                && self.expected_type.as_ref() == Some(&target)
-                && is_cloneable(&target, self.registry)
-            {
-                return Some(self.insert_implicit_copy(e, &target));
+                {
+                    if self.expected_type.as_ref() == Some(&target)
+                        && is_cloneable(&target, self.registry)
+                    {
+                        return Some(self.insert_implicit_copy(e, &target));
+                    }
+                }
             }
             if let Some(t) = &ty {
                 let borrowed_param_place = !type_is_copy(t)
@@ -3426,12 +3429,11 @@ impl<'a> Checker<'a> {
                     .map(|(_, expected_ty)| (**expected_ty).clone()),
                 _ => None,
             };
-            let ty = expected_field
-                .as_ref()
-                .map_or_else(|| self.infer_owning_value(expr), |expected| {
-                    self.infer_with_expected(expr, expected)
-                })
-                .unwrap_or(Type::Int);
+            let ty = match expected_field.as_ref() {
+                Some(expected) => self.infer_with_expected(expr, expected),
+                None => self.infer_owning_value(expr),
+            }
+            .unwrap_or(Type::Int);
             typed.push((name.clone(), ty));
         }
         let canonical = crate::AST::canonicalize_tuple_fields(typed);

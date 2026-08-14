@@ -2341,11 +2341,10 @@ impl<'a> Checker<'a> {
                                 .iter()
                                 .find(|field| field.name == *label)
                                 .map(|field| field.ty.clone());
-                            let et = expected_for_child
-                                .as_ref()
-                                .map_or_else(|| self.infer(expr), |expected| {
-                                    self.infer_with_expected(expr, expected)
-                                });
+                            let et = match expected_for_child.as_ref() {
+                                Some(expected) => self.infer_with_expected(expr, expected),
+                                None => self.infer(expr),
+                            };
                             // D-EPPAYLOAD1 (I2 fix): see the positional-payload call above.
                             self.clone_borrowed_struct_field_value(None, expr, et.as_ref());
                             if let Some(f) = fields.iter().find(|f| f.name == *label) {

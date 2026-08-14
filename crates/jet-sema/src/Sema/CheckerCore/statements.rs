@@ -5,11 +5,11 @@ use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
     aliasing_while_mut, collection_changed_in_loop, collection_root_name,
     computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
-    type_fix_hint, type_requires_owned_iteration, undefined_loop_label,
+    is_cloneable, type_fix_hint, type_requires_owned_iteration, undefined_loop_label,
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
-use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKind};
+use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKind, ViewAccess};
 use crate::Syntax;
 use crate::Generics::substitute_type;
 use std::collections::HashMap;

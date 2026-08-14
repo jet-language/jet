@@ -1214,6 +1214,7 @@ impl<'a> Checker<'a> {
                 }
             } else if !fn_type_params.is_empty() {
                 for (index, arg) in call.args.iter_mut().enumerate() {
+                    let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
                     pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
                         if let Some((param_conv, param_ty)) = sig.params.get(index) {
                             checker.check_call_argument_access(
@@ -1230,7 +1231,7 @@ impl<'a> Checker<'a> {
                         }
                         let saved_string_view_read = checker.allow_string_view_read;
                         if !checker.copies_explicit()
-                            && *param_conv == AccessConvention::Move
+                            && param_conv == Some(AccessConvention::Move)
                         {
                             // Generic inference has not resolved the owning
                             // destination yet. Permit the read-only view to
@@ -1361,12 +1362,16 @@ impl<'a> Checker<'a> {
                         (effective_params.get(i), inferred.as_ref())
                     {
                         let param_ty = self.resolve_type(param_ty.clone());
-                        if !self.copies_explicit()
-                            && let Some(target) = self.implicit_copy_target(&arg.expr, source_ty)
-                            && target == param_ty
-                            && is_cloneable(&target, self.registry)
-                        {
-                            Some(self.insert_implicit_copy(&mut arg.expr, &target))
+                        if !self.copies_explicit() {
+                            if let Some(target) = self.implicit_copy_target(&arg.expr, source_ty) {
+                                if target == param_ty && is_cloneable(&target, self.registry) {
+                                    Some(self.insert_implicit_copy(&mut arg.expr, &target))
+                                } else {
+                                    inferred
+                                }
+                            } else {
+                                inferred
+                            }
                         } else {
                             inferred
                         }

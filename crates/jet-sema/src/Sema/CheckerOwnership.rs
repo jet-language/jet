@@ -537,7 +537,7 @@ impl<'a> Checker<'a> {
         crate::Sema::current_view_fact_for_binding(&self.flow.views, name, binding.def_span)
     }
 
-    fn view_facts(&self, name: &str) -> Vec<&ViewFact> {
+    pub(super) fn view_facts(&self, name: &str) -> Vec<&ViewFact> {
         let Some(binding) = self.lookup(name) else {
             return Vec::new();
         };
