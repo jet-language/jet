@@ -901,11 +901,45 @@ fn jet_testing_snap(name: &String, actual: &String) -> bool {
 }
 
 fn jet_testing_golden(path: &String, actual: &String) -> bool {
-    std::fs::read_to_string(path).map(|s| s == *actual).unwrap_or(false)
+    match std::fs::read_to_string(path) {
+        Ok(expected) if expected == *actual => true,
+        Ok(expected) => {
+            let detail = format!(
+                "path: {}\n{}",
+                path,
+                jet_testing_unified_diff(path, &expected, actual)
+            );
+            jet_testing_record_failure(
+                format!("golden file differs: {}", path),
+                detail,
+            );
+            false
+        }
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("golden file is missing: {}", path)
+            } else {
+                format!("golden file cannot be read: {}", path)
+            };
+            jet_testing_record_failure(message, format!("path: {}", path));
+            false
+        }
+    }
 }
 
 fn jet_testing_fixture(path: &String) -> String {
-    std::fs::read_to_string(path).unwrap_or_default()
+    match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("fixture is missing: {}", path)
+            } else {
+                format!("fixture cannot be read: {}", path)
+            };
+            jet_testing_record_failure(message, format!("path: {}", path));
+            String::new()
+        }
+    }
 }
 
 fn jet_testing_temp_dir(prefix: &String) -> String {

@@ -42,6 +42,7 @@ pub struct JetTestFailure {
     pub source_line: String,
     pub col: u32,
     pub caret: u32,
+    pub detail: Option<String>,
     pub cause: Vec<String>,
     pub clears: usize,
 }
@@ -66,6 +67,7 @@ impl JetTestFailure {
             source_line: source_line.to_string(),
             col,
             caret,
+            detail: None,
             cause: Vec::new(),
             clears: 0,
         }
@@ -77,31 +79,35 @@ impl JetTestFailure {
 
     pub fn render_detail(&self) -> String {
         let mut out = format!("  Stop [{}]: {}\n", self.code, self.message);
-        if self.file.is_empty() || self.line == 0 {
-            return out;
+        if !self.file.is_empty() && self.line != 0 {
+            let line_text = self.line.to_string();
+            let margin = line_text.len();
+            let function = if self.function.is_empty() {
+                String::new()
+            } else {
+                format!(" in {}", self.function)
+            };
+            out.push_str(&format!(
+                "    --> {}:{}{}\n",
+                self.file, self.line, function
+            ));
+            out.push_str(&format!("      {}|\n", " ".repeat(margin)));
+            out.push_str(&format!(
+                "   {} | {}\n",
+                line_text, self.source_line
+            ));
+            out.push_str(&format!(
+                "      {}| {}{}\n",
+                " ".repeat(margin),
+                " ".repeat(self.col.saturating_sub(1) as usize),
+                "^".repeat(self.caret.max(1) as usize)
+            ));
         }
-        let line_text = self.line.to_string();
-        let margin = line_text.len();
-        let function = if self.function.is_empty() {
-            String::new()
-        } else {
-            format!(" in {}", self.function)
-        };
-        out.push_str(&format!(
-            "    --> {}:{}{}\n",
-            self.file, self.line, function
-        ));
-        out.push_str(&format!("      {}|\n", " ".repeat(margin)));
-        out.push_str(&format!(
-            "   {} | {}\n",
-            line_text, self.source_line
-        ));
-        out.push_str(&format!(
-            "      {}| {}{}\n",
-            " ".repeat(margin),
-            " ".repeat(self.col.saturating_sub(1) as usize),
-            "^".repeat(self.caret.max(1) as usize)
-        ));
+        if let Some(detail) = &self.detail {
+            for line in detail.lines() {
+                out.push_str(&format!("    {}\n", line));
+            }
+        }
         out
     }
 
@@ -127,12 +133,18 @@ impl JetTestFailure {
         } else {
             self.col.to_string()
         };
+        let detail = self
+            .detail
+            .as_deref()
+            .map(jet_test_json_string)
+            .unwrap_or_else(|| "null".to_string());
         format!(
-            "{{\"schema\":\"jet.report/v1\",\"moment\":\"test\",\"severity\":\"stop\",\"code\":{},\"what\":{},\"why\":{},\"fix\":{},\"detail\":null,\"file\":{},\"line\":{},\"col\":{},\"span\":null,\"fix_edits\":[],\"cause\":[{cause}],\"clears\":{clears}}}",
+            "{{\"schema\":\"jet.report/v1\",\"moment\":\"test\",\"severity\":\"stop\",\"code\":{},\"what\":{},\"why\":{},\"fix\":{},\"detail\":{detail},\"file\":{},\"line\":{},\"col\":{},\"span\":null,\"fix_edits\":[],\"cause\":[{cause}],\"clears\":{clears}}}",
             jet_test_json_string(&self.code),
             jet_test_json_string(&self.message),
             jet_test_json_string("a checked test assertion evaluated false"),
             jet_test_json_string("fix the expected value or the code under test, then rerun the test"),
+            detail = detail,
             file,
             line,
             col,
@@ -182,7 +194,7 @@ pub fn jet_test_failure(
     caret: u32,
     message: &str,
 ) -> String {
-    let report = JetTestFailure::new(
+    let mut report = JetTestFailure::new(
         "E3001",
         message,
         file,
@@ -192,6 +204,10 @@ pub fn jet_test_failure(
         col,
         caret,
     );
+    if let Some(pending) = jet_testing_take_failure() {
+        report.message = pending.message;
+        report.detail = Some(pending.detail);
+    }
     let message = report.message.clone();
     JET_TEST_FAILURE.with(|slot| *slot.borrow_mut() = Some(report));
     message

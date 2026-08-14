@@ -119,7 +119,9 @@ mod Web;
 
 /// D-REPORT-TEST1=A: host-side `jet prove` uses the same source that test
 /// harnesses receive below as their report prelude.
+#[allow(dead_code)]
 pub mod test_report {
+    include!("../Prelude/CoreLib/Top/TestingShared.rs");
     include!("../Prelude/TestReport.rs");
 }
 
@@ -390,6 +392,7 @@ fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
     order
 }
 "#;
+const TESTING_SHARED_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/TestingShared.rs");
 const TEST_REPORT_PRELUDE: &str = include_str!("../Prelude/TestReport.rs");
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
 /// the `jet test` harness only when the file declares a parameterized `#Test fn`.
@@ -721,6 +724,23 @@ fn push_corelib_prelude(
     used_core: &std::collections::HashSet<String>,
     force: bool,
 ) {
+    push_corelib_prelude_inner(out, used_core, force, false);
+}
+
+fn push_corelib_prelude_for_test_harness(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    force: bool,
+) {
+    push_corelib_prelude_inner(out, used_core, force, true);
+}
+
+fn push_corelib_prelude_inner(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    force: bool,
+    omit_testing_shared: bool,
+) {
     // `core.archive` is emitted as a reachable ordinary-Jet source module. Its
     // internal ABI calls do not require a compiler prelude fragment, so no old
     // template can become a fallback implementation.
@@ -728,7 +748,7 @@ fn push_corelib_prelude(
         return;
     }
     let mut body = String::new();
-    push_corelib_prelude_body(&mut body, used_core);
+    push_corelib_prelude_body(&mut body, used_core, omit_testing_shared);
     out.push_str(&corelib_emission_identity(&body, used_core));
     out.push('\n');
     out.push_str(&body);
@@ -854,12 +874,16 @@ pub fn corelib_emission_fingerprint(
 ) -> String {
     let mut body = String::new();
     if core_needs_embedded_runtime(used_core) {
-        push_corelib_prelude_body(&mut body, used_core);
+        push_corelib_prelude_body(&mut body, used_core, false);
     }
     corelib_emission_identity(&body, used_core)
 }
 
-fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::HashSet<String>) {
+fn push_corelib_prelude_body(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    omit_testing_shared: bool,
+) {
     // JetStd Open/CommonTypes + EncodingStream/Codecs name these foundation
     // modules unconditionally — always emit them with the Core kernel.
     out.push_str("\nmod jet_xml_pull {\n");
@@ -1129,7 +1153,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
     if needs_fs_runtime {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
+        if !omit_testing_shared {
+            out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
+        }
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
@@ -3001,6 +3027,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if any_property_test(&tests) {
         out.push_str(PROP_PRELUDE);
@@ -3715,6 +3742,7 @@ pub fn emit_bundle_tests_cov(
     }
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -3723,7 +3751,7 @@ pub fn emit_bundle_tests_cov(
         out.push_str(COV_PRELUDE);
     }
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -3980,13 +4008,14 @@ pub fn emit_bundle_fuzz(
     }
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
     out.push_str(PROP_PRELUDE);
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -4287,6 +4316,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     push_cached_runtime(&mut out, link);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -4295,7 +4325,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(COV_PRELUDE);
     }
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {

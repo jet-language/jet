@@ -377,6 +377,41 @@ fn jet_test_fail_then_fixed() {
 }
 
 #[test]
+fn jet_testing_file_failures_keep_report_context() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+
+    let failing = root.join("tests/fixtures/testing_failure_reports.jet");
+    let fixed = root.join("tests/fixtures/testing_failure_reports.fixed.jet");
+    let bad = Command::new(&jet).arg("test").arg(&failing).output().unwrap();
+    let stdout = String::from_utf8_lossy(&bad.stdout);
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+
+    assert!(!bad.status.success());
+    assert_eq!(stdout.matches(": FAIL").count(), 4, "stdout: {stdout}");
+    assert!(stderr.contains("golden file is missing: tests/fixtures/testing_failure_reports.missing"));
+    assert!(stderr.contains("golden file cannot be read: tests/fixtures"));
+    assert!(stderr.contains("golden file differs: tests/fixtures/testing_failure_reports.golden"));
+    assert!(stderr.contains("fixture is missing: tests/fixtures/testing_failure_reports.missing"));
+    assert!(stderr.contains("--- expected tests/fixtures/testing_failure_reports.golden"));
+    assert!(stderr.contains("+++ actual tests/fixtures/testing_failure_reports.golden"));
+    assert!(stderr.contains("-expected\n+actual\n"));
+    assert_eq!(stderr.matches("Stop [E3001]").count(), 4, "stderr: {stderr}");
+    assert_eq!(stderr.matches("-->").count(), 4, "stderr: {stderr}");
+
+    let good = Command::new(&jet).arg("test").arg(&fixed).output().unwrap();
+    assert!(
+        good.status.success(),
+        "fixed testing helpers failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&good.stdout),
+        String::from_utf8_lossy(&good.stderr)
+    );
+}
+
+#[test]
 fn release_test_uses_aot_tier_marker() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
