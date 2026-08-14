@@ -27,6 +27,11 @@ coverage in `tests/corelib.rs`.
 | BLAS/LAPACK vendor binding | non-goal | expert `#Unsafe` / package |
 | Full autograd graph beyond VJP/JVP helpers | non-goal this epoch | CPU reverse tape and composable VJP/JVP are shipped; accelerator graphs remain outside this slice |
 
+The ML example now exercises both F64 and F32 CPU paths end to end: inference,
+scalar MSE, named reverse gradients, SGD, and checksummed serialization back
+to a placement-preserving Tensor. `tests/compute_parity.rs` also covers shape,
+profile, checksum, learning-rate, bounds, and storage failures.
+
 ## DB drivers (#117)
 
 | Surface | Status | Notes |

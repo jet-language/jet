@@ -375,6 +375,10 @@ fn jet_compute_record(
     values: Vec<JetTensor>,
     rule: JetComputeTapeRule,
 ) -> Result<JetTensor, JetComputeError> {
+    // Validate before attaching a trace.  A profile is part of Tensor
+    // meaning, so a recorded F32 value must be canonical just like an eager
+    // value; no engine may hide a precision mismatch in tape metadata.
+    jet_compute_validate_tensor(&output)?;
     let tapes = jet_compute_tape_for_parents(parents)?;
     if tapes.is_empty() {
         return Ok(output);
@@ -769,6 +773,13 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
             "Tensor values must be finite".to_string(),
         ));
     }
+    for value in &values {
+        jet_compute_validate_profile_value(
+            &tensor.last_placement.profile,
+            *value,
+            "Tensor value",
+        )?;
+    }
     Ok(())
 }
 
@@ -804,6 +815,35 @@ fn jet_compute_inherit_placement(mut tensor: JetTensor, source: &JetTensor) -> J
     tensor.last_placement = source.last_placement.clone();
     tensor.last_transfer = None;
     tensor
+}
+
+fn jet_compute_tensor_from_shape_like(
+    source: &JetTensor,
+    shape: Vec<i64>,
+    fill: f64,
+) -> Result<JetTensor, JetComputeError> {
+    Ok(jet_compute_inherit_placement(
+        jet_compute_tensor_from_shape(shape, fill, JetComputeDevice::Cpu)?,
+        source,
+    ))
+}
+
+fn jet_compute_require_same_contract(
+    left: &JetTensor,
+    right: &JetTensor,
+    operation: &str,
+) -> Result<(), JetComputeError> {
+    if left.device != right.device {
+        return Err(JetComputeError::Device(format!(
+            "{operation} tensors must use the same device"
+        )));
+    }
+    if left.last_placement.profile != right.last_placement.profile {
+        return Err(JetComputeError::Device(format!(
+            "{operation} tensors must use the same precision profile"
+        )));
+    }
+    Ok(())
 }
 
 fn jet_compute_tensor_from_shape(
@@ -1238,6 +1278,12 @@ fn jet_compute_window_set(
     if !value.is_finite() {
         return Err("Tensor values must be finite".to_string());
     }
+    jet_compute_validate_profile_value(
+        &tensor.last_placement.profile,
+        value,
+        "Tensor write value",
+    )
+    .map_err(|error| error.jet_show())?;
     let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)
         .map_err(|error| error.jet_show())?;
     // Validate the logical element before exclusivity. A valid empty window is
@@ -1373,6 +1419,11 @@ impl JetComputeSetTarget for JetTensor {
                 "Tensor values must be finite".to_string(),
             ));
         }
+        jet_compute_validate_profile_value(
+            &self.last_placement.profile,
+            value,
+            "Tensor write value",
+        )?;
         let offset = jet_compute_offset(self, indices)?;
         let Some(data) = std::sync::Arc::get_mut(&mut self.data) else {
             return Err(JetComputeError::Unsupported(
@@ -1471,6 +1522,7 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
     }
     jet_compute_validate_tensor(a)?;
     jet_compute_validate_tensor(b)?;
+    jet_compute_require_same_contract(a, b, "matmul")?;
     let (m, k) = (a.shape[0], a.shape[1]);
     let (k2, n) = (b.shape[0], b.shape[1]);
     if m < 0 || k < 0 || k2 < 0 || n < 0 {
@@ -1484,14 +1536,21 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
             k, k2
         )));
     }
-    let mut out = jet_compute_tensor_from_shape(vec![m, n], 0.0, JetComputeDevice::Cpu)?;
+    let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+    let mut out = jet_compute_tensor_from_shape_like(a, vec![m, n], 0.0)?;
     for i in 0..m {
         for j in 0..n {
             let mut sum = 0.0;
             for t in 0..k {
                 let av = jet_compute_get_raw(a, &vec![i, t])?;
                 let bv = jet_compute_get_raw(b, &vec![t, j])?;
-                sum += av * bv;
+                sum = if f32_profile {
+                    let av = jet_compute_f32_value(av, "matmul input")?;
+                    let bv = jet_compute_f32_value(bv, "matmul input")?;
+                    f64::from(av * bv + sum as f32)
+                } else {
+                    sum + av * bv
+                };
                 if !sum.is_finite() {
                     return Err(JetComputeError::Arithmetic(
                         "matmul accumulation produced a non-finite value".to_string(),
@@ -1522,7 +1581,19 @@ fn jet_compute_on_device(
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let receipt = jet_compute_place(device)?;
+    let mut receipt = jet_compute_place(device)?;
+    if tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        receipt.profile = CPU_ORACLE_F32_PROFILE.to_string();
+        receipt.capabilities = CPU_ORACLE_F32_CAPABILITIES
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect();
+        receipt.reason = if device == JetComputeDevice::Auto {
+            "policy=auto; selected=cpu; capability=cpu-oracle.f32".to_string()
+        } else {
+            "policy=explicit; selected=cpu; capability=cpu-oracle.f32".to_string()
+        };
+    }
     Ok(JetTensor {
         shape: tensor.shape.clone(),
         strides: tensor.strides.clone(),
@@ -1606,16 +1677,7 @@ fn jet_compute_materialize_broadcast(
     // Empty output has no source element to read.  This also makes shapes such
     // as [0, 3] broadcast-safe instead of indexing an empty backing vector.
     if n == 0 {
-        let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
-        return Ok(JetTensor {
-            shape: shape.to_vec(),
-            strides,
-            data: std::sync::Arc::new(Vec::new()),
-            device: receipt.selected,
-            last_placement: receipt,
-            last_transfer: None,
-            trace: None,
-        });
+        return jet_compute_tensor_from_shape_like(tensor, shape.to_vec(), 0.0);
     }
     let mut data = Vec::with_capacity(n);
     for flat in 0..n {
@@ -1640,16 +1702,10 @@ fn jet_compute_materialize_broadcast(
             .collect::<Vec<_>>();
         data.push(jet_compute_get_raw(tensor, &source_coords)?);
     }
-    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
-    Ok(JetTensor {
-        shape: shape.to_vec(),
-        strides,
-        data: std::sync::Arc::new(data),
-        device: receipt.selected,
-        last_placement: receipt,
-        last_transfer: None,
-        trace: None,
-    })
+    let mut output = jet_compute_tensor_from_shape_like(tensor, shape.to_vec(), 0.0)?;
+    output.strides = strides;
+    output.data = std::sync::Arc::new(data);
+    Ok(output)
 }
 
 fn jet_compute_broadcast_to(
@@ -1727,7 +1783,8 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
     if out_shape.is_empty() {
         out_shape.push(1);
     }
-    let mut out = jet_compute_tensor_from_shape(out_shape.clone(), 0.0, JetComputeDevice::Cpu)?;
+    let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+    let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape.clone(), 0.0)?;
     let axis_len = tensor.shape[axis];
     let out_n = jet_compute_numel(&out_shape)?;
     for flat in 0..out_n {
@@ -1751,7 +1808,13 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
         let mut sum = 0.0;
         for k in 0..axis_len {
             coords[axis] = k;
-            sum += jet_compute_get_raw(tensor, &coords)?;
+            let value = jet_compute_get_raw(tensor, &coords)?;
+            sum = if f32_profile {
+                let value = jet_compute_f32_value(value, "sum_axis input")?;
+                f64::from(value + sum as f32)
+            } else {
+                sum + value
+            };
             if !sum.is_finite() {
                 return Err(JetComputeError::Arithmetic(
                     "sum_axis accumulation produced a non-finite value".to_string(),
@@ -1778,27 +1841,50 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
             "unsupported unary compute operation `{op}`"
         )));
     }
-    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
+    let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let values = jet_compute_tensor_values(tensor);
     let mut data = Vec::with_capacity(values.len());
     for value in values {
-        let output = match op {
-            "negate" => -value,
-            "abs" => value.abs(),
-            "exp" => value.exp(),
-            "log" if value > 0.0 => value.ln(),
-            "log" => {
-                return Err(JetComputeError::Arithmetic(
-                    "log requires strictly positive values".to_string(),
-                ));
+        let output = if f32_profile {
+            let value = jet_compute_f32_value(value, "unary input")?;
+            let output = match op {
+                "negate" => -value,
+                "abs" => value.abs(),
+                "exp" => value.exp(),
+                "log" if value > 0.0 => value.ln(),
+                "log" => {
+                    return Err(JetComputeError::Arithmetic(
+                        "log requires strictly positive values".to_string(),
+                    ));
+                }
+                "sqrt" if value >= 0.0 => value.sqrt(),
+                "sqrt" => {
+                    return Err(JetComputeError::Arithmetic(
+                        "sqrt requires non-negative values".to_string(),
+                    ));
+                }
+                _ => unreachable!("unvalidated unary operation"),
+            };
+            f64::from(output)
+        } else {
+            match op {
+                "negate" => -value,
+                "abs" => value.abs(),
+                "exp" => value.exp(),
+                "log" if value > 0.0 => value.ln(),
+                "log" => {
+                    return Err(JetComputeError::Arithmetic(
+                        "log requires strictly positive values".to_string(),
+                    ));
+                }
+                "sqrt" if value >= 0.0 => value.sqrt(),
+                "sqrt" => {
+                    return Err(JetComputeError::Arithmetic(
+                        "sqrt requires non-negative values".to_string(),
+                    ));
+                }
+                _ => unreachable!("unvalidated unary operation"),
             }
-            "sqrt" if value >= 0.0 => value.sqrt(),
-            "sqrt" => {
-                return Err(JetComputeError::Arithmetic(
-                    "sqrt requires non-negative values".to_string(),
-                ));
-            }
-            _ => unreachable!("unvalidated unary operation"),
         };
         if !output.is_finite() {
             return Err(JetComputeError::Arithmetic(format!(
@@ -1807,15 +1893,9 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
         }
         data.push(output);
     }
-    let output = JetTensor {
-        shape: tensor.shape.clone(),
-        strides: jet_compute_row_major_strides(&tensor.shape)?,
-        data: std::sync::Arc::new(data),
-        device: receipt.selected,
-        last_placement: receipt,
-        last_transfer: None,
-        trace: None,
-    };
+    let mut output = jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), 0.0)?;
+    output.strides = jet_compute_row_major_strides(&tensor.shape)?;
+    output.data = std::sync::Arc::new(data);
     jet_compute_record(
         output,
         &[tensor],
@@ -1831,6 +1911,7 @@ fn jet_compute_binary(
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(a)?;
     jet_compute_validate_tensor(b)?;
+    jet_compute_require_same_contract(a, b, "compute operation")?;
     let shape = jet_compute_broadcast_shape(&a.shape, &b.shape)?;
     if !matches!(op, "sub" | "div" | "maximum" | "minimum" | "add" | "mul") {
         return Err(JetComputeError::Unsupported(format!(
@@ -1840,7 +1921,7 @@ fn jet_compute_binary(
     // D-COMPUTE-FUSE1: broadcast indexing and the elementwise operation are
     // one eager Prelude loop. Do not materialize either broadcast operand;
     // this is the shared fusion path for AOT, comptime, and dev evaluation.
-    let receipt = jet_compute_place(JetComputeDevice::Cpu)?;
+    let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let n = jet_compute_storage_len(&shape)?;
     let mut data = Vec::with_capacity(n);
     let rank = shape.len();
@@ -1881,14 +1962,29 @@ fn jet_compute_binary(
                 "division by zero in compute operation".to_string(),
             ));
         }
-        let output = match op {
-            "sub" => x - y,
-            "div" => x / y,
-            "maximum" => x.max(y),
-            "minimum" => x.min(y),
-            "add" => x + y,
-            "mul" => x * y,
-            _ => unreachable!("unvalidated binary operation"),
+        let output = if f32_profile {
+            let x = jet_compute_f32_value(x, "binary operation input")?;
+            let y = jet_compute_f32_value(y, "binary operation input")?;
+            let output = match op {
+                "sub" => x - y,
+                "div" => x / y,
+                "maximum" => x.max(y),
+                "minimum" => x.min(y),
+                "add" => x + y,
+                "mul" => x * y,
+                _ => unreachable!("unvalidated binary operation"),
+            };
+            f64::from(output)
+        } else {
+            match op {
+                "sub" => x - y,
+                "div" => x / y,
+                "maximum" => x.max(y),
+                "minimum" => x.min(y),
+                "add" => x + y,
+                "mul" => x * y,
+                _ => unreachable!("unvalidated binary operation"),
+            }
         };
         if !output.is_finite() {
             return Err(JetComputeError::Arithmetic(
@@ -1898,15 +1994,9 @@ fn jet_compute_binary(
         data.push(output);
     }
     let strides = jet_compute_row_major_strides(&shape)?;
-    let output = JetTensor {
-        shape,
-        strides,
-        data: std::sync::Arc::new(data),
-        device: receipt.selected,
-        last_placement: receipt,
-        last_transfer: None,
-        trace: None,
-    };
+    let mut output = jet_compute_tensor_from_shape_like(a, shape, 0.0)?;
+    output.strides = strides;
+    output.data = std::sync::Arc::new(data);
     let rule = match op {
         "add" => JetComputeTapeRule::Add,
         "sub" => JetComputeTapeRule::Sub,
@@ -2346,9 +2436,14 @@ fn jet_compute_transfer(
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
+    let scalar_bytes = if tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        std::mem::size_of::<f32>()
+    } else {
+        std::mem::size_of::<f64>()
+    };
     let logical_byte_count = jet_compute_tensor_values(tensor)
         .len()
-        .checked_mul(std::mem::size_of::<f64>())
+        .checked_mul(scalar_bytes)
         .and_then(|bytes| i64::try_from(bytes).ok())
         .ok_or_else(|| JetComputeError::Device("transfer byte count overflow".to_string()))?;
     let from = tensor.device;
@@ -2430,11 +2525,8 @@ fn jet_compute_reduce_to_shape(
             target_shape, tensor.shape
         )));
     }
-    let mut out = jet_compute_tensor_from_shape(
-        target_shape.to_vec(),
-        0.0,
-        JetComputeDevice::Cpu,
-    )?;
+    let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+    let mut out = jet_compute_tensor_from_shape_like(tensor, target_shape.to_vec(), 0.0)?;
     let rank_delta = tensor.shape.len() - target_shape.len();
     let values = jet_compute_tensor_values(tensor);
     for flat in 0..values.len() {
@@ -2465,7 +2557,13 @@ fn jet_compute_reduce_to_shape(
                 "gradient accumulation is outside storage".to_string(),
             ));
         };
-        *slot += values[flat];
+        *slot = if f32_profile {
+            let previous = jet_compute_f32_value(*slot, "gradient accumulation")?;
+            let value = jet_compute_f32_value(values[flat], "gradient accumulation")?;
+            f64::from(previous + value)
+        } else {
+            *slot + values[flat]
+        };
         if !slot.is_finite() {
             return Err(JetComputeError::Arithmetic(
                 "gradient accumulation produced a non-finite value".to_string(),
@@ -2510,7 +2608,9 @@ fn jet_compute_tensor_from_values_like(
         ));
     };
     storage.clone_from_slice(values);
-    Ok(jet_compute_inherit_placement(output, template))
+    let output = jet_compute_inherit_placement(output, template);
+    jet_compute_validate_tensor(&output)?;
+    Ok(output)
 }
 
 fn jet_compute_unary_vjp(
@@ -2527,6 +2627,8 @@ fn jet_compute_unary_vjp(
             "unary cotangent shape must equal the unary output".to_string(),
         ));
     }
+    jet_compute_require_same_contract(input, output, "unary cotangent")?;
+    jet_compute_require_same_contract(output, cot, "unary cotangent")?;
     let input_values = jet_compute_tensor_values(input);
     match op {
         "negate" => jet_compute_unary("negate", cot),
@@ -2713,6 +2815,7 @@ fn jet_compute_reverse(
             "VJP seed shape must equal the function output shape".to_string(),
         ));
     }
+    jet_compute_require_same_contract(&state.value, seed, "VJP seed")?;
     let (nodes, inputs) = {
         let tape = state
             .tape
@@ -3048,6 +3151,7 @@ fn jet_compute_jvp(
                 "JVP tangent shapes must match their primal inputs".to_string(),
             ));
         }
+        jet_compute_require_same_contract(input, tangent, "JVP tangent")?;
     }
     let mut tangents: Vec<Option<JetTensor>> = vec![None; nodes.len()];
     for (index, tangent) in input_tangents.into_iter().enumerate() {
@@ -3113,6 +3217,8 @@ fn jet_compute_vjp_matmul(
             "matmul cotangent shape must equal the matmul output".to_string(),
         ));
     }
+    jet_compute_require_same_contract(a, b, "matmul cotangent")?;
+    jet_compute_require_same_contract(a, cot, "matmul cotangent")?;
     let b_t = jet_compute_transpose(b)?;
     let a_t = jet_compute_transpose(a)?;
     Ok((
@@ -3129,6 +3235,22 @@ fn jet_compute_f32_value(value: f64, context: &str) -> Result<f32, JetComputeErr
         )));
     }
     Ok(narrowed)
+}
+
+fn jet_compute_validate_profile_value(
+    profile: &str,
+    value: f64,
+    context: &str,
+) -> Result<(), JetComputeError> {
+    if profile == CPU_ORACLE_F32_PROFILE {
+        let narrowed = jet_compute_f32_value(value, context)?;
+        if f64::from(narrowed) != value {
+            return Err(JetComputeError::Arithmetic(format!(
+                "{context} is not canonical for the F32 precision profile"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn jet_compute_validate_serialized_profile_values(
@@ -3199,10 +3321,12 @@ fn jet_compute_scalar_from_like(
             "compute scalar produced a non-finite value".to_string(),
         ));
     }
-    Ok(jet_compute_inherit_placement(
+    let output = jet_compute_inherit_placement(
         jet_compute_tensor_from_shape(vec![1], value, JetComputeDevice::Cpu)?,
         template,
-    ))
+    );
+    jet_compute_validate_tensor(&output)?;
+    Ok(output)
 }
 
 fn jet_compute_mse_value(
@@ -3277,6 +3401,7 @@ fn jet_compute_mse_vjp(
             "mse_loss cotangent must be a scalar Tensor".to_string(),
         ));
     }
+    jet_compute_require_same_contract(pred, cot, "mse_loss cotangent")?;
     let cot_value = jet_compute_tensor_values(cot)
         .first()
         .copied()
@@ -3357,6 +3482,8 @@ fn jet_compute_mse_jvp(
             "mse_loss tangent precision profiles must match their primal tensors".to_string(),
         ));
     }
+    jet_compute_require_same_contract(pred, pred_tangent, "mse_loss tangent")?;
+    jet_compute_require_same_contract(target, target_tangent, "mse_loss tangent")?;
     let pred_tangent_values = jet_compute_tensor_values(pred_tangent);
     let target_tangent_values = jet_compute_tensor_values(target_tangent);
     let value = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {

@@ -3559,7 +3559,8 @@ The serializer uses shortest round-tripping finite f64 text and records the
 CPU precision profile. The checksum is deterministic FNV-1a for corruption
 detection, not authenticity. The decoder rejects duplicate or unknown fields,
 non-canonical axes or values, unsupported profiles, non-finite data,
-storage-length mismatches, and checksum failures before constructing a Tensor.
+storage-length mismatches, non-canonical F32 values, and checksum failures
+before constructing a Tensor.
 The retired two-field `shape=…;data=…` form is not accepted; there is no
 compatibility reader.
 
@@ -3568,11 +3569,18 @@ non-empty shape, device, and precision profile, and records one canonical
 autodiff rule for traced predictions and targets. `sgd_step` accepts traced
 parameters and gradients, records its affine derivative, and requires matching
 metadata plus a non-negative finite learning rate.
+Every differentiable Tensor operation keeps the source device and precision
+receipt. The generic `matmul`, elementwise, unary, broadcast, and reduction
+paths therefore run real F32 arithmetic when their inputs carry the F32
+profile; F32 inference, gradient descent, and model round trips do not widen
+silently to F64.
 `matmul_f32_tile` records the runtime CPU SIMD dispatch, vector width, and
 scalar tail in its placement receipt; its lane products use f32 arithmetic and
 an ordered CPU-oracle reduction.
 The wire stores logical view values and deserializes them into contiguous
-storage with the recorded shape and profile.
+storage with the recorded shape and profile. A corrupted or unsupported model
+wire returns `ComputeError::Serialization`; serializing a traced Tensor returns
+`ComputeError::Unsupported`. Neither path fabricates a Tensor.
 
 `D-COMPUTE-KERNEL1=D` / `D-COMPUTE-KERNEL-SURFACE1=B`: `#Kernel(.parallel) fn`
 is the explicit safe-kernel declaration. Sema accepts the marker only after proving the
@@ -3594,9 +3602,10 @@ placement and profile.
 `D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` publishes a stable backend,
 version, profile, cache identity, and closed capability list in placement
 receipts. General operations report their actual `F64Strict+Reproducible`
-profile; the tiled path reports real `F32Strict+Reproducible` arithmetic and
-ordered reduction. The ratified production profile and provider capabilities
-remain gated, and unsupported requests fail before launch.
+profile by default and retain `F32Strict+Reproducible` when their inputs carry
+that explicit profile; the tiled path reports real F32 arithmetic and ordered
+reduction. The ratified production profile and provider capabilities remain
+gated, and unsupported requests fail before launch.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
 provider-issued opaque contract. The CPU module exposes no public contract

@@ -61,6 +61,15 @@ fn run() {
         .Err(_) -> { print("mse_shape:rejected") }
     }
 
+    f32_seed :: compute.matrix(1, 1, 1.0) ?? panic("f32_seed")
+    f32_tensor :: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_tensor")
+    f64_target :: compute.full([1], 1.0) ?? panic("f64_target")
+    bad_profile :: compute.mse_loss(f32_tensor, f64_target)
+    if bad_profile == {
+        .Ok(_) -> { print("mse_profile:accepted") }
+        .Err(_) -> { print("mse_profile:rejected") }
+    }
+
     bad_lr :: compute.sgd_step(mse_left, mse_left, -1.0)
     if bad_lr == {
         .Ok(_) -> { print("negative_lr:accepted") }
@@ -114,7 +123,7 @@ fn compute_cpu_oracle_aot_covers_storage_algebra_and_corruption() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
     );
 }
 
@@ -124,7 +133,7 @@ fn compute_cpu_oracle_default_run_matches_aot_meaning() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+        "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
     );
 }
 
