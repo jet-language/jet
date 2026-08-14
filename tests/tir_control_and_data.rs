@@ -44,6 +44,17 @@ fn run() ? Err {
     assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
 }
 
+/// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
+/// produces byte-identical output through AOT, default `jet run`, and the
+/// forced interpreter.
+#[test]
+fn body_rules_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "basics/body_rules",
+        include_str!("../examples/features/expected/basics/body_rules.out"),
+    );
+}
+
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.
 #[test]
