@@ -267,6 +267,8 @@ fn ui_snapshots() {
         let retired_gate_flag = src
             .lines()
             .any(|line| line.trim() == "// @retired_gate_flag");
+        let cli_e0043 = src.lines().any(|line| line.trim() == "// @cli_e0043");
+        let cli_e1219 = src.lines().any(|line| line.trim() == "// @cli_e1219");
         // Card #1748: this flat fixture carries a manifest sample in a test
         // directive so the intentional retired spelling is not a live
         // `package.jet` counted by the migration ratchet.
@@ -309,6 +311,10 @@ fn ui_snapshots() {
             let diagnostic = jet::Manifest::parse(Path::new("package.jet"), manifest_source)
                 .expect_err("the lint-policy code fixture must be refused");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if cli_e0043 {
+            run_cli_e0043_snapshot()
+        } else if cli_e1219 {
+            run_cli_e1219_snapshot(&file_arg)
         } else if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if jetpack_retired_environment_flag {
@@ -537,6 +543,30 @@ fn run_retired_gate_flag_snapshot(file: &str) -> String {
     rendered.push_str(
         &String::from_utf8(output.stderr).expect("retired gate stderr is UTF-8"),
     );
+    rendered
+}
+
+fn run_cli_e0043_snapshot() -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["install", "--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run E0043 CLI diagnostic fixture");
+    assert!(!output.status.success(), "E0043 command must fail");
+    let mut rendered = String::from_utf8(output.stdout).expect("E0043 stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("E0043 stderr is UTF-8"));
+    rendered
+}
+
+fn run_cli_e1219_snapshot(file: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", file, "--profile=turbo", "--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run E1219 CLI diagnostic fixture");
+    assert!(!output.status.success(), "E1219 command must fail");
+    let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
     rendered
 }
 
