@@ -422,9 +422,10 @@ renumbered, and no new `W` code may be allocated.
 | E0402 | sema  | fallible call ignored as a statement      |
 | E0403 | sema  | `?` error type / return context mismatch  |
 | E0404 | sema  | `ok`/`err` need a fallible context        |
-| E0405 | sema  | `??` fallback type/`return` mismatch       |
+| E0405 | sema  | `??` fallback type/`return` mismatch or non-diverging test-bind route |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
 | E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
+| E0408 | sema  | `err` used in an optional fallback (D-CHOOSE-TEST1=A) |
 | E0410 | parse | *retired by D-MARK-DISCARD1=A* (was: `#Suppress` unknown argument) |
 | E0411 | parse | unknown `pub(…)` visibility qualifier — only `pub(package)` exists (D-PUBPKG1) |
 | E0412 | parse | teaching: `private` → `priv` inside `#PubFile` files (D-VISDEFAULT2) |
