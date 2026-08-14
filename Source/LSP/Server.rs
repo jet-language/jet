@@ -2979,7 +2979,7 @@ mod project_part_tests {
         });
         let json = diagnostic_json(&diagnostic, "src/main.jet", "#[Codable]\n");
 
-        assert!(json.contains(r#""message":"one marker is written without brackets""#, "{json}");
+        assert!(json.contains(r#""message":"one marker is written without brackets""#), "{json}");
         assert!(
             json.contains(r#""codeDescription":{"href":"jet://explain/E0999"}"#),
             "{json}"
