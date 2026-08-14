@@ -1765,6 +1765,16 @@ fn missing_declared_header_rejects_stale_cffi_cache() {
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
         "missing declared header must report E3208, got: {diagnostics:?}"
     );
+    let missing_header = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E3208")
+        .expect("E3208 was asserted above");
+    assert!(
+        missing_header
+            .why
+            .contains("the header file could not be read ("),
+        "E3208 must preserve the missing-header cause: {missing_header:?}"
+    );
     assert_eq!(fs::read_to_string(&cache_file).unwrap(), old_cache);
     let _ = fs::remove_dir_all(&root);
 }

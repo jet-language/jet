@@ -135,10 +135,6 @@ fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
             "Jet could not complete the named file, tool, or operating-system operation",
             "correct the named problem, then run the command again",
         ),
-        "E3208" => (
-            "header parsing or translation failed in the bind backend",
-            "fix the header or schema, then rerun the matching `jet inspect bind` command",
-        ),
         "E2941" => (
             "jet prove accepts only its registered proof lenses",
             "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`",
