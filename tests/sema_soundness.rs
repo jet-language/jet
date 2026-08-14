@@ -19,11 +19,11 @@ fn knowledge_loss_requires_a_spelled_gate() {
     // destination-owned conversion instead of an implicit loss.
     rejects(
         r#"
-fn take(value: F32) {}
+fn accept_f32(value: F32) {}
 
 fn run() {
     value :: Float.{1.0}
-    take(value)
+    accept_f32(value)
 }
 "#,
         "E0112",
