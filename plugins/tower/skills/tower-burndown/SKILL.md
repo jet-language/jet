@@ -32,7 +32,7 @@ Orchestrate real closeout. Rank is **tower-rank**. Plans/ballots are
 | `sidequests` | Sidequest track only |
 | `epoch N+sidequests` | Named epoch plus sidequests |
 | `model <id>` | Pin every worker and milestone reviewer to that model |
-| `subagents N` | Permit up to N concurrent implementation subagents; hard max **10** |
+| `subagents N` | Permit up to N concurrent implementation workers; hard max **5** |
 
 **Worker permission is invocation-granted.** The user says at invocation
 whether implementation workers are allowed and how many. No grant means no
@@ -84,8 +84,9 @@ rank/prep or invokes those skills.
 | Owner gates mid-flight | **tower-ballot**; stop that slice, burn ungated work |
 
 Pass these by name in every worker brief. If `model` was set, pass that model
-into every Task/subagent spawn. Effort: medium default; low for mechanical;
-high for hard semantics/architecture/debug.
+into every worker spawn. Use medium reasoning for mechanical changes, high for
+normal semantic fixes, and max only for one narrow root-cause problem after a
+concrete failed proof.
 
 ## Token and prose discipline
 
@@ -134,140 +135,125 @@ Strive for token efficiency without cutting substance:
 
 ## Milestone stream
 
-Select one milestone and its unblocked cards. Do not set a card-count target.
-Compose the stream around the milestone's dependency order and disjoint worker
-paths. Workers implement; the orchestrator integrates and closes.
+Finish one milestone before opening another. Keep about five lanes only when
+their writable paths are disjoint. Shared compiler seams get one implementation
+lane.
 
-1. Name the milestone, its cards, and their order before work starts.
-2. Dispatch one-layer workers. Parallelize only disjoint paths and serialize
-   shared mechanisms. Give each worker the full criteria and the evidence shape.
-3. Inspect each worker return. Integrate a ready patch promptly. Record concrete
-   evidence for every robust observable criterion and close the card immediately
-   when the criteria are met and no known blocker contradicts the evidence.
-4. Keep a card open when evidence is missing or a known blocker contradicts it.
-   Route the fix to the owning worker and integrate the result.
-5. Do not hold a card for a per-card reviewer, duplicate proof, or repeated
-   fresh-context audit.
-6. At milestone end, run one composed targeted test sweep over the milestone's
-   gates and one fresh-context review of the integrated milestone diff. Include
-   every applicable I9 execution tier.
-7. Every finding reopens its owning card and affected criteria. Apply and
-   integrate the fix, review the delta, verify the affected criteria, and close
-   the card again. Close the milestone only after all findings are resolved and
-   no known blocker remains.
+1. Name the milestone, its cards, and their dependency order before work starts.
+2. Dispatch bounded slices, not broad card audits. A slice names one mechanism,
+   one concrete failure or criterion set, exact writable paths, and the expected
+   observable result.
+3. Integrate each clean patch as soon as it arrives. Advance the persistent
+   builder once, then run the smallest proof that can reject that patch.
+4. Give an exact failing command and decisive output to a correction worker.
+   Do not resend the whole card or ask the worker to rediscover the failure.
+5. Record evidence and close a card only after the integrated builder proves
+   every changed observable criterion. Source inspection supports structural
+   criteria; it never substitutes for runtime, tier, snapshot, or golden proof.
+6. Refill a lane only after its prior patch is integrated, rejected, or reduced
+   to one explicit blocker. Never create an integration backlog.
+7. After every milestone card is done, run one composed targeted sweep and one
+   fresh-context review. Include every applicable I9 execution tier.
+8. Each finding reopens its owning card and criteria. Fix only the finding,
+   verify the affected targets, review the correction delta, and close again.
 
 ## Close discipline
 
 Closing cards is the product. A card closes immediately when all robust
-observable exit criteria have concrete implementation evidence, the patch is
-integrated, and no known blocker contradicts that evidence.
+observable exit criteria have concrete evidence from the integrated tree and no
+known blocker contradicts that evidence.
 
-- No per-card reviewer, duplicate proof, or repeated fresh-context audit is a
-  closure requirement.
-- A missing criterion, an invariant violation, a correctness bug, false-green
-  evidence, or any other known blocker that contradicts the evidence keeps the
-  card open or reopens it.
+- Worker claims are leads, not proof. A source-only worker cannot claim a
+  runtime, tier, snapshot, golden, or generated-artifact criterion passed.
+- The persistent builder runs each required changed-contract proof once. Do not
+  duplicate it for reassurance.
+- A missing criterion, invariant violation, correctness bug, false-green
+  result, or stale expected output keeps the card open or reopens it.
 - Style, taste, refactor ideas, and "could also" do not block closure unless a
   written criterion requires them.
-- Milestone closeout findings always reopen the owning card and affected
-  criteria. The owning worker applies the fix; the orchestrator integrates it,
-  reviews the delta, verifies the affected criteria, and closes the card again.
+- Milestone findings route back as narrow corrections. Do not launch another
+  whole-card implementation or a second milestone review.
 
 ## Dispatch brief (every worker)
 
-Workers get zero ambiguity. Each brief states:
+Workers get one bounded job with zero ambiguity. Each brief states:
 
-- Goal + definition of done (criteria text verbatim when present)
-- Card `#N` (or grouped `#A+#B`), `--by` identity, claim rules
-- Exact writable paths; everything else read-only
-- Model + effort; **ponytail** + **caveman** + **simple** (for user-facing text)
-- **No nested subagents. No stubs, facades, placeholders, or fake-green.**
-- The minimum targeted red/green command needed while implementing; do not
-  duplicate already-proved commands merely for reassurance
-- Return criteria evidence and progress to the orchestrator; workers do not write Tower
-- Worktree path/branch if used (must be under `.claude/worktrees/`); merge + remove before reporting done
-- Return shape: commits, evidence for every criterion, tests run, handoff, blockers
+- Card and exact criterion or failed proof owned by this slice
+- The concrete failure, actual output, expected behavior, and last integrated
+  commit
+- Exact writable paths; all other paths are read-only
+- One mechanism only; no broad audit, milestone review, or unrelated cleanup
+- Model and effort: medium mechanical, high normal, max only after a failed
+  high-reasoning root-cause attempt
+- **ponytail** + **caveman** + **simple**; no nested subagents, stubs, facades,
+  placeholders, compatibility paths, or fake-green
+- Source-only workers run no cargo, Jet, formatter, linter, or generator command
+- Return only commit hash, changed paths and lines, source evidence, blockers,
+  and clean status; never report an unrun proof as PASS
 
-Checkpoint the orchestrator's own dirty work before a write-capable worker
-touches a shared tree. Prefer disjoint worktrees for parallel writers; merge
-to the integration branch promptly; delete the worktree and temp branch after
-integration. No orphaned trees.
+Launch bounded workers with a hard wall-clock limit. Default: 12 minutes for a
+normal correction and 5 minutes for a mechanical fixture change. A genuinely
+hard semantic slice may get 20 minutes after a concrete failing repro. At the
+limit, cancel, salvage a coherent commit or diff, and rebrief a smaller slice.
 
-## Command hygiene (mandatory)
+Checkpoint owned dirty work before dispatch. Integrate or reject each result
+before refilling its lane. Remove disposable worktrees and their targets after
+integration; never park completed work.
 
-`scripts/agent/jet-env` can stall 10+ minutes in flake `shellHook` →
-`clean-nix-tmp.sh` scanning `/proc/*/environ`. Piping only to `tail` hides
-progress and looks hung. Every burndown command path must:
+## Command and builder hygiene (mandatory)
 
-- Set `JET_NIX_TMP_CLEANED=1` after the first clean in the session (or always
-  when re-entering nix shells repeatedly) so later `jet-env` invocations skip
-  the scan.
-- Prefer `nix develop` / `nix develop .#full` when the card needs host libs
-  (e.g. `-lbz2`) instead of thrashing rustup-without-cc paths.
-- Wrap long builds/tests with hard `timeout` budgets.
-- Stream output or log to a file and poll — never wait on a long command piped
-  solely to `tail`.
-- Never re-run the same full-suite or other long command in a silent loop.
-  Use the single composed milestone sweep below for closeout proof.
+One persistent builder owns every compiler build and test:
+`.claude/worktrees/builder`. Implementation workers are source-only. They never
+create per-worktree `target/` caches.
 
-Put these constraints in every worker brief that runs compiler/test commands.
+- Claim and refresh the builder with `scripts/agent/builder-sync.sh`.
+- Set `JET_NIX_TMP_CLEANED=1` after the first cleanup in a session.
+- Wrap long commands with hard `timeout` limits and stream their output.
+- After each integration, run the smallest rejecting proof first.
+- Batch related green targets only after the first proof passes.
+- Never rerun a green target for reassurance.
+- Never run a project-wide suite before epoch closeout.
+- Remove test-created scratch such as `.jet/perf/` before releasing the builder.
+- Never use `/tmp` for cargo targets or large logs.
 
-**Per-worktree persistent build caches.** Do NOT share one
-`CARGO_TARGET_DIR` across concurrent worktrees on diverged branches: streams
-overwrite each other's dep artifacts and `target/debug/jet`, producing
-wrong-binary smoke runs and phantom compile errors from another branch's
-code (observed 2026-08-07). Each worktree keeps its own `target/`; the cache
-stays warm because worktrees persist across milestones (below). Sharing the
-main clone's target dir is safe only for a lone worker or branches at the
-same base. Never point any target dir at `/tmp` (RAM tmpfs).
-
-**Worktrees persist across milestones.** Keep a finished worker's worktree in
-place for the next milestone instead of delete/recreate; remove worktrees only at
-end of burndown scope (or when a stream is permanently done). Branches still
-merge and delete promptly — only the working directory and its build cache
-stay warm.
+Disposable implementation worktrees contain source only. Remove them and their
+temporary branches after integration or explicit rejection. Reuse the fixed
+builder cache, not disposable worker caches.
 
 ## Concurrency
 
-Concurrency exists only under a worker grant. Without one, there is no card
-implementation stream: the orchestrator does not implement. With a grant, run
-multiple concurrent card streams **only when write paths and tests are disjoint**.
+Concurrency exists only under a worker grant. Standard cap: about five bounded
+source-only lanes.
 
-- Live workers never exceed the granted `subagents N` (hard max **10**).
-- Record ownership before creating worktrees. Prefer in-repo worktrees
-  (`.claude/worktrees/<name>`) for concurrent writers; one named close owner
-  per stream. Never sibling folders beside the clone.
-- Serialize (or contract) when streams share compiler seams, contend for build
-  resources, or produce an integration backlog.
-- Never `git add -A`. Never stage, commit, overwrite, or touch another stream's
-  paths.
-- Integrate one clean branch at a time. **Do not build an integration backlog.**
-  A ready patch moves through integration and card closure as soon as its
-  evidence is complete; it does not wait for milestone review.
-- Cap retries: reject once or twice with a tighter brief; then escalate or
-  re-scope.
+- Parallelize only disjoint writable paths. One lane owns any shared compiler
+  seam at a time.
+- Never dispatch two broad cards that both need parser, sema, TIR, codegen, or
+  the same tests.
+- A lane remains occupied until its result is integrated, rejected, or reduced
+  to a precise blocker.
+- Integrate one clean branch at a time. Do not queue completed branches.
+- Never `git add -A`; never touch another lane's paths.
+- Cancel a worker that exceeds its brief or wall-clock limit. Salvage only a
+  coherent owned diff.
+- After one failed correction, shrink the next brief to the exact error and
+  path. After two failures, diagnose inline before spending another worker.
 
 ## Milestone proof and review
 
-Workers may run the commands named by their card criteria and return the
-evidence. The orchestrator does not repeat those commands only for reassurance.
-Card closure uses robust observable evidence, an integrated patch, and an honest
-blocker check.
+Workers do not run compiler or test commands. The orchestrator's persistent
+builder supplies the sole behavioral evidence.
 
-At milestone end, the orchestrator runs exactly one composed targeted test sweep
-over the milestone's gates and one fresh-context review of the integrated
-milestone diff. The sweep includes every applicable I9 execution tier. Include
-broader targets only when the criteria or a known interaction requires them.
+For each integrated patch, run the smallest changed-contract proof that can
+reject it. A green result may close the card when all other criteria have
+concrete integrated evidence. Do not wait for milestone review.
 
-The fresh-context review checks acceptance criteria, diffs, invariants, false-green
-risk, generated files, safety, and I9 parity. It does not implement. Every finding
-reopens the owning card and affected criteria. The owning worker applies the fix;
-the orchestrator integrates it, the reviewer reviews the delta, and the
-orchestrator verifies the affected criteria before closing the card and milestone.
+At milestone end, run exactly one composed targeted sweep and one fresh-context
+review of the integrated milestone diff. The sweep covers every applicable I9
+tier. Each finding reopens its owning card and affected criteria. Apply one
+narrow correction, review its delta, and rerun only affected targets.
 
-Do not restart a green command to be safe. If the composed sweep finds a concrete
-failure, fix its cause and rerun only the affected target as part of the closeout.
-Known blockers stay visible; never bless around them.
+Do not restart a green command to be safe. Known blockers stay visible; never
+bless around them.
 
 ## Board honesty
 

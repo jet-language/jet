@@ -18,11 +18,11 @@ problems only.
   implements card work — not a one-liner, not to save time, not when a worker launch flakes.
   Resolving your own merge or integration fallout is allowed; that is not card
   implementation.
-- **Workers:** implement assigned cards and return concrete evidence for every robust
-  observable criterion, plus blockers. They do not write criteria evidence or close cards.
-- **Model routing:** default worker is GPT-5.6 Luna at `model_reasoning_effort=max`.
-  Escalate a single task to Sol (`high`) only after Luna demonstrably failed it. Never
-  launch Sol workers in a group; its burn rate is multiples of Luna's.
+- **Workers:** implement one bounded source slice and return commit, source evidence, and
+  blockers. They do not write the board or claim an unrun proof passed.
+- **Model routing:** use GPT-5.6 Luna with medium reasoning for mechanical changes and high
+  for normal semantic fixes. Use max only for one narrow root-cause problem after a concrete
+  proof failed under high reasoning. Never launch broad max-reasoning card waves.
 
 ## Never stop while work is in flight
 
@@ -33,60 +33,69 @@ there is.
 
 ## Worker briefs
 
-One card per brief, and in it: the worktree path and branch; "read the card JSON in full
-plus every cited decision verbatim"; meet EVERY criterion; the invariants that apply by
-number; greenfield migration deletes the replaced form; unratified user-facing spelling →
-STOP that slice and return `ballot-needed` with the exact question; the exact writable
-paths; the hard prohibitions (`plugins/tower`, `jet-adjacent`, `AGENTS.md`, other cards'
-in-flight files); **no board writes** (the orchestrator owns every board write); skills
-ponytail + caveman + simple; the return shape (files+lines, per-criterion evidence, proof
-commands, blockers).
+One bounded slice per brief. A slice owns one mechanism, one concrete failed proof or small
+criterion set, and exact writable paths. Do not ask a worker to audit or complete a large
+card from scratch when the builder already exposed a specific failure.
+
+Every brief includes: worktree and branch; last integrated commit; exact actual and expected
+behavior; writable paths; applicable invariants; greenfield deletion requirements; no board
+writes; no nested workers; ponytail + caveman + simple; and a compact return shape.
+
+Source-only workers do not run cargo, Jet, formatter, linter, generator, or devtool commands.
+They return commit hash, changed paths and lines, source evidence, blockers, and clean status.
+They never label runtime, tier, golden, snapshot, or generated-artifact criteria PASS without
+command output.
 
 ## Dispatching codex workers
 
-Launch from the assigned worktree:
+Launch from the assigned worktree with an explicit effort override and wall-clock limit:
 
 ```sh
-codex exec -p luna --skip-git-repo-check - < /tmp/luna/<brief>.md
+timeout 720 codex exec -p luna -c model_reasoning_effort=\"high\" \
+  --skip-git-repo-check - < /tmp/luna/<brief>.md
 ```
 
-The `luna` profile (`~/.codex/luna.config.toml`) pins model, max reasoning, no approvals,
-and full access. Full access is required, not convenience: codex `workspace-write`
-unconditionally read-only-protects `.git` (worktree pointers resolve into the main
-clone's `.git`), so sandboxed workers cannot branch, stage, or commit, and the sandbox
-blocks the Nix daemon socket unless `network_access` is set (probed 2026-08-13 on codex
-0.144.5; no `allow_git_writes` opt-out exists). Every brief therefore carries the
-access-discipline note: work only inside the assigned worktree; never touch the main
-checkout, sibling worktrees, or `plugins/tower`.
+Use 300 seconds and medium reasoning for mechanical fixture changes. Use 1,200 seconds and
+max reasoning only for a narrow semantic root cause after high reasoning failed on a concrete
+repro. At the limit, cancel, salvage only a coherent owned commit or diff, and rebrief a
+smaller slice.
 
-Implementation workers normally skip cargo/jet builds, tests, and formatters and commit
-source-only patches. They may run only cheap non-build checks unless they own the reusable
-`.claude/worktrees/builder` for the build. The orchestrator pre-creates lanes, verifies
-claims, and writes the board.
+The `luna` profile pins the model, no approvals, and full access. Full access is required:
+codex `workspace-write` protects worktree `.git` pointers and blocks the Nix daemon socket.
+Every brief therefore restricts the worker to its assigned worktree and forbids the main
+checkout, sibling worktrees, and `plugins/tower`.
+
+Implementation workers are source-only. The persistent
+`.claude/worktrees/builder` is the sole build and test lane. The orchestrator creates source
+worktrees, integrates each result immediately, advances the builder, and runs the smallest
+proof that can reject the patch.
 
 ## Milestone stream
 
-1. Select one milestone and its unblocked cards. Dispatch workers in parallel only when
-   their paths and tests are disjoint.
-2. Give each worker the card's full criteria, exact writable paths, applicable invariants,
-   and the required evidence shape. Workers implement and return evidence; they do not
-   write the board.
-3. Inspect each return. Integrate a ready patch promptly and remove its disposable
-   worktree immediately. Between correction waves, advance the persistent
-   `.claude/worktrees/builder` once and run targeted verification there. Never let
-   disposable `target/` caches accumulate. After integration, record concrete evidence
-   for every robust observable criterion and close the card when the criteria are met and
-   no known blocker contradicts the evidence.
-4. Keep a card open when evidence is missing or a known blocker contradicts it. Route the
-   fix to the owning worker and integrate the resulting patch.
-5. Do not hold a card for a per-card reviewer, duplicate proof, or repeated fresh-context
-   audit. Continue through the milestone as ready patches arrive.
-6. At milestone end, run one composed targeted test sweep over the milestone's gates and
-   one fresh-context review of the integrated milestone diff. Include every applicable I9
-   execution tier.
-7. Every finding reopens the owning card and affected criteria. Apply and integrate the
-   fix, review the delta, verify the affected criteria, and close the card again. Close
-   the milestone only after all findings are resolved and no known blocker remains.
+Finish one milestone before opening another. Keep about five source-only lanes only when
+their writable paths are disjoint. Shared parser, sema, TIR, codegen, Prelude, or test seams
+get one implementation lane.
+
+1. Select one milestone and order its unblocked cards.
+2. Dispatch bounded slices with exact paths and evidence shape. Do not dispatch mega-card
+   prompts or broad fresh reviews during implementation.
+3. Inspect each return and integrate or reject it before refilling that lane. Never build an
+   integration backlog.
+4. Advance the persistent builder once and run the smallest changed-contract proof first.
+   Source inspection never substitutes for runtime, I9 tier, snapshot, golden, or generated
+   artifact proof.
+5. If proof fails, send the exact command and decisive failure to one correction worker.
+   Do not resend the whole card or ask it to rediscover context.
+6. Record concrete integrated evidence and close the card as soon as every criterion is met
+   and no blocker contradicts it.
+7. After every milestone card is done, run one composed targeted sweep and one fresh-context
+   review of the integrated milestone diff.
+8. Reopen findings on their owning cards. Apply narrow corrections, review only the delta,
+   and rerun only affected proof targets.
+
+Disposable implementation worktrees never build and never retain `target/`. Remove each
+worktree and temporary branch after integration or explicit rejection. The fixed builder
+cache is the only persistent cargo cache.
 
 ## Board hygiene
 
