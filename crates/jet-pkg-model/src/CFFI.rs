@@ -965,8 +965,9 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
                 let header_abs = resolve_header_path(header_path, &bundle.project_root);
                 match std::fs::read_to_string(&header_abs) {
                     Ok(source) => Some(source),
-                    Err(_) => {
-                        diags.push(e3208(header_path, &lib));
+                    Err(error) => {
+                        let reason = format!("the header file could not be read ({error}).");
+                        diags.push(e3208(header_path, &lib, &reason));
                         continue;
                     }
                 }
@@ -1013,10 +1014,11 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             let header_src = header_src.as_deref().expect("header path was collected");
             let result = match crate::CBind::generate(header_src, &lib) {
                 Ok(r) => r,
-                Err(_) => {
+                Err(reason) => {
                     // A changed header that no longer parses must never revive
                     // bindings from the old hash generation.
-                    diags.push(e3208(header_path, &lib));
+                    let reason = format!("{reason}.");
+                    diags.push(e3208(header_path, &lib, &reason));
                     continue;
                 }
             };
@@ -1057,14 +1059,10 @@ fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std
     }
 }
 
-fn e3208(header: &str, lib: &str) -> Diagnostic {
-    Diagnostic::error(
+fn e3208(header: &str, lib: &str, reason: &str) -> Diagnostic {
+    Diagnostic::from_row(
         "E3208",
-        format!("Could not generate bindings from `{header}`."),
-        "Header parsing or translation failed in the bind backend.".to_string(),
-        format!(
-            "fix the header, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`."
-        ),
+        &[("header", header), ("lib", lib), ("reason", reason)],
         None,
     )
 }
