@@ -6972,6 +6972,12 @@ and a range keeps it. `.solve(y)` answers square systems and
 and transforms use `core.linalg`. The proposal and all illustrative examples
 live in `docs/proposals/matrix-surface.md`; implementation is a later card.
 
+**2026-08-13 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
+use `.call(...)`; direct named, method, field, index, and lambda calls keep their
+existing spelling. The retired adjacent-call form `)(` is rejected with
+`E-CALL-VALUE`, and the function-value projection is lowered through the
+shared callable path on every execution tier.
+
 ## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
 
 The corpus-wide first-principles audit's rulings. Tower is the decision home (D-ONCE-LEDGER1=A); this block is the spec render.
@@ -7179,12 +7185,6 @@ items. A checked text block uses the closed `#Name { … }` boundary and resolve
 the name through the declaration registry; `#SQL<Row>` and `#HTML { … }` now
 use their declared `.Block` rows. The old marker-only DSL whitelist is retired
 by the syntax-chore lane.
-
-**2026-08-13 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
-use `.call(...)`; direct named, method, field, index, and lambda calls keep their
-existing spelling. The retired adjacent-call form `)(` is rejected with
-`E-CALL-VALUE`, and the function-value projection is lowered through the
-shared callable path on every execution tier.
 
 **2026-08-13 — D-CONF-MODULE1=A implementation log** *(card #1524)*.
 Declared profile settings now seed the shared typed build-fact snapshot. A
