@@ -3101,7 +3101,7 @@ pub fn lower_expr_for_eval(
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
-) -> Result<TExpr, Diagnostic> {
+) -> Result<(TExpr, Vec<TJitSpawnLambda>), Diagnostic> {
     let mut diagnostic = None;
     let mut foreign_struct_span = None;
     crate::Comptime::walk_expr_nodes_for_validation(expr, &mut |node| {
@@ -3151,7 +3151,10 @@ pub fn lower_expr_for_eval(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_expr(expr, &cx, &mut env))
     })) {
-        Ok(tir) => Ok(tir),
+        Ok(tir) => Ok((
+            tir,
+            std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()),
+        )),
         Err(_) => Err(unsupported("this expression", Span::new(0, 0))),
     }
 }
@@ -3167,7 +3170,7 @@ pub fn lower_stmts_for_eval(
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
-) -> Result<Vec<TStmt>, Diagnostic> {
+) -> Result<(Vec<TStmt>, Vec<TJitSpawnLambda>), Diagnostic> {
     let mut diagnostic = None;
     crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
         if diagnostic.is_none() {
@@ -3193,7 +3196,10 @@ pub fn lower_stmts_for_eval(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_stmts(stmts, &cx, &mut env))
     })) {
-        Ok(tir) => Ok(tir),
+        Ok(tir) => Ok((
+            tir,
+            std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()),
+        )),
         Err(_) => Err(unsupported("this statement", Span::new(0, 0))),
     }
 }
@@ -3920,7 +3926,7 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
-    let tir = lower_expr_for_eval(
+    let (tir, mut spawn_lambdas) = lower_expr_for_eval(
         req.expr,
         &fragment_funcs,
         req.methods,
@@ -3938,6 +3944,7 @@ fn eval_expr_hook(
     cx.struct_fields = normalize_struct_field_types(req.structs);
     cx.type_names.extend(req.structs.keys().cloned());
     cx.core_imports = req.core_imports.clone();
+    cx.jit_spawn_site_base = spawn_lambdas.len();
     let lowered: Vec<TFunc> = fragment_funcs
         .iter()
         .filter_map(|(name, f)| {
@@ -3966,6 +3973,7 @@ fn eval_expr_hook(
             .ok()
         })
         .collect();
+    spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
@@ -4023,7 +4031,7 @@ fn eval_expr_hook(
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
-        spawn_lambdas: &[],
+        spawn_lambdas: &spawn_lambdas,
         task_sender: None,
         task_cancel: None,
         task_paused: None,
@@ -4037,9 +4045,12 @@ fn eval_expr_hook(
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
-    let result = ctx
-        .eval_expr(&tir, &mut scope)
-        .map(|value| ctx.pending_return.take().unwrap_or(value));
+    let result = if spawn_lambdas.is_empty() {
+        ctx.eval_expr(&tir, &mut scope)
+    } else {
+        ctx.with_task_dispatcher(|ctx| ctx.eval_expr(&tir, &mut scope))
+    }
+    .map(|value| ctx.pending_return.take().unwrap_or(value));
     if let (Some(target), Some(shared)) = (sink_target, ctx.sink.as_ref()) {
         *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
     }
@@ -4056,7 +4067,7 @@ fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
-    let tir = lower_stmts_for_eval(
+    let (tir, mut spawn_lambdas) = lower_stmts_for_eval(
         req.stmts,
         &fragment_funcs,
         req.methods,
@@ -4072,6 +4083,7 @@ fn eval_block_hook(
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
     seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.core_imports = req.core_imports.clone();
+    cx.jit_spawn_site_base = spawn_lambdas.len();
     let lowered: Vec<TFunc> = fragment_funcs
         .iter()
         .filter_map(|(name, f)| {
@@ -4094,6 +4106,7 @@ fn eval_block_hook(
             .ok()
         })
         .collect();
+    spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
@@ -4154,7 +4167,7 @@ fn eval_block_hook(
         runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
-        spawn_lambdas: &[],
+        spawn_lambdas: &spawn_lambdas,
         task_sender: None,
         task_cancel: None,
         task_paused: None,
@@ -4168,7 +4181,12 @@ fn eval_block_hook(
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
-    let outcome = match ctx.exec_stmts(&tir, &mut scope)? {
+    let outcome = if spawn_lambdas.is_empty() {
+        ctx.exec_stmts(&tir, &mut scope)
+    } else {
+        ctx.with_task_dispatcher(|ctx| ctx.exec_stmts(&tir, &mut scope))
+    }?;
+    let outcome = match outcome {
         Flow::Normal => Ok(Comptime::TirBridge::StmtOutcome::Done(scope)),
         Flow::Return(value) => Ok(Comptime::TirBridge::StmtOutcome::Returned { value, scope }),
         other => Err(unsupported(

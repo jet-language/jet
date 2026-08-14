@@ -63,11 +63,12 @@ fn comptime_keeps_task_facts_in_the_front_end() {
 }
 
 #[test]
-fn repl_keeps_the_ratified_native_task_boundary() {
-    let transcript = jet::REPL::run_transcript(&["use core.tasks as tasks"], None);
-    assert!(
-        transcript.contains("E1802"),
-        "REPL must keep its existing native-task boundary: {transcript}"
+fn repl_matches_canonical_task_output() {
+    let transcript = jet::REPL::run_transcript(&[SOURCE, "run()"], None);
+    assert_eq!(
+        transcript,
+        format!("ok\n{EXPECTED}"),
+        "REPL task output must match the canonical source"
     );
 }
 
