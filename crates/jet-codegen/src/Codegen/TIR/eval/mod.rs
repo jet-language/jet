@@ -22,6 +22,7 @@ mod gc_runtime {
 }
 
 mod contract_semantics {
+    use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
     include!("../../../Prelude/Core/Contracts.rs");
 }
 
@@ -2462,20 +2463,19 @@ impl<'a> EvalCtx<'a> {
             );
             if let Some(sink) = self.sink.as_ref() {
                 let mut sink = sink.lock().expect("evaluator sink poisoned");
-                sink.stderr.push_str(&report);
-                sink.stderr.push('\n');
-                sink.exit_code = Some(70);
+                sink.stderr.push_str(&report.rendered);
+                sink.exit_code = Some(report.exit_code);
                 return Err(crate::Sema::Diagnostics::soft_exit(
-                    "70".to_string(),
-                    "runtime contract failed".to_string(),
+                    report.exit_code.to_string(),
+                    report.what,
                     Some(contract.span),
                 ));
             }
             return Err(crate::Sema::Diagnostics::render_registered(
                 "E3005",
-                format!("#{keyword} contract failed: {message}"),
-                "a runtime contract condition evaluated false".to_string(),
-                "satisfy the contract or update it".to_string(),
+                report.what,
+                report.why,
+                report.fix,
                 Some(contract.span),
             ));
         }

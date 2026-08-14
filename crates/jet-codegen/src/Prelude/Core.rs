@@ -865,12 +865,9 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
             msg: msg.to_string(),
         }));
     }
-    jet_runtime_stop(
-        "E3005",
-        file,
-        line,
-        &format!("#{} contract failed: {}", clause_kw, msg),
-    )
+    let report = jet_contract_report(clause_kw, msg, file, line);
+    jet_proof_record(2, 1, "E3005", &report.what, file, line);
+    std::panic::resume_unwind(Box::new(report))
 }
 
 /// Private structured producer channel used only when `jet prove` launches a

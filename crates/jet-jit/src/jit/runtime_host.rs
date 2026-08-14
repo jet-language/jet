@@ -24,6 +24,7 @@ mod measurement_kernel {
 }
 
 pub(crate) mod contract_kernel {
+    use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
@@ -1281,15 +1282,13 @@ extern "C" fn jet_jit_contract_fail(msg: i64, file: i64, line: i64, kind: i64) -
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let clause = if kind == 0 { "Pre" } else { "Post" };
-        rt.stderr.push_str(&contract_kernel::jet_contract_report(
+        let report = contract_kernel::jet_contract_report(
             clause,
             &msg,
             &file,
             line as u32,
-        ));
-        rt.stderr.push('\n');
-        rt.exit_code = Some(70);
-        rt.set_trap("__jet_contract__");
+        );
+        rt.set_rendered_runtime_stop(report.rendered, report.exit_code);
         0
     })
 }
