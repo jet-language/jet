@@ -975,8 +975,7 @@ implementations.
 **D-ALIAS-OP1=B** *(ratified 2026-08-06, card #1513; amends D-TYPEALIAS1)*:
 Alias declarations bind with `::`; the retired `=` spelling emits E0378. The
 canonical executable proof is `examples/features/types/type_alias.jet` with
-`examples/features/expected/types/type_alias.out`; the old spelling remains
-covered by `tests/ui/type_alias_old_syntax.jet`.
+`examples/features/expected/types/type_alias.out`.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a

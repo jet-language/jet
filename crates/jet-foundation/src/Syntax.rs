@@ -71,6 +71,9 @@
 // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
 // `name := value`; types ride values (`Type.{ … }`) or live on signatures
 // and fields. Retires `name: Type ::` / `name: Type :=`.
+// D-ALIAS-OP1=B (ratified 2026-08-06, card #1513; amends D-TYPEALIAS1): alias
+// declarations bind with the existing `::` mark; no token or grammar category
+// is added. The retired `=` spelling is diagnostic-only.
 // D-UNINIT-SENTINEL2=A amends D-UNINIT-SENTINEL1: `uninit` is legal only as
 // the whole body of a `Type.{ uninit }` head (`name := Type.{ uninit }`).
 // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
