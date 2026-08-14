@@ -1,0 +1,34 @@
+// A raw HTTP exchange keeps the readiness proof on the shared core.net surface.
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    budget :: Duration.milliseconds(1000) ?? panic("deadline")
+    server :: task {
+        stream :: listener.accept(deadline: budget) ?? panic("accept")
+        _request :: stream.read_text(8192, deadline: budget) ?? panic("request")
+        response :: [U8].{
+            72, 84, 84, 80, 47, 49, 46, 49, 32, 50, 48, 48, 32, 79, 75, 13, 10,
+            67, 111, 110, 116, 101, 110, 116, 45, 76, 101, 110, 103, 116, 104, 58, 32, 50, 13, 10,
+            67, 111, 110, 110, 101, 99, 116, 105, 111, 110, 58, 32, 99, 108, 111, 115, 101, 13, 10,
+            13, 10, 111, 107
+        }
+        stream.write_all(response, deadline: budget) ?? panic("response")
+    }
+    client :: net.tcp_connect(address) ?? panic("connect")
+    write_ready :: client.ready(.Write, deadline: budget) ?? panic("ready")
+    print(net.ready_writable(write_ready))
+    request :: [U8].{
+        71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 49, 32, 13, 10,
+        72, 111, 115, 116, 58, 32, 108, 111, 99, 97, 108, 13, 10,
+        67, 111, 110, 110, 101, 99, 116, 105, 111, 110, 58, 32, 99, 108, 111, 115, 101, 13, 10,
+        13, 10
+    }
+    client.write_all(request, deadline: budget) ?? panic("request")
+    response :: client.read_text(8192, deadline: budget) ?? panic("read")
+    print(response.starts_with("HTTP/1.1 200 OK"))
+    print(response.ends_with("ok"))
+    server.join() ?? panic("server")
+}
