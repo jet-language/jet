@@ -422,3 +422,18 @@ from this closeout and must use the settled law above.
   every replaced consumer, example, golden, snapshot, and doc in that change.
 - **Owed features.** Build the service plane, typed job scopes, and Windows
   IOCP conformance on the substrate.
+
+## #1557 implementation closure
+
+`crates/jet-sema/src/Sema/State.rs` registers `Task.State` with the
+`Running`, `Joined`, and `Detached` states. Spawn seeds `Running`. `join` and
+`detach` record the next state.
+
+`FlowFacts` stores this row with the other flow facts. Branch and loop joins use
+the shared `FlowFacts` walker. `CheckerOwnership` checks the join duty through
+the D-LIN1 obligation pass. The private task lint state and handle flag are gone.
+
+The state row and the duty erase before TIR and codegen. They do not change the
+generated Rust or the task runtime. `tests/task_state.rs`,
+`tests/task_state_tiers.rs`, the task example, and the task-state UI snapshot
+cover the implementation and its tier boundaries.
