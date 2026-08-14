@@ -356,6 +356,10 @@ pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-JPK-GRANTSCHEMA1
 /// D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D: package default for compiler
 /// generation of Printable, Equatable, and Debug implementations.
 pub const MANIFEST_POLICY_AUTO_DERIVE: &str = "auto_derive";
+/// D-MEM-GUARANTEE1=A: package-only dependency containment policy. These
+/// fields intentionally do not enter the source `PolicyKey` registry.
+pub const POLICY_FIELD_CONTAIN: &str = "contain";
+pub const POLICY_FIELD_HARDEN: &str = "harden";
 pub const POLICY_FIELD_TRUST: &str = "trust"; // D-JPK-GRANTSCHEMA1
 /// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
 pub const POLICY_FIELD_PROVIDERS: &str = "providers";

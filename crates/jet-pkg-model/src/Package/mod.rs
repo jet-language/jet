@@ -26,7 +26,7 @@ pub use Edit::{add_dep, remove_dep};
 
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
 use crate::Lexer;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -233,6 +233,39 @@ pub struct PackagePolicy {
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).
     pub lints_deny: Option<Vec<String>>,
+    /// D-MEM-GUARANTEE1=A: package-only dependencies whose foreign pointers
+    /// are contained by a tracked-handle fence.
+    pub contain: BTreeSet<String>,
+    /// D-MEM-GUARANTEE1=A: keep sentries in release and contain every foreign
+    /// dependency. This is a tighten-only switch.
+    pub harden: bool,
+}
+
+impl PackagePolicy {
+    /// Check the package-only guarantee order. A later policy may add a
+    /// contained dependency or turn hardening on, but it may not widen either
+    /// fact. The parser uses the same law for explicit false values.
+    pub fn guarantees_tighten(&self, next: &Self) -> Result<(), String> {
+        if !self.contain.is_subset(&next.contain) {
+            return Err("`policy.contain` cannot remove a contained dependency".to_string());
+        }
+        if self.harden && !next.harden {
+            return Err("`policy.harden` cannot be turned off".to_string());
+        }
+        Ok(())
+    }
+
+    /// Return the effective fenced set for the package dependency graph.
+    pub fn contained_dependencies<'a>(
+        &self,
+        dependencies: impl IntoIterator<Item = &'a String>,
+    ) -> BTreeSet<String> {
+        if self.harden {
+            dependencies.into_iter().cloned().collect()
+        } else {
+            self.contain.clone()
+        }
+    }
 }
 
 /// D-CONF-MODULE1=A: one declared `settings:` entry — a name, a Tier-0 type,
@@ -322,6 +355,8 @@ pub enum PackageParseError {
     BadMemoryPolicy { detail: String },
     /// D-AUTODERIVE-SYNTAX1=D: malformed `policy.auto_derive`.
     BadAutoDerivePolicy { detail: String },
+    /// D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
+    BadGuaranteePolicy { detail: String },
 }
 
 impl fmt::Display for PackageParseError {
@@ -350,6 +385,7 @@ impl fmt::Display for PackageParseError {
             Self::BadEffectsBlock(detail) => f.write_str(detail),
             Self::BadMemoryPolicy { detail } => f.write_str(detail),
             Self::BadAutoDerivePolicy { detail } => f.write_str(detail),
+            Self::BadGuaranteePolicy { detail } => f.write_str(detail),
         }
     }
 }
@@ -370,7 +406,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};policy_contain={:?};policy_harden={:?};",
             self.name,
             self.version,
             self.jet,
@@ -384,6 +420,8 @@ impl PackageFacts {
             self.settings,
             self.configs,
             self.members,
+            self.policy.contain,
+            self.policy.harden,
         )
         .expect("writing to a String cannot fail");
         for (name, config) in &self.inline_configs {
@@ -424,6 +462,7 @@ impl PackageFacts {
     /// Parse the canonical `package.jet` root shape.
     pub fn parse(text: &str, origin: impl Into<String>) -> Result<Self, PackageParseError> {
         let facts = Self::parse_uncomposed(text, origin)?;
+        facts.validate_guarantees()?;
         facts
             .validate_defaults()
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
@@ -467,6 +506,7 @@ impl PackageFacts {
         let mut facts = checked.facts;
         let result = facts
             .compose_configs_checked(&resolver)
+            .and_then(|_| facts.validate_guarantees())
             .and_then(|_| {
                 facts
                     .validate_defaults()
@@ -591,6 +631,25 @@ impl PackageFacts {
             .get(field)
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Ensure every explicitly contained name belongs to this package's
+    /// declared dependency graph. `harden` needs no name check: it covers the
+    /// complete graph by definition.
+    pub fn validate_guarantees(&self) -> Result<(), PackageParseError> {
+        if let Some(name) = self
+            .policy
+            .contain
+            .iter()
+            .find(|name| !self.deps.contains_key(*name))
+        {
+            return Err(PackageParseError::BadGuaranteePolicy {
+                detail: format!(
+                    "`policy.contain` names `{name}`, but `deps:` does not declare that dependency"
+                ),
+            });
+        }
+        Ok(())
     }
 
     pub fn validate_defaults(&self) -> Result<(), ComposeError> {
@@ -1656,12 +1715,15 @@ fn parse_common(
             "policy" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "policy" => {
                 let body = record_body(&value, "policy")?;
+                let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
                 facts.policy = PackagePolicy {
-                    memory: Blocks::parse_memory_policy(body)?,
+                    memory: Blocks::parse_memory_policy(body, true)?,
                     auto_derive: Blocks::parse_auto_derive_policy(body)?,
                     trust: Blocks::parse_trust_policy(body)?,
                     providers: Blocks::parse_provider_policy(body)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
+                    contain,
+                    harden,
                 };
             }
             crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => return Err(PackageParseError::ConfigMembers),

@@ -287,6 +287,9 @@ pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     // declared in a `configs:`-referenced file.
     let facts = Package::PackageFacts::parse_uncomposed(raw, path.display().to_string())
         .map_err(|e| manifest_parse_diagnostic(path, &e))?;
+    facts
+        .validate_guarantees()
+        .map_err(|e| manifest_parse_diagnostic(path, &e))?;
     Package::to_manifest(&facts, raw)
 }
 
@@ -492,6 +495,10 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::BadAutoDerivePolicy { detail } => {
             e1206(&file, &format!("`policy.auto_derive` is malformed: {detail}"))
         }
+        PackageParseError::BadGuaranteePolicy { detail } => e1206(
+            &file,
+            &format!("package guarantee policy is malformed: {detail}"),
+        ),
     }
 }
 

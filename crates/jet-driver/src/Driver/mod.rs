@@ -8,6 +8,162 @@ use jet_pkg_model::Authority::AuthorityResolver;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+/// One of the four user-facing truth states printed by `jet inspect
+/// guarantees` (D-MEM-GUARANTEE1). The labels are deliberately stable: they
+/// are a report vocabulary, not engine-specific implementation detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuaranteeStatus {
+    Proven,
+    Watched,
+    Fenced,
+    Trusted,
+}
+
+impl GuaranteeStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Proven => "proven",
+            Self::Watched => "watched",
+            Self::Fenced => "fenced",
+            Self::Trusted => "TRUSTED",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuaranteeComponent {
+    pub name: String,
+    pub status: GuaranteeStatus,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuaranteeReport {
+    pub profile: String,
+    pub package: bool,
+    pub freestanding: bool,
+    pub components: Vec<GuaranteeComponent>,
+    pub notes: Vec<String>,
+}
+
+/// Compute the inspectable guarantee projection from package facts, loaded
+/// dependency names, and the shared unsafe-gate ledger. No execution engine
+/// participates: the CLI only renders this already-typed policy result.
+pub fn guarantee_report(
+    package: Option<&crate::Package::PackageFacts>,
+    loaded_dependencies: impl IntoIterator<Item = String>,
+    unsafe_gates: usize,
+    profile: &str,
+    freestanding: bool,
+) -> GuaranteeReport {
+    let mut dependencies = BTreeSet::new();
+    if let Some(package) = package {
+        dependencies.extend(package.deps.keys().cloned());
+    }
+    dependencies.extend(loaded_dependencies);
+
+    let harden = package.is_some_and(|package| package.policy.harden);
+    let contained = package
+        .map(|package| package.policy.contained_dependencies(dependencies.iter()))
+        .unwrap_or_default();
+    let sentries_active = !freestanding && (profile != "release" || harden);
+
+    let mut components = vec![GuaranteeComponent {
+        name: "your code".to_string(),
+        status: GuaranteeStatus::Proven,
+        evidence: "compile-time prover".to_string(),
+    }];
+    let gate_status = if unsafe_gates == 0 {
+        GuaranteeStatus::Proven
+    } else if sentries_active {
+        GuaranteeStatus::Watched
+    } else {
+        GuaranteeStatus::Trusted
+    };
+    let gate_evidence = if unsafe_gates == 0 {
+        "no audited gates".to_string()
+    } else if sentries_active {
+        "runtime sentries active".to_string()
+    } else if freestanding {
+        "runtime sentries unavailable".to_string()
+    } else {
+        "release sentries disabled".to_string()
+    };
+    components.push(GuaranteeComponent {
+        name: format!("#Unsafe gates ({unsafe_gates})"),
+        status: gate_status,
+        evidence: gate_evidence,
+    });
+
+    if dependencies.is_empty() {
+        components.push(GuaranteeComponent {
+            name: "externs".to_string(),
+            status: if package.is_some() {
+                GuaranteeStatus::Proven
+            } else {
+                GuaranteeStatus::Trusted
+            },
+            evidence: if package.is_some() {
+                "no foreign dependencies declared".to_string()
+            } else {
+                "outside package guarantee".to_string()
+            },
+        });
+    } else {
+        for dependency in dependencies {
+            let fenced = !freestanding && contained.contains(&dependency);
+            components.push(GuaranteeComponent {
+                name: dependency,
+                status: if fenced {
+                    GuaranteeStatus::Fenced
+                } else {
+                    GuaranteeStatus::Trusted
+                },
+                evidence: if fenced {
+                    "tracked handles inside dependency fence".to_string()
+                } else {
+                    "outside package guarantee".to_string()
+                },
+            });
+        }
+    }
+
+    let mut notes = Vec::new();
+    if package.is_none() {
+        notes.push(
+            "single-file: no package.jet; contain/harden unavailable; externs remain TRUSTED"
+                .to_string(),
+        );
+    } else if harden && freestanding {
+        notes.push(
+            "harden: true requested, but freestanding has no runtime fence".to_string(),
+        );
+    } else if harden {
+        notes.push("harden: true; every foreign dependency is fenced".to_string());
+    } else if package.is_some_and(|package| !package.policy.contain.is_empty()) {
+        notes.push(
+            "uncontained dependencies remain TRUSTED; add them to contain or set harden: true"
+                .to_string(),
+        );
+    }
+    if profile == "release" && unsafe_gates > 0 && !harden {
+        notes.push(
+            "release sentries: off; set harden: true to watch every #Unsafe gate".to_string(),
+        );
+    }
+    if freestanding {
+        notes.push("freestanding: prover + audit only".to_string());
+    }
+
+    GuaranteeReport {
+        profile: profile.to_string(),
+        package: package.is_some(),
+        freestanding,
+        components,
+        notes,
+    }
+}
+
 fn package_lints_deny(
     bundle: &crate::AST::ProgramBundle,
 ) -> Result<Vec<String>, Diagnostic> {

@@ -116,11 +116,27 @@ impl<'a> Parser<'a> {
                 };
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
+                    let package_only = name == Syntax::POLICY_FIELD_CONTAIN
+                        || name == Syntax::POLICY_FIELD_HARDEN;
+                    let why = if package_only {
+                        "contain and harden govern package dependencies and release profiles, not source scopes".to_string()
+                    } else if site_bound {
+                        "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them".to_string()
+                    } else {
+                        "the compiler owns the closed policy registry and its scope rules".to_string()
+                    };
+                    let fix = if package_only {
+                        "write `policy: .{ contain: [\"dependency\"], harden: true }` in `package.jet`".to_string()
+                    } else if site_bound {
+                        format!("use `#{name}` at its sound site")
+                    } else {
+                        "use `no_alloc`, `zero_rc`, `arena_bounded(bytes)`, or `sentries: .Off`".to_string()
+                    };
                     return Err(Diagnostic::error(
                         "E0355",
                         format!("`{name}` is not a scoped policy"),
-                        if site_bound { "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them".to_string() } else { "the compiler owns the closed policy registry and its scope rules".to_string() },
-                        if site_bound { format!("use `#{name}` at its sound site") } else { "use `no_alloc`, `zero_rc`, `arena_bounded(bytes)`, or `sentries: .Off`".to_string() },
+                        why,
+                        fix,
                         Some(name_span),
                     ));
                 };

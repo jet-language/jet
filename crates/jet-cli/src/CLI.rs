@@ -168,7 +168,7 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
+    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Guarantees, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
     GcReport,
@@ -188,7 +188,7 @@ impl HandlerKey {
             Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
             Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Compiler => "compiler", Self::Impact => "impact",
-            Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
+            Self::Dossier => "dossier", Self::Guarantees => "guarantees", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
             Self::Gates => "gates", Self::Authority => "authority",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
             Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
@@ -228,6 +228,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
     NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
     NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
+    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "Show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
     NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
@@ -1702,6 +1703,7 @@ mod tests {
             ("inspect", "query", Query, "query", false), ("inspect", "explain-build", ExplainBuild, "explain-build", false),
             ("inspect", "compiler", Compiler, "compiler", false),
             ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
+            ("inspect", "guarantees", Guarantees, "guarantees", false),
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
             ("inspect", "unsafe", Unsafe, "unsafe", false),
             ("inspect", "gates", Gates, "gates", false), ("inspect", "authority", Authority, "authority", false),

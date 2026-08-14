@@ -484,6 +484,22 @@ fn load_entry_with_overlays_mode_with_sink(
                     ),
                 ));
             }
+            Err(crate::Package::PackageParseError::BadGuaranteePolicy { detail }) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        &raw,
+                        vec![Diagnostic::error(
+                            "E1206",
+                            "invalid package guarantee policy".to_string(),
+                            detail,
+                            "use `policy: .{ contain: [\"dependency\"], harden: true }` in `package.jet`; these keys are package-only and tighten-only".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
             Err(error) => {
                 return Err(record_loader_error(
                     &mut sink,

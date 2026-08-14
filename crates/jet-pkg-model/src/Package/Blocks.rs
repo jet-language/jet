@@ -10,7 +10,7 @@
 use super::PackageParseError;
 use crate::RefSpec::{self, Source};
 use crate::Syntax;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 // ── small structural helpers (std-only, comment-stripped input) ────────────
 
@@ -138,6 +138,10 @@ fn bad_mem(detail: impl Into<String>) -> PackageParseError {
 
 fn bad_auto(detail: impl Into<String>) -> PackageParseError {
     PackageParseError::BadAutoDerivePolicy { detail: detail.into() }
+}
+
+fn bad_guarantee(detail: impl Into<String>) -> PackageParseError {
+    PackageParseError::BadGuaranteePolicy { detail: detail.into() }
 }
 
 // ── deps: … (D-JPK23, D-JPK-REF1, S59/D-CFFI2) ──────────────────────────────
@@ -722,7 +726,7 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
 }
 
 // ── policy: … (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
-//    D-PACKAGE-POLICY-SCOPE1, D-AUTODERIVE1) ───────────────────────────────
+//    D-PACKAGE-POLICY-SCOPE1, D-AUTODERIVE1, D-MEM-GUARANTEE1) ──────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustDecision {
@@ -871,12 +875,20 @@ pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, Pack
     jet_foundation::LintPolicy::parse_policy_lints(body).map_err(|detail| err(detail))
 }
 
-pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
+pub(super) fn parse_memory_policy(
+    body: &str,
+    package_only_fields: bool,
+) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for (name, raw) in key_value_entries(body)? {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
-            if matches!(name.as_str(), "trust" | "lints" | "providers") || name == Syntax::MANIFEST_POLICY_AUTO_DERIVE {
+            if matches!(name.as_str(), "trust" | "lints" | "providers")
+                || (package_only_fields
+                    && (name == Syntax::POLICY_FIELD_CONTAIN
+                        || name == Syntax::POLICY_FIELD_HARDEN))
+                || name == Syntax::MANIFEST_POLICY_AUTO_DERIVE
+            {
                 continue;
             }
             return Err(bad_mem(format!("`{name}` is not a registered package policy")));
@@ -902,6 +914,60 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
     Ok(out)
 }
 
+/// Parse the package-only dependency guarantee dial. The source policy
+/// registry deliberately does not know these names: they govern the package
+/// graph and release profile, not lexical source scopes.
+pub(super) fn parse_guarantee_policy(
+    body: &str,
+) -> Result<(BTreeSet<String>, bool), PackageParseError> {
+    let mut contain = BTreeSet::new();
+    let mut contain_seen = false;
+    let mut harden_seen = false;
+    let mut harden = false;
+    for (name, raw) in key_value_entries(body)? {
+        if name == Syntax::POLICY_FIELD_CONTAIN {
+            if contain_seen {
+                return Err(bad_guarantee("`policy.contain` may be declared once"));
+            }
+            contain_seen = true;
+            let values = parse_string_list(raw.trim()).map_err(|_| {
+                bad_guarantee("`policy.contain` must be a list like `[\"libxml\"]`")
+            })?;
+            for dependency in values {
+                if dependency.trim().is_empty() {
+                    return Err(bad_guarantee(
+                        "`policy.contain` cannot name an empty dependency",
+                    ));
+                }
+                if !contain.insert(dependency) {
+                    return Err(bad_guarantee(
+                        "`policy.contain` cannot name one dependency more than once",
+                    ));
+                }
+            }
+        } else if name == Syntax::POLICY_FIELD_HARDEN {
+            if harden_seen {
+                return Err(bad_guarantee("`policy.harden` may be declared once"));
+            }
+            harden_seen = true;
+            match raw.trim() {
+                "true" => harden = true,
+                "false" => {
+                    return Err(bad_guarantee(
+                        "`policy.harden` only tightens; omit it instead of writing `false`",
+                    ))
+                }
+                _ => {
+                    return Err(bad_guarantee(
+                        "`policy.harden` must be `true`; the package guarantee dial only tightens",
+                    ))
+                }
+            }
+        }
+    }
+    Ok((contain, harden))
+}
+
 /// Parse a standalone organization policy file whose entire content is one
 /// `policy: .{ … }` block (`JET_ORG_UNSAFE_POLICY`) — no other manifest
 /// fields are legal there.
@@ -919,7 +985,7 @@ pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDecl
     if !rest[close + 1..].trim().is_empty() {
         return Err(bad_mem("organization policy file may contain only the `policy` block"));
     }
-    parse_memory_policy(&rest[..close])
+    parse_memory_policy(&rest[..close], false)
 }
 
 pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, PackageParseError> {

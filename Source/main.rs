@@ -25,6 +25,7 @@ mod CmdCompile;
 mod CmdDevTools;
 mod CmdNotebook;
 mod CmdDossier;
+mod CmdInspect;
 mod CmdExpand;
 mod CmdGc;
 mod CmdImpact;
@@ -57,6 +58,7 @@ use CmdDevTools::{
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExpand::run_expand;
+use CmdInspect::run_guarantees;
 use CmdImpact::run_impact;
 use CmdPkg::{
     run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
@@ -1801,6 +1803,18 @@ fn main() {
             // D-WD2/D-DOSSIER1: umbrella explain view over semantic facts.
             let dossier_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_dossier(&dossier_args, mode.json);
+            return;
+        }
+        "guarantees" => {
+            let guarantee_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_guarantees(
+                &guarantee_args,
+                mode.json,
+                mode.color_stderr(),
+                gates,
+                named_profile.as_deref().unwrap_or("dev"),
+                freestanding,
+            );
             return;
         }
         "impact" => {
