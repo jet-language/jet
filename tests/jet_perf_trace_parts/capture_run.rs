@@ -29,7 +29,7 @@ fn run() {{
     (hold_sender, blocked) :: tasks.channel<Int>(1)
     child :: task {{
         ready_sender.send(1)
-        time.sleep(700)
+        time.sleep(700ms)
         blocked.receive() ?? panic("closed")
     }}
     child.detach()
@@ -50,7 +50,7 @@ fn run() {{
         digest = crypto.sha256(digest.hex().bytes())
     }}
     print("READY {{digest.hex().len()}}")
-    time.sleep(1200)
+    time.sleep(1200ms)
     hold_sender.send(1)
     _client :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect")
 }}

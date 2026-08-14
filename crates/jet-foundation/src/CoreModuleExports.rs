@@ -75,6 +75,7 @@ const MEM_LEAVES: &[(&str, CoreLeafKind)] = &[("AllocError", CoreLeafKind::Plain
 const CORE_ROOT_TYPES: &[&str] = &[
     crate::Syntax::TYPE_DECIMAL,
     crate::Syntax::DURATION_TYPE,
+    crate::Syntax::TYPE_INSTANT,
     "Date",
     "LocalDate",
     "LocalTime",

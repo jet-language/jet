@@ -32,6 +32,18 @@ pub(crate) fn jet_duration_kernel_total_seconds(value: i64) -> i64 {
     value / 1_000_000_000
 }
 
+pub(crate) fn jet_duration_kernel_seconds_value(value: i64) -> f64 {
+    value as f64 / 1_000_000_000.0
+}
+
+pub(crate) fn jet_duration_kernel_add(left: i64, right: i64) -> i64 {
+    left.saturating_add(right)
+}
+
+pub(crate) fn jet_duration_kernel_sub(left: i64, right: i64) -> i64 {
+    left.saturating_sub(right)
+}
+
 pub(crate) fn jet_duration_kernel_difference(left: i64, right: i64) -> i64 {
     left.saturating_sub(right)
 }

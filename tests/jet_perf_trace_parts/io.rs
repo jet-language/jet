@@ -20,7 +20,7 @@ fn run() {
         stream.write_all("echo:{message}".bytes()) ?? panic("write")
     }
     // Cross two 100 ms observe publications before completing the wait.
-    time.sleep(250)
+    time.sleep(250ms)
     client :: net.tcp_connect(address) ?? panic("connect")
     client.write_all("ping".bytes()) ?? panic("write")
     print(client.read_text(16) ?? panic("read"))

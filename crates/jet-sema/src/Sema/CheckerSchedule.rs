@@ -28,9 +28,9 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     let (what, why, fix) = match reason {
         EveryScheduleError::UnknownDurationUnit => (
             "this duration's unit isn't a recognized schedule cadence",
-            "a schedule's repeat interval uses the shared duration plane — \
-             `ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.",
-            "use a shared duration unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).",
+            "a schedule's repeat interval uses the canonical Time family — \
+             `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.",
+            "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).",
         ),
         EveryScheduleError::NonPositiveDuration => (
             "a schedule interval must be a positive duration",

@@ -233,6 +233,9 @@ pub(crate) struct TypeRegistry {
     /// #603: the one normalized source of truth for concrete unit conversion,
     /// package identity, dimension, affine kind, and algebra facts.
     unit_facts: HashMap<String, UnitFact>,
+    /// D-TYPE2-TIME1=A: canonical Time suffixes resolve directly to the core
+    /// Duration delta instead of minting Float distinct types.
+    time_literals: HashMap<String, crate::AST::CanonicalTimeUnit>,
     /// D-FIELDPOL1: struct name → computed field name → (span, declared
     /// type). A computed field never appears in `TypeDef::Struct::fields`
     /// (it's not a stored field, and is never required/allowed in a struct
@@ -301,6 +304,13 @@ impl TypeRegistry {
 
     pub(crate) fn unit_fact(&self, name: &str) -> Option<&UnitFact> {
         self.unit_facts.get(name)
+    }
+
+    pub(crate) fn time_literal(
+        &self,
+        suffix: &str,
+    ) -> Option<crate::AST::CanonicalTimeUnit> {
+        self.time_literals.get(suffix).copied()
     }
 
     fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type)]> {

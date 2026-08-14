@@ -3116,19 +3116,20 @@ impl<'a> Checker<'a> {
                 // site is too noisy (breaks showcase golden tests via path-specific output).
                 // Revisit when the test harness can normalise paths in exact comparisons.
                 ("core.files", "read") => {}
-                // D-TASKRUNTIME1=A: scheduler timer channels. `after(ms)` emits a unit tick;
-                // `after(ms, value)` emits a typed timeout value that can join a select.
+                // D-TYPE2-TIME1=A: scheduler timer channels consume the canonical
+                // Duration delta; `after(duration)` emits a unit tick and
+                // `after(duration, value)` emits a typed timeout value.
                 ("core.tasks", "after") => {
                     if !(args.len() == 1 || args.len() == 2) {
                         self.diags.push(Diagnostic::error(
                             "E0104",
                             format!(
-                                "`tasks.after` takes one duration and an optional value, got {} argument{}",
+                                "`tasks.after` takes one Duration and an optional value, got {} argument{}",
                                 args.len(),
                                 if args.len() == 1 { "" } else { "s" }
                             ),
-                            "a one-shot timer channel fires after a whole-millisecond delay".to_string(),
-                            "write `tasks.after(ms: 100)` or `tasks.after(ms: 100, value: fallback)`".to_string(),
+                            "a one-shot timer channel fires after the given Duration".to_string(),
+                            "write `tasks.after(100ms)` or `tasks.after(100ms, fallback)`".to_string(),
                             Some(span),
                         ));
                         for a in args.iter_mut() {
@@ -3136,18 +3137,16 @@ impl<'a> Checker<'a> {
                         }
                         return None;
                     }
-                    let ms_ty = self.infer(&mut args[0].expr)?;
-                    if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
-                        || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
-                    {
+                    let duration_ty = self.infer(&mut args[0].expr)?;
+                    if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
-                                "`tasks.after(ms: …)` needs an integer millisecond count, not {}",
-                                ms_ty.show()
+                                "`tasks.after(duration: …)` needs a Duration, not {}",
+                                duration_ty.show()
                             ),
-                            "timer channels use whole milliseconds".to_string(),
-                            "write `tasks.after(ms: 100)`".to_string(),
+                            "timer channels use the canonical Time delta".to_string(),
+                            "write `tasks.after(100ms)`".to_string(),
                             Some(args[0].expr.span()),
                         ));
                     }
@@ -3170,7 +3169,8 @@ impl<'a> Checker<'a> {
                         args: vec![elem],
                     });
                 }
-                // D-TASKRUNTIME1=A: interval timer sends tick numbers (1, 2, ...).
+                // D-TYPE2-TIME1=A: interval timer consumes the canonical Duration
+                // and sends tick numbers (1, 2, ...).
                 ("core.tasks", "interval") => {
                     if args.len() != 1 {
                         self.diags
@@ -3180,18 +3180,16 @@ impl<'a> Checker<'a> {
                         }
                         return None;
                     }
-                    let ms_ty = self.infer(&mut args[0].expr)?;
-                    if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
-                        || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
-                    {
+                    let duration_ty = self.infer(&mut args[0].expr)?;
+                    if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
-                                "`tasks.interval(ms: …)` needs an integer millisecond count, not {}",
-                                ms_ty.show()
+                                "`tasks.interval(duration: …)` needs a Duration, not {}",
+                                duration_ty.show()
                             ),
-                            "interval channels use whole milliseconds".to_string(),
-                            "write `tasks.interval(ms: 1000)`".to_string(),
+                            "interval channels use the canonical Time delta".to_string(),
+                            "write `tasks.interval(1000ms)`".to_string(),
                             Some(args[0].expr.span()),
                         ));
                     }

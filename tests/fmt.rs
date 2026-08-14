@@ -2617,11 +2617,9 @@ fn fmt_preserves_unit_literal() {
     // D-UNITLIT1 / D-TYPE2-TIME1: `500ms` must survive with no space inserted
     // between the number and the suffix, and the suffix itself must not be dropped.
     let src = "\
-#UnitFamily(Time) { ms, s }
-
 fn run() {
     a :: 500ms
-    print(\"{a.raw()}\")
+    print(a)
 }
 ";
     assert_fmt_stable(src, "unit literal");

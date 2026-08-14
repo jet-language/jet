@@ -1,7 +1,6 @@
 use crate::AST::{Expr, LValue, Stmt, Type};
 use crate::Codegen::TIR::{TBindingOrigin, TLocal};
 use crate::Codegen::TIR::TirWorklist;
-use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::cell::{Cell, RefCell};
@@ -344,27 +343,6 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
         }
     }
     false
-}
-
-/// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
-/// validated) to a nanosecond budget. Falls back to 0 on the impossible shape.
-pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
-    if let Some(Expr::UnitLit {
-        int, float, suffix, ..
-    }) = args.first()
-    {
-        if let Some(mult) = Syntax::duration_suffix_nanos(suffix) {
-            let nanos: u128 = if let Some(i) = int {
-                (*i as u128).saturating_mul(mult)
-            } else if let Some(f) = float {
-                (*f * mult as f64) as u128
-            } else {
-                0
-            };
-            return nanos.min(u64::MAX as u128) as u64;
-        }
-    }
-    0
 }
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere

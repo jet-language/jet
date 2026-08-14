@@ -1877,8 +1877,11 @@ fn ambient_time_call(
         )),
         ("core.time", "instant") => Ok(crate::Time::ambient_instant_value()),
         ("core.time", "sleep") => {
-            let millis = ambient_int_arg(args, 0, "time.sleep", span)?;
-            jet_codegen::scheduler::jet_std_time_sleep(millis);
+            let nanos = args
+                .first()
+                .and_then(duration_ns)
+                .ok_or_else(|| unsupported("time.sleep expects a Duration", span))?;
+            jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos);
             Ok(CtValue::Unit)
         }
         ("core.time", "start") => Ok(CtValue::Struct {

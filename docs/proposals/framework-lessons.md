@@ -57,10 +57,9 @@ an implementation boundary; it does not keep that behavior as an option.
 - D-SCHEDULE1, as amended by D-CONC-SCHED1, defines one typed schedule value
   on the D-TYPE2-TIME1 rail. A scheduled job is the lifecycle unit the runtime
   starts; `task` remains the separate structured-concurrency construct. The
-  shared duration resolver now accepts `2h` and `1d` alongside the existing
-  units, and `jet dev` reads the same checked result. The ordinary typed
-  `Duration` and wall-clock values plus service and jetos consumers are
-  unshipped.
+  canonical Time resolver now accepts `2h` and `1d` alongside the existing
+  units, and `jet dev` reads the same checked result. Service and jetos
+  consumers remain unshipped.
 - D-VALIDATE1 has in-body accumulation and `Type.validate`. Derived struct
   decode now runs the same validator after shape decoding. Hand codecs still
   opt in explicitly. D-VALIDATE-DECODE1 settles the sole

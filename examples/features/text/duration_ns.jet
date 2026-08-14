@@ -12,9 +12,12 @@ fn run() {
     a :: Duration.milliseconds(1500) ?? panic("a")
     b :: Duration.milliseconds(500) ?? panic("b")
     print(a.difference(b).in(.Milliseconds) ?? panic("diff"))
-    print((time.nanoseconds(250) ?? panic("mod")).in(.Nanoseconds) ?? panic("mod read"))
-    print((time.microseconds(3) ?? panic("mod us")).in(.Microseconds) ?? panic("mod us read"))
+    print((250ns).in(.Nanoseconds) ?? panic("literal read"))
+    print((3us).in(.Microseconds) ?? panic("literal read"))
     inst :: time.instant()
+    later :: inst + 5min
+    print(later >= inst)
+    print((later - inst).in(.Minutes) ?? panic("point delta"))
     elapsed :: inst.elapsed()
     print(elapsed.total_seconds() >= 0)
 }

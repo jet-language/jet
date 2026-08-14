@@ -1158,6 +1158,7 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ClockAdvance
                 | THandleOp::ClockWait => Some(Type::Int),
                 THandleOp::DurationIn { .. } => Some(Type::Option(Box::new(Type::Int))),
+                THandleOp::DurationSecondsValue => Some(Type::Float),
                 _ => {
                     let _ = args;
                     None
@@ -7986,6 +7987,8 @@ impl LowerCtx<'_, '_> {
             } => {
                 let value = self.lower_expr(value)?;
                 let duration = self.lower_expr(duration)?;
+                let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                let duration = self.b.ins().sdiv(duration, scale);
                 let clock = self.lower_expr(clock)?;
                 let secret = self.b.ins().iconst(types::I64, 0);
                 let host = self
@@ -8005,6 +8008,8 @@ impl LowerCtx<'_, '_> {
             } => {
                 let value = self.lower_expr(value)?;
                 let duration = self.lower_expr(duration)?;
+                let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                let duration = self.b.ins().sdiv(duration, scale);
                 let clock = self.lower_expr(clock)?;
                 let secret = self.b.ins().iconst(types::I64, 1);
                 let host = self
@@ -15131,7 +15136,9 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.call_host(self.host.conc.channel_bounded, &[cap]));
                 }
                 if module == "core.tasks" && method == "after" {
-                    let ms = self.lower_expr(&args[0])?;
+                    let duration_ns = self.lower_expr(&args[0])?;
+                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                    let ms = self.b.ins().sdiv(duration_ns, scale);
                     let value = if args.len() >= 2 {
                         self.lower_expr(&args[1])?
                     } else {
@@ -15140,7 +15147,9 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.call_host(self.host.conc.after_value, &[ms, value]));
                 }
                 if module == "core.tasks" && method == "interval" && args.len() == 1 {
-                    let ms = self.lower_expr(&args[0])?;
+                    let duration_ns = self.lower_expr(&args[0])?;
+                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                    let ms = self.b.ins().sdiv(duration_ns, scale);
                     return Ok(self.call_host(self.host.conc.interval, &[ms]));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
@@ -15155,8 +15164,8 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.call_host(self.host.conc.time_now, &[]));
                 }
                 if module == "core.time" && method == "sleep" && args.len() == 1 {
-                    let millis = self.lower_expr(&args[0])?;
-                    let sleep_status = self.call_host(self.host.conc.sleep, &[millis]);
+                    let duration_ns = self.lower_expr(&args[0])?;
+                    let sleep_status = self.call_host(self.host.conc.sleep, &[duration_ns]);
                     let _ = self.finish_wait_call(sleep_status);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
@@ -15461,30 +15470,6 @@ impl LowerCtx<'_, '_> {
                                 self.lower_expr(&args[1])?,
                                 self.lower_expr(&args[2])?,
                             ],
-                        ),
-                        ("core.time", "nanoseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 0)],
-                        ),
-                        ("core.time", "microseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 1)],
-                        ),
-                        ("core.time", "milliseconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 2)],
-                        ),
-                        ("core.time", "seconds") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 3)],
-                        ),
-                        ("core.time", "minutes") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 4)],
-                        ),
-                        ("core.time", "hours") if args.len() == 1 => (
-                            self.host.time.duration_unit,
-                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 5)],
                         ),
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
@@ -16113,11 +16098,11 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::SelectAfter {
                 builder,
-                millis,
+                duration,
                 value: _,
             } => {
                 let _ = self.lower_expr(builder)?;
-                self.lower_expr(millis)
+                self.lower_expr(duration)
             }
             TExprKind::SelectRead { builder, .. } => self.lower_expr(builder),
             TExprKind::SelectWait { builder } => {
@@ -16127,8 +16112,10 @@ impl LowerCtx<'_, '_> {
                     recv_vals.push(self.lower_expr(ch)?);
                 }
                 let mut after_flat = Vec::new();
-                for (ms, value) in afters {
-                    after_flat.push(self.lower_expr(ms)?);
+                for (duration, value) in afters {
+                    let duration_ns = self.lower_expr(duration)?;
+                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                    after_flat.push(self.b.ins().sdiv(duration_ns, scale));
                     after_flat.push(match value {
                         Some(v) => self.lower_expr(v)?,
                         None => self.b.ins().iconst(types::I64, 0),
@@ -21997,7 +21984,10 @@ impl LowerCtx<'_, '_> {
                 let other = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.duration_difference, &[recv_val, other]))
             }
-            // D-DECIMAL1: instance methods on precise numerics.
+            THandleOp::DurationSecondsValue => {
+                Ok(self.call_host(self.host.duration_seconds_value, &[recv_val]))
+            }
+            // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
                 if type_name == "Decimal" || type_name == "Fraction" =>
             {
@@ -23194,9 +23184,11 @@ impl LowerCtx<'_, '_> {
                         Ok(self.call_host(self.host.net_http.http_server_serve, &[recv_val]))
                     }
                     ("HTTPServer", "shutdown") if args.len() == 1 => {
-                        // Duration handle -> ms via DurationIn not available here; pass
-                        // duration record bits as ms when it's a Duration milliseconds handle.
-                        let grace = self.lower_expr(&args[0])?;
+                        // The HTTP Prelude adapter receives whole milliseconds;
+                        // Duration's canonical carrier is nanoseconds.
+                        let grace_ns = self.lower_expr(&args[0])?;
+                        let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                        let grace = self.b.ins().sdiv(grace_ns, scale);
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_server_shutdown,
                             self.b.func,
@@ -24159,6 +24151,96 @@ impl LowerCtx<'_, '_> {
         let l = self.lower_expr(lhs)?;
         let r = self.lower_expr(rhs)?;
         let rhs_ty = self.expr_arith_type(rhs);
+        let lhs_time = match &lhs.ty {
+            Type::Named(name) if name == jet_foundation::Syntax::DURATION_TYPE => Some(true),
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_INSTANT => Some(false),
+            _ => None,
+        };
+        let rhs_time = match &rhs.ty {
+            Type::Named(name) if name == jet_foundation::Syntax::DURATION_TYPE => Some(true),
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_INSTANT => Some(false),
+            _ => None,
+        };
+        if let (Some(left_is_duration), Some(right_is_duration)) = (lhs_time, rhs_time) {
+            if left_is_duration && right_is_duration {
+                match op {
+                    BinOp::Add => {
+                        return Ok(self.call_host(self.host.duration_add, &[l, r]));
+                    }
+                    BinOp::Sub => {
+                        return Ok(self.call_host(self.host.duration_sub, &[l, r]));
+                    }
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::Compare => {
+                        if op == BinOp::Compare {
+                            let less = self.bool_from_icmp(IntCC::SignedLessThan, l, r);
+                            let greater = self.bool_from_icmp(IntCC::SignedGreaterThan, l, r);
+                            return Ok(self.ordering_from_flags(less, greater));
+                        }
+                        let cc = match op {
+                            BinOp::Eq => IntCC::Equal,
+                            BinOp::Ne => IntCC::NotEqual,
+                            BinOp::Lt => IntCC::SignedLessThan,
+                            BinOp::Gt => IntCC::SignedGreaterThan,
+                            BinOp::Le => IntCC::SignedLessThanOrEqual,
+                            BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                            _ => unreachable!(),
+                        };
+                        return Ok(self.bool_from_icmp(cc, l, r));
+                    }
+                    _ => {}
+                }
+            } else if !left_is_duration && right_is_duration {
+                match op {
+                    BinOp::Add => {
+                        return Ok(self.call_host(self.host.time.instant_add_duration, &[l, r]));
+                    }
+                    BinOp::Sub => {
+                        return Ok(self.call_host(self.host.time.instant_sub_duration, &[l, r]));
+                    }
+                    _ => {}
+                }
+            } else if left_is_duration && !right_is_duration && op == BinOp::Add {
+                return Ok(self.call_host(self.host.time.instant_add_duration, &[r, l]));
+            } else if !left_is_duration && !right_is_duration {
+                match op {
+                    BinOp::Sub => {
+                        return Ok(self.call_host(self.host.time.instant_difference, &[l, r]));
+                    }
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::Compare => {
+                        let raw = self.call_host(self.host.time.instant_compare, &[l, r]);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        if op == BinOp::Compare {
+                            let less = self.bool_from_icmp(IntCC::SignedLessThan, raw, zero);
+                            let greater = self.bool_from_icmp(IntCC::SignedGreaterThan, raw, zero);
+                            return Ok(self.ordering_from_flags(less, greater));
+                        }
+                        let cc = match op {
+                            BinOp::Eq => IntCC::Equal,
+                            BinOp::Ne => IntCC::NotEqual,
+                            BinOp::Lt => IntCC::SignedLessThan,
+                            BinOp::Gt => IntCC::SignedGreaterThan,
+                            BinOp::Le => IntCC::SignedLessThanOrEqual,
+                            BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                            _ => unreachable!(),
+                        };
+                        return Ok(self.bool_from_icmp(cc, raw, zero));
+                    }
+                    _ => {}
+                }
+            }
+        }
         if matches!((&lhs_ty, &rhs_ty), (Type::String, Type::String))
             && matches!(op, BinOp::Add)
         {

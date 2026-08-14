@@ -1963,11 +1963,18 @@ pub fn apply_core_call_with_type(
             )],
         }),
         ("core.time", "sleep") => {
-            let millis = match one(0)? {
-                CtValue::Int(value) => *value,
-                _ => return Err(unsupported("time.sleep expects an Int", span)),
+            let nanos = match one(0)? {
+                CtValue::Struct { type_name, fields }
+                    if type_name == crate::Syntax::DURATION_TYPE => fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("ns", CtValue::Int(value)) => Some(*value),
+                            _ => None,
+                        })
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                _ => return Err(unsupported("time.sleep expects a Duration", span)),
             };
-            time_deadline_kernel::jet_std_time_sleep(millis);
+            time_deadline_kernel::jet_std_time_sleep_duration_ns(nanos);
             Ok(CtValue::Unit)
         }
         ("core.time", "start") => Ok(CtValue::Struct {

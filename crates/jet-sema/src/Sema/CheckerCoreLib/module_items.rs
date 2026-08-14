@@ -239,12 +239,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.time" => &[
             "now",
             "sleep",
-            "nanoseconds",
-            "microseconds",
-            "milliseconds",
-            "seconds",
-            "minutes",
-            "hours",
             "start",
             "instant",
             "now_utc",

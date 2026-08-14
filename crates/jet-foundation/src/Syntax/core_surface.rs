@@ -817,8 +817,8 @@ pub const RNG_TYPE: &str = "Rng";
 /// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
 /// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked
 /// durations through type-owned unit methods; whole-unit reads use one checked
-/// enum-taking method. Static unit literals remain unchanged. Duration is the
-/// canonical Time delta quantity.
+/// enum-taking method. Time literals resolve through the in-scope canonical
+/// family. Duration is the canonical Time delta quantity.
 pub const DURATION_TYPE: &str = "Duration";
 /// D-TYPE2-TIME1=A (ratified 2026-08-06): the canonical Time point quantity.
 pub const TYPE_INSTANT: &str = "Instant";

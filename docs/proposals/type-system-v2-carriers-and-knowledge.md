@@ -406,6 +406,8 @@ fn main() {
 ### P2 — a measured simulation (units + uncertainty + shapes, all checked, all zero-cost)
 
 ```jet
+use core.time as time
+
 fn main() {
     h :: 100meter                             // a Length quantity
     g :: measurement(9.80665, uncertainty: 0.00001) // canonical measured value
@@ -414,8 +416,8 @@ fn main() {
     print("fall time: {t}")                   // and carries the propagated uncertainty:
                                               // fall time: 4.51600 ± 0.0000023
 
-    later :: now() + 5min                     // point + delta = point (Time joins units)
-    task.timeout(500ms)                       // same literal, same meaning, everywhere
+    later :: time.instant() + 5min             // point + delta = point (Time joins units)
+    // A current scope member uses the same literal: .timeout(500ms) { ... }
 
     a :: Matrix<3, 4>.{ ... }                 // proposed surface — matrix design is card #1437;
     b :: Matrix<4, 2>.{ ... }                 // the measure plane is what makes it checkable

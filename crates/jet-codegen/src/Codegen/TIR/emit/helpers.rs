@@ -236,10 +236,10 @@ pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec
             }
             TExprKind::SelectAfter {
                 builder: inner,
-                millis,
+                duration,
                 value,
             } => {
-                let ms = emit_tir_expr(millis, cx);
+                let ms = format!("({}).as_millis()", emit_tir_expr(duration, cx));
                 let value = value
                     .as_ref()
                     .map(|v| emit_tir_expr(v, cx))

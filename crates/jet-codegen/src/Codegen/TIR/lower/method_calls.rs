@@ -1923,7 +1923,7 @@ fn lower_method_call_impl(
                 };
             }
             Syntax::SELECT_AFTER_METHOD if args.len() == 1 || args.len() == 2 => {
-                let millis = lower_expr(&args[0].expr, cx, env);
+                let duration = lower_expr(&args[0].expr, cx, env);
                 let value = args
                     .get(1)
                     .map(|arg| Box::new(lower_expr(&arg.expr, cx, env)));
@@ -1946,7 +1946,7 @@ fn lower_method_call_impl(
                     ty,
                     kind: TExprKind::SelectAfter {
                         builder: Box::new(builder),
-                        millis: Box::new(millis),
+                        duration: Box::new(duration),
                         value,
                     },
                 };

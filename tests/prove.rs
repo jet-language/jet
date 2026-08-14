@@ -321,7 +321,7 @@ fn prove_capture_refuses_an_unrecorded_time_operation_before_the_child_runs() {
     let root = workspace("capture_time_sleep_preflight");
     fs::write(
         root.join("main.jet"),
-        "use core.time as time\nfn run() { time.sleep(1) }\n",
+        "use core.time as time\nfn run() { time.sleep(1ms) }\n",
     )
     .unwrap();
     let artifact = root.join("sleep.jetproof-replay");
@@ -387,7 +387,7 @@ fn prove_replay_refuses_unrecorded_time_sleep_before_opening_an_artifact() {
     let root = workspace("replay_time_sleep");
     fs::write(
         root.join("main.jet"),
-        "use core.time as time\nfn run() { time.sleep(1) }\n",
+        "use core.time as time\nfn run() { time.sleep(1ms) }\n",
     )
     .unwrap();
     let out = Command::new(jet())

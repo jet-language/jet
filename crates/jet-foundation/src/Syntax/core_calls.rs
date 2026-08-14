@@ -829,7 +829,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]), // D-DET1: deterministic injected RNG capability constructor.
     CoreCallRecord::new("core.math.random", "split", "jet_std_random_split", true, &[false]),
     CoreCallRecord::new("core.time", "now", "jet_std_time_now", true, &[]),
-    CoreCallRecord::new("core.time", "sleep", "jet_std_time_sleep", true, &[false]),
+    CoreCallRecord::new("core.time", "sleep", "jet_std_time_sleep_duration_ns", true, &[false]),
     CoreCallRecord::new("core.time", "start", "jet_std_time_start", true, &[]),
     CoreCallRecord::new("core.time", "instant", "jet_time_instant_now", true, &[])
         .with_pure_route(CoreCallPureRoute::Time),
@@ -867,30 +867,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "zoned_local", "jet_time_zoned_local", true, &[true, true, true])
         .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "clock", "jet_std_clock_new", true, &[false]), // D-DET1: deterministic injected Clock capability constructor.
-    CoreCallRecord::new("core.time", "nanoseconds", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
-    CoreCallRecord::new("core.time", "microseconds", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
-    CoreCallRecord::new("core.time", "milliseconds", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
-    CoreCallRecord::new("core.time", "seconds", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
-    CoreCallRecord::new("core.time", "minutes", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
-    CoreCallRecord::new("core.time", "hours", "jet_duration_from_int", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Time)
-        .without_direct_aot()
-        .without_direct_jit(),
     CoreCallRecord::new("core.encoding.json", "parse", "jet_std_json_parse", true, &[true]), // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms // (`JSON` tree / `[[String]]` / `Map`) keep their existing helpers; the typed // forms route through the Encode/Decode model, distinguished by the lowered arg // type (encode) or the resolved return type (decode). `is_json_value` etc. read // those total facts — codegen never re-infers (I3).
     CoreCallRecord::new("core.encoding.json", "events", "jet_std_json_events", true, &[true]),
     CoreCallRecord::new("core.encoding.jsonl", "parse", "jet_std_jsonl_parse", true, &[true]),

@@ -1335,9 +1335,8 @@ pub struct StateTransition {
 /// pushing E0926 on a bad value; codegen never reads it (I3, erased).
 #[derive(Debug, Clone)]
 pub enum EveryArg {
-    /// `#Every(5min)` — same raw pieces as `Expr::UnitLit`, minus the
-    /// `#UnitFamily` scoping. The literal resolves through the shared
-    /// `Syntax::duration_suffix_nanos` duration plane.
+    /// `#Every(5min)` — same raw pieces as `Expr::UnitLit`. The literal
+    /// resolves through the canonical Time family.
     Duration {
         int: Option<i64>,
         float: Option<f64>,
@@ -1375,8 +1374,8 @@ pub enum EverySchedule {
 /// turns each into the matching E0926 What/Why/Fix row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EveryScheduleError {
-    /// The duration suffix isn't in the shared duration vocabulary
-    /// (`ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`min`/`h`/`d`).
+    /// The duration suffix isn't in the canonical Time vocabulary
+    /// (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`).
     UnknownDurationUnit,
     /// The duration is zero or negative — a schedule must advance time.
     NonPositiveDuration,
@@ -1400,7 +1399,7 @@ impl EveryArg {
     pub fn resolve(&self) -> Result<EverySchedule, EveryScheduleError> {
         match self {
             EveryArg::Duration { int, float, suffix, .. } => {
-                let Some(unit_nanos) = crate::Syntax::duration_suffix_nanos(suffix)
+                let Some(unit) = UnitFamilyDef::canonical_time_unit(suffix)
                 else {
                     return Err(EveryScheduleError::UnknownDurationUnit);
                 };
@@ -1408,7 +1407,7 @@ impl EveryArg {
                 if value <= 0.0 {
                     return Err(EveryScheduleError::NonPositiveDuration);
                 }
-                let nanos = (value * unit_nanos as f64).round() as u128;
+                let nanos = (value * unit.nanos as f64) as u128;
                 if nanos == 0 {
                     return Err(EveryScheduleError::NonPositiveDuration);
                 }
@@ -1779,6 +1778,15 @@ pub struct UnitFamilyMember {
     pub offset: UnitRatio,
 }
 
+/// D-TYPE2-TIME1=A: canonical Time suffix metadata shared by unit literals
+/// and static schedule resolution. Neither surface owns a private table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanonicalTimeUnit {
+    pub nanos: u128,
+    pub constructor: &'static str,
+    pub constructor_multiplier: i64,
+}
+
 pub type UnitRatio = crate::PerformanceBudget::Rational;
 
 /// D-UNIT-SCALE-PROVENANCE1=A: source truth behind a unit's runtime scale.
@@ -1802,6 +1810,55 @@ pub enum UnitScaleProvenance {
 }
 
 impl UnitFamilyDef {
+    /// The one canonical Time family vocabulary. `d` projects to the existing
+    /// checked hours constructor instead of adding a second duration API.
+    pub fn canonical_time_unit(suffix: &str) -> Option<CanonicalTimeUnit> {
+        match suffix {
+            "ns" => Some(CanonicalTimeUnit {
+                nanos: 1,
+                constructor: "nanoseconds",
+                constructor_multiplier: 1,
+            }),
+            "us" => Some(CanonicalTimeUnit {
+                nanos: 1_000,
+                constructor: "microseconds",
+                constructor_multiplier: 1,
+            }),
+            "ms" => Some(CanonicalTimeUnit {
+                nanos: 1_000_000,
+                constructor: "milliseconds",
+                constructor_multiplier: 1,
+            }),
+            "s" => Some(CanonicalTimeUnit {
+                nanos: 1_000_000_000,
+                constructor: "seconds",
+                constructor_multiplier: 1,
+            }),
+            "min" => Some(CanonicalTimeUnit {
+                nanos: 60_000_000_000,
+                constructor: "minutes",
+                constructor_multiplier: 1,
+            }),
+            "h" => Some(CanonicalTimeUnit {
+                nanos: 3_600_000_000_000,
+                constructor: "hours",
+                constructor_multiplier: 1,
+            }),
+            "d" => Some(CanonicalTimeUnit {
+                nanos: 86_400_000_000_000,
+                constructor: "hours",
+                constructor_multiplier: 24,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Standard Prelude Time uses the core Duration/Instant pair. It must not
+    /// mint a second Float-based unit family.
+    pub fn is_canonical_time(&self) -> bool {
+        self.family == "Time" && self.resolved_owner.as_deref() == Some("core.units")
+    }
+
     /// PascalCase the member spelling to its minted distinct-type name:
     /// `usd` → `Usd`, `m_per_s` → `MPerS`. Splits on `_`, uppercases each
     /// segment's first char. Empty/edge inputs return the input unchanged.
@@ -1821,9 +1878,13 @@ impl UnitFamilyDef {
         }
     }
 
-    /// The minted `DistinctDef` for each member (`#Numeric`, base `Float`).
-    /// Used by sema registration and codegen to lower the family.
+    /// The minted `DistinctDef` for ordinary families (`#Numeric`, base
+    /// `Float`). Canonical Time is the one fixed-carrier exception. Used by
+    /// sema registration and codegen to lower the family.
     pub fn distinct_defs(&self) -> Vec<DistinctDef> {
+        if self.is_canonical_time() {
+            return Vec::new();
+        }
         let affine = self.base.is_some()
             && self
                 .members

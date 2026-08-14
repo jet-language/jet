@@ -1298,10 +1298,10 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         } => vec![builder.as_ref(), channel.as_ref()],
         TExprKind::SelectAfter {
             builder,
-            millis,
+            duration,
             value,
         } => std::iter::once(builder.as_ref())
-            .chain(std::iter::once(millis.as_ref()))
+            .chain(std::iter::once(duration.as_ref()))
             .chain(value.iter().map(|expr| expr.as_ref()))
             .collect(),
         TExprKind::FnValue { kind } => match kind {
@@ -1722,6 +1722,13 @@ fn struct_int(value: &CtValue, field: &str) -> Option<i64> {
         CtValue::Int(value) if name == field => Some(*value),
         _ => None,
     })
+}
+
+fn duration_ns(value: &CtValue) -> Option<i64> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    (type_name == crate::Syntax::DURATION_TYPE).then(|| struct_int(value, "ns"))?
 }
 
 fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
@@ -4667,6 +4674,29 @@ impl<'a> EvalCtx<'a> {
                 .transpose()?;
             return Ok(self.new_eval_channel(capacity));
         }
+        if module == "core.tasks" && method == "after" {
+            if !self.runtime_execution {
+                return Err(unsupported("`tasks.after` at compile time", source_span));
+            }
+            let duration = self.eval_expr_child(&args[0], scope)?;
+            let duration = duration_ns(&duration)
+                .ok_or_else(|| unsupported("tasks.after duration", self.span()))?;
+            let value = args
+                .get(1)
+                .map(|arg| self.eval_expr_child(arg, scope))
+                .transpose()?
+                .unwrap_or(CtValue::Unit);
+            return Ok(self.new_eval_timer_channel(duration, value, false));
+        }
+        if module == "core.tasks" && method == "interval" {
+            if !self.runtime_execution {
+                return Err(unsupported("`tasks.interval` at compile time", source_span));
+            }
+            let duration = self.eval_expr_child(&args[0], scope)?;
+            let duration = duration_ns(&duration)
+                .ok_or_else(|| unsupported("tasks.interval duration", self.span()))?;
+            return Ok(self.new_eval_timer_channel(duration, CtValue::Unit, true));
+        }
         if module == "core.tasks" && method == "yield_now" && args.is_empty() {
             std::thread::yield_now();
             return Ok(CtValue::Unit);
@@ -5882,7 +5912,7 @@ impl<'a> EvalCtx<'a> {
                                 || type_name == "Duration" =>
                         {
                             fields.iter().find_map(|(name, v)| match (name.as_str(), v) {
-                                ("ms", CtValue::Int(ms)) => Some(*ms),
+                                ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
                                 _ => None,
                             })
                         }
@@ -7663,8 +7693,9 @@ impl<'a> EvalCtx<'a> {
                 } => {
                     let value = self.eval_expr_child(value, scope)?;
                     let duration = self.eval_expr_child(duration, scope)?;
-                    let duration = struct_int(&duration, "ms")
-                        .ok_or_else(|| unsupported("expiring duration", self.span()))?;
+                    let duration = struct_int(&duration, "ns")
+                        .ok_or_else(|| unsupported("expiring duration", self.span()))?
+                        .saturating_div(1_000_000);
                     let clock = self.eval_expr_child(clock, scope)?;
                     let clock_index = handle_index(&clock, "__JetTirClock")
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
@@ -8705,11 +8736,14 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::SelectAfter {
                 builder,
-                millis,
+                duration,
                 value,
             } => {
                 let builder = self.eval_expr_child(builder, scope)?;
-                let millis = as_int(&self.eval_expr_child(millis, scope)?, self.span())?;
+                let duration = self.eval_expr_child(duration, scope)?;
+                let duration = duration_ns(&duration)
+                    .ok_or_else(|| unsupported("select timer duration", self.span()))?;
+                let millis = duration.saturating_div(1_000_000);
                 let value = value
                     .as_ref()
                     .map(|value| self.eval_expr_child(value, scope))

@@ -2490,6 +2490,18 @@ extern "C" fn jet_jit_duration_total_seconds(value: i64) -> i64 {
     duration_kernel::jet_duration_kernel_total_seconds(value)
 }
 
+extern "C" fn jet_jit_duration_seconds_value(value: i64) -> f64 {
+    duration_kernel::jet_duration_kernel_seconds_value(value)
+}
+
+extern "C" fn jet_jit_duration_add(left: i64, right: i64) -> i64 {
+    duration_kernel::jet_duration_kernel_add(left, right)
+}
+
+extern "C" fn jet_jit_duration_sub(left: i64, right: i64) -> i64 {
+    duration_kernel::jet_duration_kernel_sub(left, right)
+}
+
 extern "C" fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
     duration_kernel::jet_duration_kernel_difference(a, b)
 }
@@ -3649,6 +3661,9 @@ host_fns! {
     duration_in_unit: "jet_jit_duration_in_unit" => jet_jit_duration_in_unit: sig_duration_int;
     duration_is_zero: "jet_jit_duration_is_zero" => jet_jit_duration_is_zero: sig_result_query_i8;
     duration_total_seconds: "jet_jit_duration_total_seconds" => jet_jit_duration_total_seconds: sig_result_query_i64;
+    duration_seconds_value: "jet_jit_duration_seconds_value" => jet_jit_duration_seconds_value: sig_result_query_f64;
+    duration_add: "jet_jit_duration_add" => jet_jit_duration_add: sig_duration_int;
+    duration_sub: "jet_jit_duration_sub" => jet_jit_duration_sub: sig_duration_int;
     duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
     perf_fidelity: "jet_jit_perf_fidelity" => jet_jit_perf_fidelity: sig_noarg_f64;
     perf_default_fidelity: "jet_jit_perf_default_fidelity" => jet_jit_perf_default_fidelity: sig_noarg_f64;

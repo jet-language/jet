@@ -242,12 +242,12 @@ fn evaluator_supports_taskgroup_combinators() {
 use core.time as time
 
 fn slow_seven() => Int {
-    time.sleep(30)
+    time.sleep(30ms)
     return 7
 }
 
 fn slow_eleven() => Int {
-    time.sleep(30)
+    time.sleep(30ms)
     return 11
 }
 
@@ -394,10 +394,10 @@ fn wait_in_group(sender: Sender<Int>) {
     task.group group {
         child :: task {
             sender.send(1)
-            time.sleep(10)
+            time.sleep(10ms)
             print("settled")
         }
-        time.sleep(10000)
+        time.sleep(10000ms)
         child.join() ?? panic("child failed")
     }
 }
@@ -431,7 +431,7 @@ fn leave_on_deadline() {
             print("settled")
         }
         #Context(deadline: time.now() - 1) {
-            time.sleep(10000)
+            time.sleep(10000ms)
         }
         child.join() ?? panic("child failed")
     }

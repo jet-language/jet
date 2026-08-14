@@ -83,6 +83,33 @@ fn run() {
 }
 
 #[test]
+fn canonical_time_plane_reaches_web_js() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_canonical_time_web_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+#Target(Web)
+use core.time as time
+
+#Target(JS)
+fn run() {
+    wait :: 500ms
+    origin :: time.instant()
+    later :: origin + 5min
+    print(wait.in(.Milliseconds) ?? panic("wait"))
+    print((later - origin).in(.Minutes) ?? panic("delta"))
+}
+"#;
+    if let Some(web_stdout) = run_web_js_source(&dir, "canonical_time_plane_web", src) {
+        assert_eq!(web_stdout, "500\n5\n");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn parenthesized_view_place_return_keeps_parameter_provenance() {
     if !common::have_rustc() {
         eprintln!("note: skipping parenthesized View return test (need rustc)");
@@ -733,7 +760,7 @@ use core.time as time
 fn run() {
     os.on_interrupt(() => {
         #Context(deadline: time.now()) {
-            time.sleep(5)
+            time.sleep(5ms)
         }
     })
     os.on_interrupt(() => {

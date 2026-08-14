@@ -291,7 +291,7 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
              if n == 0 {{ print(\"worker-0-start\") }}\n\
              if n == 64 {{ print(\"worker-1-start\") }}\n\
              if n == 128 {{ print(\"worker-2-complete\") }}\n\
-             if n == 1 {{ #Context(deadline: time.now() - 1) {{ time.sleep(1) }} }}\n\
+             if n == 1 {{ #Context(deadline: time.now() - 1) {{ time.sleep(1ms) }} }}\n\
              if n == 65 {{ return checked(n) }}\n\
              return n\n\
          }}\n\

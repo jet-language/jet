@@ -173,7 +173,7 @@ pub const TYPE_SELECT_BUILDER: &str = "SelectBuilder";
 /// D-CONCSELECT1=A: register a channel receive arm on a select builder.
 pub const SELECT_RECV_METHOD: &str = "recv";
 
-/// D-CONCSELECT1=A: register a timer arm — `.after(ms: N)`.
+/// D-TYPE2-TIME1=A: register a timer arm — `.after(duration: Duration)`.
 pub const SELECT_AFTER_METHOD: &str = "after";
 
 /// D-CONCSELECT1=A: register a readable I/O arm — `.read(stream)`.

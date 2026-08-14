@@ -61,9 +61,6 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "time" | "local_time") => local_time_parts(args, span),
         (CoreCallPureRoute::Time, "days_in_month") => time_days_in_month(args, span),
         (CoreCallPureRoute::Time, "is_leap_year") => time_is_leap_year(args, span),
-        (CoreCallPureRoute::Time, method @ ("nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours")) => {
-            duration_ctor(method, args, span)
-        }
         (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
         (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
         (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
@@ -2148,16 +2145,20 @@ fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 
 fn instant_elapsed_millis(value: &CtValue, span: Span) -> EvalResult {
     Ok(CtValue::Int(
-        super::time_kernel::jet_time_monotonic_now_ns()
-            .saturating_sub(instant_start_ns(value, span)?)
+        super::time_kernel::jet_time_instant_elapsed_ns(
+            super::time_kernel::jet_time_monotonic_now_ns(),
+            instant_start_ns(value, span)?,
+        )
             .saturating_div(1_000_000),
     ))
 }
 
 fn instant_elapsed(value: &CtValue, span: Span) -> EvalResult {
     Ok(duration_value(
-        super::time_kernel::jet_time_monotonic_now_ns()
-            .saturating_sub(instant_start_ns(value, span)?),
+        super::time_kernel::jet_time_instant_elapsed_ns(
+            super::time_kernel::jet_time_monotonic_now_ns(),
+            instant_start_ns(value, span)?,
+        ),
     ))
 }
 
@@ -2169,11 +2170,7 @@ fn duration_value(ns: i64) -> CtValue {
 }
 
 fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
-    match int_field(value, crate::Syntax::DURATION_TYPE, "ns", span) {
-        Ok(ns) => Ok(ns),
-        Err(_) => Ok(int_field(value, crate::Syntax::DURATION_TYPE, "ms", span)?
-            .saturating_mul(1_000_000)),
-    }
+    int_field(value, crate::Syntax::DURATION_TYPE, "ns", span)
 }
 
 fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
@@ -2228,46 +2225,6 @@ fn time_days_in_month(args: &[CtValue], span: Span) -> EvalResult {
 
 fn time_is_leap_year(args: &[CtValue], span: Span) -> EvalResult {
     Ok(CtValue::Bool(Date::is_leap(int_arg(args, 0, span)?)))
-}
-
-fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
-    let unit = crate::Syntax::duration_unit_for_constructor(method)
-        .ok_or_else(|| unsupported(&format!("unknown duration constructor `{method}`"), span))?;
-    let scale = match unit {
-        "Nanoseconds" => 1_i64,
-        "Microseconds" => 1_000,
-        "Milliseconds" => 1_000_000,
-        "Seconds" => 1_000_000_000,
-        "Minutes" => 60_000_000_000,
-        "Hours" => 3_600_000_000_000,
-        _ => unreachable!("closed duration unit set"),
-    };
-    let (ns, reason) = match args.first() {
-        Some(CtValue::Int(n)) => (
-            super::duration_kernel::jet_duration_kernel_from_int(*n, scale),
-            super::duration_kernel::jet_duration_kernel_int_error_reason(),
-        ),
-        Some(CtValue::Float(n)) => {
-            (
-                super::duration_kernel::jet_duration_kernel_from_float(n.as_f64(), scale),
-                super::duration_kernel::jet_duration_kernel_float_error_reason(),
-            )
-        }
-        _ => (
-            None,
-            super::duration_kernel::jet_duration_kernel_float_error_reason(),
-        ),
-    };
-    Ok(match ns {
-        Some(ns) => CtValue::Present(Box::new(duration_value(ns))),
-        None => CtValue::failed(Box::new(structure(
-            crate::Syntax::DURATION_RANGE_ERROR_TYPE,
-            vec![(
-                "reason",
-                CtValue::Str(reason.to_string()),
-            )],
-        ))),
-    })
 }
 
 fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {

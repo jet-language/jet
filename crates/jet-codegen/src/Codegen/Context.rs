@@ -895,6 +895,14 @@ impl Cx {
                         label.symbol.clone()
                     }
                 })
+                .or_else(|| {
+                    (family == "Time").then(|| match style {
+                        crate::AST::UnitFormat::Name => "Nanosecond".to_string(),
+                        crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
+                            "ns".to_string()
+                        }
+                    })
+                })
                 .unwrap_or_else(|| family.to_ascii_lowercase());
             let part = if exponent.abs() == 1 {
                 label
@@ -3757,6 +3765,25 @@ pub(crate) fn build_cx_items(
     };
 
     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
+    // D-TYPE2-TIME1=A: Duration/Instant are the core delta/point of the
+    // canonical Time family. They carry unit facts for dimensional lowering,
+    // but never enter the generated Float-family trait path.
+    let time_dimension = Some(crate::AST::Dimension::base("core.units::Time"));
+    for (name, kind) in [
+        (Syntax::DURATION_TYPE, crate::AST::QuantityKind::Delta),
+        (Syntax::TYPE_INSTANT, crate::AST::QuantityKind::Point),
+    ] {
+        cx.unit_facts.insert(
+            name.to_string(),
+            UnitFact {
+                family: "Time".to_string(),
+                dimension: time_dimension.clone(),
+                kind,
+                scale: crate::AST::UnitRatio::integer(1),
+                offset: crate::AST::UnitRatio::zero(),
+            },
+        );
+    }
     cx.struct_fields.insert(Syntax::TYPE_IO_CONTEXT.to_string(), vec![
         ("operation".to_string(), Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
         ("resource".to_string(), Type::Option(Box::new(Type::String))),

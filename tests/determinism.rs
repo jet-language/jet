@@ -116,7 +116,7 @@ fn run() {
     before := clock.now()
     fork := ~clock
     fork_before := fork.now()
-    time.sleep(2)
+    time.sleep(2ms)
     after := clock.now()
     print(after >= before)
     print(fork.now() >= fork_before)

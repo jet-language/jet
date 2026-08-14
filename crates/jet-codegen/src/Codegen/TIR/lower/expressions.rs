@@ -13,7 +13,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::{call_return_type, call_return_type_with_args, emit_tir_expr};
+use crate::Codegen::TIR::{call_return_type, call_return_type_with_args, emit_tir_expr, THandleOp};
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -2303,6 +2303,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     if cx.quantity_dimension(&expr.ty).is_some()
                         && matches!(expr.ty, Type::Named(_))
                     {
+                        if matches!(&expr.ty, Type::Named(name) if name == crate::Syntax::DURATION_TYPE) {
+                            return TExpr {
+                                ty: Type::Float,
+                                kind: TExprKind::HandleMethod {
+                                    recv: Box::new(expr),
+                                    op: THandleOp::DurationSecondsValue,
+                                    args: Vec::new(),
+                                },
+                            };
+                        }
                         TExpr {
                             ty: Type::Float,
                             kind: TExprKind::DistinctRaw(Box::new(expr)),
@@ -2434,10 +2444,33 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
             // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
             // it from the same sema table so the node's `ty` stays honest.
+            let canonical_time_ty = match (&lhs.ty, &rhs.ty) {
+                (Type::Named(left), Type::Named(right))
+                    if matches!(left.as_str(), "Duration" | "Instant")
+                        && matches!(right.as_str(), "Duration" | "Instant") => {
+                    let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
+                    let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
+                    match (*op, left_kind, right_kind) {
+                        (BinOp::Add | BinOp::Sub, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Delta))
+                        | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Point)) => {
+                            Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+                        }
+                        (BinOp::Add, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
+                        | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
+                        | (BinOp::Add, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Point)) => {
+                            Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string()))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
             let ty = if *op == BinOp::Compare {
                 Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
             } else if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
                 Type::Bool
+            } else if let Some(ty) = canonical_time_ty {
+                ty
             } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
                 let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
                 let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);

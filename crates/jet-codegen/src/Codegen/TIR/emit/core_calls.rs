@@ -535,7 +535,24 @@ fn emit_plain_core_call(
     args: &[TExpr],
     arg: &dyn Fn(usize) -> String,
     helper: &dyn Fn(&str) -> String,
+    cx: &Cx,
 ) -> Option<String> {
+    if module == "core.time" && method == "sleep" {
+        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        return Some(format!(
+            "{}jet_std_time_sleep_duration_ns(({}).ns)",
+            helper(""),
+            duration
+        ));
+    }
+    if module == "core.tasks" && method == "interval" {
+        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        return Some(format!(
+            "{}jet_std::interval(({}).as_millis())",
+            helper(""),
+            duration
+        ));
+    }
     let row = crate::Syntax::core_call(module, method)?;
     if !row.coverage.contains(crate::Syntax::CoreCallCoverage::AOT) {
         return None;
@@ -730,7 +747,7 @@ pub(crate) fn emit_tir_core_call(
             return exact;
         }
     }
-    if let Some(rendered) = emit_plain_core_call(module, method, args, &arg, &helper) {
+    if let Some(rendered) = emit_plain_core_call(module, method, args, &arg, &helper, cx) {
         return rendered;
     }
     fn vault_key_type(ty: &Type) -> Option<&str> {
@@ -810,13 +827,14 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.tasks", "after") => {
+            let duration = format!("({}).as_millis()", arg(0));
             if args.len() == 1 {
-                format!("{}jet_std::after({})", cx.root_prefix, arg(0))
+                format!("{}jet_std::after({duration})", cx.root_prefix)
             } else {
                 format!(
                     "{}jet_std::after_value({}, {})",
                     cx.root_prefix,
-                    arg(0),
+                    duration,
                     arg(1)
                 )
             }
@@ -1283,36 +1301,6 @@ pub(crate) fn emit_tir_core_call(
         
         
         
-        ("core.time", "milliseconds") => format!(
-            "{}({}, jet_std::DurationUnit::Milliseconds)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
-        ("core.time", "nanoseconds") => format!(
-            "{}({}, jet_std::DurationUnit::Nanoseconds)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
-        ("core.time", "microseconds") => format!(
-            "{}({}, jet_std::DurationUnit::Microseconds)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
-        ("core.time", "seconds") => format!(
-            "{}({}, jet_std::DurationUnit::Seconds)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
-        ("core.time", "minutes") => format!(
-            "{}({}, jet_std::DurationUnit::Minutes)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
-        ("core.time", "hours") => format!(
-            "{}({}, jet_std::DurationUnit::Hours)",
-            helper("jet_duration_from_int"),
-            arg(0)
-        ),
         
         
         

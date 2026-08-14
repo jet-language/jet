@@ -695,26 +695,6 @@ pub const SCOPE_TEST_MEASURE: &str = "measure";
 /// the member head and defaults to `AMBIENT_CASE`.
 pub const SCOPE_TEST_CASES: &str = "cases";
 
-/// D-DOTSCOPE1: recognized duration suffixes for `.timeout(<dur>)` and their
-/// nanosecond multiplier. `.timeout` and `#Every` read a bare unit literal
-/// directly, so their accepted units are fixed here rather than resolved
-/// through a `#UnitFamily` (D-UNITLIT1). This is the one duration-unit plane:
-/// a unit accepted by one duration surface has the same nanosecond meaning on
-/// every other surface. Returns `None` for any other suffix. `u128` keeps the
-/// multiply from overflowing before a consumer narrows to its runtime carrier.
-pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
-    match suffix {
-        "ns" => Some(1),
-        "us" | "µs" => Some(1_000),
-        "ms" => Some(1_000_000),
-        "s" | "sec" | "secs" => Some(1_000_000_000),
-        "min" => Some(60_000_000_000),
-        "h" => Some(3_600_000_000_000),
-        "d" => Some(86_400_000_000_000),
-        _ => None,
-    }
-}
-
 /// D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can invoke as an
 /// argv subcommand, living beside `fn run()`. Bare marker defaults to `.Dev`.
 pub const KW_JOB: &str = "Job";

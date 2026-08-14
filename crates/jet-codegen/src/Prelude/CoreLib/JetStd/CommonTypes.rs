@@ -782,7 +782,7 @@
 
     // D-TIMERES1=A: a checked elapsed span stored as whole nanoseconds
     // (about 292 years). Whole-unit reads stay truncating.
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub struct Duration {
         pub ns: i64,
     }

@@ -1531,7 +1531,7 @@ fn task_surface_runs_resident_with_string_results_and_typed_failures() {
 use core.time as time
 
 fn slow_text() => String {
-    time.sleep(25)
+    time.sleep(25ms)
     return "slow"
 }
 
@@ -1554,7 +1554,7 @@ fn run() {
         print((task.any { slow_text(), "any" }) ?? "any-fallback")
 
         cancelled :: task {
-            time.sleep(1000)
+            time.sleep(1000ms)
             return "late"
         }
         cancelled.cancel()
@@ -4138,10 +4138,9 @@ fn physical_quantities_run_in_resident_jit_without_fallback() {
     millimeter(scale: 1/1000)
     thirdish(scale: 2/3)
 }
-#UnitFamily(Time) { second }
 fn run() ? {
     distance :: 12meter
-    elapsed :: 3second
+    elapsed :: 3s
     speed :: distance / elapsed
     recovered :: speed * elapsed
     ratio :: recovered / distance
@@ -8906,7 +8905,7 @@ fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
     slow :: task {
         ready_sender.send(1)
-        time.sleep(200)
+        time.sleep(200ms)
         print(99)
     }
     ready.receive() ?? panic("closed")
@@ -8957,7 +8956,7 @@ fn failure_label(error: TaskFailure) => String {
 }
 fn run() {
     child :: task {
-        time.sleep(200)
+        time.sleep(200ms)
     }
     child.cancel()
     result :: child.join()
@@ -10021,14 +10020,14 @@ fn schedule_every_dev_loop_consumer() {
         jet::AST::EverySchedule::Interval {
             nanos: 2 * 60 * 60 * 1_000_000_000
         },
-        "`#Every(2h)` must resolve through the shared Duration plane"
+        "`#Every(2h)` must resolve through the canonical Time family"
     );
     assert_eq!(
         *schedules["compact_archive"],
         jet::AST::EverySchedule::Interval {
             nanos: 24 * 60 * 60 * 1_000_000_000
         },
-        "`#Every(1d)` must resolve through the shared Duration plane"
+        "`#Every(1d)` must resolve through the canonical Time family"
     );
 
     // Actually invoking a named job runs it like an ordinary call.

@@ -889,6 +889,50 @@ impl<'a> Checker<'a> {
                     && lfact.family == rfact.family
                 {
                     use QuantityKind::{Delta, Linear, Point};
+                    if lfact.family == "Time" && lfact.package == std::path::PathBuf::from("core.units") {
+                        let result = match (op, lfact.kind, rfact.kind) {
+                            (BinOp::Add | BinOp::Sub, Delta, Delta) => {
+                                Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+                            }
+                            (BinOp::Add, Point, Delta)
+                            | (BinOp::Sub, Point, Delta)
+                            | (BinOp::Add, Delta, Point) => {
+                                Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string()))
+                            }
+                            (BinOp::Sub, Point, Point) => {
+                                Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+                            }
+                            (BinOp::Eq
+                            | BinOp::Ne
+                            | BinOp::Lt
+                            | BinOp::Gt
+                            | BinOp::Le
+                            | BinOp::Ge
+                            | BinOp::Compare, left_kind, right_kind)
+                                if left_kind == right_kind => Some(if op == BinOp::Compare {
+                                    Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+                                } else {
+                                    Type::Bool
+                                }),
+                            (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0127",
+                                    format!(
+                                        "{} is not available between `{}` and `{}`",
+                                        operator_label(op), lname, rname
+                                    ),
+                                    "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+                                    "subtract two Instants for a Duration, or add a Duration to an Instant".to_string(),
+                                    Some(span),
+                                ));
+                                return None;
+                            }
+                            _ => None,
+                        };
+                        if result.is_some() {
+                            return result;
+                        }
+                    }
                     match (op, lfact.kind, rfact.kind) {
                         (BinOp::Add | BinOp::Sub, Linear, Linear)
                         | (BinOp::Add | BinOp::Sub, Delta, Delta) => {
@@ -1765,7 +1809,15 @@ impl<'a> Checker<'a> {
                 ty.clone()
             }
         };
-        base(left) == Type::Float && base(right) == Type::Float
+        base(left) == Type::Float
+            && base(right) == Type::Float
+            && !matches!(
+                (left, right),
+                (Type::Named(name), _) if name == crate::Syntax::TYPE_INSTANT
+            )
+            && !matches!(
+                (_, Type::Named(name)) if name == crate::Syntax::TYPE_INSTANT
+            )
     }
 
     fn dimension_mismatch(

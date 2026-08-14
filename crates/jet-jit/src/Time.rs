@@ -8,6 +8,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
+    include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
@@ -225,6 +226,56 @@ extern "C" fn jet_jit_time_instant() -> i64 {
     push(TimeValue::Instant(time_rt::JetInstant::now()))
 }
 
+extern "C" fn jet_jit_instant_add_duration(instant: i64, duration_ns: i64) -> i64 {
+    let instant = with_time(instant, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    instant
+        .map(|value| push(TimeValue::Instant(value.plus_duration_ns(duration_ns))))
+        .unwrap_or(0)
+}
+
+extern "C" fn jet_jit_instant_sub_duration(instant: i64, duration_ns: i64) -> i64 {
+    let instant = with_time(instant, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    instant
+        .map(|value| push(TimeValue::Instant(value.minus_duration_ns(duration_ns))))
+        .unwrap_or(0)
+}
+
+extern "C" fn jet_jit_instant_difference(left: i64, right: i64) -> i64 {
+    let left = with_time(left, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    let right = with_time(right, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    match (left, right) {
+        (Some(left), Some(right)) => left.difference_ns(&right),
+        _ => 0,
+    }
+}
+
+extern "C" fn jet_jit_instant_compare(left: i64, right: i64) -> i64 {
+    let left = with_time(left, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    let right = with_time(right, |value| match value {
+        TimeValue::Instant(value) => Some(*value),
+        _ => None,
+    });
+    match (left, right) {
+        (Some(left), Some(right)) => left.compare_to(&right),
+        _ => 0,
+    }
+}
+
 extern "C" fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
     let datetime = with_time(dt, |v| match v {
         TimeValue::DateTime(d) => Some(d.clone()),
@@ -265,26 +316,6 @@ extern "C" fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i6
     push(TimeValue::LocalTime(time_rt::JetLocalTime::new(
         hour, minute, second,
     )))
-}
-
-/// `core.time.{nanoseconds,…}` — Result ok bits = Duration ns.
-extern "C" fn jet_jit_time_duration_unit(value: i64, unit: i64) -> i64 {
-    let scale = match unit {
-        0 => 1i64,
-        1 => 1_000,
-        2 => 1_000_000,
-        3 => 1_000_000_000,
-        4 => 60_000_000_000,
-        5 => 3_600_000_000_000,
-        _ => 1,
-    };
-    match crate::runtime_host::duration_kernel::jet_duration_kernel_from_int(value, scale) {
-        Some(ns) => result_ok(ns as u64),
-        None => result_err(
-            crate::runtime_host::duration_kernel::jet_duration_kernel_int_error_reason()
-                .into(),
-        ),
-    }
 }
 
 /// Civil-time method dispatch. `kind`: 0=Date, 1=DateTime, 2=Period, 3=Instant, 4=Zone, 5=Zoned.
@@ -472,11 +503,14 @@ host_fns! {
     zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: ternary;
     parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
+    instant_add_duration: "jet_jit_instant_add_duration" => jet_jit_instant_add_duration: binary;
+    instant_sub_duration: "jet_jit_instant_sub_duration" => jet_jit_instant_sub_duration: binary;
+    instant_difference: "jet_jit_instant_difference" => jet_jit_instant_difference: binary;
+    instant_compare: "jet_jit_instant_compare" => jet_jit_instant_compare: binary;
     zoned: "jet_jit_time_zoned" => jet_jit_time_zoned: binary;
     days_in_month: "jet_jit_time_days_in_month" => jet_jit_time_days_in_month: binary;
     is_leap_year: "jet_jit_time_is_leap_year" => jet_jit_time_is_leap_year: unary_i8;
     datetime: "jet_jit_time_datetime" => jet_jit_time_datetime: hexary;
     local_time: "jet_jit_time_local_time" => jet_jit_time_local_time: ternary;
-    duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }

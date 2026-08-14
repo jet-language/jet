@@ -40,7 +40,7 @@ fn run() {
     }
     child.detach()
     ready.receive() ?? panic("closed")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     )

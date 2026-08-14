@@ -738,33 +738,12 @@ fn core_fixed_sig_impl(
             Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
         )),
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
-        ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
-        ("core.time", "milliseconds") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
-        )),
-        ("core.time", "nanoseconds") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
-        )),
-        ("core.time", "microseconds") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
-        )),
-        ("core.time", "seconds") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
-        )),
-        ("core.time", "minutes") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
-        )),
-        ("core.time", "hours") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        ("core.time", "sleep") => Some((
+            vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
+            None,
         )),
         ("core.tasks", "interval") => Some((
-            vec![(read, Type::Int)],
+            vec![(read, Type::Named("Duration".to_string()))],
             Some(Type::Apply {
                 name: "Receiver".to_string(),
                 args: vec![Type::Int],

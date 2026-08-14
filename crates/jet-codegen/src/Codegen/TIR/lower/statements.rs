@@ -23,7 +23,6 @@ use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
 use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::TIR::lower::timeout_nanos;
 use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
@@ -3379,7 +3378,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         // D-DOTSCOPE1 / D-META-DSL1: a `#Test` scope member
         // (`.setup`/`.expect_fail`/`.timeout`/`.skip`) or a declared checked
         // text block. Legality/args were checked in sema; here we pick the
-        // lowering kind and fold `.timeout`'s duration literal to a nanosecond budget.
+        // lowering kind while retaining `.timeout`'s canonical Duration expression.
         // `.setup` emits inline, so its bindings are visible to the rest of the test;
         // the others open their own scope in
         // `emit_tir_stmt`.
@@ -3402,7 +3401,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
                 ScopeMemberKind::ExpectFail(expected)
             } else if name == Syntax::SCOPE_TEST_TIMEOUT {
-                ScopeMemberKind::Timeout(timeout_nanos(args))
+                ScopeMemberKind::Timeout(lower_expr(
+                    args.first().expect("sema validated .timeout argument"),
+                    cx,
+                    env,
+                ))
             } else {
                 ScopeMemberKind::Skip
             };

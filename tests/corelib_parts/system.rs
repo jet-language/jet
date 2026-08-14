@@ -394,7 +394,7 @@ use core.time as time
 
 fn run() {
     #Context(deadline: time.now()) {
-        time.sleep(5)
+        time.sleep(5ms)
     }
 }
 
@@ -901,7 +901,7 @@ fn fast_nine() => Int {
 }
 
 fn slow_one() => Int {
-    time.sleep(300)
+    time.sleep(300ms)
     return 1
 }
 

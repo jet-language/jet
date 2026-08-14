@@ -805,6 +805,15 @@ fn web_wasm_expr_supported(
             }
         }),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::CoreCall { module, method, args, .. }
+            if module == "core.time" && method == "instant" && args.is_empty() => true,
+        TIR::TExprKind::HandleMethod { recv, op, args }
+            if web_wasm_handle_method_supported(op, args.len()) => {
+            web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+                && args.iter().all(|arg| {
+                    web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+                })
+        }
         TIR::TExprKind::Unary { operand, .. }
         | TIR::TExprKind::Clone(operand)
         | TIR::TExprKind::ExplicitCopy(operand)
@@ -895,6 +904,13 @@ fn web_wasm_expr_supported(
                 | TIR::TNumericOp::CastAs { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Panic { msg, .. },
+        } => {
+            web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(msg, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::HostCall(host) => match host.as_ref() {
             TIR::THostCall::FixedListIndex { base, index, .. } => {
                 web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
@@ -1203,6 +1219,48 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::ReactiveEffectMethod { method } => {
             argc == 0 && matches!(method.as_str(), "unsubscribe" | "is_active")
         }
+        TIR::THandleOp::DurationNew { .. } => argc == 0,
+        TIR::THandleOp::DurationIn { unit: Some(_) } => argc == 1,
+        TIR::THandleOp::DurationIsZero | TIR::THandleOp::DurationTotalSeconds => argc == 0,
+        TIR::THandleOp::DurationDifference => argc == 1,
+        TIR::THandleOp::DurationSecondsValue => argc == 0,
+        TIR::THandleOp::CivilTimeMethod { kind, method } => {
+            kind == "Instant" && argc == 0 && matches!(method.as_str(), "elapsed_millis" | "elapsed")
+        }
+        _ => false,
+    }
+}
+
+fn web_time_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Named(name)
+            if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT
+    )
+}
+
+fn web_duration_scale(unit: &str) -> Option<i64> {
+    Some(match unit {
+        "Nanoseconds" => 1,
+        "Microseconds" => 1_000,
+        "Milliseconds" => 1_000_000,
+        "Seconds" => 1_000_000_000,
+        "Minutes" => 60_000_000_000,
+        "Hours" => 3_600_000_000_000,
+        _ => return None,
+    })
+}
+
+fn web_wasm_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
+    match op {
+        TIR::THandleOp::DurationNew { .. } => argc == 0,
+        TIR::THandleOp::DurationIn { unit: Some(_) } => argc == 1,
+        TIR::THandleOp::DurationIsZero | TIR::THandleOp::DurationTotalSeconds => argc == 0,
+        TIR::THandleOp::DurationDifference => argc == 1,
+        TIR::THandleOp::DurationSecondsValue => argc == 0,
+        TIR::THandleOp::CivilTimeMethod { kind, method } => {
+            kind == "Instant" && argc == 0 && matches!(method.as_str(), "elapsed_millis" | "elapsed")
+        }
         _ => false,
     }
 }
@@ -1340,7 +1398,14 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 | TIR::TNumericOp::FloatToInt { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_expr_supported(recv),
-        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
+        E::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Value(fallback),
+        } => web_expr_supported(value) && web_expr_supported(fallback),
+        E::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Panic { msg, .. },
+        } => web_expr_supported(value) && web_expr_supported(msg),
         E::IfExpr {
             cond,
             then_body,
@@ -3154,6 +3219,8 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::InlineRange { base, .. } => wasm_ty(base),
         Type::Int => Some("JetWasmInt"),
         Type::IntN { signed: true, .. } => Some("i64"),
+        Type::Named(name)
+            if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => Some("i64"),
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
@@ -3178,6 +3245,11 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Int => "JetWasmInt".to_string(),
         Type::IntN { signed: true, .. } => "i64".to_string(),
+        Type::Named(name)
+            if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => "i64".to_string(),
+        Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
+            "JetRangeError".to_string()
+        }
         Type::IntN { signed: false, .. } => "u64".to_string(),
         Type::Float | Type::Float32 => "f64".to_string(),
         Type::Bool => "bool".to_string(),
@@ -3213,6 +3285,11 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
+        Type::Named(name)
+            if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => "i64".to_string(),
+        Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
+            "JetRangeError".to_string()
+        }
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
@@ -3256,6 +3333,7 @@ fn wasm_param_rust_ty(
 ) -> Option<String> {
     let owned = wasm_internal_ty(ty, bundle)?;
     match (conv, ty) {
+        (_, ty) if web_time_type(ty) => Some(owned),
         (AccessConvention::Read, Type::String) => Some("&String".to_string()),
         (AccessConvention::Write, Type::String) => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::String) => Some("String".to_string()),
@@ -3420,9 +3498,9 @@ fn wasm_emit_call_arg(
     if arg.fn_coerce.is_some() {
         return Err(());
     }
-    if arg.borrow && uninit_borrow.is_none() {
+    if arg.borrow && uninit_borrow.is_none() && !web_time_type(&arg.value.ty) {
         value = format!("&({value})");
-    } else if arg.mut_borrow && uninit_borrow.is_none() {
+    } else if arg.mut_borrow && uninit_borrow.is_none() && !web_time_type(&arg.value.ty) {
         value = format!("&mut ({value})");
     }
     Ok(value)
@@ -4231,11 +4309,73 @@ fn wasm_emit_expr(
                 "{{ let __jet_compare_left = {l}; let __jet_compare_right = {r}; if (__jet_compare_left) < (__jet_compare_right) {{ {less} }} else if (__jet_compare_left) > (__jet_compare_right) {{ {greater} }} else {{ {equal} }} }}"
             )
         }
+        TIR::TExprKind::Binary { op, lhs, rhs, .. }
+            if matches!(op, crate::AST::BinOp::Add | crate::AST::BinOp::Sub)
+                && web_time_type(&expr.ty)
+                && web_time_type(&lhs.ty)
+                && web_time_type(&rhs.ty) =>
+        {
+            let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
+            let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
+            match op {
+                crate::AST::BinOp::Add => format!("({l}).saturating_add({r})"),
+                crate::AST::BinOp::Sub => format!("({l}).saturating_sub({r})"),
+                _ => unreachable!(),
+            }
+        }
         TIR::TExprKind::Binary { op, lhs, rhs, line, .. } => {
             let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
             wasm_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
                 .unwrap_or_else(|| format!("({l} {} {r})", binop(op).expect("ordinary wasm binary operator")))
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.time" && method == "instant" && args.is_empty() => {
+            "jet_time_monotonic_now_ns()".to_string()
+        }
+        TIR::TExprKind::HandleMethod { recv, op, args } => {
+            let recv = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            match op {
+                TIR::THandleOp::DurationNew { unit, float } => {
+                    let scale = web_duration_scale(unit).ok_or(())?;
+                    if *float {
+                        format!("jet_web_duration_from_float(({recv}), {scale})")
+                    } else {
+                        format!("jet_web_duration_from_int(({recv}), {scale})")
+                    }
+                }
+                TIR::THandleOp::DurationIn { unit: Some(unit) } => {
+                    let scale = web_duration_scale(unit).ok_or(())?;
+                    format!("Ok(({recv}) / {scale})")
+                }
+                TIR::THandleOp::DurationIsZero => format!("({recv}) == 0"),
+                TIR::THandleOp::DurationTotalSeconds => format!("({recv}) / 1000000000"),
+                TIR::THandleOp::DurationDifference => {
+                    let other = wasm_emit_expr(
+                        args.first().ok_or(())?,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                    format!("({recv}).saturating_sub({other})")
+                }
+                TIR::THandleOp::DurationSecondsValue => {
+                    format!("({recv}) as f64 / 1000000000.0")
+                }
+                TIR::THandleOp::CivilTimeMethod { kind, method }
+                    if kind == "Instant" && method == "elapsed_millis" => {
+                        format!("jet_time_monotonic_now_ns().saturating_sub({recv}).saturating_div(1000000)")
+                    }
+                TIR::THandleOp::CivilTimeMethod { kind, method }
+                    if kind == "Instant" && method == "elapsed" => {
+                        format!("jet_time_monotonic_now_ns().saturating_sub({recv})")
+                    }
+                _ => return Err(()),
+            }
         }
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Clone(inner) | TIR::TExprKind::ExplicitCopy(inner) => format!(
@@ -4438,6 +4578,18 @@ fn wasm_emit_expr(
             file_prefix,
             reconstructions,
         )?,
+        TIR::TExprKind::OrFallback { value, fallback } => {
+            let value = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+            let TIR::TOrFallback::Panic { msg, loc } = fallback else {
+                return Err(())
+            };
+            let msg = wasm_emit_expr(msg, funcs, file_prefix, reconstructions)?;
+            format!(
+                "match ({value}) {{ Ok(__jet_ok) => __jet_ok, Err(_) => jet_panic({:?}, {}, &({msg})) }}",
+                loc.file,
+                loc.line,
+            )
+        }
         TIR::TExprKind::OptionLift2 { f, a, b } => jet_format!(
             "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || {{ let {jet_prefix}f = ({}); move |{jet_prefix}a, {jet_prefix}b| ({jet_prefix}f)({jet_prefix}a, {jet_prefix}b) }})",
             wasm_emit_expr(a, funcs, file_prefix, reconstructions)?,
@@ -6161,6 +6313,20 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             let r = tir_js_expr(rhs, funcs, file_prefix).expect("js binary rhs");
             format!("({l} {} {r})", binop(op).expect("ordinary JS binary operator"))
         }),
+        E::Binary { op, lhs, rhs, .. }
+            if matches!(op, crate::AST::BinOp::Add | crate::AST::BinOp::Sub)
+                && web_time_type(&expr.ty)
+                && web_time_type(&lhs.ty)
+                && web_time_type(&rhs.ty) =>
+        {
+            let l = tir_js_expr(lhs, funcs, file_prefix)?;
+            let r = tir_js_expr(rhs, funcs, file_prefix)?;
+            match op {
+                crate::AST::BinOp::Add => format!("jet_time_add({l}, {r})"),
+                crate::AST::BinOp::Sub => format!("jet_time_sub({l}, {r})"),
+                _ => unreachable!(),
+            }
+        }
         // Float results (D-INTDIV1 `Int / Int` → Float, float arithmetic) leave
         // BigInt land through `Number(...)` so JS does floating-point math.
         E::Binary { op, lhs, rhs, .. }
@@ -6416,7 +6582,17 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 .join(", ");
             format!("{}({}, {})", kernel, tir_js_expr(recv, funcs, file_prefix)?, args)
         }
-        E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.time" && method == "instant" && args.is_empty() => {
+            "jet_time_monotonic_now_ns()".to_string()
+        }
+        E::CoreCall { module, method, args, .. } => {
+            tir_core_call(module, method, args, funcs, file_prefix)?
+        }
         E::BuiltinMethod { recv, op, args } => {
             let recv_ty = &recv.ty;
             let recv = tir_js_expr(recv, funcs, file_prefix)?;
@@ -6479,6 +6655,36 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                         _ => return Err(()),
                     }
                 }
+                TIR::THandleOp::DurationNew { unit, float } => {
+                    let scale = web_duration_scale(unit).ok_or(())?;
+                    if *float {
+                        format!("jet_web_duration_from_float({}, {})", recv, scale)
+                    } else {
+                        format!("jet_web_duration_from_int({}, {})", recv, scale)
+                    }
+                }
+                TIR::THandleOp::DurationIn { unit: Some(unit) } => {
+                    let scale = web_duration_scale(unit).ok_or(())?;
+                    format!("jet_web_duration_ok(BigInt({recv}) / BigInt({scale}))")
+                }
+                TIR::THandleOp::DurationIsZero => format!("BigInt({recv}) === 0n"),
+                TIR::THandleOp::DurationTotalSeconds => {
+                    format!("BigInt({recv}) / 1000000000n")
+                }
+                TIR::THandleOp::DurationDifference if a.len() == 1 => {
+                    format!("jet_time_sub({recv}, {})", a[0])
+                }
+                TIR::THandleOp::DurationSecondsValue => {
+                    format!("Number({recv}) / 1000000000")
+                }
+                TIR::THandleOp::CivilTimeMethod { kind, method }
+                    if kind == "Instant" && method == "elapsed_millis" => {
+                        format!("jet_time_sub(jet_time_monotonic_now_ns(), {recv}) / 1000000n")
+                    }
+                TIR::THandleOp::CivilTimeMethod { kind, method }
+                    if kind == "Instant" && method == "elapsed" => {
+                        format!("jet_time_sub(jet_time_monotonic_now_ns(), {recv})")
+                    }
                 _ => return Err(()),
             }
         }
@@ -6520,12 +6726,29 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             }
             _ => return Err(()),
         },
-        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => {
+        E::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Value(fallback),
+        } => {
             // Tagged Option/Result unwrap; also accepts legacy nullish from older emit.
             jet_format!(
                 "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : {}))({}))",
                 tir_js_expr(fallback, funcs, file_prefix)?,
                 tir_js_expr(value, funcs, file_prefix)?
+            )
+        },
+        E::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Panic { msg, loc },
+        } => {
+            let value = tir_js_expr(value, funcs, file_prefix)?;
+            let msg = tir_js_expr(msg, funcs, file_prefix)?;
+            jet_format!(
+                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : jet_runtime_stop(\"E3001\", {}, {}, {})))({}))",
+                json_quote(&loc.file),
+                loc.line,
+                msg,
+                value,
             )
         },
         E::IfExpr {
@@ -6718,6 +6941,9 @@ fn tir_core_call(
             format!("jetDom.mount({}, {}, {})", get(0), get(1), get(2))
         });
     }
+    if module == "time" && method == "instant" && a.is_empty() {
+        return Ok("jet_time_monotonic_now_ns()".to_string());
+    }
     if let Some(kind) = storage {
         return Ok(match method {
             "get" => format!("jetDom.storageGet(\"{kind}\", {})", get(0)),
@@ -6762,6 +6988,7 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
         (false, "resize_event") => Some(2),
         (false, "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container") => Some(0),
         (false, "key_event" | "signal" | "value" | "text" | "button" | "box") => Some(1),
+        (false, "instant") => Some(0),
         (false, "on") => Some(3),
         _ => None,
     }
@@ -6911,6 +7138,21 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
     "    jet_runtime_stop(\"E3001\", file, line, message)\n",
     "}\n\n",
+    // D-TIMERES1=A / D-TYPE2-TIME1=A: the wasm adapter includes the same
+    // fixed nanosecond kernels as native AOT. It only changes the nominal
+    // Duration carrier to the wasm i64 ABI at the boundary.
+    include_str!("../Prelude/Core/Duration.rs"),
+    "\n",
+    include_str!("../Prelude/Core/TimeMonotonic.rs"),
+    "\n",
+    "#[derive(Clone, Debug)]\n",
+    "struct JetRangeError { reason: String }\n\n",
+    "fn jet_web_duration_from_int(value: i64, scale: i64) -> Result<i64, JetRangeError> {\n",
+    "    jet_duration_kernel_from_int(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_int_error_reason().to_string() })\n",
+    "}\n\n",
+    "fn jet_web_duration_from_float(value: f64, scale: i64) -> Result<i64, JetRangeError> {\n",
+    "    jet_duration_kernel_from_float(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_float_error_reason().to_string() })\n",
+    "}\n\n",
     // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
     // first, so `T?` and `T ? E` mean one thing on the web tier too.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
@@ -7009,6 +7251,8 @@ const JS_POWER_PRELUDE: &str = concat!(
     // 2^53.
     "const JET_I64_MIN = -(2n ** 63n);\n",
     "const JET_I64_MAX = 2n ** 63n - 1n;\n",
+    include_str!("../Prelude/Core/Time.js"),
+    "\n",
     "function jet_i64(value, message, file, line) {\n",
     "  if (value < JET_I64_MIN || value > JET_I64_MAX) jet_runtime_stop(\"E3010\", file, line, message);\n",
     "  return value;\n",

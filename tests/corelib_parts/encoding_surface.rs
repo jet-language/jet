@@ -374,7 +374,7 @@ fn run() {
     print(time.now_utc().to_timestamp() > 0)
     print(time.today().to_string().len() > 0)
     print(time.instant().elapsed_millis() >= 0)
-    time.sleep(0)
+    time.sleep(0ms)
     stopwatch := time.start()
     print(stopwatch.elapsed_millis() >= 0)
     print(date.today().to_string().len() > 0)

@@ -1548,11 +1548,11 @@ and electronics units from ordinary `Prelude/Units.jet` source.
 
 fn run() {
     distance :: 12meter
-    speed :: distance / 3second
-    rate :: 30token / 2second
+    speed :: distance / 3s
+    rate :: 30token / 2s
     print(distance) // 12 meter
-    print(speed)    // 4 meter/second
-    print(rate)     // 15 token/second
+    print(speed)    // 4 meter/ns
+    print(rate)     // 15 token/ns
 }
 ```
 
@@ -1962,9 +1962,9 @@ use core.time as time
 
 fn run() {
     started :: time.now()                // milliseconds since 1970-01-01 UTC
-    time.sleep(100)                      // pause ~100 ms (blocking)
+    time.sleep(100ms)                    // pause ~100 ms (blocking)
     sw :: time.start()                   // Stopwatch
-    time.sleep(50)
+    time.sleep(50ms)
     print(sw.elapsed_millis())           // at least 50
     print(time.now() - started)
 
@@ -1984,12 +1984,11 @@ fn run() {
 | `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime ? String` | Local wall-clock time |
 | `datetime(y, m, d, h, mi, s)` | `DateTime` | UTC date-time from civil components |
 | `days_in_month(y, m)` / `is_leap_year(y)` | `Int` / `Bool` | Calendar facts |
-| `nanoseconds`/`microseconds`/`milliseconds`/`seconds`/`minutes`/`hours`(n) | `Duration ? RangeError` | Checked elapsed-time spans (nanosecond storage, D-TIMERES1=A) |
 | `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
 | `zone(name)` / `utc()` | `Zone ? String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
 | `zoned_local(date, time, zone)` | `ZonedDateTime` | Resolve local civil time in a zone |
-| `sleep(millis)` | nothing | Block for about `millis` milliseconds (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
+| `sleep(duration: Duration)` | nothing | Block for the duration (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
@@ -2066,7 +2065,11 @@ A runtime `Duration` is an i64 nanosecond count (D-TIMERES1=A), built with
 checked type-owned unit methods such as `Duration.seconds(n)?` or
 `Duration.nanoseconds(n)?`. Read a whole unit with `d.in(.Nanoseconds)?` /
 `d.in(.Milliseconds)?`; the result truncates toward zero and reports
-`RangeError` on overflow. Static unit literals such as `5s` remain unchanged.
+`RangeError` on overflow. Time literals `ns`, `us`, `ms`, `s`, `min`, `h`, and
+`d` are members of the canonical `core.units::Time` family and produce a
+`Duration` with an i64 nanosecond carrier. `Instant` is the matching point:
+`time.instant() + 5min` is an `Instant`, and subtracting two `Instant` values
+produces a `Duration`.
 
 | `Duration` method | Returns | What it does |
 |-------------------|---------|--------------|
@@ -2622,9 +2625,9 @@ there's no combined channel value).
 | `handle.cancel()` | nothing | Request cancellation on the task control plane |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
 | `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
-| `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
-| `tasks.after(ms: N, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
-| `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
+| `tasks.after(duration: Duration)` | `Receiver<Unit>` | One-shot timer channel |
+| `tasks.after(duration: Duration, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
+| `tasks.interval(duration: Duration)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
 | `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `sender.close()` | nothing | Close the send half explicitly |
@@ -2645,7 +2648,7 @@ and `ProcessChild.wait()`) observe the inherited budget and report runtime
 exit. A numeric limit below one is clamped to one before a child starts. Inside
 one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel losers.
 The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
-value, `.after(ms: N)` is a unit timer arm, and `.after(ms: N, value: fallback)`
+value, `.after(duration: Duration)` is a unit timer arm, and `.after(duration: Duration, value: fallback)`
 is a typed timeout arm that can be mixed with same-`T` receive arms.
 
 ### `core.testing` — fixtures under `#Test`
@@ -3690,10 +3693,9 @@ idempotency, retention, retry, and dead-letter state.
 
 ```jet
 use core.services as services
-use core.time as time
 
 fn run() {
-    runtime := services.runtime("orders.log", retention: time.hours(24))
+    runtime := services.runtime("orders.log", retention: 24h)
     receipt := runtime.send(order_endpoint, order, key: order.id)?
     if receipt == {
         .Enqueued(id) -> audit(id)

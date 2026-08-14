@@ -827,11 +827,52 @@ fn builtin_type_registry() -> TypeRegistry {
         must_use: false,
         c_layout_tag: None,
     });
+    // D-UNITLIT1=A: suffixes enter a module only with the in-scope unit
+    // family. Pipeline registration fills this map after Prelude injection;
+    // keeping the builtin registry empty prevents `#NoPrelude` modules from
+    // receiving an ambient Time suffix table.
+    let time_literals = HashMap::new();
+    let time_dimension = Some(crate::AST::Dimension::base("core.units::Time"));
+    let time_package = PathBuf::from("core.units");
+    let zero_ratio = crate::AST::UnitRatio::zero();
+    let one_ratio = crate::AST::UnitRatio::integer(1);
+    let mut unit_types = HashSet::from([
+        crate::Syntax::DURATION_TYPE.to_string(),
+        crate::Syntax::TYPE_INSTANT.to_string(),
+    ]);
+    let mut unit_facts = HashMap::new();
+    unit_facts.insert(
+        crate::Syntax::DURATION_TYPE.to_string(),
+        UnitFact {
+            package: time_package.clone(),
+            family: "Time".to_string(),
+            member: "ns".to_string(),
+            dimension: time_dimension.clone(),
+            scale: one_ratio.clone(),
+            scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+            offset: zero_ratio.clone(),
+            kind: QuantityKind::Delta,
+        },
+    );
+    unit_facts.insert(
+        crate::Syntax::TYPE_INSTANT.to_string(),
+        UnitFact {
+            package: time_package,
+            family: "Time".to_string(),
+            member: "ns".to_string(),
+            dimension: time_dimension,
+            scale: one_ratio,
+            scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+            offset: zero_ratio,
+            kind: QuantityKind::Point,
+        },
+    );
     TypeRegistry {
         types,
         text_heads: HashMap::new(),
-        unit_types: HashSet::new(),
-        unit_facts: HashMap::new(),
+        unit_types,
+        unit_facts,
+        time_literals,
         computed_fields: HashMap::new(),
         field_defaults: HashMap::new(),
     }

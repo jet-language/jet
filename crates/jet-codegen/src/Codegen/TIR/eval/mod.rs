@@ -1953,6 +1953,53 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    /// D-TYPE2-TIME1=A: timer channels use the same Duration nanosecond
+    /// carrier as every other interpreter time operation. The scheduler
+    /// remains an adapter: it receives the shared millisecond boundary only
+    /// after the canonical Duration has been evaluated.
+    pub(super) fn new_eval_timer_channel(
+        &mut self,
+        duration_ns: i64,
+        value: CtValue,
+        repeating: bool,
+    ) -> CtValue {
+        let channel = crate::scheduler::JetSchedulerChannel::new();
+        let sender = channel.sender();
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.channels.len();
+        runtime.channels.push(EvalChannel {
+            channel,
+            sender: sender.clone(),
+        });
+        drop(runtime);
+        let receiver = CtValue::Struct {
+            type_name: "Receiver".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+        };
+        let duration_ms = duration_ns.saturating_div(1_000_000);
+        let delay = if repeating {
+            crate::scheduler::jet_task_interval_ms_defaulted(duration_ms)
+        } else {
+            crate::scheduler::jet_task_delay_ms_defaulted(duration_ms)
+        };
+        crate::scheduler::jet_scheduler_spawn(move || {
+            if repeating {
+                let mut tick = 1i64;
+                loop {
+                    crate::scheduler::jet_scheduler_sleep_ms(delay);
+                    if !sender.send(CtValue::Int(tick)) {
+                        break;
+                    }
+                    tick = tick.saturating_add(1);
+                }
+            } else {
+                crate::scheduler::jet_scheduler_sleep_ms(delay);
+                let _ = sender.send(value);
+            }
+        });
+        receiver
+    }
+
     pub(super) fn send_eval_channel(
         &self,
         index: usize,

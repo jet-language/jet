@@ -35,7 +35,7 @@ code.
 | Task failure | string state and trace helpers | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
 | Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
-| Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
+| Wait on two channels | `g.select().recv(a).recv(b).after(100ms, -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
 | Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
 
@@ -200,7 +200,7 @@ loop {
     job :: rx.receive() ?? break
     handle(job)
 }
-winner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()
+winner :: g.select().recv(ch1).recv(ch2).after(100ms, -1).wait()
 ```
 
 **Ratified law.** Channels are builtin values. Draining is a loop. Waiting on
@@ -271,9 +271,9 @@ amends D-SHARED-API1 and D-TXN2.
 
 ### 5. Schedules, pools, and services — D-CONC-SCHED1=A
 
-**Today.** The schedule marker still parses its private duration table. There is
-no worker cap. The service topology is ratified; its typed schedule consumer is
-unshipped.
+**Today.** The schedule marker resolves its duration literal through the
+canonical `core.units::Time` family. There is no worker cap. The service
+topology is ratified; its typed schedule consumer is unshipped.
 
 **Ratified law.** Scheduling is typed data on the work.
 
@@ -297,8 +297,8 @@ fn nightly_backup() {
   owns a group; a restart rule is data on that group. No new mechanism.
 
 The ratified law deletes the private schedule table. The current implementation
-still accepts only `ns`, `us`, `ms`, `s`, and `min`; the D-TYPE2-TIME1 value,
-`2h`/`1d`, and service/jetos consumers are unshipped.
+resolves `ns`, `us`, `ms`, `s`, `min`, `h`, and `d` through the canonical
+D-TYPE2-TIME1 family. Service/jetos consumers remain unshipped.
 
 ### 6. Protocols — clearer, and on the same three facts
 
@@ -347,9 +347,8 @@ Settled answers:
   declared conversions, and arm tables. Nothing overlaps with optionals or
   results, because it *is* results.
 - **Time.** `after 100ms`, `Every(5min)`, and deadlines all read the one
-  Duration rail that D-TYPE2-TIME1 (card #1497) defines. The private schedule
-  suffix table is retired by law; the current parser boundary is recorded
-  above.
+  Duration rail that D-TYPE2-TIME1 (card #1552) defines. No private schedule
+  suffix table remains; the current parser boundary is recorded above.
 - **Knowledge planes.** State, duty, and reach are registered planes in the
   v2 fact registry. Send-safety is the crossing plane settled by
   D-CONC-CROSS1=A. Facts become nameable and reflectable like every other

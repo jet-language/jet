@@ -2393,10 +2393,10 @@ pub enum ScopeMemberKind {
     /// `.expect_fail { … }` / `.expect_fail(E3010) { … }` — the region must
     /// fail, optionally with the named runtime stop code.
     ExpectFail(Option<String>),
-    /// `.timeout(dur) { … }` — post-hoc budget in nanoseconds. The region runs to
-    /// completion, then its elapsed time is compared against the budget; over
-    /// budget fails the test. (v1: post-hoc — does not interrupt a hang.)
-    Timeout(u64),
+    /// `.timeout(dur) { … }` — post-hoc budget. The region runs to completion,
+    /// then its elapsed time is compared against the canonical Duration value;
+    /// over budget fails the test. (v1: post-hoc — does not interrupt a hang.)
+    Timeout(TExpr),
     /// `.skip { … }` — a region that is not executed. Emitted as `if false { … }`
     /// so the body still type-checks but never runs.
     Skip,
@@ -3969,11 +3969,11 @@ pub enum TExprKind {
         builder: Box<TExpr>,
         channel: Box<TExpr>,
     },
-    /// D-SELECT-GENERIC1=A: `.after(ms: …)` registers a timer arm carrying the
+    /// D-TYPE2-TIME1=A: `.after(duration: …)` registers a timer arm carrying the
     /// builder's same `T` when a value is supplied.
     SelectAfter {
         builder: Box<TExpr>,
-        millis: Box<TExpr>,
+        duration: Box<TExpr>,
         value: Option<Box<TExpr>>,
     },
     /// D-CONCSELECT1=A: `.read(stream)` on a select builder.
@@ -4937,7 +4937,10 @@ pub enum THandleOp {
     DurationIsZero,
     DurationTotalSeconds,
     DurationDifference,
-    /// D-DECIMAL1 / D-NUMTYPE1: instance methods on precise numeric types.
+    /// D-TYPE2-TIME1=A: dimensional algebra reads canonical Time in seconds;
+    /// the stored carrier remains i64 nanoseconds.
+    DurationSecondsValue,
+    /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,
         method: String,

@@ -247,31 +247,66 @@ impl JetPeriod {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct JetInstant {
-    start: std::time::Instant,
+    start_ns: i64,
+}
+
+pub(crate) fn jet_time_instant_add_duration_ns(start_ns: i64, duration_ns: i64) -> i64 {
+    start_ns.saturating_add(duration_ns)
+}
+
+pub(crate) fn jet_time_instant_sub_duration_ns(start_ns: i64, duration_ns: i64) -> i64 {
+    start_ns.saturating_sub(duration_ns)
+}
+
+pub(crate) fn jet_time_instant_difference_ns(left_ns: i64, right_ns: i64) -> i64 {
+    left_ns.saturating_sub(right_ns)
+}
+
+pub(crate) fn jet_time_instant_elapsed_ns(now_ns: i64, start_ns: i64) -> i64 {
+    now_ns.saturating_sub(start_ns)
+}
+
+pub(crate) fn jet_time_instant_compare(left_ns: i64, right_ns: i64) -> i64 {
+    match left_ns.cmp(&right_ns) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
 }
 
 impl JetInstant {
     pub(crate) fn now() -> Self {
         JetInstant {
-            start: std::time::Instant::now(),
+            start_ns: jet_time_monotonic_now_ns(),
         }
     }
     pub(crate) fn elapsed_millis(&self) -> i64 {
-        self.start.elapsed().as_millis() as i64
+        self.elapsed_nanos().saturating_div(1_000_000)
     }
     pub(crate) fn elapsed_nanos(&self) -> i64 {
-        self.start.elapsed().as_nanos().min(i64::MAX as u128) as i64
+        jet_time_instant_elapsed_ns(jet_time_monotonic_now_ns(), self.start_ns)
+    }
+    pub(crate) fn plus_duration_ns(&self, ns: i64) -> Self {
+        Self {
+            start_ns: jet_time_instant_add_duration_ns(self.start_ns, ns),
+        }
+    }
+    pub(crate) fn minus_duration_ns(&self, ns: i64) -> Self {
+        Self {
+            start_ns: jet_time_instant_sub_duration_ns(self.start_ns, ns),
+        }
+    }
+    pub(crate) fn difference_ns(&self, other: &Self) -> i64 {
+        jet_time_instant_difference_ns(self.start_ns, other.start_ns)
+    }
+    pub(crate) fn compare_to(&self, other: &Self) -> i64 {
+        jet_time_instant_compare(self.start_ns, other.start_ns)
     }
 
     pub(crate) fn to_string_fmt(&self) -> String {
         "Instant".to_string()
-    }
-}
-impl PartialEq for JetInstant {
-    fn eq(&self, other: &Self) -> bool {
-        self.start == other.start
     }
 }
 

@@ -376,5 +376,5 @@ option.
 | `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`; `credentials` remains D4 drift. |
 | `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`; the current Boolean canonical control remains D4 drift. |
 | `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
-| `time.now` | Local current instant with the standard clock door. | `time.now_utc` or an injected `Clock` for explicit zone/reproducibility. |
+| `time.now` | Current Unix time in milliseconds from the ambient standard clock. | `time.clock(seed)` or an injected `Clock` for deterministic/reproducible code. |
 | `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |

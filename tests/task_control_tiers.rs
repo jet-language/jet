@@ -13,12 +13,12 @@ const SOURCE: &str = r#"
 use core.time as time
 
 fn slow_three() => Int {
-    time.sleep(25)
+    time.sleep(25ms)
     return 3
 }
 
 fn slow_six() => Int {
-    time.sleep(25)
+    time.sleep(25ms)
     return 6
 }
 
@@ -52,12 +52,12 @@ const NESTED_SOURCE: &str = r#"
 use core.time as time
 
 fn slow_one() => Int {
-    time.sleep(100)
+    time.sleep(100ms)
     return 1
 }
 
 fn slow_three() => Int {
-    time.sleep(100)
+    time.sleep(100ms)
     return 3
 }
 
@@ -81,7 +81,7 @@ fn win(state: Shared<[Int]>) => Int {
 }
 
 fn lose(state: Shared<[Int]>) => Int {
-    time.sleep(100)
+    time.sleep(100ms)
     state.edit((value: [Int]) => value[0] = 2)
     return 2
 }
@@ -92,7 +92,7 @@ fn run() {
     task.group workers {
         race_result :: (task.race { win(race_state), lose(race_state) }) ?? 0
         any_result :: (task.any { win(any_state), lose(any_state) }) ?? 0
-        time.sleep(200)
+        time.sleep(200ms)
         print(race_result)
         print(race_state.read((value: [Int]) => value[0]))
         print(any_result)
@@ -113,7 +113,7 @@ fn run() {{
     task.group limited(limit: {limit}) {{
         first :: task {{
             sender.send(1)
-            time.sleep(25)
+            time.sleep(25ms)
             sender.send(2)
         }}
         receiver.receive() ?? 0

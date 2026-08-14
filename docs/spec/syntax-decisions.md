@@ -1767,7 +1767,7 @@ an error.
 **D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
 card #1268)*: `print` and bare interpolation show a quantity's magnitude and
 declared unit symbol by default. Derived dimensions use a normalized product
-or quotient, such as `4 meter/second`. An explicit `Display` implementation
+or quotient, such as `4 meter/ns`. An explicit `Display` implementation
 replaces this default for its concrete unit type.
 
 `{value:Unit(name)}` uses the generated unit type name.
@@ -3697,8 +3697,10 @@ or `Float` becomes a duration only through the type-owned closed family
 and non-finite floats; fractional milliseconds truncate toward zero. Whole-unit
 reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)?`, return
 `Int ? RangeError`, and truncate toward zero. The former `core.time` free
-constructors and per-unit readers leave the surface without aliases. Static
-unit literals remain unchanged.
+constructors and per-unit readers leave the surface without aliases. D-TYPE2-TIME1
+amends the static literal rule: `ns`, `us`, `ms`, `s`, `min`, `h`, and `d` resolve
+through the canonical `core.units::Time` family and produce the checked
+nanosecond `Duration` delta.
 
 **D-SHAPE-OPAQUE-INFER1=A — hidden generic constructor arguments** *(ratified by
 owner 2026-07-14, card #568)*: `Type.new(…)` may omit the receiver's generic
@@ -5692,7 +5694,7 @@ existing named-function entry convention.
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
 (D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1); the
-shared duration plane also accepts `2h` and `1d`;
+canonical Time family also accepts `2h` and `1d`;
 `#Every("03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
 due jobs in the dev loop, the service runtime (D-SERVICE1) schedules
@@ -5715,9 +5717,9 @@ args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
 the selected function's source name, so a sibling's plain-call dependency
 (ballot: dependency = plain function call) does not die with E0102.
 D-SERVICE1 still has no typed builder/worker/group to carry a schedule into a
-service runtime, and D-TYPE2-TIME1 has not yet supplied the ordinary typed
-`Duration`/wall-clock carrier. Those remain future cards; the service path must
-not reinterpret raw extras as `#Every` or add a second scheduler.
+service runtime. D-TYPE2-TIME1 now supplies the ordinary typed `Duration` and
+Instant carriers; the service path remains a future slice and must not
+reinterpret raw extras as `#Every` or add a second scheduler.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
@@ -6333,8 +6335,8 @@ ratified nanosecond decision. Point and delta reuse the affine machinery
 temperatures already use. Timeout and schedule sites accept the Time delta type
 instead of reading raw suffix tables.
 
-The `Instant` Syntax row is registered now for I7 and editor-grammar coverage;
-its parser/sema behavior and UI or formatter snapshots are owed to #1552.
+The `Instant` Syntax row is registered for I7 and editor-grammar coverage, and
+#1552 supplies its parser/sema behavior plus the UI and formatter coverage.
 
 Amends: D-TIMERES1 and D-QUANTITY-POINT1. Replacement: resolve Duration and
 Instant through the canonical Time quantity family.

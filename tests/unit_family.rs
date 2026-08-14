@@ -220,15 +220,14 @@ fn user_dimensions_compose_and_named_derived_units_share_the_structure() {
     let src = r#"
 #UnitFamily(Mass, dimension, base: kilogram) { kilogram }
 #UnitFamily(Length, dimension, base: meter) { meter }
-#UnitFamily(Time, dimension, base: second) { second }
 #UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
 
 fn accept(force: Newton) { print("{force.raw()}") }
 fn keep<Q: Quantity<Force, .Linear>>(value: ^Q) => Q { return value }
 fn run() {
     momentum :: 4kilogram * 3meter
-    acceleration_step :: momentum / 2second
-    force :: acceleration_step / 2second
+    acceleration_step :: momentum / 2s
+    force :: acceleration_step / 2s
     named :: 1newton
     keep(^named)
     keep(^force)
@@ -244,15 +243,14 @@ fn user_dimensions_keep_interpreter_and_resident_jit_parity() {
     let src = r#"
 #UnitFamily(Mass, dimension, base: kilogram) { kilogram }
 #UnitFamily(Length, dimension, base: meter) { meter }
-#UnitFamily(Time, dimension, base: second) { second }
 #UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
 
 fn accept(force: Newton) { print("{force.raw()}") }
 fn keep<Q: Quantity<Force, .Linear>>(value: ^Q) => Q { return value }
 fn run() {
     momentum :: 4kilogram * 3meter
-    acceleration_step :: momentum / 2second
-    force :: acceleration_step / 2second
+    acceleration_step :: momentum / 2s
+    force :: acceleration_step / 2s
     keep(^force)
     accept(force)
 }
@@ -795,9 +793,8 @@ fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
 fn quantity_generic_bound_rejects_wrong_dimension_and_kind() {
     let wrong_dimension = r#"
 #UnitFamily(Length, dimension) { meter }
-#UnitFamily(Time, dimension) { second }
 fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }
-fn run() { source :: 3second; keep(^source) }
+fn run() { source :: 3s; keep(^source) }
 "#;
     assert_eq!(codes_of(wrong_dimension), vec!["E0905"]);
 
@@ -861,10 +858,9 @@ fn imported_explicit_quantity_argument_checks_its_bound() {
         &entry,
         r#"
 use "units" as units
-#UnitFamily(Time, dimension) { second }
 fn run() {
-    source :: 1second
-    bad :: units.keep<Second>(^source)
+    source :: 1s
+    bad :: units.keep<Duration>(^source)
     print(bad.raw())
 }
 "#,
@@ -1158,11 +1154,10 @@ fn family_erases_in_codegen() {
 fn physical_dimensions_derive_before_codegen_and_erase_at_runtime() {
     let src = r#"
 #UnitFamily(Length, dimension) { meter }
-#UnitFamily(Time, dimension) { second }
 
 fn run() {
     distance :: 12meter
-    elapsed :: 3second
+    elapsed :: 3s
     speed :: distance / elapsed
     area :: distance * distance
     recovered :: speed * elapsed
@@ -1171,22 +1166,43 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("dimensionally valid program should compile");
     assert!(out.rust.contains("__jet_Meter"));
-    assert!(out.rust.contains("__jet_Second"));
     assert!(out.rust.contains(".0 /"), "unit division must erase to base arithmetic");
     assert!(out.rust.contains(".0 *"), "unit multiplication must erase to base arithmetic");
     assert!(!out.rust.contains("Quantity<"), "dimension facts must not reach emitted Rust");
 }
 
 #[test]
+fn canonical_time_plane_reaches_all_native_execution_tiers() {
+    let src = r#"
+use core.time as time
+
+fn now() => Instant {
+    return time.instant()
+}
+
+fn run() {
+    wait :: 500ms
+    origin :: now()
+    point :: now() + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    print(wait.in(.Milliseconds) ?? panic("wait"))
+    print(delta.in(.Minutes) ?? panic("delta"))
+    print(speed)
+}
+"#;
+    tir_support::assert_tiers_agree("canonical_time_plane", src, "500\n5\n6 meter/ns\n");
+}
+
+#[test]
 fn quantities_display_units_styles_and_explicit_overrides() {
     let defaults = r#"
 #UnitFamily(Length, dimension, base: meter) { meter px(scale: 1) }
-#UnitFamily(Time, dimension, base: second) { second }
 #UnitFamily(Currency) { usd }
 
 fn run() {
     distance :: 12meter
-    elapsed :: 3second
+    elapsed :: 3s
     speed :: distance / elapsed
     pixels :: 766px
     price :: 5usd
@@ -1203,7 +1219,7 @@ fn run() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "12 meter\n4 meter/second\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
+        "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
     );
     if jet_jit::cranelift_host_supported() {
         use jet::JitBackend::JitBackend;
@@ -1220,7 +1236,7 @@ fn run() {
         match backend.run(&bundle, false) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout,
-                "12 meter\n4 meter/second\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
+                "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
             ),
             RunOutcome::Problems(diagnostics) => panic!("JIT rejected unit display: {diagnostics:?}"),
         }
@@ -1357,7 +1373,7 @@ fn dimensional_quantities_example_stays_in_native_jit() {
         } => {
             assert_eq!(
                 stdout,
-                "12 meter\n4 meter/second\n12 meter\n766 px\n12 Meter\n12\n12.0\n"
+                "12 meter\n4 meter/ns\n12 meter\n766 px\n12 Meter\n12\n12.0\n"
             );
             assert!(stderr.is_empty());
             assert_eq!(exit_code, 0);
@@ -1513,8 +1529,7 @@ fn run() {}
 fn physical_dimension_mismatch_is_rejected_in_sema() {
     let src = r#"
 #UnitFamily(Length, dimension) { meter }
-#UnitFamily(Time, dimension) { second }
-fn run() { bad :: 1meter + 1second }
+fn run() { bad :: 1meter + 1s }
 "#;
     let codes = codes_of(src);
     assert_eq!(codes, vec!["E0359"], "expected one dimension mismatch, got {codes:?}");
@@ -1555,7 +1570,7 @@ pub fn sample() => [[String: [Unit]]] { return [["values": [1unit]]] }
 pub fn first(groups: [[String: [Unit]]]) => Unit { return ~groups[0]["values"][0] }
 "#;
     let time = r#"
-#UnitFamily(Time, dimension) { unit }
+#UnitFamily(Clock, dimension) { unit }
 pub fn sample() => [[String: [Unit]]] { return [["values": [1unit]]] }
 pub fn first(groups: [[String: [Unit]]]) => Unit { return ~groups[0]["values"][0] }
 "#;
@@ -1661,9 +1676,8 @@ fn physical_dimensions_cross_file_boundaries_canonically() {
         dir.join("units.jet"),
         r#"
 #UnitFamily(Length, dimension) { meter }
-#UnitFamily(Time, dimension) { second }
 pub fn distance() => Meter { return 12meter }
-pub fn elapsed() => Second { return 3second }
+pub fn elapsed() => Duration { return 3s }
 "#,
     )
     .unwrap();

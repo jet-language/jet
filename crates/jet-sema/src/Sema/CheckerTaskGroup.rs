@@ -843,7 +843,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`SelectBuilder` has no method `{other}`"),
-                    "scoped select supports `.recv(ch)`, `.read(stream)`, `.after(ms: …)`, and `.wait()`"
+                    "scoped select supports `.recv(ch)`, `.read(stream)`, `.after(duration: …)`, and `.wait()`"
                         .to_string(),
                     "write `g.select().recv(ch).wait()`".to_string(),
                     Some(span),
@@ -932,13 +932,13 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.after()` takes one `ms:` duration and an optional value, got {} argument{}",
+                    "`.after()` takes one Duration and an optional value, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                "a select timer arm fires after the given milliseconds; mixed recv/timer selects need a typed value"
+                "a select timer arm fires after the given Duration; mixed recv/timer selects need a typed value"
                     .to_string(),
-                "write `.after(ms: 100)` or `.after(ms: 100, value: fallback)`".to_string(),
+                "write `.after(100ms)` or `.after(100ms, fallback)`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -946,18 +946,16 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
-        let ms_ty = self.infer(&mut args[0].expr)?;
-        if !(matches!(&ms_ty, Type::Int | Type::InlineRange { .. })
-            || matches!(&ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
-        {
+        let duration_ty = self.infer(&mut args[0].expr)?;
+        if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
             self.diags.push(Diagnostic::error(
                 "E0112",
                 format!(
-                    "`.after(ms: …)` needs an integer millisecond count, not {}",
-                    ms_ty.show()
+                    "`.after(duration: …)` needs a Duration, not {}",
+                    duration_ty.show()
                 ),
-                "timer arms use whole milliseconds".to_string(),
-                "write `.after(ms: 100)`".to_string(),
+                "timer arms use the canonical Time delta".to_string(),
+                "write `.after(100ms)`".to_string(),
                 Some(args[0].expr.span()),
             ));
         }
@@ -988,7 +986,7 @@ impl<'a> Checker<'a> {
                 "a timer arm mixed with receive arms needs a typed value".to_string(),
                 "otherwise the select would have no value to return when the timer wins"
                     .to_string(),
-                "write `.after(ms: 100, value: fallback)`".to_string(),
+                "write `.after(100ms, fallback)`".to_string(),
                 Some(span),
             ));
             return None;

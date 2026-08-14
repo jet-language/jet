@@ -1,5 +1,6 @@
-/// Monotonic scalar used by erased interpreter carriers. Native AOT/JIT keep
-/// the opaque Instant; TIR deopt stores this same Prelude clock sample.
+/// Monotonic scalar used by the shared Instant carrier. AOT stores the scalar
+/// in the Prelude value; JIT keeps its handle opaque; TIR deopt stores the same
+/// Prelude clock sample.
 pub fn jet_time_monotonic_now_ns() -> i64 {
     static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     EPOCH

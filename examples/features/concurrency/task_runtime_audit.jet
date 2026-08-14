@@ -1,4 +1,5 @@
-// D-TASKRUNTIME1=A: bounded channels, typed timer channels, and select timeouts.
+// D-TYPE2-TIME1=A: bounded channels, typed timer channels, and select timeouts
+// all consume the canonical Time Duration literal.
 use core.tasks as tasks
 
 fn run() {
@@ -9,11 +10,11 @@ fn run() {
         print(ch.receive() ?? panic("channel closed"))
         print(ch.receive() ?? panic("channel closed"))
         blocked.join() ?? panic("blocked task failed")
-        timeout :: g.select().after(0, -1).wait()
+        timeout :: g.select().after(0ms, -1).wait()
         print(timeout)
-        once :: tasks.after(0, 7)
+        once :: tasks.after(0ms, 7)
         print(once.receive() ?? panic("timer closed"))
-        ticks :: tasks.interval(1)
+        ticks :: tasks.interval(1ms)
         print(ticks.receive() ?? panic("interval closed"))
         print(ticks.receive() ?? panic("interval closed"))
     }

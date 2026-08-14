@@ -763,7 +763,7 @@ fn validate_args(
                     "`.timeout` needs exactly one duration".to_string(),
                     "the region must complete within a time budget, written as a duration literal"
                         .to_string(),
-                    "write `.timeout(500ms) { … }` (`ns`/`us`/`ms`/`s`)".to_string(),
+                    "write `.timeout(500ms) { … }` (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`)".to_string(),
                     Some(at),
                 ));
             }
@@ -784,10 +784,10 @@ fn validate_args(
     }
 }
 
-/// A duration literal usable by `.timeout` — a bare unit literal whose suffix is
-/// a recognized time unit (D-UNITLIT1; no `#UnitFamily` in scope required).
+/// A duration literal usable by `.timeout` — a bare literal in the canonical
+/// Time family (D-TYPE2-TIME1; no private timeout suffix table).
 fn is_duration(e: &Expr) -> bool {
-    matches!(e, Expr::UnitLit { suffix, .. } if Syntax::duration_suffix_nanos(suffix).is_some())
+    matches!(e, Expr::UnitLit { suffix, .. } if crate::AST::UnitFamilyDef::canonical_time_unit(suffix).is_some())
 }
 
 fn vocab_list(vocab: &[&str]) -> String {

@@ -15,6 +15,11 @@ mod duration_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
 
+mod time_semantics {
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
+    include!("../../../jet-codegen/src/Prelude/Core/Time.rs");
+}
+
 mod loadable_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
 }
@@ -79,6 +84,44 @@ fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     }
 }
 
+fn canonical_time_field(value: &CtValue, type_name: &str, field: &str) -> Option<i64> {
+    let CtValue::Struct {
+        type_name: actual,
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    (actual == type_name).then(|| {
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            (wanted, CtValue::Int(value)) if wanted == field => Some(*value),
+            _ => None,
+        })
+    })?
+}
+
+fn canonical_duration(value: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: crate::Syntax::DURATION_TYPE.to_string(),
+        fields: vec![("ns".to_string(), CtValue::Int(value))],
+    }
+}
+
+fn canonical_instant(value: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: crate::Syntax::TYPE_INSTANT.to_string(),
+        fields: vec![("start_ns".to_string(), CtValue::Int(value))],
+    }
+}
+
+fn canonical_time_cmp(left: i64, right: i64) -> std::cmp::Ordering {
+    match time_semantics::jet_time_instant_compare(left, right) {
+        value if value < 0 => std::cmp::Ordering::Less,
+        0 => std::cmp::Ordering::Equal,
+        _ => std::cmp::Ordering::Greater,
+    }
+}
+
 /// Binary operators with runtime-identical semantics.
 pub fn eval_binop(
     op: BinOp,
@@ -88,6 +131,122 @@ pub fn eval_binop(
 ) -> Result<CtValue, Diagnostic> {
     use CtValue::*;
     match (op, l, r) {
+        (op @ (BinOp::Add | BinOp::Sub), left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == crate::Syntax::DURATION_TYPE
+                    && right_name == crate::Syntax::DURATION_TYPE
+            ) => {
+            let left = canonical_time_field(&left, crate::Syntax::DURATION_TYPE, "ns")
+                .ok_or_else(|| unsupported("malformed Duration value", span))?;
+            let right = canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
+                .ok_or_else(|| unsupported("malformed Duration value", span))?;
+            let value = if op == BinOp::Add {
+                duration_semantics::jet_duration_kernel_add(left, right)
+            } else {
+                duration_semantics::jet_duration_kernel_sub(left, right)
+            };
+            Ok(canonical_duration(value))
+        }
+        (BinOp::Add, left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == crate::Syntax::TYPE_INSTANT
+                    && right_name == crate::Syntax::DURATION_TYPE
+            ) => Ok(canonical_instant(time_semantics::jet_time_instant_add_duration_ns(
+                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
+                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
+            ))),
+        (BinOp::Add, left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == crate::Syntax::DURATION_TYPE
+                    && right_name == crate::Syntax::TYPE_INSTANT
+            ) => Ok(canonical_instant(time_semantics::jet_time_instant_add_duration_ns(
+                canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
+                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                canonical_time_field(&left, crate::Syntax::DURATION_TYPE, "ns")
+                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
+            ))),
+        (BinOp::Sub, left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == crate::Syntax::TYPE_INSTANT
+                    && right_name == crate::Syntax::DURATION_TYPE
+            ) => Ok(canonical_instant(time_semantics::jet_time_instant_sub_duration_ns(
+                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
+                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
+            ))),
+        (BinOp::Sub, left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == crate::Syntax::TYPE_INSTANT
+                    && right_name == crate::Syntax::TYPE_INSTANT
+            ) => Ok(canonical_duration(time_semantics::jet_time_instant_difference_ns(
+                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
+                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
+            ))),
+        (op @ (BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::Compare), left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    Struct { type_name: left_name, .. },
+                    Struct { type_name: right_name, .. }
+                ) if left_name == right_name
+                    && (left_name == crate::Syntax::DURATION_TYPE
+                        || left_name == crate::Syntax::TYPE_INSTANT)
+            ) => {
+            let field = if matches!(&left, Struct { type_name, .. } if type_name == crate::Syntax::DURATION_TYPE) {
+                "ns"
+            } else {
+                "start_ns"
+            };
+            let left = canonical_time_field(&left, if field == "ns" { crate::Syntax::DURATION_TYPE } else { crate::Syntax::TYPE_INSTANT }, field)
+                .ok_or_else(|| unsupported("malformed Time value", span))?;
+            let right = canonical_time_field(&right, if field == "ns" { crate::Syntax::DURATION_TYPE } else { crate::Syntax::TYPE_INSTANT }, field)
+                .ok_or_else(|| unsupported("malformed Time value", span))?;
+            let ordering = canonical_time_cmp(left, right);
+            Ok(match op {
+                BinOp::Eq => Bool(ordering == std::cmp::Ordering::Equal),
+                BinOp::Ne => Bool(ordering != std::cmp::Ordering::Equal),
+                BinOp::Lt => Bool(ordering == std::cmp::Ordering::Less),
+                BinOp::Gt => Bool(ordering == std::cmp::Ordering::Greater),
+                BinOp::Le => Bool(ordering != std::cmp::Ordering::Greater),
+                BinOp::Ge => Bool(ordering != std::cmp::Ordering::Less),
+                BinOp::Compare => Enum {
+                    type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+                    variant: match ordering {
+                        std::cmp::Ordering::Less => "Less",
+                        std::cmp::Ordering::Equal => "Equal",
+                        std::cmp::Ordering::Greater => "Greater",
+                    }
+                    .to_string(),
+                    args: Vec::new(),
+                },
+                _ => unreachable!(),
+            })
+        }
         (BinOp::Add, Str(left), Str(right)) => Ok(Str(
             string_concat_semantics::jet_string_concat(&left, &right),
         )),
@@ -687,8 +846,7 @@ pub fn apply_mutating_with_type(
                         let millis = dfields
                             .iter()
                             .find_map(|(name, value)| match (name.as_str(), value) {
-                                ("ns", CtValue::Int(ns)) => Some(ns.div_euclid(1_000_000)),
-                                ("ms", CtValue::Int(millis)) => Some(*millis),
+                                ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
                                 _ => None,
                             })
                             .unwrap_or(0);
@@ -2072,11 +2230,8 @@ pub fn apply_method(
             // D-TIMERES1=A: Duration stores whole nanoseconds.
             let ns = fields
                 .iter()
-                .find(|(n, _)| n == "ns" || n == "ms")
-                .and_then(|(name, value)| match (name.as_str(), value) {
+                .find_map(|(name, value)| match (name.as_str(), value) {
                     ("ns", CtValue::Int(value)) => Some(*value),
-                    // Transitional: ms-era values scale into ns.
-                    ("ms", CtValue::Int(value)) => Some(value.saturating_mul(1_000_000)),
                     _ => None,
                 })
                 .unwrap_or(0);

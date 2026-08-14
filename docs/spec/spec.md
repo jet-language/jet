@@ -66,7 +66,8 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   out-of-range values fail with `RangeError`. A Duration stores a whole-nanosecond
   count. `duration.in(.Unit)?` reads a whole `Int` unit, truncating toward zero.
   `is_zero()`, `total_seconds()`, and `difference(other)` are Duration facts.
-  Compile-time duration literals are unchanged.
+  Time literals (`ns`, `us`, `ms`, `s`, `min`, `h`, `d`) resolve through the
+  in-scope canonical Time family and produce the checked Duration delta.
 - Civil time (D-TIMEDEPTH1 / D-TIME-CALENDAR1): `LocalDate` adds
   `quarter_of_year`, `days_in_month`, `is_leap_year`, and `replace(y, m, d)`.
   `DateTime` adds sub-second accessors (`millisecond` / `microsecond` /

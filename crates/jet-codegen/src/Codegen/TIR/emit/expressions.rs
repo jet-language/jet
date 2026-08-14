@@ -2524,7 +2524,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             if matches!(
                 (&lhs.ty, &rhs.ty),
                 (Type::Named(left), Type::Named(right))
-                    if left == right && cx.unit_facts.contains_key(left)
+                    if left == right
+                        && cx.unit_facts.contains_key(left)
+                        && !matches!(left.as_str(), "Duration" | "Instant")
             ) && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
             {
                 let (trait_name, method) = match op {
@@ -4050,6 +4052,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::DurationDifference => {
                     format!("{}jet_duration_difference(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::DurationSecondsValue => {
+                    format!("{}jet_duration_seconds_value(&({}))", root, recv)
                 }
                 THandleOp::PreciseMethod { type_name, method } => {
                     let prefix = if type_name == "Fraction" {
@@ -5870,11 +5875,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::SelectAfter {
             builder,
-            millis,
+            duration,
             value,
         } => {
             let b = emit_tir_expr(builder, cx);
-            let ms = emit_tir_expr(millis, cx);
+            let ms = format!("({}).as_millis()", emit_tir_expr(duration, cx));
             if let Some(value) = value {
                 let v = emit_tir_expr(value, cx);
                 format!("{b}.after_value({ms}, {v})")

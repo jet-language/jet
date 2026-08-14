@@ -734,6 +734,19 @@ fn check_bundle_opts_for_output_inner(
                             }
                         }
                     }
+                    // D-TYPE2-TIME1=A / D-UNITLIT1=A: the canonical Time
+                    // family owns the suffix literals. Register them only
+                    // after this module's Prelude injection has selected the
+                    // family, so `#NoPrelude` remains genuinely unscoped.
+                    if uf.is_canonical_time() {
+                        for member in &uf.members {
+                            if let Some(unit) =
+                                crate::AST::UnitFamilyDef::canonical_time_unit(&member.name)
+                            {
+                                st.registry.time_literals.insert(member.name.clone(), unit);
+                            }
+                        }
+                    }
                 }
                 Item::Test(t) => {
                     let Some(name) = &t.name else {
@@ -784,6 +797,7 @@ fn check_bundle_opts_for_output_inner(
                             text_heads: st.registry.text_heads.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
+                            time_literals: st.registry.time_literals.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
                             field_defaults: st.registry.field_defaults.clone(),
                         }

@@ -1997,8 +1997,7 @@ impl<'a> Interp<'a> {
                             let millis = fields
                                 .iter()
                                 .find_map(|(name, value)| match (name.as_str(), value) {
-                                    ("ns", CtValue::Int(ns)) => Some(ns.div_euclid(1_000_000)),
-                                    ("ms", CtValue::Int(millis)) => Some(*millis),
+                                    ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
                                     _ => None,
                                 })
                                 .unwrap_or(0);

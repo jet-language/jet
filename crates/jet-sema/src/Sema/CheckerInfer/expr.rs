@@ -10,8 +10,8 @@ use crate::Syntax;
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::AST::{
-    AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
-    TypedLitBody, UnOp, noelse_terminated,
+    AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, OrFallback,
+    StrPart, Type, TypedLitBody, UnOp, noelse_terminated,
 };
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
@@ -1501,13 +1501,10 @@ impl<'a> Checker<'a> {
                     Some(Type::Float)
                 }
             }
-            // D-UNITLIT1: `500ms` — resolve the suffix against an in-scope
-            // `#UnitFamily` member (PascalCased to its minted `#Numeric
-            // distinct Float` type name) and rewrite this node in place to an
-            // ordinary destination-owned conversion — sugar over the existing
-            // distinct-type path, so every downstream check (cross-unit
-            // E0127, arithmetic, `.raw()`) is the SAME machinery a
-            // hand-written `Ms(500.0)` already goes through.
+            // D-UNITLIT1 / D-TYPE2-TIME1: ordinary suffixes resolve against an
+            // in-scope `#UnitFamily` member. Canonical Time is elaborated to
+            // the checked Duration constructor; other families retain their
+            // existing nominal Float path.
             Expr::UnitLit {
                 int,
                 float,
@@ -1516,6 +1513,70 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } => {
+                if let Some(unit) = self.registry.time_literal(suffix) {
+                    let mut value = match (int, float) {
+                        (Some(value), _) => Expr::Int(*value, *span, None, None),
+                        (_, Some(value)) => Expr::Float(*value, *span, false),
+                        _ => Expr::Int(0, *span, None, None),
+                    };
+                    if unit.constructor_multiplier != 1 {
+                        let multiplier = if float.is_some() {
+                            Expr::Float(unit.constructor_multiplier as f64, *span, false)
+                        } else {
+                            Expr::Int(unit.constructor_multiplier, *span, None, None)
+                        };
+                        value = Expr::Binary(
+                            BinOp::Mul,
+                            Box::new(value),
+                            Box::new(multiplier),
+                            *span,
+                        );
+                    }
+                    let constructor = Expr::MethodCall {
+                        receiver: Box::new(Expr::Ident(
+                            Syntax::DURATION_TYPE.to_string(),
+                            *suffix_span,
+                        )),
+                        method: unit.constructor.to_string(),
+                        method_span: *suffix_span,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
+                        args: vec![CallArg {
+                            convention: AccessConvention::Read,
+                            expr: value,
+                            span: *span,
+                            flags: CallArgFlags::default(),
+                            label: None,
+                            spread: false,
+                        }],
+                        recv_type: None,
+                        resolved_ret: None,
+                        checked_widen: false,
+                    };
+                    *e = Expr::OrFallback {
+                        value: Box::new(constructor),
+                        fallback: OrFallback::Panic {
+                            name_span: *suffix_span,
+                            args: vec![CallArg {
+                                convention: AccessConvention::Read,
+                                expr: Expr::Str(
+                                    vec![StrPart::Lit(
+                                        "time literal is outside Duration's i64 range"
+                                            .to_string(),
+                                    )],
+                                    *span,
+                                ),
+                                span: *span,
+                                flags: CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                        },
+                        is_option: false,
+                        span: *span,
+                    };
+                    return self.infer(e);
+                }
                 let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
                 let is_unit_member = self.registry.is_distinct(&type_name)
                     && self.registry.distinct_is_numeric(&type_name)

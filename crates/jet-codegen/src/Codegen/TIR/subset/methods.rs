@@ -287,7 +287,7 @@ pub(crate) fn method_call_in_subset(
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
             Syntax::SELECT_AFTER_METHOD => {
-                // `select.after(ms)` or `select.after(ms, value)` — both covered.
+                // `select.after(duration)` or `select.after(duration, value)` — both covered.
                 return (args.len() == 1 || args.len() == 2)
                     && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }

@@ -148,7 +148,7 @@ fn run() {
     rejected_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
     rejected_hook.on(rejected_scope, (n: Int) => HookDecision.Continue)
     print("READY")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     ) else {
@@ -270,7 +270,7 @@ fn run() {
     close_queued.join()
     close_blocked.join()
 
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     ) else {
@@ -349,7 +349,7 @@ fn run() {
     once_scope.cancel()
 
     print("READY")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     ) else {
@@ -392,7 +392,7 @@ fn run() {
     many.on(scope, (n: Int) => {})
     loop i, 0..<300 { many.emit(i) }
     print("READY")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     ) else {
@@ -418,11 +418,11 @@ use core.time as time
 fn run() {
     scope :: event.scope()
     concurrent :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
-    concurrent.on(scope, (n: Int) => { time.sleep(1) })
+    concurrent.on(scope, (n: Int) => { time.sleep(1ms) })
     loop i, 0..<400 { concurrent.emit_async(i) }
-    time.sleep(1500)
+    time.sleep(1500ms)
     print("READY")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     ) else {

@@ -40,3 +40,9 @@ pub fn jet_std_time_sleep(millis: i64) {
     jet_scheduler_sleep_ms(want as u64);
     jet_deadline_check("time sleep");
 }
+
+/// D-TYPE2-TIME1=A: the core sleep call receives the canonical Duration
+/// carrier and only this Prelude adapter projects it to scheduler milliseconds.
+pub fn jet_std_time_sleep_duration_ns(nanos: i64) {
+    jet_std_time_sleep(nanos.saturating_div(1_000_000));
+}

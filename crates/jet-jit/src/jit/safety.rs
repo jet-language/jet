@@ -1573,17 +1573,23 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return args.len() <= 1 && args.iter().all(|a| resident_safe_expr(a, callees));
             }
             if module == "core.tasks" && matches!(method.as_str(), "after" | "interval") {
-                return !args.is_empty()
-                    && args.len() <= 2
-                    && args.iter().all(|a| {
-                        matches!(&a.ty, Type::Int) && resident_safe_expr(a, callees)
-                    });
+                let Some(duration) = args.first() else {
+                    return false;
+                };
+                let value_safe = args.get(1).map_or(true, |value| {
+                    matches!(&value.ty, Type::Int) && resident_safe_expr(value, callees)
+                });
+                return args.len() <= 2
+                    && matches!(&duration.ty, Type::Named(name) if name == "Duration")
+                    && resident_safe_expr(duration, callees)
+                    && value_safe;
             }
             if module == "core.time" && matches!(method.as_str(), "now" | "sleep") {
                 return match (method.as_str(), args.len()) {
                     ("now", 0) => true,
                     ("sleep", 1) => {
-                        matches!(&args[0].ty, Type::Int) && resident_safe_expr(&args[0], callees)
+                        matches!(&args[0].ty, Type::Named(name) if name == "Duration")
+                            && resident_safe_expr(&args[0], callees)
                     }
                     _ => false,
                 };
@@ -2243,12 +2249,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         }
         TExprKind::SelectAfter {
             builder,
-            millis,
+            duration,
             value,
         } => {
             resident_safe_expr(builder, callees)
-                && matches!(&millis.ty, Type::Int)
-                && resident_safe_expr(millis, callees)
+                && matches!(&duration.ty, Type::Named(name) if name == "Duration")
+                && resident_safe_expr(duration, callees)
                 && value.as_ref().map_or(true, |v| {
                     matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees)
                 })
@@ -4943,9 +4949,9 @@ fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool
         && recvs
             .iter()
             .all(|ch| jit_concurrency_type(&ch.ty) && resident_safe_expr(ch, callees))
-        && afters.iter().all(|(ms, value)| {
-            matches!(&ms.ty, Type::Int)
-                && resident_safe_expr(ms, callees)
+        && afters.iter().all(|(duration, value)| {
+            matches!(&duration.ty, Type::Named(name) if name == "Duration")
+                && resident_safe_expr(duration, callees)
                 && value
                     .map(|v| matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees))
                     .unwrap_or(true)
@@ -4970,10 +4976,10 @@ pub(crate) fn collect_select_arms_jit<'a>(
             }
             TExprKind::SelectAfter {
                 builder: inner,
-                millis,
+                duration,
                 value,
             } => {
-                afters.push((millis.as_ref(), value.as_deref()));
+                afters.push((duration.as_ref(), value.as_deref()));
                 cur = inner;
             }
             TExprKind::SelectRead { builder: inner, .. } => {
@@ -5418,6 +5424,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIn { .. } => args.len() <= 1,
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
+        THandleOp::DurationSecondsValue => args.is_empty(),
         THandleOp::AllocAlloc | THandleOp::AllocTryAlloc => args.len() == 1,
         THandleOp::AllocReset
         | THandleOp::ClockNow

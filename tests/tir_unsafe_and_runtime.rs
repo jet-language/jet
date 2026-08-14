@@ -786,7 +786,7 @@ fn boom() => Int {
 }
 fn deadline() => Int {
     #Context(deadline: 0) {
-        time.sleep(1)
+        time.sleep(1ms)
     }
     return 0
 }
@@ -819,7 +819,7 @@ fn run() {
             .Ok(_) -> { print("wrong deadline variant") }
         }
         cancelled :: task {
-            time.sleep(1000)
+            time.sleep(1000ms)
         }
         cancelled.cancel()
         cancelled_result :: cancelled.join()
@@ -1020,7 +1020,7 @@ fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
 use core.time as time
 
 fn slow(value: Int) => Int {
-    time.sleep(1)
+    time.sleep(1ms)
     return value
 }
 

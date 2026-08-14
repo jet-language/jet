@@ -882,6 +882,22 @@ pub(super) fn eval_handle_with_type_and_sink(
                 )],
             })
         }
+        THandleOp::DurationSecondsValue => {
+            let ns = match recv {
+                CtValue::Struct { fields, .. } => fields
+                    .iter()
+                    .find(|(n, _)| n == "ns")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            Ok(CtValue::Float(
+                duration_kernel::jet_duration_kernel_seconds_value(ns),
+            ))
+        }
         THandleOp::FileReaderReadLine => Err(unsupported("handle `FileReaderReadLine`", span)),
         THandleOp::FileWriterWriteLine => Err(unsupported("handle `FileWriterWriteLine`", span)),
         THandleOp::FileWriterFlush => Err(unsupported("handle `FileWriterFlush`", span)),

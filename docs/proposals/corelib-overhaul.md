@@ -430,7 +430,7 @@ with a count.
   wrapping_*, gcd, lcm, factorial, decimal, fraction, … *(~110)*
 - `core.random` — int, float, float_range, bool, normal, exponential,
   pick, weighted_pick, sample, shuffle, seed, rng, split, bytes
-- `core.time` — now, sleep, milliseconds/seconds/…, start, instant,
+- `core.time` — now, sleep, canonical Time literals, start, instant,
   now_utc, from_unix_ms, today, parse_*, local_time, period*, zone, utc,
   zoned*
 - `core.time.date` — new, today, parse

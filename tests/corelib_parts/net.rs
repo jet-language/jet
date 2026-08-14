@@ -403,7 +403,7 @@ fn run() {{
         }}
     }}
     _ready :: ready_rx.receive() ?? panic("ready")
-    time.sleep(50)
+    time.sleep(50ms)
     lookup.cancel()
     lookup.join() ?? panic("lookup task failed")
 }}
@@ -570,9 +570,9 @@ fn run() {
         }
     }
     _accept_ready :: accept_rx.receive() ?? panic("accept ready")
-    time.sleep(10)
+    time.sleep(10ms)
     cancelled_accept.cancel()
-    time.sleep(10)
+    time.sleep(10ms)
     release_accept :: net.tcp_connect(cancelled_address) ?? panic("release accept")
     release_accept.close() ?? panic("release close")
     cancelled_accept.join() ?? panic("cancelled accept task failed")
@@ -595,7 +595,7 @@ fn run() {
         }
     }
     _wait_ready :: wait_rx.receive() ?? panic("wait ready")
-    time.sleep(10)
+    time.sleep(10ms)
     ready_wait.cancel()
     ready_wait.join() ?? panic("ready wait task failed")
     ready_client.close() ?? panic("ready client close")
@@ -671,7 +671,7 @@ fn run() {
         }
     }
     _ready :: ready_rx.receive() ?? panic("ready")
-    time.sleep(10)
+    time.sleep(10ms)
     waiter.cancel()
     waiter.join() ?? panic("udp readiness task failed")
 
@@ -1286,7 +1286,7 @@ fn run() {
     address :: net.socket_to_string(typed_address)
     client :: task {
         stream := net.tcp_connect(address) ?? panic("connect")
-        time.sleep(100)
+        time.sleep(100ms)
         stream.close() ?? panic("close")
     }
     stream := net.tcp_accept(listener) ?? panic("accept")
@@ -1328,10 +1328,10 @@ fn run() {
     address :: net.socket_to_string(typed_address)
     server :: task {
         first := net.tcp_accept(listener) ?? return
-        time.sleep(100)
+        time.sleep(100ms)
         first.close() ?? return
         second := net.tcp_accept(listener) ?? return
-        time.sleep(100)
+        time.sleep(100ms)
         second.close() ?? return
     }
 
@@ -1393,7 +1393,7 @@ fn run() {
             if chunk.len() == 0 {
                 return
             }
-            time.sleep(15)
+            time.sleep(15ms)
         }
     }
     client := net.tcp_connect(address) ?? panic("connect")

@@ -143,9 +143,88 @@ fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
 fn jet_duration_total_seconds(d: &jet_std::Duration) -> i64 {
     jet_duration_kernel_total_seconds(d.ns)
 }
+fn jet_duration_seconds_value(d: &jet_std::Duration) -> f64 {
+    jet_duration_kernel_seconds_value(d.ns)
+}
 fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_std::Duration {
     jet_std::Duration {
         ns: jet_duration_kernel_difference(a.ns, b.ns),
+    }
+}
+
+impl std::ops::Add for jet_std::Duration {
+    type Output = jet_std::Duration;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        jet_std::Duration {
+            ns: jet_duration_kernel_add(self.ns, rhs.ns),
+        }
+    }
+}
+
+impl std::ops::Sub for jet_std::Duration {
+    type Output = jet_std::Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        jet_std::Duration {
+            ns: jet_duration_kernel_sub(self.ns, rhs.ns),
+        }
+    }
+}
+
+impl std::ops::Add<jet_std::Duration> for JetInstant {
+    type Output = JetInstant;
+
+    fn add(self, rhs: jet_std::Duration) -> Self::Output {
+        self.plus_duration_ns(rhs.ns)
+    }
+}
+
+impl std::ops::Sub<jet_std::Duration> for JetInstant {
+    type Output = JetInstant;
+
+    fn sub(self, rhs: jet_std::Duration) -> Self::Output {
+        self.minus_duration_ns(rhs.ns)
+    }
+}
+
+impl std::ops::Sub for JetInstant {
+    type Output = jet_std::Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        jet_std::Duration {
+            ns: self.difference_ns(&rhs),
+        }
+    }
+}
+
+impl std::ops::Add<JetInstant> for jet_std::Duration {
+    type Output = JetInstant;
+
+    fn add(self, rhs: JetInstant) -> Self::Output {
+        rhs.plus_duration_ns(self.ns)
+    }
+}
+
+impl __jet_Comparable for jet_std::Duration {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        if self.ns < rhs.ns {
+            __jet_Ordering::__jet_Less
+        } else if self.ns > rhs.ns {
+            __jet_Ordering::__jet_Greater
+        } else {
+            __jet_Ordering::__jet_Equal
+        }
+    }
+}
+
+impl __jet_Comparable for JetInstant {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        match self.compare_to(rhs) {
+            value if value < 0 => __jet_Ordering::__jet_Less,
+            0 => __jet_Ordering::__jet_Equal,
+            _ => __jet_Ordering::__jet_Greater,
+        }
     }
 }
 

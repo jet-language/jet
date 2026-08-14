@@ -1943,14 +1943,15 @@ fn emit_tir_stmt(
                 }
                 // `.timeout(dur)` — v1 post-hoc: run to completion, then compare
                 // elapsed against the budget. Does not interrupt a hang.
-                ScopeMemberKind::Timeout(nanos) => {
+                ScopeMemberKind::Timeout(duration) => {
                     out.push_str(&format!("{}{{\n", pad));
                     out.push_str(&format!("{}let __start = std::time::Instant::now();\n", ip));
                     emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
                     out.push_str(&format!("{}let __elapsed = __start.elapsed();\n", ip));
                     out.push_str(&format!(
-                        "{}let __budget = std::time::Duration::from_nanos({});\n",
-                        ip, nanos
+                        "{}let __budget = std::time::Duration::from_nanos(({}).ns.max(0) as u64);\n",
+                        ip,
+                        emit_tir_expr(duration, cx)
                     ));
                     out.push_str(&format!("{}if __elapsed > __budget {{\n", ip));
                     out.push_str(&format!(

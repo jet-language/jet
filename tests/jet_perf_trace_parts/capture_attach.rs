@@ -37,7 +37,7 @@ fn run() {
     x :: arena.alloc(42)
     probe_work()
     print("READY")
-    time.sleep(30000)
+    time.sleep(30000ms)
 }
 "#,
     )
