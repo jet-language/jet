@@ -29,6 +29,7 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
     let outcome = std::fs::read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap();
     let fault_injection =
         std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
+    let sentry = std::fs::read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
     let source_text = format!(
         r#"#![allow(dead_code)]
@@ -38,7 +39,12 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
 mod jet_uninit_semantics {{
 {uninit}
 }}
+mod jet_mem {{
+    mod jet_sentry {{
+{sentry}
+    }}
 {prelude}
+}}
 {body}
 "#
     );
