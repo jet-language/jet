@@ -842,10 +842,9 @@ fn related_information_json(
             continue;
         };
         related.push(format!(
-            r#"{{"location":{{"uri":"{}","range":{}}},"message":"[{}] {}"}}"#,
+            r#"{{"location":{{"uri":"{}","range":{}}},"message":"{}"}}"#,
             json_escape(uri),
             range_json(byte_span_to_range(src, span)),
-            json_escape(&cause.code),
             json_escape(&cause.what),
         ));
     }
@@ -3029,7 +3028,7 @@ mod project_part_tests {
             "{json}"
         );
         assert!(
-            json.contains(r#""message":"[E0956] root construct failed""#),
+            json.contains(r#""message":"root construct failed""#),
             "{json}"
         );
     }
