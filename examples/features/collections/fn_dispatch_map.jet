@@ -2,11 +2,11 @@
 fn lower(s: String) => String :: ~s
 fn quote(s: String) => String :: "\"{s}\""
 
-fn run() {
+fn run() ? {
     commands :: [String: fn(String) => String].{ "lower": lower, "quote": quote }
-    f :: commands.get("quote") ?? panic("missing quote handler")
+    f :: commands.get("quote")?
     q :: f("hi")
-    g :: commands.get("lower") ?? panic("missing lower handler")
+    g :: commands.get("lower")?
     l :: g("HI")
     print("{q} {l}")
 }
