@@ -14587,12 +14587,17 @@ impl LowerCtx<'_, '_> {
                             )
                         }
                         "abs" if args.len() == 1 => {
-                            // Inline f64 abs — no separate host (Prelude uses libm).
-                            let x = self.lower_expr(&args[0])?;
-                            let neg = self.b.ins().fneg(x);
-                            let zero = self.b.ins().f64const(0.0);
-                            let neg_mask = self.b.ins().fcmp(FloatCC::LessThan, x, zero);
-                            return Ok(self.b.ins().select(neg_mask, neg, x));
+                            let host_id = match &args[0].ty {
+                                Type::Int => self.host.math_extra.abs_i64,
+                                Type::Float => self.host.math_extra.abs_f64,
+                                Type::Float32 => self.host.math_extra.abs_f32,
+                                other => {
+                                    return Err(format!(
+                                        "jit core.math.abs unsupported type: {other:?}"
+                                    ))
+                                }
+                            };
+                            (host_id, vec![self.lower_expr(&args[0])?])
                         }
                         "max" if args.len() == 2 => {
                             let host_id = match &args[0].ty {

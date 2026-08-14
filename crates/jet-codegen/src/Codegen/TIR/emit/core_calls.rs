@@ -89,12 +89,15 @@ fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
 
 fn core_math_scalar_helper(method: &str, ty: &Type) -> Option<&'static str> {
     match (method, ty) {
+        ("abs", Type::Int) => Some("jet_std_math_abs_i64"),
         ("min", Type::Int) => Some("jet_std_math_min_i64"),
         ("max", Type::Int) => Some("jet_std_math_max_i64"),
         ("clamp", Type::Int) => Some("jet_std_math_clamp_i64"),
+        ("abs", Type::Float) => Some("jet_std_math_abs_f64"),
         ("min", Type::Float) => Some("jet_std_math_min_f64"),
         ("max", Type::Float) => Some("jet_std_math_max_f64"),
         ("clamp", Type::Float) => Some("jet_std_math_clamp_f64"),
+        ("abs", Type::Float32) => Some("jet_std_math_abs_f32"),
         ("min", Type::Float32) => Some("jet_std_math_min_f32"),
         ("max", Type::Float32) => Some("jet_std_math_max_f32"),
         ("clamp", Type::Float32) => Some("jet_std_math_clamp_f32"),
@@ -2885,7 +2888,16 @@ pub(crate) fn emit_tir_core_call(
         // lowering). Numeric scalar forms call the shared Prelude helper for
         // their resolved type; other comparable values retain the native method.
         // Args are emitted PLAINLY.
-        ("core.math", "abs") => format!("({}).abs()", arg(0)),
+        ("core.math", "abs") => {
+            if let Some(name) = args
+                .first()
+                .and_then(|arg| core_math_scalar_helper("abs", &arg.ty))
+            {
+                format!("{}({})", helper(name), arg(0))
+            } else {
+                format!("({}).abs()", arg(0))
+            }
+        }
         ("core.math", "min" | "max" | "clamp") => {
             if let Some(name) = args
                 .first()

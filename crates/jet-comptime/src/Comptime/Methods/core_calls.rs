@@ -433,6 +433,13 @@ fn core_math_float_min(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFl
     }
 }
 
+fn core_math_float_abs(value: CtFloat) -> CtFloat {
+    match value {
+        CtFloat::F32(value) => CtFloat::F32(math_lib_pure::jet_std_math_abs_f32(value)),
+        CtFloat::F64(value) => CtFloat::F64(math_lib_pure::jet_std_math_abs_f64(value)),
+    }
+}
+
 fn core_math_float_max(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
     match (left, right) {
         (CtFloat::F32(left), CtFloat::F32(right)) => {
@@ -1128,8 +1135,8 @@ pub fn apply_core_call_with_type(
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
         ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
         ("core.math", "abs") => match one(0)? {
-            CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
-            CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
+            CtValue::Int(n) => Ok(CtValue::Int(math_lib_pure::jet_std_math_abs_i64(*n))),
+            CtValue::Float(f) => Ok(CtValue::Float(core_math_float_abs(*f))),
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
         ("core.math", "pow") => {

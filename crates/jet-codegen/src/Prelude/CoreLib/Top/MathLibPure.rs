@@ -1,6 +1,18 @@
 // Shared core.math helpers (I9). Included by AOT prelude, JIT math_rt, and comptime ambient.
 // Keep std-only; no jet_std / host types.
 
+pub fn jet_std_math_abs_i64(value: i64) -> i64 {
+    value.abs()
+}
+
+pub fn jet_std_math_abs_f64(value: f64) -> f64 {
+    value.abs()
+}
+
+pub fn jet_std_math_abs_f32(value: f32) -> f32 {
+    value.abs()
+}
+
 pub fn jet_std_math_min_i64(left: i64, right: i64) -> i64 {
     left.min(right)
 }

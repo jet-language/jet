@@ -12,6 +12,16 @@ pub(crate) mod math_rt {
     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));
 }
 
+extern "C" fn jet_jit_math_abs_i64(value: i64) -> i64 {
+    math_rt::jet_std_math_abs_i64(value)
+}
+extern "C" fn jet_jit_math_abs_f64(value: f64) -> f64 {
+    math_rt::jet_std_math_abs_f64(value)
+}
+extern "C" fn jet_jit_math_abs_f32(value: f64) -> f64 {
+    math_rt::jet_std_math_abs_f32(value as f32) as f64
+}
+
 fn opt_i64(v: Option<i64>) -> i64 {
     match v {
         Some(n) => n.wrapping_add(1),
@@ -318,6 +328,9 @@ host_fns! {
 
 
     }
+    abs_i64: "jet_jit_math_abs_i64" => jet_jit_math_abs_i64: i64_i64;
+    abs_f64: "jet_jit_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
+    abs_f32: "jet_jit_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
     erf: "jet_jit_math_erf" => jet_jit_math_erf: f64_f64;
     erfc: "jet_jit_math_erfc" => jet_jit_math_erfc: f64_f64;
     gamma: "jet_jit_math_gamma" => jet_jit_math_gamma: f64_f64;
@@ -384,7 +397,6 @@ host_fns! {
     div_mod: "jet_jit_math_div_mod" => jet_jit_math_div_mod: i64_i64_i64;
     div_rem: "jet_jit_math_div_rem" => jet_jit_math_div_rem: i64_i64_i64;
 }
-
 
 
 
