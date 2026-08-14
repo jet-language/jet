@@ -1514,13 +1514,14 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 if let Some(unit) = self.registry.time_literal(suffix) {
+                    let is_float = float.is_some();
                     let mut value = match (int, float) {
                         (Some(value), _) => Expr::Int(*value, *span, None, None),
                         (_, Some(value)) => Expr::Float(*value, *span, false),
                         _ => Expr::Int(0, *span, None, None),
                     };
                     if unit.constructor_multiplier != 1 {
-                        let multiplier = if float.is_some() {
+                        let multiplier = if is_float {
                             Expr::Float(unit.constructor_multiplier as f64, *span, false)
                         } else {
                             Expr::Int(unit.constructor_multiplier, *span, None, None)

@@ -836,7 +836,7 @@ fn builtin_type_registry() -> TypeRegistry {
     let time_package = PathBuf::from("core.units");
     let zero_ratio = crate::AST::UnitRatio::zero();
     let one_ratio = crate::AST::UnitRatio::integer(1);
-    let mut unit_types = HashSet::from([
+    let unit_types = HashSet::from([
         crate::Syntax::DURATION_TYPE.to_string(),
         crate::Syntax::TYPE_INSTANT.to_string(),
     ]);
