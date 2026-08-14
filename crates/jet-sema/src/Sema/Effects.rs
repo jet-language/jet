@@ -492,8 +492,6 @@ pub fn check_autodiff_purity(
                                 | "solve"
                                 | "fft"
                                 | "serialize"
-                                | "mse_loss"
-                                | "sgd_step"
                                 | "to_sparse"
                                 | "sparse_mv"
                                 | "matmul_f32_tile"

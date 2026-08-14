@@ -5,7 +5,7 @@
 //! AOT and the interpreter (I9).
 
 use crate::JitRuntime;
-use crate::Marshal::result_ok;
+use crate::Marshal::{result_err_msg, result_ok};
 use super::Concurrency;
 
 #[allow(dead_code, unused_imports)]
@@ -33,6 +33,98 @@ mod semantics {
 
     pub(super) fn from_list(values: &[f64]) -> Result<Tensor, String> {
         jet_compute_from_list(&values.to_vec()).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn matrix(rows: i64, cols: i64, fill: f64) -> Result<Tensor, String> {
+        jet_compute_matrix(rows, cols, fill).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn zeros(shape: &[i64]) -> Result<Tensor, String> {
+        jet_compute_zeros(&shape.to_vec()).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn ones(shape: &[i64]) -> Result<Tensor, String> {
+        jet_compute_ones(&shape.to_vec()).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn full(shape: &[i64], value: f64) -> Result<Tensor, String> {
+        jet_compute_full(&shape.to_vec(), value).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn eye(size: i64) -> Result<Tensor, String> {
+        jet_compute_eye(size).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn add(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_add(left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn mul(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_mul(left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn sub(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_binary("sub", left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn matmul(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_matmul(left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn sum_axis(tensor: &Tensor, axis: i64) -> Result<Tensor, String> {
+        jet_compute_sum_axis(tensor, axis).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn mse_loss(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_mse_loss(left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn sgd_step(param: &Tensor, grad: &Tensor, learning_rate: f64) -> Result<Tensor, String> {
+        jet_compute_sgd_step(param, grad, learning_rate).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn serialize(tensor: &Tensor) -> Result<String, String> {
+        jet_compute_serialize(tensor).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn deserialize(payload: &str) -> Result<Tensor, String> {
+        jet_compute_deserialize(&payload.to_string()).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn matmul_f32_tile(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+        jet_compute_matmul_f32_tile(left, right).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn set(tensor: &mut Tensor, indices: &[i64], value: f64) -> Result<(), String> {
+        jet_compute_set(tensor, indices, value).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn get(tensor: &Tensor, indices: &[i64]) -> Result<f64, String> {
+        jet_compute_get(tensor, indices).map_err(|error| error.jet_show())
+    }
+
+    pub(super) fn tensor_shape(tensor: &Tensor) -> Vec<i64> {
+        jet_compute_tensor_shape(tensor)
+    }
+
+    pub(super) fn tensor_rank(tensor: &Tensor) -> i64 {
+        jet_compute_tensor_rank(tensor)
+    }
+
+    pub(super) fn tensor_numel(tensor: &Tensor) -> i64 {
+        jet_compute_tensor_numel(tensor)
+    }
+
+    pub(super) fn tensor_device(tensor: &Tensor) -> String {
+        jet_compute_tensor_device(tensor)
+    }
+
+    pub(super) fn tensor_placement(tensor: &Tensor) -> String {
+        jet_compute_tensor_placement(tensor)
+    }
+
+    pub(super) fn profile_show() -> String {
+        jet_compute_profile_show()
     }
 
     pub(super) fn copy(tensor: &Tensor) -> Tensor {
@@ -172,6 +264,24 @@ fn alloc_float_list(runtime: &mut JitRuntime, values: &[f64]) -> i64 {
     list
 }
 
+fn alloc_int_list(runtime: &mut JitRuntime, values: &[i64]) -> i64 {
+    let list = runtime.heap.alloc_empty_list();
+    for &value in values {
+        if runtime.heap.list_push_int(list, value).is_none() {
+            runtime.set_trap("JIT compute integer-list allocation failed");
+            return 0;
+        }
+    }
+    list
+}
+
+fn read_int_list(runtime: &JitRuntime, handle: i64) -> Option<Vec<i64>> {
+    let len = runtime.heap.list_len(handle)?;
+    (0..len)
+        .map(|index| runtime.heap.list_get_int(handle, index))
+        .collect()
+}
+
 fn sync_float_list(runtime: &mut JitRuntime, list: i64, values: &[f64]) -> bool {
     for (index, &value) in values.iter().enumerate() {
         let Ok(index) = i64::try_from(index) else {
@@ -237,6 +347,278 @@ extern "C" fn jet_jit_compute_from_list(values: i64) -> i64 {
             Err(message) => trap(runtime, &message),
         }
     })
+}
+
+extern "C" fn jet_jit_compute_matrix(rows: i64, cols: i64, fill: f64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| match semantics::matrix(rows, cols, fill) {
+        Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+        Err(message) => result_err_msg(&message),
+    })
+}
+
+extern "C" fn jet_jit_compute_zeros(shape: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(shape) = read_int_list(runtime, shape) else {
+            return result_err_msg("core.compute.zeros expects an integer shape list");
+        };
+        match semantics::zeros(&shape) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_ones(shape: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(shape) = read_int_list(runtime, shape) else {
+            return result_err_msg("core.compute.ones expects an integer shape list");
+        };
+        match semantics::ones(&shape) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_full(shape: i64, value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(shape) = read_int_list(runtime, shape) else {
+            return result_err_msg("core.compute.full expects an integer shape list");
+        };
+        match semantics::full(&shape, value) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_eye(size: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| match semantics::eye(size) {
+        Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+        Err(message) => result_err_msg(&message),
+    })
+}
+
+fn clone_tensor_pair(runtime: &JitRuntime, left: i64, right: i64) -> Option<(semantics::Tensor, semantics::Tensor)> {
+    Some((slot(runtime, left)?.tensor.clone(), slot(runtime, right)?.tensor.clone()))
+}
+
+extern "C" fn jet_jit_compute_add(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg("core.compute.add received an invalid Tensor handle");
+        };
+        match semantics::add(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_mul(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg("core.compute.mul received an invalid Tensor handle");
+        };
+        match semantics::mul(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_sub(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg("core.compute.sub received an invalid Tensor handle");
+        };
+        match semantics::sub(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_matmul(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg("core.compute.matmul received an invalid Tensor handle");
+        };
+        match semantics::matmul(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_sum_axis(tensor: i64, axis: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return result_err_msg("core.compute.sum_axis received an invalid Tensor handle");
+        };
+        match semantics::sum_axis(&tensor, axis) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_mse_loss(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg("core.compute.mse_loss received an invalid Tensor handle");
+        };
+        match semantics::mse_loss(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_sgd_step(param: i64, grad: i64, learning_rate: f64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((param, grad)) = clone_tensor_pair(runtime, param, grad) else {
+            return result_err_msg("core.compute.sgd_step received an invalid Tensor handle");
+        };
+        match semantics::sgd_step(&param, &grad, learning_rate) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_serialize(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return result_err_msg("core.compute.serialize received an invalid Tensor handle");
+        };
+        match semantics::serialize(&tensor) {
+            Ok(payload) => {
+                let handle = runtime.heap.alloc_string(payload);
+                result_ok(handle as u64)
+            }
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_deserialize(payload: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(payload) = runtime.heap.clone_string(payload) else {
+            return result_err_msg("core.compute.deserialize expects a string payload");
+        };
+        match semantics::deserialize(&payload) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_matmul_f32_tile(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+            return result_err_msg(
+                "core.compute.matmul_f32_tile received an invalid Tensor handle",
+            );
+        };
+        match semantics::matmul_f32_tile(&left, &right) {
+            Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_get(tensor: i64, indices: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(indices) = read_int_list(runtime, indices) else {
+            return result_err_msg("core.compute.get expects an integer index list");
+        };
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return result_err_msg("core.compute.get received an invalid Tensor handle");
+        };
+        match semantics::get(&tensor, &indices) {
+            Ok(value) => result_ok(value.to_bits()),
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_set(tensor: i64, indices: i64, value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(indices) = read_int_list(runtime, indices) else {
+            return result_err_msg("core.compute.set expects an integer index list");
+        };
+        let result = {
+            let Some(slot) = slot_mut(runtime, tensor) else {
+                return result_err_msg("core.compute.set received an invalid Tensor handle");
+            };
+            semantics::set(&mut slot.tensor, &indices, value)
+        };
+        match result {
+            Ok(()) => {
+                let values = match slot(runtime, tensor) {
+                    Some(slot) => match semantics::tensor_values(&slot.tensor) {
+                        Ok(values) => values,
+                        Err(message) => return result_err_msg(&message),
+                    },
+                    None => return result_err_msg("core.compute.set received an invalid Tensor handle"),
+                };
+                let Some(list) = slot(runtime, tensor).map(|slot| slot.list) else {
+                    return result_err_msg("core.compute.set received an invalid Tensor handle");
+                };
+                if !sync_float_list(runtime, list, &values) {
+                    return 0;
+                }
+                result_ok(0)
+            }
+            Err(message) => result_err_msg(&message),
+        }
+    })
+}
+
+extern "C" fn jet_jit_compute_shape(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return trap(runtime, "core.compute.shape received an invalid Tensor handle");
+        };
+        alloc_int_list(runtime, &semantics::tensor_shape(&tensor))
+    })
+}
+
+extern "C" fn jet_jit_compute_rank(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
+        Some(slot) => semantics::tensor_rank(&slot.tensor),
+        None => trap(runtime, "core.compute.rank received an invalid Tensor handle"),
+    })
+}
+
+extern "C" fn jet_jit_compute_numel(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
+        Some(slot) => semantics::tensor_numel(&slot.tensor),
+        None => trap(runtime, "core.compute.numel received an invalid Tensor handle"),
+    })
+}
+
+extern "C" fn jet_jit_compute_device(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return trap(runtime, "core.compute.device received an invalid Tensor handle");
+        };
+        runtime.heap.alloc_string(semantics::tensor_device(&tensor))
+    })
+}
+
+extern "C" fn jet_jit_compute_placement(tensor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+            return trap(runtime, "core.compute.placement received an invalid Tensor handle");
+        };
+        runtime.heap.alloc_string(semantics::tensor_placement(&tensor))
+    })
+}
+
+extern "C" fn jet_jit_compute_profile_show() -> i64 {
+    Concurrency::with_runtime_mut(|runtime| runtime.heap.alloc_string(semantics::profile_show()))
 }
 
 extern "C" fn jet_jit_compute_copy(tensor: i64) -> i64 {
@@ -467,6 +849,63 @@ host_fns! {
         sig_one.returns.push(cranelift_codegen::ir::AbiParam::new(
             cranelift_codegen::ir::types::I64,
         ));
+        let mut sig_zero = cranelift_codegen::ir::Signature::new(cc);
+        sig_zero.returns.push(cranelift_codegen::ir::AbiParam::new(
+            cranelift_codegen::ir::types::I64,
+        ));
+        let mut sig_two = cranelift_codegen::ir::Signature::new(cc);
+        for _ in 0..2 {
+            sig_two
+                .params
+                .push(cranelift_codegen::ir::AbiParam::new(
+                    cranelift_codegen::ir::types::I64,
+                ));
+        }
+        sig_two.returns.push(cranelift_codegen::ir::AbiParam::new(
+            cranelift_codegen::ir::types::I64,
+        ));
+        let mut sig_three_f64 = cranelift_codegen::ir::Signature::new(cc);
+        sig_three_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
+        sig_three_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
+        sig_three_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::F64,
+            ));
+        sig_three_f64
+            .returns
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
+        let mut sig_two_f64 = cranelift_codegen::ir::Signature::new(cc);
+        sig_two_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
+        sig_two_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
+        sig_two_f64
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::F64,
+            ));
+        sig_two_f64
+            .returns
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
         let mut sig_window = cranelift_codegen::ir::Signature::new(cc);
         for ty in [
             cranelift_codegen::ir::types::I64,
@@ -485,6 +924,30 @@ host_fns! {
             ));
     }
     from_list: "jet_compute_from_list" => jet_jit_compute_from_list: sig_one;
+    matrix: "jet_compute_matrix" => jet_jit_compute_matrix: sig_three_f64;
+    zeros: "jet_compute_zeros" => jet_jit_compute_zeros: sig_one;
+    ones: "jet_compute_ones" => jet_jit_compute_ones: sig_one;
+    full: "jet_compute_full" => jet_jit_compute_full: sig_two_f64;
+    eye: "jet_compute_eye" => jet_jit_compute_eye: sig_one;
+    add: "jet_compute_add" => jet_jit_compute_add: sig_two;
+    mul: "jet_compute_mul" => jet_jit_compute_mul: sig_two;
+    sub: "jet_compute_sub" => jet_jit_compute_sub: sig_two;
+    matmul: "jet_compute_matmul" => jet_jit_compute_matmul: sig_two;
+    sum_axis: "jet_compute_sum_axis" => jet_jit_compute_sum_axis: sig_two;
+    mse_loss: "jet_compute_mse_loss" => jet_jit_compute_mse_loss: sig_two;
+    sgd_step: "jet_compute_sgd_step" => jet_jit_compute_sgd_step: sig_three_f64;
+    serialize: "jet_compute_serialize" => jet_jit_compute_serialize: sig_one;
+    deserialize: "jet_compute_deserialize" => jet_jit_compute_deserialize: sig_one;
+    matmul_f32_tile: "jet_compute_matmul_f32_tile" => jet_jit_compute_matmul_f32_tile: sig_two;
+    get: "jet_compute_get" => jet_jit_compute_get: sig_two;
+    set: "jet_compute_set" => jet_jit_compute_set: sig_two_f64;
+    shape: "jet_compute_tensor_shape" => jet_jit_compute_shape: sig_one;
+    rank: "jet_compute_tensor_rank" => jet_jit_compute_rank: sig_one;
+    numel: "jet_compute_tensor_numel" => jet_jit_compute_numel: sig_one;
+    device: "jet_compute_tensor_device" => jet_jit_compute_device: sig_one;
+    placement: "jet_compute_tensor_placement" => jet_jit_compute_placement: sig_one;
+    profile_f32_strict: "jet_compute_profile_f32_strict" => jet_jit_compute_profile_show: sig_zero;
+    profile_show: "jet_compute_profile_show" => jet_jit_compute_profile_show: sig_zero;
     copy: "jet_compute_copy" => jet_jit_compute_copy: sig_one;
     clone: "jet_compute_clone" => jet_jit_compute_clone: sig_one;
     drop_tensor: "jet_jit_compute_drop_tensor" => jet_jit_compute_drop_tensor: sig_one;

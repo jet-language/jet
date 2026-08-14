@@ -1146,7 +1146,10 @@ pub fn core_fixed_sig(
                 (read, Type::Named("Tensor".to_string())),
                 (read, Type::Named("Tensor".to_string())),
             ],
-            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Named("Tensor".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "sgd_step") => Some((
             vec![

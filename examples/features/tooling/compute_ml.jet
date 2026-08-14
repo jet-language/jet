@@ -7,10 +7,7 @@ fn predict(weight: Tensor, input: Tensor) => Tensor {
 
 fn training_loss(weight: Tensor, input: Tensor, target: Tensor) => Tensor {
     prediction :: predict(weight, input)
-    error :: compute.sub(prediction, target) ?? panic("error")
-    squared :: compute.mul(error, error) ?? panic("square")
-    column_loss :: compute.sum_axis(squared, 0) ?? panic("column_loss")
-    return compute.sum_axis(column_loss, 0) ?? panic("loss")
+    return compute.mse_loss(prediction, target) ?? panic("loss")
 }
 
 fn run() {
@@ -21,14 +18,14 @@ fn run() {
     before :: predict(weight, input)
     print("before:{compute.to_list(before)}")
     before_loss :: compute.mse_loss(before, target) ?? panic("before_loss")
-    print("loss:{before_loss}")
+    print("loss:{compute.to_list(before_loss)}")
 
     gradients :: compute.gradient(training_loss, ~weight, ~input, ~target, wrt: [weight])
     next :: compute.sgd_step(weight, gradients.weight, 0.5) ?? panic("sgd")
     after :: predict(next, input)
     print("after:{compute.to_list(after)}")
     after_loss :: compute.mse_loss(after, target) ?? panic("after_loss")
-    print("trained_loss:{after_loss}")
+    print("trained_loss:{compute.to_list(after_loss)}")
 
     wire :: compute.serialize(next) ?? panic("serialize")
     print("wire:{wire}")

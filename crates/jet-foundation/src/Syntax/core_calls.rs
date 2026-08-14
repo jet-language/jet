@@ -533,6 +533,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.compute", "ones", "jet_compute_ones", true, &[true]),
     CoreCallRecord::new("core.compute", "full", "jet_compute_full", true, &[true, false]),
     CoreCallRecord::new("core.compute", "from_list", "jet_compute_from_list", true, &[true]),
+    CoreCallRecord::new("core.compute", "set", "jet_compute_set", true, &[true, true, false])
+        .without_direct_aot(),
     CoreCallRecord::new("core.compute", "matrix", "jet_compute_matrix", true, &[false, false, false]),
     CoreCallRecord::new("core.compute", "vec", "jet_compute_vec", true, &[false, false]),
     CoreCallRecord::new("core.compute", "add", "jet_compute_add", true, &[true, true]),

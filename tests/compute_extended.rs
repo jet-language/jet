@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, run_default_multi};
+use tir_support::{assert_tiers_agree, build_and_run, run_default_multi};
 
 fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
     let (aot_code, aot_stdout) = build_and_run(name, source);
@@ -42,12 +42,12 @@ fn autodiff_sparse_simd_and_streams_use_real_paths() {
 
 #[test]
 fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
-    assert_aot_and_default_parity(
+    assert_tiers_agree(
         "compute_ml_targeted",
         include_str!("../examples/features/tooling/compute_ml.jet"),
-        &["before:", "loss:", "after:", "trained_loss:", "wire:shape=2,2;data="],
+        "before:[0.0, 0.0, 0.0, 0.0]\nloss:[1.0]\nafter:[0.25, 0.25, 0.25, 0.25]\ntrained_loss:[0.5625]\nwire:shape=2,2;data=0.25,0.25,0.25,0.25;profile=F64Strict+Reproducible;checksum=8551306b599382c8\nround:[0.25, 0.25, 0.25, 0.25]\n",
     );
-    assert_aot_and_default_parity(
+    assert_tiers_agree(
         "compute_ml_f32_wire",
         r#"
 use core.compute as compute
@@ -62,7 +62,7 @@ fn run() {
     print("round:{compute.to_list(round)}")
 }
 "#,
-        &["profile=F32Strict+Reproducible", "round:[6.0]"],
+        "wire:shape=1,1;data=6.0;profile=F32Strict+Reproducible;checksum=4593129c0b16d781\nround:[6.0]\n",
     );
     assert_aot_and_default_parity(
         "compute_device_targeted",
@@ -82,6 +82,53 @@ fn safe_kernel_boundary_and_f32_profile_are_explicit() {
         "compute_simd_targeted",
         include_str!("../examples/features/tooling/compute_simd.jet"),
         &["profile=F32Strict+Reproducible", "tile:[19.0, 22.0, 43.0, 50.0]"],
+    );
+}
+
+#[test]
+fn f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices() {
+    let source = r#"
+use core.compute as compute
+
+fn run() {
+    left :: compute.full([3, 13], 1.0) ?? panic("left")
+    right :: compute.full([13, 7], 2.0) ?? panic("right")
+    scalar :: compute.matmul(left, right) ?? panic("scalar")
+    tiled :: compute.matmul_f32_tile(left, right) ?? panic("tiled")
+    print("scalar:{compute.to_list(scalar)}")
+    print("tiled:{compute.to_list(tiled)}")
+
+    wrong :: compute.full([14, 7], 2.0) ?? panic("wrong")
+    bad_shape :: compute.matmul_f32_tile(left, wrong)
+    if bad_shape == {
+        .Ok(_) -> { print("bad_shape:accepted") }
+        .Err(_) -> { print("bad_shape:rejected") }
+    }
+
+    wide :: compute.full([1, 1], 1e40) ?? panic("wide")
+    bad_f32 :: compute.matmul_f32_tile(wide, wide)
+    if bad_f32 == {
+        .Ok(_) -> { print("bad_f32:accepted") }
+        .Err(_) -> { print("bad_f32:rejected") }
+    }
+
+    overflow :: compute.matrix(9223372036854775807, 2, 0.0)
+    if overflow == {
+        .Ok(_) -> { print("overflow:accepted") }
+        .Err(_) -> { print("overflow:rejected") }
+    }
+}
+"#;
+    assert_tiers_agree(
+        "compute_f32_tile_hostile",
+        source,
+        concat!(
+            "scalar:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\n",
+            "tiled:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\n",
+            "bad_shape:rejected\n",
+            "bad_f32:rejected\n",
+            "overflow:rejected\n",
+        ),
     );
 }
 

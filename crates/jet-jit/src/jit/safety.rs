@@ -42,6 +42,80 @@ fn resident_safe_compute_call(
         ("from_list", [values]) if jit_list_float_type(&values.ty) => {
             resident_safe_expr(values, callees)
         }
+        ("matrix", [rows, cols, fill])
+            if intish_ty(&rows.ty)
+                && intish_ty(&cols.ty)
+                && matches!(erase_runtime_qualifiers(&fill.ty), Type::Float | Type::Float32) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("zeros" | "ones", [shape]) if jit_list_int_type(&shape.ty) => {
+            resident_safe_expr(shape, callees)
+        }
+        ("full", [shape, value])
+            if jit_list_int_type(&shape.ty)
+                && matches!(erase_runtime_qualifiers(&value.ty), Type::Float | Type::Float32) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("eye", [size]) if intish_ty(&size.ty) => resident_safe_expr(size, callees),
+        ("add" | "mul" | "sub" | "matmul", [left, right])
+            if left.ty.is_compute_tensor_family() && right.ty.is_compute_tensor_family() =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("sum_axis", [tensor, axis])
+            if tensor.ty.is_compute_tensor_family() && intish_ty(&axis.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("mse_loss", [left, right])
+            if left.ty.is_compute_tensor_family() && right.ty.is_compute_tensor_family() =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("sgd_step", [param, grad, learning_rate])
+            if param.ty.is_compute_tensor_family()
+                && grad.ty.is_compute_tensor_family()
+                && matches!(
+                    erase_runtime_qualifiers(&learning_rate.ty),
+                    Type::Float | Type::Float32
+                ) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("serialize", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        ("deserialize", [payload]) if matches!(erase_runtime_qualifiers(&payload.ty), Type::String) => {
+            resident_safe_expr(payload, callees)
+        }
+        ("matmul_f32_tile", [left, right])
+            if left.ty.is_compute_tensor_family() && right.ty.is_compute_tensor_family() =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("get", [tensor, indices])
+            if tensor.ty.is_compute_tensor_family() && jit_list_int_type(&indices.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("set", [tensor, indices, value])
+            if tensor.ty.is_compute_tensor_family()
+                && jit_list_int_type(&indices.ty)
+                && matches!(erase_runtime_qualifiers(&value.ty), Type::Float | Type::Float32) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("shape", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        ("rank" | "numel" | "device" | "placement", [tensor])
+            if tensor.ty.is_compute_tensor_family() =>
+        {
+            resident_safe_expr(tensor, callees)
+        }
+        ("profile_f32_strict" | "profile_show", []) => true,
         ("to_list", [tensor]) if tensor.ty.is_compute_tensor_family() => {
             resident_safe_expr(tensor, callees)
         }

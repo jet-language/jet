@@ -3524,7 +3524,7 @@ fn run() {
 | `eye` / `det` / `inv` / `solve` / `fft` | dense linalg + DFT |
 | `to_sparse` / `sparse_mv` / `sparse_nnz` | CSR sparse view over dense |
 | `gradient` / `value_and_gradient` / `jvp` / `vjp` | reverse default + composable JVP/VJP |
-| `mse_loss` / `sgd_step` | checked CPU-oracle loss and precision-preserving SGD |
+| `mse_loss` / `sgd_step` | scalar Tensor loss and precision-preserving differentiable SGD |
 | `serialize` / `deserialize` | checksummed Tensor model wire with profile receipt |
 | `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
 | `stream_new` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
@@ -3548,9 +3548,14 @@ storage-length mismatches, and checksum failures before constructing a Tensor.
 The retired two-field `shape=…;data=…` form is not accepted; there is no
 compatibility reader.
 
-`mse_loss` requires matching non-empty shape, device, and precision profile;
-`sgd_step` requires matching parameter/gradient metadata and a non-negative
-finite learning rate.
+`mse_loss` returns a scalar Tensor with shape `[1]`. It requires matching
+non-empty shape, device, and precision profile, and records one canonical
+autodiff rule for traced predictions and targets. `sgd_step` accepts traced
+parameters and gradients, records its affine derivative, and requires matching
+metadata plus a non-negative finite learning rate.
+`matmul_f32_tile` records the runtime CPU SIMD dispatch, vector width, and
+scalar tail in its placement receipt; its lane products use f32 arithmetic and
+an ordered CPU-oracle reduction.
 The wire stores logical view values and deserializes them into contiguous
 storage with the recorded shape and profile.
 

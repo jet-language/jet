@@ -1556,7 +1556,7 @@ pub fn apply(
             &ct_to_tensor(one(0)?, span)?,
             &ct_to_tensor(one(1)?, span)?,
         ) {
-            Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
         "sgd_step" => Ok(match jet_compute_sgd_step(
