@@ -301,6 +301,7 @@ fn progress_terminal_builtin(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
             | crate::Codegen::TIR::TBuiltinOp::Product { .. }
             | crate::Codegen::TIR::TBuiltinOp::Min { .. }
             | crate::Codegen::TIR::TBuiltinOp::Max { .. }
+            | crate::Codegen::TIR::TBuiltinOp::First
     )
 }
 

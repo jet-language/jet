@@ -193,7 +193,10 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("first", []) => option(xs.first().cloned(), xs),
+        ("first", []) => option(
+            crate::Comptime::CollectionEval::iter_first(xs.to_vec()),
+            xs,
+        ),
         ("flat_map", [f]) => {
             let mut out = Vec::new();
             for x in xs {
@@ -347,7 +350,10 @@ fn eval(
         }
         ("skip", [n]) => {
             let n = as_int(n, span)?.max(0) as usize;
-            CtValue::List(xs.iter().skip(n).cloned().collect())
+            CtValue::List(crate::Comptime::CollectionEval::iter_skip(
+                xs.to_vec(),
+                n as i64,
+            ))
         }
         ("step_by", [n]) => {
             let n = as_int(n, span)?;

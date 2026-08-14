@@ -18460,21 +18460,26 @@ impl LowerCtx<'_, '_> {
                         self.host.coll.sorted_set_last
                     };
                     Ok(self.call_host(host_id, &[recv_val]))
+                } else if matches!(op, TBuiltinOp::First) {
+                    let Some(elem) = jit_list_iter_elem_type(&recv_ty) else {
+                        return Err("jit builtin method unsupported".to_string());
+                    };
+                    let host_id = match elem {
+                        Type::Int | Type::Char => self.host.coll.iter_first,
+                        Type::String => self.host.coll.iter_first_string,
+                        Type::Float => self.host.coll.iter_first_float,
+                        _ => return Err("jit iterator first type unsupported".to_string()),
+                    };
+                    Ok(self.call_host(host_id, &[recv_val]))
                 } else if matches!(
                     &recv_ty,
                     Type::List(_) | Type::FixedList { .. }
                 ) || jit_list_native_type(&recv_ty)
-                    || (matches!(op, TBuiltinOp::First)
-                        && jit_list_iter_elem_type(&recv_ty).is_some())
                 {
                     // Option-packed like GetList / list_get_opt: 0 = None, value+1 = Some.
-                    let idx = if matches!(op, TBuiltinOp::First) {
-                        self.b.ins().iconst(types::I64, 0)
-                    } else {
-                        let len = self.call_host(self.host.coll.list_len, &[recv_val]);
-                        let one = self.b.ins().iconst(types::I64, 1);
-                        self.b.ins().isub(len, one)
-                    };
+                    let len = self.call_host(self.host.coll.list_len, &[recv_val]);
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let idx = self.b.ins().isub(len, one);
                     Ok(self.call_host(self.host.coll.list_get_opt, &[recv_val, idx]))
                 } else {
                     Err("jit builtin method unsupported".to_string())
@@ -18747,7 +18752,12 @@ impl LowerCtx<'_, '_> {
                 self.lower_iter_adapter(self.host.coll.iter_take, recv_val, Some(&args[0]), None)
             }
             TBuiltinOp::Skip => {
-                self.lower_iter_adapter(self.host.coll.iter_skip, recv_val, Some(&args[0]), None)
+                let host = match jit_list_iter_elem_type(&recv_ty) {
+                    Some(Type::String) => self.host.coll.iter_skip_string,
+                    Some(Type::Float) => self.host.coll.iter_skip_float,
+                    _ => self.host.coll.iter_skip,
+                };
+                self.lower_iter_adapter(host, recv_val, Some(&args[0]), None)
             }
             TBuiltinOp::StepBy => {
                 self.lower_iter_adapter(self.host.coll.iter_step_by, recv_val, Some(&args[0]), None)

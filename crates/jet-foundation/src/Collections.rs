@@ -157,6 +157,7 @@ pub fn is_iter_terminal(method: &str) -> bool {
         method,
         "to_list"
             | "collect"
+            | "first"
             | "each"
             | "find"
             | "any"

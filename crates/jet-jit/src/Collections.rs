@@ -222,6 +222,10 @@ mod collection_semantics {
         jet_iter_skip(jet_iter_from_vec(xs), n).to_list()
     }
 
+    pub(super) fn iter_first<T: 'static>(xs: Vec<T>) -> Option<T> {
+        jet_iter_first(jet_iter_from_vec(xs)).ok()
+    }
+
     pub(super) fn iter_step_by<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
         jet_iter_step_by(jet_iter_from_vec(xs), n).to_list()
     }
@@ -1498,6 +1502,18 @@ fn alloc_from_strings(xs: &[String]) -> i64 {
     })
 }
 
+fn alloc_from_floats(xs: &[f64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for &value in xs {
+            rt.heap
+                .list_push_float(out, value)
+                .expect("jit float-list adapter: push");
+        }
+        out
+    })
+}
+
 fn alloc_map_pairs(pairs: &[(String, i64)]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let map = rt.heap.alloc_empty_map();
@@ -1559,6 +1575,39 @@ extern "C" fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let out = collection_semantics::iter_skip(xs, n);
     transfer_progress_skip(list, alloc_from_ints(&out), n)
+}
+
+extern "C" fn jet_jit_iter_first(list: i64) -> i64 {
+    match collection_semantics::iter_first(clone_list_ints(list)) {
+        Some(value) => value.wrapping_add(1),
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_iter_first_string(list: i64) -> i64 {
+    match collection_semantics::iter_first(clone_list_strings(list)) {
+        Some(value) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value).wrapping_add(1)),
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_iter_first_float(list: i64) -> i64 {
+    match collection_semantics::iter_first(clone_list_floats(list)) {
+        Some(value) => value.to_bits().wrapping_add(1) as i64,
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_iter_skip_string(list: i64, n: i64) -> i64 {
+    let xs = clone_list_strings(list);
+    let out = collection_semantics::iter_skip(xs, n);
+    transfer_progress_skip(list, alloc_from_strings(&out), n)
+}
+
+extern "C" fn jet_jit_iter_skip_float(list: i64, n: i64) -> i64 {
+    let xs = clone_list_floats(list);
+    let out = collection_semantics::iter_skip(xs, n);
+    transfer_progress_skip(list, alloc_from_floats(&out), n)
 }
 
 extern "C" fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
@@ -4330,8 +4379,13 @@ host_fns! {
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
+    iter_first: "jet_jit_iter_first" => jet_jit_iter_first: sig_len;
+    iter_first_string: "jet_jit_iter_first_string" => jet_jit_iter_first_string: sig_len;
+    iter_first_float: "jet_jit_iter_first_float" => jet_jit_iter_first_float: sig_len;
     iter_take: "jet_jit_iter_take" => jet_jit_iter_take: sig_get_opt;
     iter_skip: "jet_jit_iter_skip" => jet_jit_iter_skip: sig_get_opt;
+    iter_skip_string: "jet_jit_iter_skip_string" => jet_jit_iter_skip_string: sig_get_opt;
+    iter_skip_float: "jet_jit_iter_skip_float" => jet_jit_iter_skip_float: sig_get_opt;
     iter_step_by: "jet_jit_iter_step_by" => jet_jit_iter_step_by: sig_get_opt;
     iter_dedup: "jet_jit_iter_dedup" => jet_jit_iter_dedup: sig_get_opt;
     iter_chunks: "jet_jit_iter_chunks" => jet_jit_iter_chunks: sig_get_opt;

@@ -865,6 +865,22 @@ fn run() {
     );
 }
 
+/// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
+#[test]
+fn iter_positional_pick_uses_skip_then_first() {
+    let src = "\
+fn run() {
+    nums := [10, 20, 30]
+    print(nums.skip(1).first() ?? -1)
+    print(nums.skip(9).first() ?? -1)
+}
+";
+    let rust = compile("tir_iter_positional_pick", src);
+    assert!(rust.contains("jet_iter_first("));
+    assert!(!rust.contains("jet_iter_nth("));
+    assert_tiers_agree("tir_iter_positional_pick", src, "20\n-1\n");
+}
+
 /// `remove` on both a list (value default and explicit slot mode) and a map
 /// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
 #[test]

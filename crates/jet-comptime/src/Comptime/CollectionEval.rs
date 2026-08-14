@@ -156,6 +156,14 @@ mod collection_semantics {
     ) -> JetOutcome<(), AllocError> {
         jet_string_try_push(text, addition)
     }
+
+    pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
+        jet_iter_first(jet_iter_from_vec(values)).ok()
+    }
+
+    pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
+        jet_iter_skip(jet_iter_from_vec(values), n).to_list()
+    }
 }
 
 pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {

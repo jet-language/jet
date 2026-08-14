@@ -3016,10 +3016,17 @@ fn resident_safe_builtin_op(
                 ))
                 && args.is_empty()
         }
-        TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
-        | TBuiltinOp::Windows => {
+        TBuiltinOp::Take | TBuiltinOp::StepBy | TBuiltinOp::Chunks | TBuiltinOp::Windows => {
             jit_list_iter_elem_type(recv_ty).is_some()
                 && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Skip => {
+            matches!(
+                jit_list_iter_elem_type(recv_ty),
+                Some(Type::Int | Type::Float | Type::String | Type::Char)
+            ) && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
@@ -3252,12 +3259,18 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::BitSetToList
         | TBuiltinOp::BitSetCopy
         | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
-        TBuiltinOp::First | TBuiltinOp::Last => {
+        TBuiltinOp::First => {
+            (matches!(recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK)
+                || matches!(
+                    jit_list_iter_elem_type(recv_ty),
+                    Some(Type::Int | Type::Float | Type::String | Type::Char)
+                ))
+                && args.is_empty()
+        }
+        TBuiltinOp::Last => {
             (matches!(recv_ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_RANK)
                 || matches!(recv_ty, Type::List(_) | Type::FixedList { .. })
-                || jit_list_native_type(recv_ty)
-                || (matches!(op, TBuiltinOp::First)
-                    && jit_list_iter_elem_type(recv_ty).is_some()))
+                || jit_list_native_type(recv_ty))
                 && args.is_empty()
         }
         TBuiltinOp::Pop => {

@@ -38,12 +38,6 @@ function jet_iter_lazy(pull) {
     skip(n) {
       return jet_iter_lazy(() => this._pull().slice(Math.max(0, Number(n))));
     },
-    first() {
-      const values = this._pull();
-      return values.length === 0
-        ? { tag: "None", values: [] }
-        : { tag: "Some", values: [values[0]] };
-    },
     to_list() {
       return this._pull();
     },
@@ -65,7 +59,12 @@ function jet_iter_skip(view, n) {
 }
 
 function jet_iter_first(view) {
-  if (view && view.__jet_iter) return view.first();
+  if (view && view.__jet_iter) {
+    const values = view._pull();
+    return values.length === 0
+      ? { tag: "None", values: [] }
+      : { tag: "Some", values: [values[0]] };
+  }
   return view.length === 0
     ? { tag: "None", values: [] }
     : { tag: "Some", values: [view[0]] };

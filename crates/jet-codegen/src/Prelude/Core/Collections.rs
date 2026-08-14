@@ -560,9 +560,6 @@ impl<T: 'static> JetIter<T> {
     fn is_empty(mut self) -> bool {
         self.0.next().is_none()
     }
-    fn first(mut self) -> JetOutcome<T, JetAbsent> {
-        jet_outcome_of(self.0.next())
-    }
 }
 
 impl<T> IntoIterator for JetIter<T> {
@@ -575,6 +572,10 @@ impl<T> IntoIterator for JetIter<T> {
 
 fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
     JetIter(Box::new(xs.into_iter()))
+}
+
+fn jet_iter_first<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(it.into_iter().next())
 }
 
 /// Lazy `String.split` — yields owned pieces on pull (no intermediate Vec of parts).

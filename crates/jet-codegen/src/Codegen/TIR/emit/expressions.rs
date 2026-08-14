@@ -1453,7 +1453,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::GetList => format!("jet_outcome_of(({}).get({} as usize).cloned())", recv, a(0)),
                 TBuiltinOp::First => {
                     if recv_is_iter {
-                        format!("({recv}).first()")
+                        format!("jet_iter_first(({recv}))")
                     } else {
                         format!("jet_outcome_of(({}).first().cloned())", recv)
                     }
