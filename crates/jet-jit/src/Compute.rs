@@ -331,6 +331,14 @@ mod semantics {
         Ok(jet_compute_tensor_to_list(tensor))
     }
 
+    /// Marshal the logical storage projection without applying the user-facing
+    /// `to_list` trace rule. Resident slots must retain traced tensors while a
+    /// Prelude transform is running; the heap list is only an adapter mirror.
+    pub(super) fn marshal_values(tensor: &Tensor) -> Result<Vec<f64>, String> {
+        jet_compute_validate_tensor(tensor).map_err(|error| error.jet_show())?;
+        Ok(jet_compute_tensor_values(tensor))
+    }
+
     pub(super) fn slice(
         tensor: &Tensor,
         start: i64,
@@ -512,7 +520,7 @@ fn sync_float_list(runtime: &mut JitRuntime, list: i64, values: &[f64]) -> bool 
 }
 
 fn alloc_tensor(runtime: &mut JitRuntime, tensor: semantics::Tensor) -> i64 {
-    let Ok(values) = semantics::tensor_values(&tensor) else {
+    let Ok(values) = semantics::marshal_values(&tensor) else {
         runtime.set_trap("JIT compute tensor validation failed");
         return 0;
     };
