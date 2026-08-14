@@ -1,6 +1,7 @@
 use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
+use crate::Sema::CheckerCoreLib::is_polymorphic_core_special;
 use crate::Sema::Diagnostics::{private_item, soft_public_use, type_fix_hint};
 use crate::Sema::FFI::e3211;
 use crate::Syntax;
@@ -16,6 +17,7 @@ impl<'a> Checker<'a> {
             span: Span,
             type_args: &[Type],
             args: &mut Vec<crate::AST::CallArg>,
+            resolved_ret_out: &mut Option<Type>,
         ) -> Option<Type> {
             let member_prefix = jet_foundation::Names::member_name(alias, "");
             // D-NAME-WALK1=A: a qualified call through an inline module's
@@ -35,6 +37,7 @@ impl<'a> Checker<'a> {
                     span,
                     type_args,
                     args,
+                    resolved_ret_out,
                 );
             }
             if let Some((real_name, real_idx)) = self
@@ -56,7 +59,7 @@ impl<'a> Checker<'a> {
                 .get(&(alias.to_string(), item.clone()))
                 .cloned()
             {
-                return self.infer_core_call(
+                let ret = self.infer_core_call(
                     &module,
                     &real_item,
                     alias_span,
@@ -64,6 +67,12 @@ impl<'a> Checker<'a> {
                     type_args,
                     args,
                 );
+                // D-NAME-WALK1=A: an arg-dependent Core return is a sema fact.
+                // Carry it across the re-export hop so TIR does not fall back to Unit.
+                if is_polymorphic_core_special(&module, &real_item) {
+                    *resolved_ret_out = ret.clone();
+                }
+                return ret;
             }
             let Some(sig) = self.funcs.get(mangled).cloned() else {
                 self.diags.push(Diagnostic::error(

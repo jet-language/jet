@@ -724,6 +724,7 @@ impl<'a> Checker<'a> {
                         call.name_span,
                         &call.type_args,
                         &mut call.args,
+                        &mut call.resolved_ret,
                     );
                     return Some(result);
                 }

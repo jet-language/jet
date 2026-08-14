@@ -1130,6 +1130,7 @@ impl<'a> Checker<'a> {
                         span,
                         type_args,
                         args,
+                        resolved_ret_out,
                     );
                 }
             }
