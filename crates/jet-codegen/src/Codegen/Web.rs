@@ -2075,7 +2075,7 @@ fn js_runtime_stop_metadata() -> String {
         json_quote(&default_report.fix),
     );
     for row in jet_foundation::Registry::diagnostic_rows().iter().filter(|row| {
-        row.moment == jet_foundation::Diagnostics::ReportMoment::Run
+        row.stage == "runtime"
             && row.status == jet_foundation::Registry::DiagnosticStatus::Active
             && row.code.starts_with("E30")
     }) {
