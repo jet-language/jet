@@ -551,7 +551,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
 fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let example = root.join("examples/features/tooling/build_entry_discovery");
-    let entry = example.join("main.jet");
+    let entry = example.join("run.jet");
     let expected = fs::read(
         root.join("examples/features/expected/tooling/build_entry_discovery.out"),
     )
