@@ -954,6 +954,7 @@ fn registered_unimplemented_codes_are_expected() {
         ("E0005", "retired"),
         ("E0006", "retired"),
         ("E0062", "retired"),
+        ("E0071", "retired"),
         ("E0010", "retired"),
         ("E0011", "retired"),
         ("E0020", "retired"),
@@ -1021,9 +1022,10 @@ fn registered_unimplemented_codes_are_expected() {
         &emitted,
     )
     .expect("embedded stale allowlist fixture must fail");
-    assert!(stale_fixture_failure.contains("E2101"));
-    assert!(stale_fixture_failure.contains("E3001"));
-    assert!(stale_fixture_failure.contains("remove the line"));
+    assert_eq!(
+        stale_fixture_failure,
+        "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  E2101\n  E3001"
+    );
 
     assert!(
         registered.contains("E0033"),
