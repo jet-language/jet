@@ -2520,8 +2520,8 @@ is `#[ignore]` for local 100k stress.
 order before commit. This removes lock-order cycles inside transaction commit.
 
 **Non-guarantee.** Jet does not guarantee deadlock freedom for arbitrary
-structured-concurrency programs, and it does not detect arbitrary deadlocks at
-runtime. `task`, `task.group`, join duties, and `tasks.channel` define ownership,
+structured-concurrency programs, and it does not detect arbitrary deadlocks at runtime.
+`task`, `task.group`, join duties, and `tasks.channel` define ownership,
 lifetime, and wait behavior; they do not prove progress. Two tasks can wait for
 each other through bounded channels, or a task can wait for a result that no task
 sends.
