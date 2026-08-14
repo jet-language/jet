@@ -102,14 +102,8 @@ impl<'a> Checker<'a> {
                     name_span: *name_span,
                 },
                 Expr::Index { span: idx_span, .. } => {
-                    self.diags.push(Diagnostic::error(
-                        "E0163",
-                        "increment and decrement can't target an indexed slot".to_string(),
-                        "write the full update: `map[key] = map[key] + 1`".to_string(),
-                        "use `+= 1` on a name, or assign through `=` with the whole right-hand side"
-                            .to_string(),
-                        Some(*idx_span),
-                    ));
+                    self.diags
+                        .push(Diagnostic::from_row("E0163", &[], Some(*idx_span)));
                     return None;
                 }
                 Expr::Field(base, field, field_span) => LValue::Field {

@@ -270,6 +270,7 @@ renumbered, and no new `W` code may be allocated.
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
 | E0163 | sema  | `++`/`--` can't target an indexed slot (D-INCR1) |
+| E0164 | sema  | compound assignment can't target an indexed slot (S17) |
 | E0154 | parse | protocol line does not use sender form `client:` or `server:` (D-PROTO2, D-ARROW-CONTROL1) |
 | E0805 | sema  | `yield` used outside a function declared `=> Stream<T>` (D-STREAMYIELD1) |
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
@@ -1647,7 +1648,8 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
 | E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
-| E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
+| E0163 | increment and decrement can't target an indexed slot. | An indexed read can panic when a map key is missing, so the update needs a default value. | Write a total update, such as `map[key] = (map.get(key) ?? 0) + 1`. |
+| E0164 | compound assignment can't target an indexed slot. | A compound update reads an indexed slot before it writes; that read can panic when a map key is missing. | Write a total update, such as `map[key] = (map.get(key) ?? 0) + 1`. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
 | L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |

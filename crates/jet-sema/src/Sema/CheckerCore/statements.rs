@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
                     }))
         }
 
-        /// True when compound assign on `target` is rejected (E0003 / E0362), so
+        /// True when compound assign on `target` is rejected (E0164 / E0362), so
         /// L0503 must not recommend it.
         fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
             match target {
@@ -486,15 +486,8 @@ impl<'a> Checker<'a> {
                     value,
                 } => {
                     let is_compound = op.is_some();
-                    if let (Some(op), LValue::Index { span, .. }) = (op, &*target) {
-                        self.diags.push(Diagnostic::error(
-                            "E0003",
-                            "compound assignment can't target an indexed slot".to_string(),
-                            "write the full new value: `map[key] = map[key] + 1`".to_string(),
-                            format!("use `=` with the whole right-hand side"),
-                            Some(*span),
-                        ));
-                        let _ = op;
+                    if let (Some(_op), LValue::Index { span, .. }) = (op, &*target) {
+                        self.diags.push(Diagnostic::from_row("E0164", &[], Some(*span)));
                         let saved_expected = self.expected_type.clone();
                         if let Some(place_ty) = self.lvalue_type(target) {
                             self.expected_type = Some(place_ty);
@@ -3110,7 +3103,7 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
 }
 
 /// S17 / L0503: `place = place op rhs` → prefer `place op= rhs`.
-/// Indexed places are excluded (compound assign there is E0003).
+/// Indexed places are excluded (compound assign there is E0164).
 fn prefer_compound_assign(
     target: &LValue,
     value: &Expr,

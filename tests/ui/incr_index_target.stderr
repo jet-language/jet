@@ -3,5 +3,5 @@ Error [E0163]: increment and decrement can't target an indexed slot
     |
   4 |     xs[0]++
     |       ^^^
- Why: write the full update: `map[key] = map[key] + 1`
- Fix: use `+= 1` on a name, or assign through `=` with the whole right-hand side
+ Why: an indexed read can panic when a map key is missing, so the update needs a default value.
+ Fix: write a total update, such as `map[key] = (map.get(key) ?? 0) + 1`
