@@ -5468,7 +5468,7 @@ fn emit_js_app(
                 .collect();
             out.push_str(&prelude);
             out.push_str(&format!(
-                "  const raw = wasm.{sym}({});\n",
+                "  let raw;\n  try {{ raw = wasm.{sym}({}); }} catch (error) {{\n    const _edge = jet_web_wasm_edge(wasm);\n    if (_edge?.outcome?.tag === \"Err\") return jet_web_edge_result(_edge.outcome, _edge.metadata);\n    throw error;\n  }}\n",
                 call_args.join(", ")
             ));
             out.push_str("  const _edge = jet_web_wasm_edge(wasm);\n");
@@ -5575,7 +5575,10 @@ fn emit_js_app(
         } else {
             out.push_str("export async function jet_main() {\n");
             out.push_str("  const wasm = await loadWasm();\n");
-            out.push_str(&format!("  const raw = wasm.{}();\n", wasm_export_symbol("run")));
+            out.push_str(&format!(
+                "  let raw;\n  try {{ raw = wasm.{}(); }} catch (error) {{\n    const _edge = jet_web_wasm_edge(wasm);\n    if (_edge?.outcome?.tag === \"Err\") return jet_web_edge_result(_edge.outcome, _edge.metadata);\n    throw error;\n  }}\n",
+                wasm_export_symbol("run")
+            ));
             out.push_str("  const _edge = jet_web_wasm_edge(wasm);\n");
             out.push_str("  if (_edge?.outcome?.tag === \"Err\") return jet_web_edge_result(_edge.outcome, _edge.metadata);\n");
             out.push_str("  if (_edge?.outcome?.tag === \"Ok\") return _edge.outcome.value;\n");
@@ -7815,6 +7818,7 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_runtime_stop(code: &'static str, file: &str, line: u32, message: &str) -> ! {\n",
     "    let report = jet_render_runtime_stop(code, file, line, \"\", \"\", 1, 1, message, \"\");\n",
     "    let error = jet_err(message.to_string(), Ok(code.to_string()), Err(JetAbsent));\n",
+    "    jet_wasm_store_runtime_error(&error, &report.rendered);\n",
     "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
     "}\n\n",
     "fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {\n",
@@ -7850,6 +7854,7 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {\n",
     "    let report = jet_contract_report(clause_kw, msg, file, line);\n",
     "    let error = jet_err(report.what.clone(), Ok(\"E3005\".to_string()), Err(JetAbsent));\n",
+    "    jet_wasm_store_runtime_error(&error, &report.rendered);\n",
     "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
     "}\n\n",
     include_str!("../Prelude/Core/TaskWasm.rs"),
