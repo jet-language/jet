@@ -1542,13 +1542,19 @@ fn accessibility_audit_findings_have_live_cards() {
     let separator = lines
         .get(header + 1)
         .expect("accessibility findings table needs a separator row");
+    let separator_cells = markdown_table_cells(separator);
     assert_eq!(
-        markdown_table_cells(separator).len(),
+        separator_cells.len(),
         expected_header.len(),
         "accessibility findings table separator must match its five columns"
     );
+    assert!(
+        separator_cells.iter().all(|cell| cell == "---"),
+        "accessibility findings table needs a Markdown separator for every column"
+    );
 
     let mut rows = Vec::new();
+    let mut finding_ids = HashSet::new();
     for line in lines.iter().skip(header + 2) {
         if !line.trim_start().starts_with('|') {
             break;
@@ -1559,12 +1565,31 @@ fn accessibility_audit_findings_have_live_cards() {
             expected_header.len(),
             "accessibility findings row must have id, surface, screen_reader, state, and card: {line}"
         );
+        for (name, cell) in expected_header.iter().zip(&cells) {
+            assert!(!cell.is_empty(), "accessibility finding {name} must not be empty: {line}");
+        }
+        assert!(
+            finding_ids.insert(cells[0].clone()),
+            "accessibility finding IDs must be unique: {}",
+            cells[0]
+        );
+        assert!(
+            matches!(cells[3].as_str(), "pass" | "gap" | "not-proven"),
+            "accessibility finding {} has an unknown state: {}",
+            cells[0],
+            cells[3]
+        );
         rows.push(cells);
     }
     assert!(!rows.is_empty(), "accessibility audit must list at least one finding");
 
     for row in rows {
         if row[3].trim().eq_ignore_ascii_case("pass") {
+            assert_eq!(
+                row[4], "—",
+                "passing accessibility finding {} must not name a Tower card",
+                row[0]
+            );
             continue;
         }
         let cards = audit_card_refs(&row[4]);
@@ -1573,7 +1598,14 @@ fn accessibility_audit_findings_have_live_cards() {
             "non-pass accessibility finding {} must name a live Tower card",
             row[0]
         );
+        let mut unique_cards = HashSet::new();
         for card in cards {
+            assert!(
+                unique_cards.insert(card),
+                "accessibility finding {} must list each Tower card once: {}",
+                row[0],
+                card
+            );
             let output = Command::new("node")
                 .args([
                     "plugins/tower/tower.mjs",
@@ -1593,16 +1625,43 @@ fn accessibility_audit_findings_have_live_cards() {
                 String::from_utf8_lossy(&output.stderr)
             );
             let json = String::from_utf8_lossy(&output.stdout);
-            let num = &card[1..];
+            let report = jet_foundation::JSON::parse_json(json.trim()).unwrap_or_else(|error| {
+                panic!(
+                    "Tower lookup for {} returned invalid JSON: {:?}\n{}",
+                    row[0],
+                    error,
+                    json
+                )
+            });
+            let resolved_num = jet_foundation::JSON::json_get(&report, "num")
+                .and_then(jet_foundation::JSON::json_int)
+                .expect("Tower card JSON must contain a numeric num");
+            let expected_num = card[1..]
+                .parse::<i64>()
+                .expect("audit card reference must contain a numeric card ID");
             assert!(
-                json.contains(&format!("\"num\": {num}"))
-                    || json.contains(&format!("\"num\":{num}")),
-                "Tower lookup for {} did not resolve {}: {}",
+                resolved_num == expected_num,
+                "Tower lookup for {} resolved {} as card {}, not {}: {}",
                 row[0],
                 card,
+                resolved_num,
+                expected_num,
                 json
             );
         }
+    }
+
+    for law in [
+        "D-REPORT-LAW1=A",
+        "D-REPORT-HOME1=A",
+        "D-REPORT-MACHINE1=A",
+        "D-REPORT-EDITOR1=A",
+        "`jet.report/v1`",
+    ] {
+        assert!(
+            text.contains(law),
+            "accessibility audit must name the canonical report law `{law}`"
+        );
     }
 }
 

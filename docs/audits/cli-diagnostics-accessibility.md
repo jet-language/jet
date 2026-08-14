@@ -16,6 +16,18 @@ is not one merged report, machine paths and edits still have open cards, and
 the full LSP-to-terminal parity path is not proven. Each gap points to an
 existing live Tower card. No new output mode or second renderer is proposed.
 
+## Canonical report surface
+
+D-REPORT-LAW1=A defines one report for every error, warning, stop, test
+failure, and tool failure. D-REPORT-HOME1=A makes the typed row the only text
+home. D-REPORT-MACHINE1=A names `jet.report/v1` as the one machine report
+shape. D-REPORT-EDITOR1=A makes the LSP payload a projection of that report.
+
+This audit treats the terminal frame, the JSON line, and the LSP diagnostic as
+three projections of one report. Status, progress, success, and ledger lines
+are command data, not second report shapes. The findings below do not promote
+any of those lines to a report or propose another renderer.
+
 ## Method and evidence boundary
 
 This pass reads the checked-in terminal transcripts, PTY fixture states,
@@ -41,7 +53,9 @@ The primary evidence is:
   expectations.
 - `crates/jet-foundation/src/Diagnostics.rs`,
   `crates/jet-foundation/src/Terminal.rs`, and
-  `crates/jet-cli/src/Help/Interactive.rs` — current implementation path.
+  `crates/jet-cli/src/Help/Interactive.rs` — terminal implementation path.
+- `Source/LSP/Server.rs` and `Source/LSP/Check.rs` — LSP report and shared-fix
+  implementation path.
 
 ## Findings
 
