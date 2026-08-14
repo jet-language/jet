@@ -1576,7 +1576,7 @@ fn run() {
 }
 
 #[test]
-fn web_edge_preserves_one_report_across_js_and_wasm() {
+fn web_edge_preserves_one_error_wire_across_js_and_wasm() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web failure-edge parity test (need rustc + node)");
         return;
@@ -1724,9 +1724,10 @@ try {
   await jet_main();
   throw new Error("unexpected success");
 } catch (error) {
-  for (const field of ["message", "code", "cause", "journey"]) {
-    if (!(field in error)) throw new Error("typed edge report lost " + field);
+  for (const field of ["message", "code", "cause", "journey", "toJSON"]) {
+    if (!(field in error)) throw new Error("typed edge lost " + field);
   }
+  if (!(error instanceof Error) || error.name !== "JetError") throw new Error("edge did not use JetError");
   const returnedFrame = showRuntimeError(error);
   const overlay = document.getElementById("jet-runtime-overlay");
   if (!overlay || overlay.hidden || returnedFrame !== error.frame || overlay.textContent !== error.frame) {
@@ -1734,7 +1735,9 @@ try {
   }
   console.log(JSON.stringify({
     kind: error.constructor?.name,
+    name: error.name,
     code: error.code,
+    wire: error.toJSON(),
     cause: error.cause?.message ?? null,
     journey: error.journey ?? "",
     frame: error.frame,
@@ -1832,7 +1835,7 @@ try {
         String::from_utf8_lossy(&node.stderr)
     );
     let stdout = String::from_utf8_lossy(&node.stdout);
-    assert!(stdout.contains("kind=JetWebRuntimeError"), "{stdout}");
+    assert!(stdout.contains("kind=JetError"), "{stdout}");
     assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
     assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
     assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
@@ -1894,7 +1897,7 @@ try {
         String::from_utf8_lossy(&node.stderr)
     );
     let stdout = String::from_utf8_lossy(&node.stdout);
-    assert!(stdout.contains("kind=Object"), "{stdout}");
+    assert!(stdout.contains("kind=JetError"), "{stdout}");
     assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
     assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
     assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
