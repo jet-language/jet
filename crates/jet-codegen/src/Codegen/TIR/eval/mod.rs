@@ -77,7 +77,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
+use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
 use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
@@ -2993,6 +2993,25 @@ fn seed_fragment_distinct_types(
     }
 }
 
+fn seed_fragment_unit_families(cx: &mut Cx, families: &[UnitFamilyDef]) {
+    if families.is_empty() {
+        return;
+    }
+    // Reuse the bundle context registry. Fragment evaluation must not grow a
+    // second unit-fact implementation just because it has no ProgramBundle.
+    let items = families
+        .iter()
+        .cloned()
+        .map(Item::UnitFamily)
+        .collect::<Vec<_>>();
+    let units = build_cx_items(&items, "", "<eval>", None, &HashMap::new());
+    cx.type_names.extend(units.type_names);
+    cx.distinct_types.extend(units.distinct_types);
+    cx.distinct_ranges.extend(units.distinct_ranges);
+    cx.unit_facts.extend(units.unit_facts);
+    cx.unit_labels.extend(units.unit_labels);
+}
+
 fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
     for (name, function) in funcs {
         cx.fn_param_names.insert(
@@ -3189,6 +3208,7 @@ pub fn lower_expr_for_eval(
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
+    unit_families: &[UnitFamilyDef],
 ) -> Result<(TExpr, Vec<TJitSpawnLambda>), Diagnostic> {
     let mut diagnostic = None;
     let mut foreign_struct_span = None;
@@ -3223,6 +3243,7 @@ pub fn lower_expr_for_eval(
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
+    seed_fragment_unit_families(&mut cx, unit_families);
     seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
     for (name, value) in globals {
@@ -3258,6 +3279,7 @@ pub fn lower_stmts_for_eval(
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
+    unit_families: &[UnitFamilyDef],
 ) -> Result<(Vec<TStmt>, Vec<TJitSpawnLambda>), Diagnostic> {
     let mut diagnostic = None;
     crate::Comptime::walk_stmt_expr_nodes_for_validation(stmts, &mut |expr| {
@@ -3271,6 +3293,7 @@ pub fn lower_stmts_for_eval(
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, structs, methods, computed_fields);
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
+    seed_fragment_unit_families(&mut cx, unit_families);
     seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
     for name in globals.keys() {
@@ -4028,10 +4051,12 @@ fn eval_expr_hook(
         req.core_imports,
         req.distinct_ranges,
         req.distinct_bases,
+        req.unit_families,
     )?;
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, req.structs, req.methods, req.computed_fields);
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
+    seed_fragment_unit_families(&mut cx, req.unit_families);
     seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.struct_fields = normalize_struct_field_types(req.structs);
     cx.type_names.extend(req.structs.keys().cloned());
@@ -4169,10 +4194,12 @@ fn eval_block_hook(
         req.core_imports,
         req.distinct_ranges,
         req.distinct_bases,
+        req.unit_families,
     )?;
     let mut cx = empty_cx();
     seed_fragment_structs(&mut cx, req.structs, req.methods, req.computed_fields);
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
+    seed_fragment_unit_families(&mut cx, req.unit_families);
     seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.core_imports = req.core_imports.clone();
     cx.jit_spawn_site_base = spawn_lambdas.len();

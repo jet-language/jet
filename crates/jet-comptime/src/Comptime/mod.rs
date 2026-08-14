@@ -730,6 +730,9 @@ pub fn evaluate_closed_value(
         0,
         &HashMap::new(),
         empty_methods(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &[],
         None,
         build_facts,
     )
@@ -750,6 +753,9 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
     methods: &HashMap<(String, String), &'a Func>,
+    distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
+    unit_families: &[crate::AST::UnitFamilyDef],
     mutated: Option<&mut HashMap<String, CtValue>>,
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
@@ -765,6 +771,9 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
         initial_impure_depth,
         structs,
         methods,
+        distinct_ranges,
+        distinct_bases,
+        unit_families,
         mutated,
     )
 }
@@ -866,6 +875,7 @@ pub fn evaluate_with_imports_opts(
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
+        unit_families: &[],
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
@@ -929,6 +939,9 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         initial_impure_depth,
         structs,
         empty_methods(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &[],
         mutated,
     )
 }
@@ -944,6 +957,9 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
     methods: &HashMap<(String, String), &'a Func>,
+    distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
+    unit_families: &[crate::AST::UnitFamilyDef],
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
@@ -962,8 +978,9 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
         initial_impure_depth,
         structs,
         computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
+        distinct_ranges,
+        distinct_bases,
+        unit_families,
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
@@ -1447,6 +1464,7 @@ pub fn run_block_with_imports(
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
+        unit_families: &[],
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,

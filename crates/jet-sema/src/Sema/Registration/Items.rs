@@ -207,6 +207,9 @@ pub(crate) fn eval_comptime_items(
         );
         let mut funcs: HashMap<String, &Func> = HashMap::new();
         let mut methods: HashMap<(String, String), &Func> = HashMap::new();
+        let mut distinct_ranges = HashMap::new();
+        let mut distinct_bases = HashMap::new();
+        let mut unit_families = Vec::new();
         let mut structs = HashMap::new();
         let mut externs: HashSet<String> = HashSet::new();
         for item in &eval_items {
@@ -241,6 +244,23 @@ pub(crate) fn eval_comptime_items(
                     for method in &e.methods {
                         methods.insert((e.name.clone(), method.name.clone()), method);
                     }
+                }
+                Item::Distinct(definition) => {
+                    distinct_ranges.insert(
+                        definition.name.clone(),
+                        definition.range.map(|(lo, hi, _)| (lo, hi)),
+                    );
+                    distinct_bases.insert(definition.name.clone(), definition.base.clone());
+                }
+                Item::UnitFamily(family) => {
+                    for definition in family.distinct_defs() {
+                        distinct_ranges.insert(
+                            definition.name.clone(),
+                            definition.range.map(|(lo, hi, _)| (lo, hi)),
+                        );
+                        distinct_bases.insert(definition.name.clone(), definition.base);
+                    }
+                    unit_families.push(family.clone());
                 }
                 Item::ExternRust(b) => {
                     for ef in &b.functions {
@@ -321,6 +341,9 @@ pub(crate) fn eval_comptime_items(
                 0,
                 &structs,
                 &methods,
+                &distinct_ranges,
+                &distinct_bases,
+                &unit_families,
                 None,
                 build_facts,
             ) {

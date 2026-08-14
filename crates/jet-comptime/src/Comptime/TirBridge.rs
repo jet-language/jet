@@ -407,6 +407,9 @@ pub struct ExprEvalRequest<'a> {
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a HashMap<String, Type>,
+    /// Unit-family declarations seed the codegen context's canonical facts
+    /// for fragment lowering; the conversion semantics remain in TIR/Prelude.
+    pub unit_families: &'a [crate::AST::UnitFamilyDef],
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
@@ -432,6 +435,7 @@ pub struct BlockEvalRequest<'a> {
     pub structs: &'a HashMap<String, &'a StructDef>,
     pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a HashMap<String, Type>,
+    pub unit_families: &'a [crate::AST::UnitFamilyDef],
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,

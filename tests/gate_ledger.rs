@@ -420,7 +420,7 @@ fn i9_repl_tier_keeps_the_fixture_behavior() {
         .stdin
         .as_mut()
         .expect("REPL stdin")
-        .write_all(b":load tier.jet\nrun()\n:quit\n")
+        .write_all(b":load tier.jet\n:run\n:quit\n")
         .expect("write REPL input");
     let output = child.wait_with_output().expect("finish REPL");
     let text = stdout(&output);

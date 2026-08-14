@@ -2614,9 +2614,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             {
                 return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
             }
-            // An `approx(value)` not consumed immediately by an integer-to-float
-            // crossing grants nothing later. Erase its unspellable marker now.
-            if call.widen_approx && call.args.len() == 1 {
+            // Early comptime registration runs before sema annotates calls with
+            // `widen_approx`. Recognize the unshadowed builtin here too; sema
+            // still owns validation and gate recording, while TIR owns the one
+            // canonical marker erasure used by every evaluator tier.
+            let builtin_approx = call.name == Syntax::BUILTIN_APPROX
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name);
+            if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
                 return lower_expr(&call.args[0].expr, cx, env);
             }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
