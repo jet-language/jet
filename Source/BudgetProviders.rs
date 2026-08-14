@@ -4,7 +4,7 @@
 //! compiler. No provider lookup consults `PATH`. Every transport feeds the
 //! same binary decoder and limit checker before evidence reaches evaluation.
 
-use jet_foundation::PerformanceBudget::{CanonicalJson, Rational};
+use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson, Rational};
 use jet_foundation::PerformanceBudget::{Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile};
 use jet_foundation::SHA256::sha256_hex;
 use std::collections::BTreeMap;
@@ -245,12 +245,14 @@ pub fn compiler_probe_workload(
     let entry = entry.canonicalize().map_err(|error| format!("cannot resolve compile workload entry: {error}"))?;
     if !entry.starts_with(&root) { return Err("compile workload entry escapes its project root".into()); }
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
+    let provider_version = compiler_probe_version(&root, mode, target, profile, patch)?;
     CanonicalJson::object([
         ("entry".into(), CanonicalJson::String(entry.to_string_lossy().into_owned())),
         ("mode".into(), CanonicalJson::String(mode.into())),
         ("patch".into(), patch.map(|value| CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null)),
         ("patch_sha256".into(), CanonicalJson::String(descriptor.patch_sha256)),
         ("profile".into(), CanonicalJson::String(profile.into())),
+        ("provider_version".into(), CanonicalJson::String(provider_version)),
         ("project_root".into(), CanonicalJson::String(root.to_string_lossy().into_owned())),
         ("samples".into(), CanonicalJson::Integer(COMPILE_SAMPLES.to_string())),
         ("source_tree_sha256".into(), CanonicalJson::String(descriptor.source_tree_sha256)),
@@ -327,11 +329,16 @@ fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation
     let CanonicalJson::Object(workload) = &request.workload else {
         return Err(ProviderFailure::malformed("CompilerProbe workload is not an object"));
     };
+    validate_compile_workload_identity(request, workload)?;
     let mode = workload_text(workload, "mode")?;
     let target = workload_text(workload, "target")?;
     let profile = workload_text(workload, "profile")?;
+    let provider_version = workload_text(workload, "provider_version")?;
     let root = PathBuf::from(workload_text(workload, "project_root")?);
     let entry = PathBuf::from(workload_text(workload, "entry")?);
+    if !root.is_absolute() || !entry.is_absolute() {
+        return Err(ProviderFailure::malformed("CompilerProbe paths are not compiler-resolved absolute text"));
+    }
     let patch = match workload.get("patch") {
         Some(CanonicalJson::Null) => None,
         Some(CanonicalJson::String(value)) => Some(value.as_str()),
@@ -354,6 +361,10 @@ fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation
     let entry = entry.canonicalize().map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("compile workload entry is unavailable: {error}")))?;
     if !entry.starts_with(&root) { return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload entry escapes its project root")); }
     let descriptor = compile_descriptor(&root, mode.as_str(), target.as_str(), profile.as_str(), patch).map_err(ProviderFailure::malformed)?;
+    let expected_provider_version = compiler_probe_version(&root, mode.as_str(), target.as_str(), profile.as_str(), patch).map_err(ProviderFailure::malformed)?;
+    if provider_version != expected_provider_version {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload provider identity is stale or forged"));
+    }
     let source_tree_sha256 = workload_text(workload, "source_tree_sha256")?;
     let patch_sha256 = workload_text(workload, "patch_sha256")?;
     if source_tree_sha256.as_str() != descriptor.source_tree_sha256.as_str() || patch_sha256.as_str() != descriptor.patch_sha256.as_str() {
@@ -368,6 +379,32 @@ fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation
     let result = compile_latency_samples(&root, &entry, &scratch, mode.as_str(), patch, &descriptor.source_tree_sha256, &descriptor.patch_sha256, target.as_str(), profile.as_str(), warmups as usize, sample_count as usize, &request.specs, &request.request_id);
     let _ = std::fs::remove_dir_all(&scratch);
     result
+}
+
+fn validate_compile_workload_identity(
+    request: &ProviderRequest,
+    fields: &BTreeMap<String, CanonicalJson>,
+) -> Result<(), ProviderFailure> {
+    const KEYS: [&str; 11] = [
+        "entry",
+        "mode",
+        "patch",
+        "patch_sha256",
+        "profile",
+        "project_root",
+        "provider_version",
+        "samples",
+        "source_tree_sha256",
+        "target",
+        "warmups",
+    ];
+    if fields.len() != KEYS.len() || KEYS.iter().any(|key| !fields.contains_key(*key)) {
+        return Err(ProviderFailure::malformed("CompilerProbe workload has an unexpected or missing identity field"));
+    }
+    if request.request_id != stable_id(&request.workload) {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload request identity is stale or forged"));
+    }
+    Ok(())
 }
 
 fn compile_latency_samples(
@@ -723,7 +760,7 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
     if target != "cli" {
         return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
     }
-    let executable = std::env::current_exe().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
+    let executable = running_executable().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
     let mut command = Command::new(executable);
     command.arg("build").arg(entry).current_dir(root).env("JET_TIMING", "1").env("JET_CACHE_DIR", root.join(".jet-compile-cache")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     match profile {
@@ -743,6 +780,19 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
             Ok(None) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Timeout, "compile workload build exceeded its deadline")); }
             Err(error) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot supervise compile workload build: {error}"))); }
         }
+    }
+}
+
+fn running_executable() -> std::io::Result<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let executable = PathBuf::from("/proc/self/exe");
+        std::fs::File::open(&executable)?;
+        Ok(executable)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::env::current_exe()
     }
 }
 
