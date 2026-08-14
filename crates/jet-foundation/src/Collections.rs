@@ -206,6 +206,57 @@ pub fn iter_elem(ty: &Type) -> Option<&Type> {
     }
 }
 
+/// Candidate vocabulary for missing-method diagnostics. The receiver filter
+/// below still delegates to `builtin_method_return`, so a name is suggested
+/// only when the canonical method table accepts it for that receiver.
+const BUILTIN_METHOD_VOCABULARY: &str = concat!(
+    "a accepted action active_count add add_asset_bundle add_bench add_doc add_executable add_install add_library add_new ",
+    "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
+    "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
+    "close collect compare concat contains contains_value copy copy_to count count_by count_ones count_zeros ",
+    "cycle dedup dedup_by default_allow default_profile delete delivered delivered_handlers diagnostics difference digest downgrade ",
+    "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
+    "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
+    "flat_map flatten float float_range flush fold from from_bytes from_keys from_text functions generate ",
+    "generated_lines get get_buffer get_disjoint_write get_or_set group_by guard_edit guard_read has has_key has_method hex ",
+    "hole home ids implements index_of indexed indexes init insert int intersection intersperse ",
+    "is_active is_alphabetic is_ascii is_disjoint is_empty is_finite is_infinite is_lower is_nan is_numeric is_sorted is_sorted_by ",
+    "is_subset is_superset is_upper is_whitespace item items join key keys last last_index_of lazy ",
+    "leading_zeros left legacy len lines listener_count map match matches max max_by merge ",
+    "min min_by min_max min_max_by new new_random next normal normalize notes notify_all notify_one ",
+    "now on on_priority once or_err origin packages pad_end pad_start para_filter para_fold para_map ",
+    "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop ",
+    "pop_back pop_first pop_front position probe product public_key push push_back push_front queued queued_count ",
+    "random reaches_panic read read_byte read_bytes read_string receive reduce remove remove_prefix remove_suffix repeat ",
+    "replace require reverse rewind right rsplit run running_count sample scan second seek ",
+    "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_by source ",
+    "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
+    "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
+    "to_int to_list to_lower to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
+    "trailing_zeros trim trim_end trim_start true_ try_collect types union unsubscribe unzip update upgrade ",
+    "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
+    "write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
+);
+
+/// Return the names accepted by the receiver's canonical built-in method
+/// table. Arity is probed because the table stores signatures as
+/// `(method, argument count)` pairs, while a missing-call diagnostic only has
+/// the method spelling available.
+pub fn builtin_method_names(recv_ty: &Type) -> Vec<String> {
+    if let Type::Tagged { inner, .. } = recv_ty {
+        return builtin_method_names(inner);
+    }
+    BUILTIN_METHOD_VOCABULARY
+        .split_whitespace()
+        .filter(|method| {
+            (0..=8).any(|arg_count| {
+                builtin_method_return(recv_ty, method, arg_count, false).is_some()
+            })
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
 pub fn builtin_method_return(
     recv_ty: &Type,

@@ -1619,6 +1619,24 @@ impl<'a> Parser<'a> {
             || (matches!(self.peek().kind, TokKind::Comma) && !self.at_yielding_loop_clause())
     }
 
+    fn foreign_loop_word_diagnostic(word: &str, span: Span) -> Diagnostic {
+        let fix = match word {
+            Syntax::FOREIGN_FOR => "write `loop item, source { … }`",
+            Syntax::FOREIGN_WHILE => "write `loop condition { … }`",
+            Syntax::FOREIGN_CONTINUE => "write `next`",
+            Syntax::FOREIGN_DO => "write `loop { … }`",
+            _ => "write the current loop form",
+        };
+        Diagnostic::error(
+            "E0003",
+            format!("expected a statement, found `{word}`"),
+            "foreign loop words are not Jet statements; Jet loop statements start with `loop`"
+                .to_string(),
+            fix.to_string(),
+            Some(span),
+        )
+    }
+
     /// Parse statements until the closing `}` (consumed). Recovers at
     /// statement boundaries so several problems surface in one run.
     pub(in super::super) fn block_stmts(&mut self) -> Vec<Stmt> {
@@ -2003,20 +2021,17 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Continue(span))
             }
             TokKind::Ident(name)
-                if name == Syntax::FOREIGN_CONTINUE
-                    && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace) =>
+                if matches!(
+                    name.as_str(),
+                    Syntax::FOREIGN_FOR
+                        | Syntax::FOREIGN_WHILE
+                        | Syntax::FOREIGN_CONTINUE
+                        | Syntax::FOREIGN_DO
+                ) =>
             {
+                let word = name.clone();
                 let span = self.bump().span;
-                self.diags.push(Diagnostic::error(
-                    "E0003",
-                    "Jet spells this loop step `next`, not `continue`".to_string(),
-                    "`next` skips the rest of the current loop pass and starts the next one"
-                        .to_string(),
-                    "write `next`".to_string(),
-                    Some(span),
-                ));
-                self.finish_stmt()?;
-                Ok(Stmt::Continue(span))
+                Err(Self::foreign_loop_word_diagnostic(&word, span))
             }
             TokKind::KwLoop => self.loop_stmt(None),
             // D-LOOPLABEL3=A: `name :: loop { }` declares a compile-time loop name.

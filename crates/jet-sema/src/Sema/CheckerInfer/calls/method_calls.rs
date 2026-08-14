@@ -26,7 +26,9 @@ use crate::Sema::CheckerCoreLib::{
     wrong_core_arity,
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
-use crate::Sema::Diagnostics::{builtin_type_from_ident, expr_root_ident, is_printable, type_is_copy};
+use crate::Sema::Diagnostics::{
+    builtin_type_from_ident, expr_root_ident, is_printable, suggest_field, type_is_copy,
+};
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
 use std::collections::HashSet;
@@ -40,6 +42,40 @@ struct RootCallTarget {
 }
 
 impl<'a> Checker<'a> {
+    fn method_candidate(
+        &self,
+        method: &str,
+        receiver_ty: &Type,
+        type_name: Option<&str>,
+    ) -> Option<String> {
+        let mut candidates = Collections::builtin_method_names(receiver_ty);
+        if candidates.is_empty() {
+            if let Some(type_name) = type_name {
+                candidates = self.method_names_for_type_name(type_name);
+            }
+        }
+        suggest_field(method, &candidates)
+    }
+
+    fn receiver_method_label(receiver_ty: &Type) -> String {
+        match receiver_ty {
+            Type::Tagged { inner, .. } => Self::receiver_method_label(inner),
+            Type::List(_) | Type::FixedList { .. } => "List".to_string(),
+            Type::Map { .. } => "Map".to_string(),
+            Type::String => "String".to_string(),
+            Type::Named(name) => name.clone(),
+            Type::Apply { name, .. } => name.clone(),
+            _ => receiver_ty.name(),
+        }
+    }
+
+    fn missing_receiver_method_why(receiver_ty: &Type, method: &str) -> String {
+        format!(
+            "this `{}` value has no instance method named `{method}`",
+            Self::receiver_method_label(receiver_ty)
+        )
+    }
+
     /// D-FAIL-CARRIER1=A: a fact an error type carries on its report.
     ///
     /// An error type opts into a middle state by carrying it on its report:
@@ -4243,19 +4279,52 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+            // Built-in value types have no user `struct`/`enum` registry entry,
+            // but their method names still come from the canonical collection
+            // table. Keep their ordinary missing-method errors on E0311 so the
+            // explanation describes the actual receiver instead of claiming
+            // that only nominal values can have methods. `Iter` retains its
+            // materializer-specific E0102 recovery below.
+            let builtin_methods = Collections::builtin_method_names(&recv_ty);
+            if !builtin_methods.is_empty()
+                && !matches!(&recv_ty, Type::Apply { name, .. } if name == Syntax::TYPE_ITER)
+            {
+                let fix = self
+                    .method_candidate(method, &recv_ty, None)
+                    .map_or_else(
+                        || format!("check the spelling of `{method}`"),
+                        |candidate| format!("did you mean `{candidate}`?"),
+                    );
+                self.diags.push(Diagnostic::error(
+                    "E0311",
+                    format!("`{method}` isn't a method on this value"),
+                    Self::missing_receiver_method_why(&recv_ty, method),
+                    fix,
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return None;
+            }
             let type_name = match &recv_ty {
                 Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
                 Type::Option(inner) => match inner.as_ref() {
                     Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
                     _ => {
+                        let fix = self
+                            .method_candidate(method, &recv_ty, None)
+                            .map_or_else(
+                                || format!("check the spelling of `{method}`"),
+                                |candidate| format!("did you mean `{candidate}`?"),
+                            );
                         self.diags.push(Diagnostic::error(
                             "E0311",
                             format!("`{}` isn't a method on this value", method),
-                            "instance methods belong to struct or enum values".to_string(),
                             format!(
-                                "call it on the type: `{}.{method}(...)` if it's static",
-                                recv_ty.name()
+                                "this value does not expose an instance method named `{method}`"
                             ),
+                            fix,
                             Some(span),
                         ));
                         for a in args.iter_mut() {
@@ -4265,11 +4334,19 @@ impl<'a> Checker<'a> {
                     }
                 },
                 _ => {
+                    let fix = self
+                        .method_candidate(method, &recv_ty, None)
+                        .map_or_else(
+                            || format!("check the spelling of `{method}`"),
+                            |candidate| format!("did you mean `{candidate}`?"),
+                        );
                     self.diags.push(Diagnostic::error(
                         "E0311",
                         format!("`{}` isn't a method on this value", method),
-                        "only struct and enum values have instance methods".to_string(),
-                        format!("check the spelling of `{}`", method),
+                        format!(
+                            "this value does not expose an instance method named `{method}`"
+                        ),
+                        fix,
                         Some(span),
                     ));
                     for a in args.iter_mut() {
@@ -4323,10 +4400,18 @@ impl<'a> Checker<'a> {
                 )
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
-                let fix = materializer.map_or_else(
-                    || format!("define it inside `struct {display_type_name}` or `impl {display_type_name}`"),
-                    |method| format!("call `{method}` first"),
-                );
+                let fix = self
+                    .method_candidate(method, &recv_ty, Some(&type_name))
+                    .map(|candidate| format!("did you mean `{candidate}`?"))
+                    .or_else(|| {
+                        materializer
+                            .map(|method| format!("call `{method}` first"))
+                    })
+                    .unwrap_or_else(|| {
+                        format!(
+                            "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
+                        )
+                    });
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", display_type_name, method),

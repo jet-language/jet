@@ -192,6 +192,20 @@ impl<'a> Checker<'a> {
         Some((owner, sig))
     }
 
+    pub(crate) fn method_names_for_type_name(&self, type_name: &str) -> Vec<String> {
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return Vec::new();
+        };
+        if owner == self.module_idx {
+            self.registry.method_names(leaf)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .map_or_else(Vec::new, |module| module.registry.method_names(leaf))
+        }
+    }
+
     pub(crate) fn instantiate_method_sig(
         &self,
         owner_mod: usize,

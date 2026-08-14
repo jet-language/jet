@@ -334,6 +334,17 @@ impl TypeRegistry {
         }
     }
 
+    pub(crate) fn method_names(&self, type_name: &str) -> Vec<String> {
+        let mut names = match self.types.get(type_name) {
+            Some(TypeDef::Struct { methods, .. }) | Some(TypeDef::Enum { methods, .. }) => {
+                methods.keys().cloned().collect()
+            }
+            _ => Vec::new(),
+        };
+        names.sort();
+        names
+    }
+
     fn field_names(&self, type_name: &str) -> Vec<String> {
         match self.types.get(type_name) {
             Some(TypeDef::Struct { fields, .. }) => {

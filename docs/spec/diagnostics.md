@@ -131,7 +131,7 @@ renumbered, and no new `W` code may be allocated.
 |-------|-------|------------------------------------------|
 | E0001 | jet   | character/escape/lone brace means nothing here |
 | E0002 | jet   | unterminated text literal, interpolation, or block comment |
-| E0003 | parse | expected X, found Y; teaches `continue` → `next`, `??` fallback values, and named multi-value enum payloads |
+| E0003 | parse | statement parse error; expected a current statement form |
 | E0004 | parse | *retired in M1* (was: parameters staged)  |
 | E0005 | parse | *retired in M1* (was: variables staged)   |
 | E0006 | parse | *retired in M4* (was: `?` staged)         |
@@ -317,7 +317,7 @@ renumbered, and no new `W` code may be allocated.
 | E0308 | sema  | bare `None` needs a known `T?` type       |
 | E0309 | sema  | nested `T??` rejected                     |
 | E0310 | sema  | `T?` used where plain `T` expected        |
-| E0311 | sema  | static/instance method confusion          |
+| E0311 | sema  | static/instance method confusion or missing receiver method |
 | E0312 | sema  | value `==` unsupported (field detail)     |
 | E0313 | sema  | destructuring target's shape doesn't match the value (S74) |
 | E0315 | sema  | list-pattern arity ≠ a known-length list literal (S74) |

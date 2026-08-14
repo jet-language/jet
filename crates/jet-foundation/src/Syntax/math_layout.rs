@@ -267,8 +267,8 @@ pub const RETIRED_LOOP_STEP: &str = "step";
 pub const KW_BREAK: &str = "break";
 /// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
 pub const KW_NEXT: &str = "next";
-/// D-LOOP-CONTROLWORD1=B: common foreign spelling recognized only for the
-/// E0003 teaching error that points at `next`.
+/// D-S14-PAUSE: common foreign spelling recognized only for an ordinary E0003;
+/// it is not accepted as a loop-control alias.
 pub const FOREIGN_CONTINUE: &str = "continue";
 
 /// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
@@ -525,10 +525,11 @@ pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 /// D-FFI-UNIFY1: generated foreign bindings live under `.jet/bindings/<lang>/`.
 pub const BINDINGS_ROOT_SUBDIR: &str = "bindings"; // D-FFI-UNIFY1
 
-/// S14: foreign forms recognized only for teaching errors.
-/// S19-amend (2026-06-17): `while`/`for` are now teaching errors pointing at `loop`.
+/// D-S14-PAUSE: retired foreign loop words are recognized only long enough to
+/// report an ordinary current-syntax error; none is accepted as Jet syntax.
 pub const FOREIGN_WHILE: &str = "while";
 pub const FOREIGN_FOR: &str = "for";
+pub const FOREIGN_DO: &str = "do";
 pub const FOREIGN_TRY: &str = "try";
 pub const FOREIGN_FUNC: &str = "func";
 pub const FOREIGN_DEF: &str = "def";
