@@ -81,6 +81,169 @@ pub(crate) fn run_guarantees(
     }
 }
 
+/// `jet inspect provenance [<dependency>]` — read the one lock-backed
+/// dependency provenance record. Verification stays on existing resolver and
+/// E1204 paths; this command only projects their recorded facts.
+pub(crate) fn run_provenance(args: &[String], json: bool) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no package.jet found — run `jet inspect provenance` inside a project",
+    );
+    let lock = match jet::Lock::load(&root) {
+        Some(lock) => lock,
+        None => {
+            crate::cli_error!("E1202", "no lockfile found — run `jet fetch` first");
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    let manifest_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
+    let manifest = match jet::Manifest::load(&root) {
+        Some(Ok(manifest)) => manifest,
+        Some(Err(diagnostic)) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    &manifest_path.display().to_string(),
+                    "",
+                    &[diagnostic],
+                )
+            );
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+        None => unreachable!("manifest root was found above"),
+    };
+    let requirement = manifest
+        .authority
+        .trust
+        .as_ref()
+        .and_then(|trust| trust.require)
+        .unwrap_or(jet::Package::ProvenanceRequirement::None);
+    let target = provenance_target(args);
+    let mut reports = lock
+        .packages
+        .iter()
+        .filter(|package| !matches!(&package.source, jet::Lock::LockSource::Root))
+        .filter(|package| target.is_none() || target.as_deref() == Some(package.name.as_str()))
+        .map(jet::Lock::LockedPackage::provenance_report)
+        .collect::<Vec<_>>();
+    reports.sort_by(|left, right| left.name.cmp(&right.name).then(left.version.cmp(&right.version)));
+    if let Some(target) = target {
+        if reports.is_empty() {
+            crate::cli_error!(
+                @fix "E2104",
+                format!("dependency `{target}` is not present in the lockfile"),
+                "use `jet inspect provenance` to list locked dependencies"
+            );
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    }
+    if json {
+        render_provenance_json(requirement, &reports);
+    } else {
+        render_provenance_text(requirement, &reports);
+    }
+}
+
+fn provenance_target(args: &[String]) -> Option<String> {
+    args.iter()
+        .find(|argument| !argument.starts_with('-'))
+        .cloned()
+}
+
+fn render_provenance_text(
+    requirement: jet::Package::ProvenanceRequirement,
+    reports: &[jet::Lock::DependencyProvenanceReport],
+) {
+    println!("provenance");
+    println!("require: {}", requirement.label());
+    for (index, report) in reports.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        println!("{} {}", report.name, report.version);
+        let evidence = matches!(
+            report.integrity.status,
+            jet::Lock::ProvenanceStatus::Enforced
+        )
+        .then_some(", E1204")
+        .unwrap_or("");
+        println!(
+            "  {:<12} {} — matches .jet/lock ({}{evidence})",
+            "integrity",
+            report.integrity.value,
+            report.integrity.status.label()
+        );
+        render_provenance_field("transparency", &report.transparency);
+        render_provenance_field("publisher", &report.publisher);
+        render_provenance_field("build", &report.build);
+    }
+}
+
+fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
+    println!(
+        "  {label:<12} {} ({})",
+        field.value,
+        field.status.label()
+    );
+}
+
+fn render_provenance_json(
+    requirement: jet::Package::ProvenanceRequirement,
+    reports: &[jet::Lock::DependencyProvenanceReport],
+) {
+    print!(
+        "{{\"schema_version\":1,\"require\":\"{}\",\"packages\":[",
+        json_escape(requirement.label())
+    );
+    for (index, report) in reports.iter().enumerate() {
+        if index > 0 {
+            print!(",");
+        }
+        print!(
+            "{{\"name\":\"{}\",\"version\":\"{}\",",
+            json_escape(&report.name),
+            json_escape(&report.version)
+        );
+        let integrity_evidence = matches!(
+            report.integrity.status,
+            jet::Lock::ProvenanceStatus::Enforced
+        )
+        .then_some("E1204");
+        render_provenance_json_field(
+            "integrity",
+            &report.integrity,
+            integrity_evidence,
+            true,
+        );
+        render_provenance_json_field("transparency", &report.transparency, None, true);
+        render_provenance_json_field("publisher", &report.publisher, None, true);
+        render_provenance_json_field("build", &report.build, None, false);
+        print!("}}");
+    }
+    println!("]}}");
+}
+
+fn render_provenance_json_field(
+    key: &str,
+    field: &jet::Lock::ProvenanceField,
+    evidence: Option<&str>,
+    trailing_comma: bool,
+) {
+    print!(
+        "\"{key}\":{{\"value\":\"{}\",\"status\":\"{}\"",
+        json_escape(&field.value),
+        field.status.label()
+    );
+    if let Some(evidence) = evidence {
+        print!(",\"evidence\":\"{}\"", json_escape(evidence));
+    }
+    if trailing_comma {
+        print!(",");
+    }
+    print!("}}");
+}
+
 fn entry_file(args: &[String]) -> Option<String> {
     let mut skip_value = false;
     for argument in args {

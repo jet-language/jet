@@ -214,6 +214,9 @@ mod tests {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     pub package: PackageMeta,
+    /// D-AUTHORITY-MANIFEST1=A: package authority policy, including the
+    /// D-BOUND-PROV1 provenance requirement.
+    pub authority: crate::Package::PackageAuthority,
     /// Jet package dependencies.
     pub dependencies: BTreeMap<String, DepSpec>,
     /// Rust crate dependencies for `extern rust` blocks. Always empty today:

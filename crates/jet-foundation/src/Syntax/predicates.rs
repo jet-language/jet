@@ -349,32 +349,38 @@ pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
 /// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
 /// per-dependency escape from the `effects:` budget, recorded in the lockfile.
 pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
-/// D-JPK-GRANTSCHEMA1=A: source-reviewed trust policy lives under
-/// `policy: { trust: { … } }` in `pkg.jet`. Manifest keys only, no language
+/// D-POLICY-WORD1=A: package floors and memory governance live under the
+/// `policy: .{ … }` block in `package.jet`. Manifest keys only, no language
 /// grammar.
-pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-JPK-GRANTSCHEMA1
+pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
 /// D-MEM-GUARANTEE1=A: package-only dependency containment policy. These
 /// fields intentionally do not enter the source `PolicyKey` registry.
 pub const POLICY_FIELD_CONTAIN: &str = "contain";
 pub const POLICY_FIELD_HARDEN: &str = "harden";
-pub const POLICY_FIELD_TRUST: &str = "trust"; // D-JPK-GRANTSCHEMA1
+/// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
+/// provider authority live under the one `authority: .{ … }` block.
+pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_FIELD_TRUST: &str = "trust"; // D-BOUND-PROV1
 /// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
-pub const POLICY_FIELD_PROVIDERS: &str = "providers";
+pub const AUTHORITY_FIELD_PROVIDERS: &str = "providers";
 pub const PROVIDER_FIELD_REGISTRY: &str = "registry";
 pub const PROVIDER_FIELD_ALLOW: &str = "allow";
 pub const PROVIDER_FIELD_DENY: &str = "deny";
-pub const POLICY_TRUST_FIELD_DEFAULT: &str = "default"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_FIELD_CI: &str = "ci"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_FIELD_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_FIELD_SERVICES: &str = "services"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_DECISION_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_DECISION_DENY: &str = "deny"; // D-JPK-GRANTSCHEMA1
-pub const POLICY_TRUST_DECISION_ALLOW: &str = "allow"; // D-JPK-GRANTSCHEMA1
+pub const AUTHORITY_TRUST_FIELD_DEFAULT: &str = "default"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_FIELD_CI: &str = "ci"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_FIELD_PROMPT: &str = "prompt"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_FIELD_SERVICES: &str = "services"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_FIELD_REQUIRE: &str = "require"; // D-BOUND-PROV1
+pub const AUTHORITY_TRUST_REQUIRE_NONE: &str = "none"; // D-BOUND-PROV1
+pub const AUTHORITY_TRUST_REQUIRE_LOGGED: &str = "logged"; // D-BOUND-PROV1
+pub const AUTHORITY_TRUST_REQUIRE_ATTESTED: &str = "attested"; // D-BOUND-PROV1
+pub const AUTHORITY_TRUST_DECISION_PROMPT: &str = "prompt"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_DECISION_DENY: &str = "deny"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_TRUST_DECISION_ALLOW: &str = "allow"; // D-AUTHORITY-MANIFEST1
 /// D-LINTPOLICY1=A (the override law, card #505): the `policy: { lints: { … } }`
-/// sub-block, joining `trust` under the one `policy:` namespace
-/// (D-JPK-POLICYSURFACE1). Warnings never fail a build by default (I1 memory/
-/// type safety is never in scope here); a team opts into a wall by naming
-/// stable lints here. Manifest keys only, no language grammar.
+/// sub-block. Warnings never fail a build by default (I1 memory/type safety is
+/// never in scope here); a team opts into a wall by naming stable lints here.
+/// Manifest keys only, no language grammar.
 pub const POLICY_FIELD_LINTS: &str = "lints"; // D-LINTPOLICY1
 /// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — stable lint
 /// names (e.g. `float_money`) that fail the build when they fire, instead of

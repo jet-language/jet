@@ -1034,8 +1034,8 @@ fn gate_with_hash(
                 theme.error_coded(
                     "E1255",
                     "this project's trust policy denies the environment grant",
-                    "`policy.trust` is source-reviewed and told Jet not to prompt for this authority",
-                    "change `policy.trust` to `prompt`/`allow`, pass `--trust` for this one run, or remove the trust-sensitive env facts.",
+                    "`authority.trust` is source-reviewed and told Jet not to prompt for this authority",
+                    "change `authority.trust` to `prompt`/`allow`, pass `--trust` for this one run, or remove the trust-sensitive env facts.",
                 );
                 return Err(2);
             }
@@ -1109,7 +1109,7 @@ fn gate_with_hash(
 fn project_trust_policy(project_dir: &Path) -> Option<super::Package::TrustPolicy> {
     super::Package::PackageFacts::load(project_dir)
         .and_then(Result::ok)
-        .and_then(|m| m.policy.trust)
+        .and_then(|m| m.authority.trust)
 }
 
 /// A stable hash over a foreign flake/devenv file's content (U16) — the same
@@ -1349,17 +1349,17 @@ mod tests {
     }
 
     #[test]
-    fn policy_trust_default_allow_and_deny_feed_gate() {
+    fn authority_trust_default_allow_and_deny_feed_gate() {
         let allow_dir = scratch("policy_allow");
         std::fs::write(
             allow_dir.join(Syntax::PAYLOAD_FILE),
-            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: allow } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{ trust: { default: allow } }\n",
         )
         .unwrap();
         let deny_dir = scratch("policy_deny");
         std::fs::write(
             deny_dir.join(Syntax::PAYLOAD_FILE),
-            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: deny } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{ trust: { default: deny } }\n",
         )
         .unwrap();
         let refs = [ref_spec("fastfetch@nixpkgs")];

@@ -366,6 +366,7 @@ mod tests {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope: None,
+            provenance: None,
         }
     }
 

@@ -4,7 +4,8 @@
 //! for programs Jet cannot compile safely or unambiguously (I1 memory/type
 //! safety is never in scope here; it has no override). A team opts into a
 //! wall through the one policy surface: `policy: { lints: { deny: […] } }`
-//! in `package.jet` (joining `policy.trust` under D-JPK-POLICYSURFACE1). When a
+//! in `package.jet` (alongside `authority.trust` under the ratified authority
+//! model). When a
 //! denied lint fires, the build fails naming the exact lint and site instead
 //! of only printing a warning — the bypass a solo run would have taken is
 //! recorded as a build failure instead, never a silent downgrade.

@@ -205,7 +205,7 @@ fn ensure_locked_authority(
         Err(ProviderError::Registry(
             provider,
             format!(
-                "locked provider authority does not match current policy.providers (locked repository `{repository}`, current `{}`)",
+                "locked provider authority does not match current authority.providers (locked repository `{repository}`, current `{}`)",
                 current.registry()
             ),
         ))

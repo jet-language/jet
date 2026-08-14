@@ -1159,6 +1159,18 @@ The holder extends D-MIGRATE1/D-MIGRATE4 bookkeeping and does not change
 known-field decoding, marker behavior, or FieldError diagnostics. Grid cell:
 run / wire value.
 
+**D-BOUND-PROV1=A — dependency provenance has one read surface** (ratified
+2026-08-07): `jet inspect provenance` reads one lock-backed record per
+dependency. The record shows the locked integrity hash, transparency entry,
+publisher identity, and build attestation. Integrity remains enforced by
+E1204. Other evidence is shown as `verified` or `recorded` when present and
+is not required by default. The package may select one floor in the existing
+authority block: `authority: .{ trust: { require: none|logged|attested } }`.
+`none` is the default, `logged` requires transparency evidence, and `attested`
+requires build-attestation evidence. This amends D-AUTHORITY-MANIFEST1's trust
+block with `require:`. Human and JSON output read the same record; no second
+trust surface exists. Grid cell: build / dependency.
+
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a

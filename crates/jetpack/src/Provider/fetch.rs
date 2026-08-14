@@ -53,10 +53,10 @@ impl Authority {
             .project_dir
             .and_then(PackageFacts::load)
             .transpose()
-            .map_err(|error| format!("could not parse policy.providers: {error:?}"))?
+            .map_err(|error| format!("could not parse authority.providers: {error:?}"))?
             .and_then(|manifest| {
                 manifest
-                    .policy
+                    .authority
                     .providers
                     .into_iter()
                     .find(|authority| authority.provider == provider)
@@ -86,7 +86,7 @@ impl Authority {
         }
         if normalized_deny.iter().any(|value| normalized_allow.contains(value)) {
             return Err(format!(
-                "policy.providers.{provider} denies an explicitly allowed authority"
+                "authority.providers.{provider} denies an explicitly allowed authority"
             ));
         }
         let curl = if require_curl {
@@ -194,7 +194,7 @@ impl Authority {
         let authority = authority_of(url)?;
         if self.deny.contains(&authority) || !self.allow.contains(&authority) {
             return Err(format!(
-                "policy.providers.{} does not authorize `{authority}`",
+                "authority.providers.{} does not authorize `{authority}`",
                 self.provider
             ));
         }

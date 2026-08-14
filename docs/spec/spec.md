@@ -2665,18 +2665,25 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `jet trust grant <grant> [--scope user|repo]` records a reviewed local grant;
   `jet trust revoke <grant>` removes it so the next risky action asks again.
   The store remains backward-compatible with U19 `hash:` and `pattern:` lines.
-  `package.jet` may carry reviewed source policy as
-  `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
-  Policy decisions are `allow`, `prompt`, or `deny`; unknown fields are a
-  manifest error.
+  `package.jet` may carry reviewed source authority as
+  `authority: .{ trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested }, providers: { … } }`.
+  Trust decisions are `allow`, `prompt`, or `deny`. The provenance requirement
+  is `none`, `logged`, or `attested`; absent `require` means `none`. Unknown
+  fields are a manifest error.
+- **Dependency provenance (D-BOUND-PROV1):** `jet inspect provenance` reads
+  the one lock-backed record for each dependency. It shows the locked
+  integrity hash, transparency entry, publisher identity, and build
+  attestation. Integrity stays enforced by E1204. Other fields show
+  `verified` or `recorded` when present. `authority.trust.require` can require
+  logged or attested evidence during dependency resolution.
 - **The override law (D-LINTPOLICY1=A):** warnings and lints never fail a
   build by default — errors stay reserved for programs Jet cannot compile
   safely or unambiguously (I1 memory/type safety has no override and is
   outside this law). Every bypass is spelled at the site or on the command
   line, never in hidden config, and lands in the audit record (`jet inspect
   dossier`, effect-budget provenance, build facts). Walls are team policy
-  only: `package.jet`'s `policy: { lints: { deny: […] } }` joins `policy.trust`
-  under the one `policy:` namespace (D-JPK-POLICYSURFACE1) — `deny:` lists
+  only: `package.jet`'s `policy: { lints: { deny: […] } }` stays under the
+  `policy:` namespace alongside `authority.trust` (D-JPK-POLICYSURFACE1) — `deny:` lists
   stable lint names (e.g. `float_money`), and a lint that fires while its name is listed
   fails the build with E1293 instead of only warning. Absent entirely, every
   lint stays a warning (I1/D-LINTPOLICY1 default); host/org policy narrows,

@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn inspect_provenance_human_and_json_agree() {
+    let dir = isolated_cwd("inspect_provenance");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"provenance\"\nversion: \"0.1.0\"\nauthority: .{ trust: { require: attested } }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join(".jet")).unwrap();
+    fs::write(
+        dir.join(".jet/lock"),
+        r#"version = 1
+
+[[package]]
+name = "provenance"
+version = "0.1.0"
+source = { root = "." }
+fingerprint = "fp-root"
+dependencies = ["textkit"]
+
+[[package]]
+name = "textkit"
+version = "1.2.0"
+source = { registry = "main", reference = "textkit#1.2.0", output = ".jet/store/textkit", source-hash = "sha256-source", repository = "https://registry.example.test", authority = "jet-registry-index" }
+fingerprint = "sha256-plan"
+content-hash = "sha256:4be1…"
+dependencies = []
+provenance-transparency = "logged 2026-08-01, registry log #48122"
+provenance-publisher = "ed25519:ak3f… \"textkit team\""
+provenance-build = "slsa v1.0 — github.com/acme/textkit@8c00d1"
+
+[root]
+dependencies = ["textkit"]
+"#,
+    )
+    .unwrap();
+
+    let human = Command::new(jet())
+        .args(["inspect", "provenance"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    let human = String::from_utf8(human.stdout).unwrap();
+    assert!(human.contains("sha256:4be1…") && human.contains("logged 2026-08-01") && human.contains("ed25519:ak3f… \"textkit team\"") && human.contains("slsa v1.0"), "{human}");
+    assert!(human.contains("enforced") && human.contains("verified") && human.contains("recorded"), "{human}");
+    check_snapshot("inspect_provenance.txt", &human);
+
+    let json = Command::new(jet())
+        .args(["inspect", "provenance", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    let json = String::from_utf8(json.stdout).unwrap();
+    assert!(parse_json(&json).is_ok(), "provenance report JSON must parse: {json}");
+    for field in ["integrity", "transparency", "publisher", "build"] {
+        assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
+    }
+    assert!(json.contains("\"evidence\":\"E1204\"") && json.contains("\"status\":\"enforced\""), "{json}");
+    check_snapshot("inspect_provenance.json", &json);
+}
+
+#[test]
 fn perl_bind_launders_parse_failure_as_e3208() {
     if Command::new("perl").arg("-v").output().is_err(){return}
     let dir=isolated_cwd("perl_bind_invalid");let script=dir.join("broken.pl");fs::write(&script,"sub Broken { if ( }\n").unwrap();

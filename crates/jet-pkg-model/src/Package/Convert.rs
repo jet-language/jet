@@ -68,6 +68,7 @@ pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::M
             repository: facts.repository.clone(),
             layer: facts.layer,
         },
+        authority: facts.authority.clone(),
         dependencies,
         dependencies_rust: BTreeMap::new(),
         raw: raw.to_string(),

@@ -269,6 +269,7 @@ fn lock_roundtrip_layer_metadata() {
         effects: vec![],
         effect_grants: vec![],
         envelope: None,
+        provenance: None,
     };
     let lock = LockFile {
         version: 1,

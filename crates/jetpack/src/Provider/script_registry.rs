@@ -1895,7 +1895,7 @@ mod tests {
         let write_policy = |registry: &Path, allow: &str, deny: &str| {
             fs::write(&manifest, format!(r#"name: "p"
 version: "1"
-policy: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], deny: [{deny}] }} }} }}
+authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], deny: [{deny}] }} }} }}
 "#, registry.display())).unwrap();
         };
         write_policy(&repo, "\"dist.example.test\"", "");

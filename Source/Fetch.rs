@@ -70,6 +70,9 @@ pub fn fetch(
         if let Err(d) = Lock::verify_all_manifest_deps_locked(manifest, lock) {
             return Err(vec![d]);
         }
+        if let Err(d) = enforce_provenance_policy(lock, manifest) {
+            return Err(vec![d]);
+        }
         let dep_dirs = build_dep_dirs_from_lock(lock, project_root, manifest)?;
         return Ok((lock.clone(), dep_dirs));
     }
@@ -77,6 +80,9 @@ pub fn fetch(
     // Resolve the full dependency graph.
     let mut resolver = Resolver::new(project_root, existing_lock, opts);
     let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
+    if let Err(d) = enforce_provenance_policy(&new_lock, manifest) {
+        return Err(vec![d]);
+    }
     Lock::ensure_build_stamp(project_root, &mut new_lock);
 
     // Write the lock file, inside the project's `.jet/` managed folder (U2).
@@ -106,6 +112,27 @@ pub fn fetch(
     Ok((new_lock, dep_dirs))
 }
 
+fn enforce_provenance_policy(
+    lock: &LockFile,
+    manifest: &Manifest,
+) -> Result<(), Diagnostic> {
+    let requirement = manifest
+        .authority
+        .trust
+        .as_ref()
+        .and_then(|trust| trust.require)
+        .unwrap_or(crate::Package::ProvenanceRequirement::None);
+    Lock::enforce_provenance_requirement(lock, requirement).map_err(|error| {
+        Diagnostic::error(
+            "E1207",
+            error,
+            "authority.trust.require is an explicit provenance floor; Jet will not silently downgrade it",
+            "record the required transparency or build evidence, or set `authority: .{ trust: { require: none } }`",
+            None,
+        )
+    })
+}
+
 // ──────────────────────────────────────────────
 // Resolver
 // ──────────────────────────────────────────────
@@ -114,7 +141,7 @@ struct Resolver<'a> {
     project_root: &'a Path,
     existing_lock: Option<&'a LockFile>,
     opts: &'a FetchOptions,
-    /// name → (version, source_dir, fingerprint, deps)
+    /// name → (version, source_dir, fingerprint, content hash, deps, provenance)
     resolved: BTreeMap<String, ResolvedPkg>,
     /// name → Vec<chain> — for E1201 blame chains.
     version_seen: HashMap<String, (String, Vec<String>)>,
@@ -125,8 +152,10 @@ struct ResolvedPkg {
     source: Lock::LockSource,
     locked: Option<LockedRevision>,
     fingerprint: String,
+    content_hash: Option<String>,
     deps: Vec<String>,
     source_dir: PathBuf,
+    provenance: Option<Lock::DependencyProvenance>,
 }
 
 impl<'a> Resolver<'a> {
@@ -179,6 +208,7 @@ impl<'a> Resolver<'a> {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope: None,
+            provenance: None,
         });
 
         // Dependency packages in stable order.
@@ -189,13 +219,14 @@ impl<'a> Resolver<'a> {
                 source: pkg.source.clone(),
                 locked: pkg.locked.clone(),
                 fingerprint: pkg.fingerprint.clone(),
-                content_hash: None,
+                content_hash: pkg.content_hash.clone(),
                 dependencies: pkg.deps.clone(),
                 layer: None,
                 inferred_layer: None,
                 effects: Vec::new(),
                 effect_grants: Vec::new(),
                 envelope: None,
+                provenance: pkg.provenance.clone(),
             });
         }
 
@@ -323,7 +354,6 @@ impl<'a> Resolver<'a> {
                 let (store_path, content_hash) =
                     Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
                         .map_err(|d| vec![d])?;
-                let _ = content_hash; // recorded in lock on next `jet fetch` pass
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
                 // recorded content hash before it is linked into the build.
@@ -336,6 +366,11 @@ impl<'a> Resolver<'a> {
                     .join("deps")
                     .join(dep_name);
                 Store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
+                let provenance = self.existing_provenance(
+                    dep_name,
+                    &dep_version,
+                    &content_hash,
+                );
 
                 self.resolved.insert(
                     dep_name.to_string(),
@@ -344,8 +379,10 @@ impl<'a> Resolver<'a> {
                         source: LockSource::Path(path.clone()),
                         locked: None,
                         fingerprint: fp,
+                        content_hash: Some(content_hash),
                         deps: trans_deps,
                         source_dir: abs_path,
+                        provenance,
                     },
                 );
             }
@@ -440,6 +477,11 @@ impl<'a> Resolver<'a> {
                     tree_hash: git_tree_hash.clone(),
                     last_modified: unix_now(),
                 };
+                let provenance = self.existing_provenance(
+                    dep_name,
+                    &dep_version,
+                    &git_tree_hash,
+                );
 
                 self.resolved.insert(
                     dep_name.to_string(),
@@ -451,8 +493,10 @@ impl<'a> Resolver<'a> {
                         },
                         locked: Some(locked),
                         fingerprint: fp,
+                        content_hash: Some(git_tree_hash.clone()),
                         deps: trans_deps,
                         source_dir: clone_dir,
+                        provenance,
                     },
                 );
             }
@@ -513,6 +557,9 @@ impl<'a> Resolver<'a> {
                     )]);
                 }
                 let dep_version = selected.version.clone();
+                let content_hash = selected.content_hash.clone();
+                let publisher = (!selected.public_key.is_empty() && !selected.signature.is_empty())
+                    .then(|| format!("ed25519:{}", selected.public_key));
                 if let Some((prev_ver, prev_chain)) =
                     self.version_seen.get(dep_name).cloned()
                 {
@@ -544,7 +591,7 @@ impl<'a> Resolver<'a> {
                     .filter_map(|dep| self.resolved.get(dep).map(|pkg| pkg.fingerprint.as_str()))
                     .collect();
                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&artifact);
-                let fp = Lock::compute_fingerprint(&selected.content_hash, &dep_fps, &cap_digest);
+                let fp = Lock::compute_fingerprint(&content_hash, &dep_fps, &cap_digest);
                 let (store_path, _content_hash) = Store::ensure_path_dep(
                     dep_name,
                     &dep_version,
@@ -552,7 +599,7 @@ impl<'a> Resolver<'a> {
                     &artifact,
                 )
                 .map_err(|diagnostic| vec![diagnostic])?;
-                Store::verify_entry(dep_name, &store_path, &selected.content_hash)
+                Store::verify_entry(dep_name, &store_path, &content_hash)
                     .map_err(|diagnostic| vec![diagnostic])?;
                 let link_dir = self
                     .project_root
@@ -560,6 +607,16 @@ impl<'a> Resolver<'a> {
                     .join("deps")
                     .join(dep_name);
                 Store::link_into_project(&store_path, &link_dir).map_err(|diagnostic| vec![diagnostic])?;
+                let mut provenance = self
+                    .existing_provenance(dep_name, &dep_version, &content_hash)
+                    .unwrap_or_default();
+                if let Some(publisher) = publisher {
+                    provenance.publisher = Some(publisher);
+                }
+                let provenance = (provenance.transparency.is_some()
+                    || provenance.publisher.is_some()
+                    || provenance.build.is_some())
+                .then_some(provenance);
                 self.resolved.insert(
                     dep_name.to_string(),
                     ResolvedPkg {
@@ -568,14 +625,16 @@ impl<'a> Resolver<'a> {
                             registry: registry.name,
                             reference: format!("{}#{}", selected.name, selected.version),
                             output: store_path.to_string_lossy().into_owned(),
-                            source_hash: selected.content_hash,
+                            source_hash: content_hash.clone(),
                             repository: registry.url,
                             authority: "jet-registry-index".to_string(),
                         },
                         locked: None,
                         fingerprint: fp,
+                        content_hash: Some(content_hash),
                         deps: trans_deps,
                         source_dir: artifact,
+                        provenance,
                     },
                 );
             }
@@ -642,6 +701,23 @@ impl<'a> Resolver<'a> {
 
     fn should_update(&self, dep_name: &str) -> bool {
         self.opts.update_dep.as_deref() == Some(dep_name)
+    }
+
+    fn existing_provenance(
+        &self,
+        dep_name: &str,
+        version: &str,
+        content_hash: &str,
+    ) -> Option<Lock::DependencyProvenance> {
+        self.existing_lock?
+            .packages
+            .iter()
+            .find(|package| {
+                package.name == dep_name
+                    && package.version == version
+                    && package.provenance_report().integrity.value == content_hash
+            })
+            .and_then(|package| package.provenance.clone())
     }
 
     fn find_locked_rev(&self, dep_name: &str) -> Option<String> {

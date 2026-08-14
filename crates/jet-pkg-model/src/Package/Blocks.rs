@@ -1,9 +1,11 @@
 //! Structural sub-parsers for the `deps:`, `packages:`, `build:`, `effects:`,
-//! `grants:` and `policy:` blocks of the ratified `package.jet` vocabulary
+//! `grants:`, `authority:`, and `policy:` blocks of the ratified `package.jet`
+//! vocabulary
 //! (D-CONF-PLANE1, D-CONF-NAME1). These blocks carry semantics ratified by
 //! their own, separate decisions (D-JPK23, D-TGT1/D-TGT2/D-TGT3, D-CFFI2,
-//! D-BUILDPROFILE1, D-CTEFFECT1, D-EFFBUDGET1, D-JPK-GRANTSCHEMA1,
-//! D-JPK-PROVIDERAUTH1, D-LINTPOLICY1, D-PACKAGE-POLICY-SCOPE1,
+//! D-BUILDPROFILE1, D-CTEFFECT1, D-EFFBUDGET1, D-AUTHORITY-MANIFEST1,
+//! D-BOUND-PROV1, D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
+//! D-PACKAGE-POLICY-SCOPE1,
 //! D-ONCE-AUTODERIVE1) — this module is the single reader for all of them, so
 //! `package.jet` never again has two parsers for one fact.
 
@@ -721,7 +723,8 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
     Ok(names)
 }
 
-// ── policy: … (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
+// ── authority: … / policy: … (D-AUTHORITY-MANIFEST1, D-BOUND-PROV1,
+//    D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
 //    D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1) ──────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -736,6 +739,25 @@ pub struct TrustPolicy {
     pub default: Option<TrustDecision>,
     pub ci_prompt: Option<TrustDecision>,
     pub services: Vec<(String, TrustDecision)>,
+    /// D-BOUND-PROV1: optional provenance floor for dependency resolution.
+    pub require: Option<ProvenanceRequirement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvenanceRequirement {
+    None,
+    Logged,
+    Attested,
+}
+
+impl ProvenanceRequirement {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => Syntax::AUTHORITY_TRUST_REQUIRE_NONE,
+            Self::Logged => Syntax::AUTHORITY_TRUST_REQUIRE_LOGGED,
+            Self::Attested => Syntax::AUTHORITY_TRUST_REQUIRE_ATTESTED,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -746,77 +768,94 @@ pub struct ProviderAuthority {
     pub deny: Vec<String>,
 }
 
-pub(super) fn parse_trust_policy(body: &str) -> Result<Option<TrustPolicy>, PackageParseError> {
-    let Some(trust_body) = block_body(body, Syntax::POLICY_FIELD_TRUST, '{', '}') else {
+pub(super) fn parse_authority_trust(body: &str) -> Result<Option<TrustPolicy>, PackageParseError> {
+    let Some(trust_body) = block_body(body, Syntax::AUTHORITY_FIELD_TRUST, '{', '}') else {
         return Ok(None);
     };
     let mut policy = TrustPolicy::default();
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(&trust_body)? {
         if !seen.insert(key.clone()) {
-            return Err(err(format!("policy.trust.{key} is declared more than once")));
+            return Err(err(format!("authority.trust.{key} is declared more than once")));
         }
-        if key == Syntax::POLICY_TRUST_FIELD_DEFAULT {
+        if key == Syntax::AUTHORITY_TRUST_FIELD_DEFAULT {
             policy.default = Some(parse_trust_decision(&value)?);
-        } else if key == Syntax::POLICY_TRUST_FIELD_CI {
+        } else if key == Syntax::AUTHORITY_TRUST_FIELD_CI {
             policy.ci_prompt = Some(parse_ci_trust_prompt(&value)?);
-        } else if key == Syntax::POLICY_TRUST_FIELD_SERVICES {
+        } else if key == Syntax::AUTHORITY_TRUST_FIELD_SERVICES {
             policy.services = parse_service_trust(&value)?;
+        } else if key == Syntax::AUTHORITY_TRUST_FIELD_REQUIRE {
+            policy.require = Some(parse_provenance_requirement(&value)?);
         } else {
             return Err(err(format!(
-                "unknown `policy.trust` field `{key}` — allowed: `{}`, `{}`, `{}`",
-                Syntax::POLICY_TRUST_FIELD_DEFAULT,
-                Syntax::POLICY_TRUST_FIELD_CI,
-                Syntax::POLICY_TRUST_FIELD_SERVICES,
+                "unknown `authority.trust` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`",
+                Syntax::AUTHORITY_TRUST_FIELD_DEFAULT,
+                Syntax::AUTHORITY_TRUST_FIELD_CI,
+                Syntax::AUTHORITY_TRUST_FIELD_SERVICES,
+                Syntax::AUTHORITY_TRUST_FIELD_REQUIRE,
             )));
         }
     }
     Ok(Some(policy))
 }
 
-pub(super) fn parse_provider_policy(body: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
-    let Some(providers) = block_body(body, Syntax::POLICY_FIELD_PROVIDERS, '{', '}') else {
+pub(super) fn parse_provider_authority(body: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
+    let Some(providers) = block_body(body, Syntax::AUTHORITY_FIELD_PROVIDERS, '{', '}') else {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
     let mut seen_providers = HashSet::new();
     for (provider, value) in key_value_entries(&providers)? {
         if !seen_providers.insert(provider.clone()) {
-            return Err(err(format!("policy.providers.{provider} is declared more than once")));
+            return Err(err(format!("authority.providers.{provider} is declared more than once")));
         }
         let authority = value
             .trim()
             .strip_prefix('{')
             .and_then(|value| value.strip_suffix('}'))
-            .ok_or_else(|| err(format!("policy.providers.{provider} must be an authority object")))?;
+            .ok_or_else(|| err(format!("authority.providers.{provider} must be an authority object")))?;
         let mut registry = None;
         let mut allow = Vec::new();
         let mut deny = Vec::new();
         let mut seen_fields = HashSet::new();
         for (field, value) in key_value_entries(authority)? {
             if !seen_fields.insert(field.clone()) {
-                return Err(err(format!("policy.providers.{provider}.{field} is declared more than once")));
+                return Err(err(format!("authority.providers.{provider}.{field} is declared more than once")));
             }
             if field == Syntax::PROVIDER_FIELD_REGISTRY {
                 let value = value.trim();
                 if !value.starts_with('"') || !value.ends_with('"') || value.len() < 2 {
-                    return Err(err(format!("policy.providers.{provider}.registry must be a string")));
+                    return Err(err(format!("authority.providers.{provider}.registry must be a string")));
                 }
                 registry = Some(unquote(value));
             } else if field == Syntax::PROVIDER_FIELD_ALLOW {
                 allow = parse_string_list(&value)
-                    .map_err(|_| err(format!("policy.providers.{provider}.allow must be a list")))?;
+                    .map_err(|_| err(format!("authority.providers.{provider}.allow must be a list")))?;
             } else if field == Syntax::PROVIDER_FIELD_DENY {
                 deny = parse_string_list(&value)
-                    .map_err(|_| err(format!("policy.providers.{provider}.deny must be a list")))?;
+                    .map_err(|_| err(format!("authority.providers.{provider}.deny must be a list")))?;
             } else {
-                return Err(err(format!("unknown policy.providers.{provider} field `{field}`")));
+                return Err(err(format!("unknown authority.providers.{provider} field `{field}`")));
             }
         }
-        let registry = registry.ok_or_else(|| err(format!("policy.providers.{provider} needs registry")))?;
+        let registry = registry.ok_or_else(|| err(format!("authority.providers.{provider} needs registry")))?;
         out.push(ProviderAuthority { provider, registry, allow, deny });
     }
     Ok(out)
+}
+
+fn parse_provenance_requirement(value: &str) -> Result<ProvenanceRequirement, PackageParseError> {
+    match unquote(value).as_str() {
+        v if v == Syntax::AUTHORITY_TRUST_REQUIRE_NONE => Ok(ProvenanceRequirement::None),
+        v if v == Syntax::AUTHORITY_TRUST_REQUIRE_LOGGED => Ok(ProvenanceRequirement::Logged),
+        v if v == Syntax::AUTHORITY_TRUST_REQUIRE_ATTESTED => Ok(ProvenanceRequirement::Attested),
+        other => Err(err(format!(
+            "`authority.trust.require` must be `{}`, `{}`, or `{}`, not `{other}`",
+            Syntax::AUTHORITY_TRUST_REQUIRE_NONE,
+            Syntax::AUTHORITY_TRUST_REQUIRE_LOGGED,
+            Syntax::AUTHORITY_TRUST_REQUIRE_ATTESTED,
+        ))),
+    }
 }
 
 fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, PackageParseError> {
@@ -825,19 +864,19 @@ fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, PackageParseError
     let body = value
         .strip_prefix('{')
         .and_then(|s| s.strip_suffix('}'))
-        .ok_or_else(|| err("`policy.trust.ci` must be `{ prompt: allow|prompt|deny }`"))?;
+        .ok_or_else(|| err("`authority.trust.ci` must be `{ prompt: allow|prompt|deny }`"))?;
     let mut prompt = None;
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body)? {
         if !seen.insert(key.clone()) {
-            return Err(err(format!("policy.trust.ci.{key} is declared more than once")));
+            return Err(err(format!("authority.trust.ci.{key} is declared more than once")));
         }
-        if key != Syntax::POLICY_TRUST_FIELD_PROMPT {
-            return Err(err(format!("unknown `policy.trust.ci` field `{key}` — allowed: `prompt`")));
+        if key != Syntax::AUTHORITY_TRUST_FIELD_PROMPT {
+            return Err(err(format!("unknown `authority.trust.ci` field `{key}` — allowed: `prompt`")));
         }
         prompt = Some(parse_trust_decision(&value)?);
     }
-    prompt.ok_or_else(|| err("`policy.trust.ci` needs `prompt:`"))
+    prompt.ok_or_else(|| err("`authority.trust.ci` needs `prompt:`"))
 }
 
 fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, PackageParseError> {
@@ -846,12 +885,12 @@ fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, Pack
     let body = value
         .strip_prefix('{')
         .and_then(|s| s.strip_suffix('}'))
-        .ok_or_else(|| err("`policy.trust.services` must be `{ name: allow|prompt|deny }`"))?;
+        .ok_or_else(|| err("`authority.trust.services` must be `{ name: allow|prompt|deny }`"))?;
     let mut services = Vec::new();
     let mut seen = HashSet::new();
     for (name, value) in key_value_entries(body)? {
         if !seen.insert(name.clone()) {
-            return Err(err(format!("policy.trust.services.{name} is declared more than once")));
+            return Err(err(format!("authority.trust.services.{name} is declared more than once")));
         }
         services.push((name, parse_trust_decision(&value)?));
     }
@@ -860,9 +899,9 @@ fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, Pack
 
 fn parse_trust_decision(value: &str) -> Result<TrustDecision, PackageParseError> {
     match unquote(value).as_str() {
-        v if v == Syntax::POLICY_TRUST_DECISION_ALLOW => Ok(TrustDecision::Allow),
-        v if v == Syntax::POLICY_TRUST_DECISION_PROMPT => Ok(TrustDecision::Prompt),
-        v if v == Syntax::POLICY_TRUST_DECISION_DENY => Ok(TrustDecision::Deny),
+        v if v == Syntax::AUTHORITY_TRUST_DECISION_ALLOW => Ok(TrustDecision::Allow),
+        v if v == Syntax::AUTHORITY_TRUST_DECISION_PROMPT => Ok(TrustDecision::Prompt),
+        v if v == Syntax::AUTHORITY_TRUST_DECISION_DENY => Ok(TrustDecision::Deny),
         other => Err(err(format!("`{other}` is not a trust decision — use `allow`, `prompt`, or `deny`"))),
     }
 }
@@ -879,7 +918,7 @@ pub(super) fn parse_memory_policy(
     let mut seen = HashSet::new();
     for (name, raw) in key_value_entries(body)? {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
-            if matches!(name.as_str(), "trust" | "lints" | "providers")
+            if name == "lints"
                 || (package_only_fields
                     && (name == Syntax::POLICY_FIELD_CONTAIN
                         || name == Syntax::POLICY_FIELD_HARDEN))
@@ -1021,6 +1060,7 @@ const MANIFEST_BLOCKS: &[&str] = &[
     Syntax::MANIFEST_BLOCK_BUILD,
     Syntax::MANIFEST_BLOCK_EFFECTS,
     Syntax::MANIFEST_BLOCK_GRANTS,
+    Syntax::MANIFEST_BLOCK_AUTHORITY,
     Syntax::MANIFEST_BLOCK_POLICY,
     "dev_deps",
     "patch",

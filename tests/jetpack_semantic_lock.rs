@@ -4,6 +4,8 @@
 mod common;
 
 use jetpack::Overlay::{self, OverlayPolicy, OverlaySet, PackageOverride};
+use jetpack::Lock::{self, DependencyProvenance};
+use jetpack::Package::ProvenanceRequirement;
 use jetpack::SemanticLock::{
     self, apply_overlay_invalidations, atomic_commit, load, merge, merge_revalidate_commit,
     overlay_invalidations, record_catalog_selection, revalidate, selective_update,
@@ -49,6 +51,70 @@ fn pkg(owner: &str, key: &str, exact: &str, hash: &str) -> SemanticRecord {
             update_command: format!("jet update {key}"),
         },
     )
+}
+
+#[test]
+fn provenance_policy_none_logged_attested_and_e1204() {
+    for (spelling, expected) in [
+        ("none", ProvenanceRequirement::None),
+        ("logged", ProvenanceRequirement::Logged),
+        ("attested", ProvenanceRequirement::Attested),
+    ] {
+        let facts = jetpack::Package::PackageFacts::parse(
+            &format!(
+                "name: \"app\"\nversion: \"0.1.0\"\nauthority: .{{ trust: {{ require: {spelling} }} }}\n"
+            ),
+            "test",
+        )
+        .expect("authority provenance requirement should parse");
+        assert_eq!(facts.authority.trust.unwrap().require, Some(expected));
+    }
+
+    let mut lock = Lock::parse(
+        r#"version = 1
+
+[[package]]
+name = "textkit"
+version = "1.2.0"
+source = { path = "textkit" }
+fingerprint = "fp-textkit"
+content-hash = "sha256-locked"
+dependencies = []
+
+[root]
+dependencies = ["textkit"]
+"#,
+    )
+    .expect("provenance lock fixture should parse");
+
+    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::None).is_ok());
+    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Logged).is_err());
+
+    lock.packages[0].provenance = Some(DependencyProvenance {
+        transparency: Some("registry log #48122".into()),
+        publisher: Some("ed25519:ak3f \"textkit team\"".into()),
+        build: None,
+    });
+    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Logged).is_ok());
+    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Attested).is_err());
+
+    lock.packages[0].provenance.as_mut().unwrap().build = Some("slsa v1.0".into());
+    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Attested).is_ok());
+    let encoded = Lock::write(&lock);
+    assert!(encoded.contains("provenance-transparency = \"registry log #48122\""));
+    assert!(encoded.contains("provenance-publisher = \"ed25519:ak3f \\\"textkit team\\\"\""));
+    assert!(encoded.contains("provenance-build = \"slsa v1.0\""));
+    let round_trip = Lock::parse(&encoded).expect("provenance fields should round-trip");
+    assert_eq!(round_trip.packages[0].provenance, lock.packages[0].provenance);
+
+    let root = unique_root("provenance-e1204");
+    let entry = root.join("textkit");
+    fs::create_dir_all(&entry).unwrap();
+    fs::write(entry.join("package.jet"), "name: \"textkit\"\nversion: \"1.2.0\"\n").unwrap();
+    let diagnostic = jet::Store::verify_content_hash("textkit", &entry, "sha256-not-the-tree")
+        .expect_err("a changed store entry must retain E1204");
+    assert_eq!(diagnostic.code, "E1204");
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

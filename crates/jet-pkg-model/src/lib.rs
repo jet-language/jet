@@ -22,7 +22,7 @@
 // `crate::Parser`, `crate::Sema` without cross-crate path changes — same
 // pattern `jetpack` itself already uses for `jet_codegen`'s re-exports.
 // `Sema` is needed to validate the closed effect vocabulary a `package.jet`
-// `policy: { trust:/lints: }` block names (jet-driver already depends on
+// `authority: { trust: }` and `policy: { lints: }` block names (jet-driver already depends on
 // Sema transitively through jet-codegen, so this adds nothing new to its
 // build graph — it is the compiler's checker, not Jetpack's engine).
 pub use jet_sema::{Diagnostics, Lexer, Parser, Policy, Sema, Syntax, AST, SHA256};

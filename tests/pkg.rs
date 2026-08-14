@@ -1226,11 +1226,11 @@ fn manifest_parse_grants_block() {
 }
 
 #[test]
-fn manifest_parse_policy_trust_block() {
+fn manifest_parse_authority_trust_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\npolicy: .{ trust: .{ default: prompt, ci: .{ prompt: deny }, services: .{ postgres: prompt } } }\n";
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("policy.trust block should parse");
-    let policy = pm.policy.trust.expect("trust policy should be stored");
+        + "\nauthority: .{ trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n";
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority.trust block should parse");
+    let policy = pm.authority.trust.expect("authority trust policy should be stored");
     assert_eq!(
         policy.default,
         Some(jetpack::Package::TrustDecision::Prompt)
@@ -1246,11 +1246,15 @@ fn manifest_parse_policy_trust_block() {
             jetpack::Package::TrustDecision::Prompt
         )]
     );
+    assert_eq!(
+        policy.require,
+        Some(jetpack::Package::ProvenanceRequirement::Attested)
+    );
 }
 
 #[test]
-fn manifest_policy_trust_rejects_unknown_decision() {
-    let raw = min_manifest("app", "0.1.0") + "\npolicy: .{ trust: .{ default: maybe } }\n";
+fn manifest_authority_trust_rejects_unknown_decision() {
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ trust: { default: maybe } }\n";
     let err =
         jetpack::Package::PackageFacts::parse(&raw, "test").expect_err("unknown trust decision should fail");
     assert!(matches!(
@@ -1950,6 +1954,7 @@ fn lock_file_content_hash_roundtrip() {
 
         effect_grants: vec![],
         envelope: None,
+        provenance: None,
     };
     let lock = LockFile {
         version: 1,
@@ -3258,6 +3263,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
 
             effect_grants: vec![],
             envelope: None,
+            provenance: None,
         }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],

@@ -227,10 +227,10 @@ json.encode(rec)                          // verified survives the round-trip
 
 ### 9. Provenance gets a surface and a default — D-BOUND-PROV1 *(implements ratified D-JPK-TRUSTROOT1=D; decides only the enforcement default and the read surface)*
 
-The trust machinery is typed and ratified — TUF roles, hybrid publisher identity, SLSA attestation — and verification is not live, with no way to see any of it. Provenance nobody can read is provenance nobody has. Everything below is proposed; today this command does not exist.
+The trust machinery is typed and ratified — TUF roles, hybrid publisher identity, SLSA attestation — and verification is not live, with no way to see any of it. Provenance nobody can read is provenance nobody has. D-BOUND-PROV1 adds the read surface and the manifest floor.
 
 ```sh
-$ jet inspect provenance textkit          # proposed
+$ jet inspect provenance textkit
 textkit 1.2.0
   integrity    sha256:4be1… — matches .jet/lock            (enforced, E1204)
   transparency logged 2026-08-01, registry log #48122      (verified)
@@ -238,11 +238,11 @@ textkit 1.2.0
   build        slsa v1.0 — github.com/acme/textkit@8c00d1  (recorded)
 ```
 
-The default the ballot decides: integrity stays enforced always (shipped), everything above it is **verified and shown when present, required only on request**. The expert requirement lives in the manifest's ratified authority block (D-AUTHORITY-MANIFEST1=A, #1570), whose trust vocabulary today is `trust: { default, ci, services }` with allow/prompt/deny values. The `require:` row below is a **named amendment** — new vocabulary inside that ratified block, and the same row is the refusal switch:
+The ratified default keeps integrity enforced always (E1204). Everything above it is **verified and shown when present, required only on request**. The expert requirement lives in the manifest's ratified authority block (D-AUTHORITY-MANIFEST1=A, #1570). Its `require:` row is a **named amendment** inside that block, and the same row is the refusal switch:
 
 ```jet
 authority: .{
-    trust: { require: attested }      // proposed amendment: fail resolve on unattested deps
+    trust: { require: attested }      // fail resolve on unattested deps
 }
 ```
 

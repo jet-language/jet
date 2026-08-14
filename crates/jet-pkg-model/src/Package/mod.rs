@@ -8,7 +8,7 @@
 //! 2026-08-06): the compile path (`jet-driver`), tooling, and Canvas all
 //! parse through `PackageFacts::parse`/`load`. There is no second,
 //! legacy-vocabulary parser — `deps:`/`packages:`/`build:`/`effects:`/
-//! `grants:`/`policy:` block grammar lives in `Blocks`.
+//! `grants:`/`authority:`/`policy:` block grammar lives in `Blocks`.
 
 pub mod Blocks;
 mod Convert;
@@ -17,8 +17,8 @@ mod Edit;
 
 pub use Blocks::{
     build_entry_source, dep_display, parse_policy_document, BuildOptimize, BuildPanic,
-    BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority, Target,
-    TrustDecision, TrustPolicy,
+    BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority,
+    ProvenanceRequirement, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
@@ -194,7 +194,11 @@ pub struct PackageFacts {
     pub effects_deny: Option<Vec<String>>,
     /// D-EFFBUDGET1: the audited per-dependency escape from `effects:`.
     pub grants: Vec<(String, Vec<String>)>,
-    /// D-POLICY-WORD1=A: the one governance namespace (`policy: .{ … }`).
+    /// D-AUTHORITY-MANIFEST1=A: the one source authority namespace
+    /// (`authority: .{ … }`).
+    pub authority: PackageAuthority,
+    /// D-POLICY-WORD1=A: package floors and memory governance
+    /// (`policy: .{ … }`).
     pub policy: PackagePolicy,
     /// D-CONF-MODULE1=A: typed settings declared in `settings: .{ … }`.
     /// The driver resolves their effective profile values into the shared
@@ -224,10 +228,6 @@ pub struct PackagePolicy {
     /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
     /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `sentries`).
     pub memory: Vec<crate::Policy::PolicyDeclaration>,
-    /// D-JPK-GRANTSCHEMA1=A: `policy.trust`.
-    pub trust: Option<Blocks::TrustPolicy>,
-    /// D-JPK-PROVIDERAUTH1=A: `policy.providers`.
-    pub providers: Vec<Blocks::ProviderAuthority>,
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).
     pub lints_deny: Option<Vec<String>>,
@@ -237,6 +237,14 @@ pub struct PackagePolicy {
     /// D-MEM-GUARANTEE1=A: keep sentries in release and contain every foreign
     /// dependency. This is a tighten-only switch.
     pub harden: bool,
+}
+
+/// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: authority facts are package
+/// scope and do not compose from Config files.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageAuthority {
+    pub trust: Option<Blocks::TrustPolicy>,
+    pub providers: Vec<Blocks::ProviderAuthority>,
 }
 
 impl PackagePolicy {
@@ -406,7 +414,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};policy_contain={:?};policy_harden={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};policy_contain={:?};policy_harden={:?};",
             self.name,
             self.version,
             self.jet,
@@ -420,6 +428,7 @@ impl PackageFacts {
             self.settings,
             self.configs,
             self.members,
+            self.authority,
             self.policy.contain,
             self.policy.harden,
         )
@@ -1712,14 +1721,20 @@ fn parse_common(
             }
             "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "grants" => facts.grants = Blocks::parse_grants(record_body(&value, "grants")?)?,
+            "authority" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "authority" => {
+                let body = record_body(&value, "authority")?;
+                facts.authority = PackageAuthority {
+                    trust: Blocks::parse_authority_trust(body)?,
+                    providers: Blocks::parse_provider_authority(body)?,
+                };
+            }
             "policy" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "policy" => {
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
                 facts.policy = PackagePolicy {
                     memory: Blocks::parse_memory_policy(body, true)?,
-                    trust: Blocks::parse_trust_policy(body)?,
-                    providers: Blocks::parse_provider_policy(body)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
                     contain,
                     harden,

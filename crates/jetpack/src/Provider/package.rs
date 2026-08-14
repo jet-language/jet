@@ -362,8 +362,16 @@ fn normalized_manifest_semantics(
     if let Some(effects) = &mut manifest.effects_deny {
         effects.sort();
     }
-    if let Some(policy) = &mut manifest.policy.trust {
+    if let Some(policy) = &mut manifest.authority.trust {
         policy.services.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    manifest
+        .authority
+        .providers
+        .sort_by(|left, right| left.provider.cmp(&right.provider));
+    for provider in &mut manifest.authority.providers {
+        provider.allow.sort();
+        provider.deny.sort();
     }
     format!("{manifest:?}")
 }

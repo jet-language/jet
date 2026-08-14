@@ -54,6 +54,181 @@ pub struct LockedPackage {
     /// the lock. `None` for a package that has not been realized yet or an
     /// older lock that predates the field (round-trips unchanged).
     pub envelope: Option<LockEnvelope>,
+    /// D-BOUND-PROV1: one inspectable dependency provenance record. The
+    /// integrity hash stays on the package/source identity; these fields are
+    /// the transparency, publisher, and build evidence above that floor.
+    pub provenance: Option<DependencyProvenance>,
+}
+
+/// D-BOUND-PROV1: evidence recorded once per locked dependency. Empty fields
+/// are meaningful: an unattested dependency remains resolvable by default, but
+/// `authority.trust.require` can require the missing rung.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DependencyProvenance {
+    pub transparency: Option<String>,
+    pub publisher: Option<String>,
+    pub build: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvenanceStatus {
+    Enforced,
+    Verified,
+    Recorded,
+}
+
+impl ProvenanceStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Enforced => "enforced",
+            Self::Verified => "verified",
+            Self::Recorded => "recorded",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvenanceField {
+    pub value: String,
+    pub status: ProvenanceStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyProvenanceReport {
+    pub name: String,
+    pub version: String,
+    pub integrity: ProvenanceField,
+    pub transparency: ProvenanceField,
+    pub publisher: ProvenanceField,
+    pub build: ProvenanceField,
+}
+
+impl LockedPackage {
+    /// Project one lock record into the single user-facing provenance view.
+    /// The projection never verifies a second way: integrity is the existing
+    /// E1204 floor, registry metadata is the existing verified source path,
+    /// and attestation remains recorded until its live verifier lands.
+    pub fn provenance_report(&self) -> DependencyProvenanceReport {
+        let locked_hash = self
+            .content_hash
+            .clone()
+            .or_else(|| self.locked.as_ref().map(|revision| revision.tree_hash.clone()))
+            .or_else(|| match &self.source {
+                LockSource::Cran { source_hash, .. }
+                | LockSource::LuaRocks { source_hash, .. }
+                | LockSource::Registry { source_hash, .. } => Some(source_hash.clone()),
+                LockSource::Nix { .. } => self
+                    .envelope
+                    .as_ref()
+                    .map(|envelope| envelope.output_hash.clone()),
+                LockSource::Root | LockSource::Path(_) | LockSource::Git { .. } => None,
+            })
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "not recorded".to_string());
+        let integrity_status = if locked_hash == "not recorded" {
+            ProvenanceStatus::Recorded
+        } else {
+            ProvenanceStatus::Enforced
+        };
+
+        let transparency = self
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.transparency.clone())
+            .filter(|value| !value.trim().is_empty());
+        let transparency = if let Some(value) = transparency {
+            ProvenanceField {
+                value,
+                status: ProvenanceStatus::Verified,
+            }
+        } else {
+            ProvenanceField {
+                value: "not recorded".to_string(),
+                status: ProvenanceStatus::Recorded,
+            }
+        };
+
+        let publisher = self
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.publisher.clone())
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| ProvenanceField {
+                value,
+                status: ProvenanceStatus::Verified,
+            })
+            .unwrap_or_else(|| ProvenanceField {
+                value: "not recorded".to_string(),
+                status: ProvenanceStatus::Recorded,
+            });
+
+        let build = self
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.build.clone())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.envelope
+                    .as_ref()
+                    .map(|envelope| envelope.provenance.clone())
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .map(|value| ProvenanceField {
+                value,
+                status: ProvenanceStatus::Recorded,
+            })
+            .unwrap_or_else(|| ProvenanceField {
+                value: "not recorded".to_string(),
+                status: ProvenanceStatus::Recorded,
+            });
+
+        DependencyProvenanceReport {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            integrity: ProvenanceField {
+                value: locked_hash,
+                status: integrity_status,
+            },
+            transparency,
+            publisher,
+            build,
+        }
+    }
+}
+
+/// Enforce one manifest-selected provenance floor over all non-root lock
+/// records. Integrity is deliberately not part of this switch; E1204 remains
+/// the existing unconditional store check.
+pub fn enforce_provenance_requirement(
+    lock: &LockFile,
+    requirement: crate::Package::ProvenanceRequirement,
+) -> Result<(), String> {
+    if requirement == crate::Package::ProvenanceRequirement::None {
+        return Ok(());
+    }
+    for package in &lock.packages {
+        if matches!(&package.source, LockSource::Root) {
+            continue;
+        }
+        let report = package.provenance_report();
+        let satisfied = match requirement {
+            crate::Package::ProvenanceRequirement::None => true,
+            crate::Package::ProvenanceRequirement::Logged => {
+                matches!(report.transparency.status, ProvenanceStatus::Verified)
+            }
+            crate::Package::ProvenanceRequirement::Attested => {
+                report.build.value != "not recorded"
+            }
+        };
+        if !satisfied {
+            return Err(format!(
+                "dependency `{}` {} provenance requirement is not recorded",
+                package.name,
+                requirement.label()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// D-JPK-CACHE1=A (U24/A4): the lock-serialized form of a realized object's
@@ -300,6 +475,26 @@ pub fn write(lock: &LockFile) -> String {
         if let Some(env) = &pkg.envelope {
             write_envelope(&mut out, env);
         }
+        if let Some(provenance) = &pkg.provenance {
+            if let Some(value) = &provenance.transparency {
+                out.push_str(&format!(
+                    "provenance-transparency = \"{}\"\n",
+                    escape_str(value)
+                ));
+            }
+            if let Some(value) = &provenance.publisher {
+                out.push_str(&format!(
+                    "provenance-publisher = \"{}\"\n",
+                    escape_str(value)
+                ));
+            }
+            if let Some(value) = &provenance.build {
+                out.push_str(&format!(
+                    "provenance-build = \"{}\"\n",
+                    escape_str(value)
+                ));
+            }
+        }
     }
 
     for tc in &lock.toolchains {
@@ -464,6 +659,31 @@ fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
 
 fn escape_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn unescape_str(s: &str) -> String {
+    let s = s.trim().strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let mut out = String::with_capacity(s.len());
+    let mut escaped = false;
+    for character in s.chars() {
+        if escaped {
+            out.push(match character {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            out.push(character);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
 }
 
 /// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
@@ -775,6 +995,15 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "platform" => pkg.envelope_mut().platform = val.trim_matches('"').to_string(),
                 "signature" => pkg.envelope_mut().signature = val.trim_matches('"').to_string(),
                 "provenance" => pkg.envelope_mut().provenance = val.trim_matches('"').to_string(),
+                "provenance-transparency" => pkg
+                    .provenance_mut()
+                    .transparency = Some(unescape_str(val)),
+                "provenance-publisher" => pkg
+                    .provenance_mut()
+                    .publisher = Some(unescape_str(val)),
+                "provenance-build" => pkg
+                    .provenance_mut()
+                    .build = Some(unescape_str(val)),
                 _ => {}
             }
         }
@@ -1152,12 +1381,18 @@ struct PartialPkg {
     effects: Vec<String>,
     effect_grants: Vec<String>,
     envelope: Option<LockEnvelope>,
+    provenance: Option<DependencyProvenance>,
 }
 
 impl PartialPkg {
     /// Lazily create the envelope on first envelope key seen.
     fn envelope_mut(&mut self) -> &mut LockEnvelope {
         self.envelope.get_or_insert_with(LockEnvelope::default)
+    }
+
+    fn provenance_mut(&mut self) -> &mut DependencyProvenance {
+        self.provenance
+            .get_or_insert_with(DependencyProvenance::default)
     }
 
     fn finish(self) -> Result<LockedPackage, String> {
@@ -1179,6 +1414,7 @@ impl PartialPkg {
             effects: self.effects,
             effect_grants: self.effect_grants,
             envelope: self.envelope,
+            provenance: self.provenance,
         })
     }
 }
@@ -1537,6 +1773,15 @@ pub fn record_nix_realization(
         }
     };
     lock.version = LOCK_VERSION;
+    let existing_provenance = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Nix { .. })
+        })
+        .and_then(|package| package.provenance.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -1553,6 +1798,7 @@ pub fn record_nix_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        provenance: existing_provenance,
     };
     if let Some(existing) = lock
         .packages
@@ -1673,6 +1919,15 @@ pub fn record_cran_realization(
             build_stamp: None,
         });
     lock.version = LOCK_VERSION;
+    let existing_provenance = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Cran { .. })
+        })
+        .and_then(|package| package.provenance.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -1692,6 +1947,7 @@ pub fn record_cran_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|p| {
         p.name == name && matches!(&p.source, LockSource::Cran { .. })
@@ -1754,6 +2010,15 @@ pub fn record_luarocks_realization(
             build_stamp: None,
         });
     lock.version = LOCK_VERSION;
+    let existing_provenance = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::LuaRocks { .. })
+        })
+        .and_then(|package| package.provenance.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -1773,6 +2038,7 @@ pub fn record_luarocks_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|p| {
         p.name == name && matches!(&p.source, LockSource::LuaRocks { .. })
@@ -1836,6 +2102,15 @@ pub fn record_registry_realization(
             build_stamp: None,
         });
     lock.version = LOCK_VERSION;
+    let existing_provenance = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Registry { registry: value, .. } if value == registry)
+        })
+        .and_then(|package| package.provenance.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -1856,6 +2131,7 @@ pub fn record_registry_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|package| {
         package.name == name
@@ -2378,6 +2654,7 @@ mod a4_envelope_tests {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope,
+            provenance: None,
         }
     }
 
