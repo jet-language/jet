@@ -1887,7 +1887,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             "to_string" | "numerator" | "denominator" | "to_float" | "is_zero",
                             1
                         ) | ("add" | "sub" | "mul" | "div" | "equal", 2)
-                    )))
+                    ))
                 || (type_name == jet_foundation::Syntax::TYPE_COMPLEX
                     && matches!(
                         (func.as_str(), args.len()),
