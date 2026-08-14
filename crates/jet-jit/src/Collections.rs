@@ -131,7 +131,7 @@ mod collection_semantics {
         jet_list_position(xs, |value| f(value)).is_ok()
     }
 
-    pub(super) fn list_closure_all<F>(xs: Vec<i64>, f: F) -> bool
+    pub(super) fn list_closure_all<F>(xs: Vec<i64>, mut f: F) -> bool
     where
         F: FnMut(&i64) -> bool,
     {
@@ -182,7 +182,7 @@ mod collection_semantics {
         });
     }
 
-    pub(super) fn list_closure_each_mut<F>(xs: Vec<i64>, f: F)
+    pub(super) fn list_closure_each_mut<F>(xs: Vec<i64>, mut f: F)
     where
         F: FnMut(&i64),
     {
@@ -1064,7 +1064,7 @@ extern "C" fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
         if closure_trapped() {
             false
         } else {
-            unsafe { invoke_closure_bool(slot, *value) } && !closure_trapped()
+            (unsafe { invoke_closure_bool(slot, *value) }) && !closure_trapped()
         }
     });
     if closure_trapped() {

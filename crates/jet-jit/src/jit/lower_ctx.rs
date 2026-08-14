@@ -26365,10 +26365,8 @@ impl LowerCtx<'_, '_> {
         } else {
             self.host.coll.list_closure_each
         };
-        self.b.ins().call(
-            self.module.declare_func_in_func(host, self.b.func),
-            &[recv_val, callback],
-        );
+        let host_ref = self.module.declare_func_in_func(host, self.b.func);
+        self.b.ins().call(host_ref, &[recv_val, callback]);
         self.emit_trap_check()?;
         self.sync_collection_captures(lam, env)?;
         Ok(self.b.ins().iconst(types::I8, 0))
