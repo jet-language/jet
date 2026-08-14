@@ -1,4 +1,41 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
+impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
+    fn add_new(&mut self, key: K, value: V) -> bool {
+        if self.bound == Some(0)
+            || self.entries.iter().any(|(stored, _)| stored == &key)
+        {
+            return false;
+        }
+        self.put(key, value);
+        true
+    }
+
+    fn remove(&mut self, key: &K) -> Option<V> {
+        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+        Some(self.entries.remove(index).1)
+    }
+
+    fn contains_key(&self, key: &K) -> bool {
+        self.entries.iter().any(|(stored, _)| stored == key)
+    }
+
+    fn keys(&self) -> Vec<K> {
+        self.entries.iter().map(|(key, _)| key.clone()).collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn capacity(&self) -> i64 {
+        self.bound.map(|bound| bound as i64).unwrap_or(i64::MAX)
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
 #[derive(Clone)]
 struct JetCache<K, V> {
     lru: JetLru<K, V>,
