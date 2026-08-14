@@ -102,6 +102,79 @@ fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
     }
 }
 
+fn runtime_stop_calls(source: &str) -> Vec<Vec<&str>> {
+    let needle = "set_runtime_stop(";
+    let mut calls = Vec::new();
+    let mut search_from = 0;
+    while let Some(offset) = source[search_from..].find(needle) {
+        let start = search_from + offset + needle.len();
+        let bytes = source.as_bytes();
+        let mut args = Vec::new();
+        let mut arg_start = start;
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut braces = 0usize;
+        let mut string = false;
+        let mut escaped = false;
+        let mut end = None;
+        for index in start..bytes.len() {
+            let byte = bytes[index];
+            if string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => string = true,
+                b'(' => parens += 1,
+                b')' if parens > 0 => parens -= 1,
+                b')' => {
+                    args.push(source[arg_start..index].trim());
+                    end = Some(index);
+                    break;
+                }
+                b'[' => brackets += 1,
+                b']' => brackets = brackets.saturating_sub(1),
+                b'{' => braces += 1,
+                b'}' => braces = braces.saturating_sub(1),
+                b',' if parens == 0 && brackets == 0 && braces == 0 => {
+                    args.push(source[arg_start..index].trim());
+                    arg_start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { break };
+        calls.push(args);
+        search_from = end + 1;
+    }
+    calls
+}
+
+#[test]
+fn jit_collections_use_ice_for_internals_and_canonical_runtime_messages() {
+    let source = read(&root().join("crates/jet-jit/src/Collections.rs"));
+    assert!(
+        !source.contains("set_trap("),
+        "Collections.rs must not convert adapter invariants into runtime traps"
+    );
+
+    let direct_messages: Vec<_> = runtime_stop_calls(&source)
+        .into_iter()
+        .filter_map(|args| args.get(2).copied())
+        .filter(|wording| wording.trim_start_matches('&').trim_start().starts_with('"'))
+        .collect();
+    assert!(
+        direct_messages.is_empty(),
+        "Collections.rs must pass canonical or returned messages to set_runtime_stop, not direct wording literals: {direct_messages:?}"
+    );
+}
+
 /// All codes registered in the typed compile-time diagnostic rows.
 fn registered_codes() -> BTreeSet<String> {
     jet_foundation::Registry::diagnostic_rows()

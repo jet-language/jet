@@ -414,6 +414,10 @@ pub fn jet_stack_overflow_message(fn_name: &str) -> String {
     format!("stack overflow in `{fn_name}`")
 }
 
+pub fn jet_loop_stride_message() -> &'static str {
+    "E0123: loop stride must be positive"
+}
+
 /// One recursion budget for every execution tier. The evaluator, AOT Prelude,
 /// and JIT host all stop at the same Jet-defined depth before a native stack
 /// fault can escape as a process crash.

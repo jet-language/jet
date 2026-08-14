@@ -3891,7 +3891,7 @@ fn emit_wasm_body(
                         out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_end = {end};\n"));
                         out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_stride = {step};\n"));
                         out.push_str(&jet_format!(
-                            "{pad}    assert!({jet_prefix}loop_stride > 0, \"E0123: loop stride must be positive\");\n"
+                            "{pad}    assert!({jet_prefix}loop_stride > 0, jet_loop_stride_message());\n"
                         ));
                         out.push_str(&jet_format!(
                             "{pad}    for {loop_var} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n"

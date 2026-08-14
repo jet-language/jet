@@ -782,7 +782,7 @@ fn closure_callback_slot(handle: i64) -> Option<JitCallableSlot> {
     Concurrency::with_runtime_mut(|rt| {
         let slot = jit_callable_parts(rt, handle);
         if slot.is_none() {
-            rt.set_trap("invalid resident collection callback");
+            jet_foundation::ice!(None, "invalid resident collection callback");
         }
         slot
     })
@@ -875,8 +875,7 @@ fn alloc_closure_floats(values: Vec<f64>) -> i64 {
         let list = rt.heap.alloc_empty_list();
         for value in values {
             if rt.heap.list_push_float(list, value).is_none() {
-                rt.set_trap("JIT collection closure list allocation failed");
-                return 0;
+                jet_foundation::ice!(None, "JIT collection closure list allocation failed");
             }
         }
         list
@@ -1168,7 +1167,11 @@ extern "C" fn jet_jit_list_indexes(n: i64) -> i64 {
 extern "C" fn jet_jit_loop_stride_check(stride: i64) -> i64 {
     if stride <= 0 {
         Concurrency::with_runtime_mut(|rt| {
-            rt.set_trap("E0123: a source loop stride must be positive");
+            rt.set_runtime_stop(
+                "E3001",
+                0,
+                jet_foundation::Outcome::jet_loop_stride_message(),
+            );
         });
     }
     stride
@@ -1500,12 +1503,10 @@ extern "C" fn jet_jit_range_equal(
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(xs) = rt.heap.clone_int_list(list) else {
-            rt.set_trap("list join received an invalid list");
-            return 0;
+            jet_foundation::ice!(None, "list join received an invalid list");
         };
         let Some(sep) = rt.heap.clone_string(sep_id) else {
-            rt.set_trap("list join received an invalid separator");
-            return 0;
+            jet_foundation::ice!(None, "list join received an invalid separator");
         };
         // Match AOT JoinSep: `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`.
         // String elements are heap handles; Int (and other non-string carriers) show as
@@ -1691,14 +1692,8 @@ extern "C" fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
 extern "C" fn jet_jit_map_increment(map: i64, key: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let current = rt.heap.map_get(map, key).unwrap_or(0);
-        let Some(next) = current.checked_add(1) else {
-            rt.set_runtime_stop(
-                "E3010",
-                0,
-                "this addition overflows the value's type (the result is outside its range)",
-            );
-            return;
-        };
+        let one = rt.heap.int_from_i64(1);
+        let next = rt.heap.int_add(current, one);
         let _ = rt.heap.map_insert(map, key, next);
     });
 }
@@ -1725,8 +1720,7 @@ extern "C" fn jet_jit_map_validate(map: i64) -> i64 {
         if rt.heap.map_len(map).is_some() {
             map
         } else {
-            rt.set_trap("data object payload is not a map");
-            0
+            jet_foundation::ice!(None, "data object payload is not a map");
         }
     })
 }
@@ -2202,20 +2196,16 @@ extern "C" fn jet_jit_iter_zip_family(
     Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         let Some(plan_id) = usize::try_from(plan_id).ok() else {
-            rt.set_runtime_stop("E3001", 0, "zip plan missing");
-            return out;
+            jet_foundation::ice!(None, "zip plan missing");
         };
         let Some(plan) = rt.zip_plans.get(plan_id).cloned() else {
-            rt.set_runtime_stop("E3001", 0, "zip plan missing");
-            return out;
+            jet_foundation::ice!(None, "zip plan missing");
         };
         let Some(handles) = rt.heap.clone_int_list(column_handles) else {
-            rt.set_runtime_stop("E3001", 0, "zip columns handle invalid");
-            return out;
+            jet_foundation::ice!(None, "zip columns handle invalid");
         };
         if handles.len() != plan.columns.len() {
-            rt.set_runtime_stop("E3001", 0, "zip columns arity mismatch");
-            return out;
+            jet_foundation::ice!(None, "zip columns arity mismatch");
         }
         let Some(lengths) = handles
             .iter()
@@ -2228,8 +2218,7 @@ extern "C" fn jet_jit_iter_zip_family(
                     .collect::<Vec<_>>()
             })
         else {
-            rt.set_runtime_stop("E3001", 0, "zip column handle invalid");
-            return out;
+            jet_foundation::ice!(None, "zip column handle invalid");
         };
         let common_fills = if plan.fill_mode == 1 {
             plan.columns
@@ -2277,8 +2266,7 @@ extern "C" fn jet_jit_iter_zip_family(
             let record = rt.heap.alloc_record(plan.columns.len());
             for (column_index, (column, value)) in plan.columns.iter().zip(values).enumerate() {
                 if jit_zip_set_value(&mut rt.heap, record, column_index, *column, value).is_none() {
-                    rt.set_runtime_stop("E3001", 0, "zip value representation mismatch");
-                    return out;
+                    jet_foundation::ice!(None, "zip value representation mismatch");
                 }
             }
             let _ = rt.heap.list_push_int(out, record);
@@ -3393,12 +3381,10 @@ extern "C" fn jet_jit_deque_join(dq: i64, sep_id: i64) -> i64 {
             .get((dq as usize).wrapping_sub(1))
             .map(|d| d.iter().copied().collect::<Vec<_>>())
         else {
-            rt.set_trap("deque join received an invalid deque");
-            return 0;
+            jet_foundation::ice!(None, "deque join received an invalid deque");
         };
         let Some(sep) = rt.heap.clone_string(sep_id) else {
-            rt.set_trap("deque join received an invalid separator");
-            return 0;
+            jet_foundation::ice!(None, "deque join received an invalid separator");
         };
         let parts: Vec<String> = xs.iter().map(|id| id.to_string()).collect();
         let joined = parts.join(&sep);
@@ -3877,7 +3863,7 @@ extern "C" fn jet_jit_priority_queue_remove_slot(handle: i64, index: i64, line: 
             ) {
                 Ok(value) => value.ok(),
                 Err(message) => {
-                    rt.set_trap(&message);
+                    rt.set_runtime_stop("E3010", line, &message);
                     None
                 }
             },

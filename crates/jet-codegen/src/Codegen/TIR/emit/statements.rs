@@ -1167,7 +1167,7 @@ fn emit_tir_stmt(
                         range_pad, stride
                     ));
                     out.push_str(&jet_format!(
-                        "{}if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
+                        "{}if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n",
                         range_pad, cx.root_prefix, cx.file
                     ));
                 }
@@ -1205,7 +1205,7 @@ fn emit_tir_stmt(
                     out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_start = {};\n", pad, s));
                     out.push_str(&jet_format!("{}    let {jet_prefix}loop_end = {};\n", pad, e));
                     out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, st));
-                    out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                    out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&jet_format!(
                         "{}{}for {} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n",
                         pad,
@@ -1532,7 +1532,7 @@ fn emit_tir_stmt(
                 let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
                 out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_source = {};\n", pad, source_rust));
                 out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, stride));
-                out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
+                out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n", pad, cx.root_prefix, cx.file));
                 source_storage = mangle_generated("loop_source");
                 stride_suffix = jet_format!(".step_by({jet_prefix}loop_stride as usize)");
                 source_storage.as_str()
